@@ -26,6 +26,12 @@ lifecycleCompose = "2.11.0"
 # 파일이 없으면 빌드가 실패하므로 플러그인과 파일은 항상 같이 있어야 한다.
 googleServices = "4.5.0"
 firebaseBom = "34.19.0"
+# --- 위치 (출발·도착 판별) ---
+# FusedLocationProvider. 플랫폼 LocationManager 대신 이걸 쓰는 이유는
+# GPS·WiFi·셀을 합쳐 주고 배터리 정책을 알아서 처리하기 때문이다. 아침 한 번의
+# 이동을 따라가는 동안 화면이 꺼져 있어도 fix 가 끊기지 않아야 한다.
+# Play Services 는 firebase-messaging 이 이미 끌어오므로 새 런타임 의존은 아니다.
+playServicesLocation = "21.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -62,6 +68,9 @@ androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "l
 # firebase. BOM 이 나머지 firebase 아티팩트 버전을 고정하므로 개별 버전을 쓰지 않는다.
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
+
+# 위치
+play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

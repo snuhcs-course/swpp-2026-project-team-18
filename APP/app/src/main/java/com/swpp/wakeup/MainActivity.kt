@@ -1,11 +1,15 @@
 package com.swpp.wakeup
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -32,7 +36,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -45,6 +51,7 @@ import com.swpp.wakeup.ui.events.HomeSetupScreen
 import com.swpp.wakeup.ui.events.RouteChoiceScreen
 import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
+import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitTheme
@@ -116,6 +123,32 @@ private fun MainHost(
     val scope = rememberCoroutineScope()
     var showAccountDialog by remember { mutableStateOf(false) }
     var serverStatus by remember { mutableStateOf<String?>(null) }
+
+    // 알림·위치 권한을 한 번 요청한다.
+    //
+    // 알림 권한은 알람의 전제다 — 전체화면 인텐트가 알림을 타고 뜨기 때문에
+    // 거부되면 잠금화면에서 알람 화면이 올라오지 못한다.
+    // 위치 권한은 출발·도착 판별의 전제다. 없으면 알람은 울리지만 기록이 없다.
+    // 배경 위치는 요청하지 않는다 — 추적은 알람 화면에서 시작하므로 필요 없다.
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { /* 결과는 화면에서 다시 확인한다. 거부해도 앱은 동작한다 */ }
+
+    LaunchedEffect(Unit) {
+        val missing = buildList {
+            if (ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (!LocationPermissions.granted(context)) {
+                addAll(LocationPermissions.REQUESTED)
+            }
+        }
+        if (missing.isNotEmpty()) permissionLauncher.launch(missing.toTypedArray())
+    }
 
     // 환영 문구. 로그인에서 넘어온 경우에만 한 번 띄운다.
     val welcomeText = welcomeNickname?.let { stringResource(R.string.auth_welcome, it) }
@@ -250,6 +283,18 @@ private fun MainHost(
                         append("일정 ${state.totalCount}개")
                         state.homeLabel?.let { append("\n집: $it") }
                         if (!state.hasHome) append("\n집 위치 미설정")
+
+                        // 알람이 실제로 기기에 걸렸는지 확인할 창구.
+                        // 서버가 시각을 아는 것과 기기가 울리는 것은 다른 문제다.
+                        append("\n\n알람 ${state.registeredAlarms}개 등록됨")
+                        state.nextRegisteredLabel?.let { append(" · 다음 $it") }
+                        if (!LocationPermissions.granted(context)) {
+                            append("\n위치 권한 없음 — 출발·도착이 기록되지 않음")
+                        }
+                        if (state.pendingObservations > 0) {
+                            append("\n올리지 못한 이동 기록 ${state.pendingObservations}건")
+                        }
+
                         if (BuildConfig.DEV_TOOLS) {
                             append("\n\nBASE_URL = ${BuildConfig.BASE_URL}")
                             serverStatus?.let { append("\n$it") }

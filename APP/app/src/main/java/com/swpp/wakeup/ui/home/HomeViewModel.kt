@@ -1,13 +1,17 @@
 package com.swpp.wakeup.ui.home
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.domain.model.AlarmPlanView
+import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.EventSection
+import com.swpp.wakeup.sensing.TripObservationQueue
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.ui.nav.AppRoute
@@ -46,6 +50,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val hasHome: Boolean = true,
         val homeLabel: String? = null,
         val unplannedCount: Int = 0,
+
+        /**
+         * 실제로 `AlarmManager` 에 등록된 알람 수.
+         *
+         * 계산된 알람 수와 다를 수 있다 — 지난 알람과 7일 밖의 알람은 등록하지
+         * 않는다. 실기기에서 "등록됐나" 를 확인할 유일한 창구다.
+         */
+        val registeredAlarms: Int = 0,
+        /** 가장 이른 등록 알람. 예 "7:40" */
+        val nextRegisteredLabel: String? = null,
+        /** 아직 서버로 올리지 못한 관측 수. 0 이 정상이다 */
+        val pendingObservations: Int = 0,
     ) {
         val isEmpty: Boolean get() = !loading && error == null && totalCount == 0
         val todayLine: String
@@ -78,17 +94,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             when (val result = repository.loadHome()) {
-                is EventRepository.Result.Success -> _state.update {
-                    it.copy(
-                        loading = false,
-                        error = null,
-                        sections = result.data.sections,
-                        nextAlarm = result.data.nextAlarm,
-                        totalCount = result.data.totalCount,
-                        hasHome = result.data.hasHome,
-                        homeLabel = result.data.homeLabel,
-                        unplannedCount = result.data.unplannedCount,
-                    )
+                is EventRepository.Result.Success -> {
+                    _state.update {
+                        it.copy(
+                            loading = false,
+                            error = null,
+                            sections = result.data.sections,
+                            nextAlarm = result.data.nextAlarm,
+                            totalCount = result.data.totalCount,
+                            hasHome = result.data.hasHome,
+                            homeLabel = result.data.homeLabel,
+                            unplannedCount = result.data.unplannedCount,
+                        )
+                    }
+                    syncAlarms(result.data.schedules)
                 }
 
                 is EventRepository.Result.Failure -> _state.update {
@@ -99,6 +118,43 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
+
+    /**
+     * 서버 계획을 실제 알람 등록에 반영하고, 밀린 관측을 올린다.
+     *
+     * 홈을 새로 읽을 때마다 한다. 이 지점이 "계산된 알람" 과 "울리는 알람" 을
+     * 잇는 유일한 곳이다 — 여기가 빠지면 서버는 7:40 을 알고 있지만 기기는
+     * 아무것도 모른다.
+     *
+     * 알람 등록이 실패해도 화면은 살아 있어야 한다. 등록 실패로 목록까지
+     * 못 보게 만들 이유가 없다.
+     */
+    private fun syncAlarms(schedules: List<AlarmSchedule>) {
+        val app = getApplication<Application>()
+        val scheduler = AlarmScheduler(app)
+        val queue = TripObservationQueue(app)
+
+        runCatching { scheduler.sync(schedules) }
+            .onFailure { Log.e(TAG, "알람 등록 실패", it) }
+
+        val registered = runCatching { scheduler.registered() }.getOrDefault(emptyList())
+
+        _state.update {
+            it.copy(
+                registeredAlarms = registered.size,
+                nextRegisteredLabel = registered.firstOrNull()?.alarmLabel,
+                pendingObservations = queue.pendingCount,
+            )
+        }
+
+        // 지하철에서 판정된 관측이 큐에 남아 있을 수 있다. 연결됐으니 올린다.
+        viewModelScope.launch {
+            val sent = queue.flush()
+            if (sent > 0) {
+                _state.update { it.copy(pendingObservations = queue.pendingCount) }
+            }
+        }
+    }
 
     fun logout() = tokenStore.clear()
 
@@ -416,5 +472,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     _homeSetup.update { it.copy(submitting = false, error = result.message) }
             }
         }
+    }
+
+    private companion object {
+        const val TAG = "HomeViewModel"
     }
 }
