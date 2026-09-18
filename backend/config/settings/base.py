@@ -31,12 +31,14 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     # local
-    # back-spec.md 2절은 앱 12개를 정의하지만, P0~P1 에 필요한 3개로 시작한다.
-    # 나머지(routines, observations, routing, weather, prediction, rooms,
-    # reports, nlp, push)는 해당 페이즈에서 추가한다.
+    # back-spec.md 2절은 앱 12개를 정의하지만 필요한 것부터 추가한다.
+    # 나머지(routines, weather, prediction, rooms, reports, nlp, push)는
+    # 해당 페이즈에서 붙인다.
     "apps.accounts",
     "apps.events",
     "apps.planning",
+    # 앱이 GPS 로 판별한 실제 출발·도착 시각. 분포 학습의 유일한 재료다.
+    "apps.observations",
     # 카카오 경로·로컬 검색 클라이언트. 모델이 없고 clients.py 만 있다.
     "apps.routing",
 ]
@@ -128,7 +130,13 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
-    "DEFAULT_THROTTLE_RATES": {"route": "120/hour", "nlp": "30/hour"},
+    # observation 은 외부 API 를 부르지 않으므로 넉넉하다. 한 아침에 출발·도착
+    # 2건이지만 오프라인 큐가 재전송하면 같은 건이 여러 번 올 수 있다.
+    "DEFAULT_THROTTLE_RATES": {
+        "route": "120/hour",
+        "nlp": "30/hour",
+        "observation": "600/hour",
+    },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",

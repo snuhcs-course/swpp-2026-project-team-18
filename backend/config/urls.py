@@ -20,4 +20,6 @@ urlpatterns = [
     path("api/profile", ProfileView.as_view(), name="profile"),
     # back-spec.md 5.3 일정·장소
     path("api/", include("apps.events.urls")),
+    # 이동 관측 — 앱이 GPS 로 판별한 실제 출발·도착 시각
+    path("api/", include("apps.observations.urls")),
 ]
