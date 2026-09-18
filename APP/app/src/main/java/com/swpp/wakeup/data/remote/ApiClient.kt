@@ -77,6 +77,13 @@ object ApiClient {
 
     val profile: ProfileApi by lazy { retrofit.create(ProfileApi::class.java) }
 
+    val observations: ObservationsApi by lazy {
+        retrofit.create(ObservationsApi::class.java)
+    }
+
+    /** 초기화됐는지. 서비스·리시버는 Application 보다 먼저 깨어날 수 있다. */
+    val isReady: Boolean get() = ::tokenStore.isInitialized
+
     /**
      * 실패 응답 본문에서 사용자에게 보여줄 메시지를 뽑는다.
      *

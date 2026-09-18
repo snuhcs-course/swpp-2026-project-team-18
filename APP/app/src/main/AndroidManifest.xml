@@ -8,15 +8,46 @@
     <!--
       알람 앱은 USE_EXACT_ALARM 을 요청할 수 있고 설치 시 부여된다.
       SCHEDULE_EXACT_ALARM 과 달리 런타임 요청이 불필요하다.
-      실제 알람 구현(P1)에서 사용한다.
     -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!--
+      잠금화면 위로 알람 화면을 띄운다. API 34+ 에서 이 권한은 앱 카테고리가
+      알람·통화일 때만 기본 부여된다. 그래서 application 에 appCategory 를
+      선언한다. 부여되지 않은 기기에서는 헤드업 알림으로 떨어진다.
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 발화 순간 기기가 깊은 잠에서 깨어날 때까지 잡아 둔다. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!--
+      출발·도착 판별. 화면이 꺼진 채 이동하는 동안 fix 가 필요하므로
+      포그라운드 서비스로 돌린다(TripTrackingService).
+    -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!--
+      추적은 알람 화면(= 앱이 보이는 상태)에서 시작하므로 포그라운드 위치
+      권한만으로 동작한다. 이 권한은 재부팅 후 복원 같은 경로를 위해
+      선언만 해 둔다. **런타임에서 강제로 요청하지 않는다** — 시스템
+      대화상자가 위협적이고, 없어도 핵심 흐름이 동작한다.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- 위치 없이도 앱은 쓸 수 있다. 판별 기능만 비활성된다. -->
+    <uses-feature
+        android:name="android.hardware.location.gps"
+        android:required="false" />
+
     <application
         android:name=".JitApplication"
         android:allowBackup="true"
+        android:appCategory="productivity"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
@@ -49,6 +80,56 @@
             android:name=".MainActivity"
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
+
+        <!--
+          알람 화면.
+
+          singleInstance + 별도 taskAffinity: 알람은 앱 화면 스택과 섞이면 안
+          된다. 해제하고 나서 뒤로 가기를 눌렀을 때 알람이 다시 나오면 안 된다.
+          excludeFromRecents: 최근 앱 목록에 알람 화면이 남지 않게 한다.
+          showOnLockScreen/turnScreenOn 은 코드에서도 설정한다 — 매니페스트
+          속성만으로는 기기에 따라 동작하지 않는 경우가 있다.
+        -->
+        <activity
+            android:name=".alarm.AlarmActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:showOnLockScreen="true"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.APP"
+            android:turnScreenOn="true" />
+
+        <!-- AlarmManager 가 깨우는 지점. -->
+        <receiver
+            android:name=".alarm.AlarmReceiver"
+            android:exported="false" />
+
+        <!--
+          재부팅하면 등록한 알람이 전부 사라진다. PendingIntent 는 프로세스
+          밖에 남지 않는다. 저장소에 적어 둔 알람을 다시 등록한다.
+          시간대·시각 변경도 같이 받는다 — KST 로 계산한 알람이 어긋난다.
+        -->
+        <receiver
+            android:name=".alarm.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          출발·도착 판별. 알람을 해제하면 시작하고 도착하거나 마감 시각이
+          지나면 스스로 멈춘다.
+        -->
+        <service
+            android:name=".sensing.TripTrackingService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
 
 </manifest>

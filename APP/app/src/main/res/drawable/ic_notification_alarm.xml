@@ -1,0 +1,25 @@
+<!--
+  알림 작은 아이콘.
+
+  상태바 아이콘은 실루엣이어야 한다 — 시스템이 색을 덮어쓰기 때문에 색이
+  들어간 런처 아이콘을 쓰면 흰 사각형으로 뭉개진다. 단색 path 만 둔다.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#FFFFFFFF">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,4C7.58,4 4,7.58 4,12s3.58,8 8,8 8,-3.58 8,-8 -3.58,-8 -8,-8zM12,18c-3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6 6,2.69 6,6 -2.69,6 -6,6z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12.5,8L11,8v5l4.25,2.52 0.75,-1.23 -3.5,-2.04z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7.88,3.39L6.6,1.86 2,5.71l1.29,1.53z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M22,5.72l-4.6,-3.86 -1.29,1.53 4.6,3.86z" />
+</vector>

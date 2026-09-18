@@ -15,6 +15,7 @@ import com.swpp.wakeup.data.remote.ProfileDto
 import com.swpp.wakeup.data.remote.ProfileUpdateRequest
 import com.swpp.wakeup.data.remote.RouteCandidateDto
 import com.swpp.wakeup.domain.model.AlarmPlanView
+import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.PlanRow
 import com.swpp.wakeup.domain.model.RouteChoice
@@ -56,6 +57,13 @@ class EventRepository(
         val homeLabel: String?,
         /** 알람이 계산되지 않은 일정 수. 원인 안내에 쓴다 */
         val unplannedCount: Int,
+        /**
+         * 실제로 `AlarmManager` 에 등록할 목록.
+         *
+         * 화면용 [sections] 와 따로 만든다. 등록에는 epoch 밀리초와 좌표가
+         * 필요한데 표시 문자열("7:40")에서는 되돌릴 수 없다.
+         */
+        val schedules: List<AlarmSchedule>,
     )
 
     suspend fun loadHome(): Result<HomeData> = guard {
@@ -75,6 +83,7 @@ class EventRepository(
                 hasHome = profile.hasHome,
                 homeLabel = profile.homeLabel?.takeIf { it.isNotBlank() },
                 unplannedCount = sorted.count { it.alarmAt == null },
+                schedules = events.mapNotNull { it.toSchedule(zone, profile) },
             )
         )
     }
@@ -376,6 +385,55 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         // false 일 때만 알린다. null(고른 적 없음)과 true(그대로 쓰임)는
         // 사용자가 알 필요가 없다.
         routeFellBack = plan.routeChoiceHonored == false,
+    )
+}
+
+/**
+ * 알람 등록·이동 추적에 쓸 형태로 바꾼다.
+ *
+ * **계산되지 않은 계획은 건너뛴다.** 알람 시각이 없으면 등록할 것이 없다.
+ * 집 위치가 없거나 장소가 없어 `status != ok` 인 일정이 그렇다. 이때 임의의
+ * 시각을 만들어 등록하면 엉뚱한 시간에 울린다.
+ *
+ * 좌표는 판별 기준점이다 — 집은 출발, 일정 장소는 도착. 둘 다 없으면 알람은
+ * 울리지만 추적은 하지 않는다([AlarmSchedule.canTrack]).
+ */
+private fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedule? {
+    val plan = alarmPlan ?: return null
+    if (plan.status != AlarmPlanDto.STATUS_OK) return null
+
+    val alarm = plan.alarmAt
+        ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+        ?: return null
+    val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
+
+    val alarmLocal = alarm.atZoneSameInstant(zone)
+    val startLocal = start.atZoneSameInstant(zone)
+    val arriveLocal = plan.arriveAt
+        ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+        ?.atZoneSameInstant(zone)
+
+    return AlarmSchedule(
+        eventId = id,
+        alarmAtMillis = alarm.toInstant().toEpochMilli(),
+        departByMillis = plan.departBy
+            ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+            ?.toInstant()?.toEpochMilli(),
+        arriveAtMillis = plan.arriveAt
+            ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+            ?.toInstant()?.toEpochMilli(),
+        startAtMillis = start.toInstant().toEpochMilli(),
+        alarmLabel = alarmLocal.format(ALARM_FORMAT),
+        meridiem = if (alarmLocal.hour < 12) "AM" else "PM",
+        eventLine = "${startLocal.format(TIME_FORMAT)} $title",
+        placeName = place?.let { p ->
+            listOfNotNull(p.name, p.address?.takeIf(String::isNotBlank)).joinToString(" · ")
+        },
+        arrivalLine = arriveLocal?.let { "${it.format(ALARM_FORMAT)} 도착 예정" },
+        homeLat = profile.homeLat,
+        homeLng = profile.homeLng,
+        destLat = place?.lat,
+        destLng = place?.lng,
     )
 }
 
