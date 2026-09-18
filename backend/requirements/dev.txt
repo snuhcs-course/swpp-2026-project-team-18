@@ -1,0 +1,7 @@
+-r base.txt
+
+# 테스트
+pytest==8.3.4
+pytest-django==4.9.0
+
+# numpy 는 P2 의 분포 계산(BE-P2-01)에서 필요하다. 지금은 넣지 않는다.

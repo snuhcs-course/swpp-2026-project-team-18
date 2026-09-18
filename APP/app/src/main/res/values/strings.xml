@@ -1,0 +1,80 @@
+<resources>
+    <string name="app_name">JustInTime</string>
+
+    <!--
+      P0 서버 연결 확인 화면(activity_main.xml)은 제거했다. MainActivity 가 Compose
+      홈 화면으로 바뀌었고, 서버 확인 기능은 홈의 아바타 > 대화상자로 옮겼다
+      (디버그 빌드 한정).
+    -->
+
+    <!-- 인증 공통 -->
+    <string name="auth_email">이메일</string>
+    <string name="auth_password">비밀번호</string>
+    <string name="auth_password_confirm">비밀번호 확인</string>
+    <string name="auth_nickname">닉네임</string>
+    <string name="auth_login">로그인</string>
+    <string name="auth_signup">회원가입</string>
+    <string name="auth_no_account">계정이 없으신가요?</string>
+    <string name="auth_or">또는</string>
+
+    <!-- 로그인 (Figma ⑦) -->
+    <string name="login_brand" translatable="false">JustInTime</string>
+    <string name="login_tagline">도착 확률을 정하는 알람</string>
+
+    <string name="login_bullet_calendar">캘린더를 읽어 첫 일정을 자동으로 찾음</string>
+    <string name="login_bullet_learn">준비·이동 시간을 학습해 알람을 계산</string>
+    <string name="login_bullet_room">약속방에서 친구들의 도착 상황을 함께 확인</string>
+
+    <string name="login_google">Google로 계속하기</string>
+    <string name="login_kakao">카카오로 계속하기</string>
+
+    <string name="login_terms">계속하면 이용약관 및 개인정보처리방침에 동의함</string>
+    <string name="login_browse">로그인 없이 둘러보기</string>
+
+    <!-- 회원가입 (Figma ⑩) -->
+    <string name="signup_heading">계정 만들기</string>
+    <string name="signup_sub">이메일과 비밀번호만으로 시작함</string>
+    <string name="signup_submit">가입하고 시작하기</string>
+    <string name="signup_have_account">이미 계정이 있으신가요?</string>
+
+    <string name="signup_rule_length">8자 이상</string>
+    <string name="signup_rule_mix">영문과 숫자를 함께 포함</string>
+    <string name="signup_rule_similar">이메일과 너무 비슷하지 않음</string>
+
+    <string name="signup_stored_title">저장하는 정보</string>
+    <string name="signup_stored_body">이메일과 닉네임만 저장함. 비밀번호는 해시로만 보관하고 원문을 남기지 않음</string>
+
+    <!-- 소셜 로그인은 back-spec 5.1 에서 제외됐다. 버튼은 디자인에만 남아 있다. -->
+    <string name="login_social_not_wired">소셜 로그인은 아직 없음. 이메일로 로그인한다.</string>
+
+    <!-- 로그인·가입 성공 후 홈에서 한 번 보여준다 -->
+    <string name="auth_welcome">%1$s님 환영합니다</string>
+
+    <!-- 홈 (Figma ③) -->
+    <string name="home_title">다가오는 일정</string>
+    <string name="home_sample_notice">표본 데이터. 일정 연동은 아직 없음</string>
+    <string name="home_next_alarm">다음 알람</string>
+    <string name="home_add_event">+  일정 추가</string>
+    <string name="home_on_time_probability">정시 도착 확률 %1$d%%</string>
+    <string name="home_alarm_at">알람 %1$s</string>
+    <string name="home_percent">%1$d%%</string>
+
+    <!-- 알람 결정 (Figma ④) -->
+    <string name="alarm_first_event">첫 일정</string>
+    <string name="alarm_recommended">추천 알람</string>
+    <string name="alarm_how_computed">이렇게 계산했음</string>
+    <string name="alarm_total">합계 %1$d분</string>
+    <string name="alarm_minutes">%1$d분</string>
+    <string name="alarm_confirm">이 알람으로 설정</string>
+    <string name="alarm_change_risk">지각 위험 바꾸기</string>
+
+    <!-- 리스크 선택 (Figma ⑤) -->
+    <string name="risk_title">얼마나 안전하게 갈까?</string>
+    <string name="risk_subtitle">시각을 정하지 말고, 감수할 지각 위험을 정하면 됨</string>
+    <string name="risk_selected">선택됨</string>
+    <string name="risk_auto_title">자동 조정</string>
+    <string name="risk_auto_body">시험·발표 일정은 자동으로 안전 모드로 올림</string>
+    <string name="risk_dist_title">총 소요시간 분포 · 최근 30일</string>
+    <string name="risk_dist_footer">평균이 아니라 분포를 쓰기 때문에 확률로 말할 수 있음</string>
+    <string name="risk_continue">%1$s으로 계속하기</string>
+</resources>

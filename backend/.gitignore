@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+# 절대 커밋하지 않는다. .env.example 만 저장소에 둔다.
+.env
+
+db.sqlite3
+db.sqlite3-journal
+
+.pytest_cache/
+staticfiles/

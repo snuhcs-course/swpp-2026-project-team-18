@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "674568433318",
+    "project_id": "justintime-1f10d",
+    "storage_bucket": "justintime-1f10d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:674568433318:android:23730f57ec567e12984e67",
+        "android_client_info": {
+          "package_name": "com.swpp.wakeup"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD30Xe8DuGVzem18yLtifZ3Oy9uOIGqeXI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
