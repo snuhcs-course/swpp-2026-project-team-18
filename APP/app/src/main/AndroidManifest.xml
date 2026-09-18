@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 서버 통신 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      알람 앱은 USE_EXACT_ALARM 을 요청할 수 있고 설치 시 부여된다.
+      SCHEDULE_EXACT_ALARM 과 달리 런타임 요청이 불필요하다.
+      실제 알람 구현(P1)에서 사용한다.
+    -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:name=".JitApplication"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.APP"
+        android:usesCleartextTraffic="true"
+        tools:targetApi="34">
+        <!--
+          usesCleartextTraffic: 개발 중 http://10.0.2.2:8000 접근용.
+          배포 시에는 제거하고 HTTPS 를 쓰거나 network-security-config 로 좁힌다.
+        -->
+        <!--
+          로그인이 진입 화면이다. 아직 인증 연동이 없으므로 "로그인 없이
+          둘러보기" 로 MainActivity(P0 서버 확인)로 넘어간다.
+        -->
+        <activity
+            android:name=".ui.auth.LoginActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+    </application>
+
+</manifest>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  액티비티 진입 애니메이션.
+
+  기본 전환은 딱 끊기는 느낌이 있어서 페이드에 아주 짧은 상승을 더했다.
+  이동 거리를 3%로 작게 둔 이유는, 크게 움직이면 화면 전체가 튀어 보여서다.
+  minSdk 34 이므로 Activity.overrideActivityTransition() 으로 지정한다.
+-->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/fast_out_slow_in"
+    android:shareInterpolator="true">
+
+    <alpha
+        android:duration="260"
+        android:fromAlpha="0.0"
+        android:toAlpha="1.0" />
+
+    <translate
+        android:duration="300"
+        android:fromYDelta="3%p"
+        android:toYDelta="0%p" />
+</set>

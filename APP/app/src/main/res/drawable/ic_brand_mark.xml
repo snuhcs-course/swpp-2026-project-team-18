@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  JustInTime 브랜드 마크. Figma 23:8 (66dp 링 + 중앙 14dp 점).
+
+  layer-list 로 만들면 안 된다. 링 shape 는 intrinsic 크기가 없고 점 item 만
+  14dp 를 가지므로 레이어리스트 전체 intrinsic 이 14dp 가 되고, ImageView 의
+  기본 fitCenter 가 이를 확대해 점이 전체를 덮는다. viewport 가 고정된
+  vector 로 그린다.
+
+  원 경로 규칙: M cx-r,cy a r,r 0 1,0 2r,0 a r,r 0 1,0 -2r,0
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="66dp"
+    android:height="66dp"
+    android:viewportWidth="66"
+    android:viewportHeight="66">
+
+    <!-- 바깥 링. 반지름 31.5 = 33 - 3/2 이라 3 두께가 66 안에 들어온다. -->
+    <path
+        android:pathData="M 1.5,33 a 31.5,31.5 0 1,0 63,0 a 31.5,31.5 0 1,0 -63,0"
+        android:strokeColor="@color/jit_accent"
+        android:strokeWidth="3" />
+
+    <!-- 중앙 점. 지름 14 → 반지름 7 -->
+    <path
+        android:pathData="M 26,33 a 7,7 0 1,0 14,0 a 7,7 0 1,0 -14,0"
+        android:fillColor="@color/jit_accent" />
+</vector>

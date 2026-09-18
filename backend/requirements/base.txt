@@ -1,0 +1,10 @@
+# back-spec.md 1절 버전 고정. Lab2 에서 검증된 조합을 승계한다.
+Django==5.2.16
+djangorestframework==3.18.1
+django-cors-headers==4.9.0
+djangorestframework-simplejwt==5.3.1
+requests==2.32.5
+
+# 환경변수 로딩. DATABASE_URL 파싱은 dj-database-url 이 담당한다.
+python-dotenv==1.0.1
+dj-database-url==2.3.0

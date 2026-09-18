@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  단색 원. 크기는 사용하는 곳에서 정하고 색은 tint 로 바꾼다.
+  불릿 점(6dp)과 소셜 버튼 심볼(16dp)에 공용으로 쓴다.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@android:color/white" />
+</shape>

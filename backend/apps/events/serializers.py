@@ -1,0 +1,237 @@
+"""일정 API 시리얼라이저. back-spec.md 5.3."""
+
+from __future__ import annotations
+
+from django.db import transaction
+from rest_framework import serializers
+
+from .models import Event, EventTag, Place
+
+
+class PlaceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Place
+        fields = ("id", "name", "address", "lat", "lng", "kakao_place_id")
+        read_only_fields = ("id",)
+
+
+class EventTagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EventTag
+        fields = ("id", "key", "label", "default_tau", "penalty_shape")
+        read_only_fields = fields
+
+
+class AlarmPlanSerializer(serializers.Serializer):
+    """일정에 딸린 알람 계획.
+
+    `on_time_probability` 는 **null 일 수 있다.** 관측이 쌓이기 전에는 확률을
+    만들 수 없다. 클라이언트는 null 을 "학습 중" 으로 표시한다.
+    """
+
+    status = serializers.CharField()
+    status_label = serializers.CharField(source="get_status_display")
+    alarm_at = serializers.DateTimeField(allow_null=True)
+    depart_by = serializers.DateTimeField(allow_null=True)
+    arrive_at = serializers.DateTimeField(allow_null=True)
+    prep_minutes = serializers.IntegerField(allow_null=True)
+    travel_minutes = serializers.IntegerField(allow_null=True)
+    buffer_minutes = serializers.IntegerField(allow_null=True)
+    total_minutes = serializers.IntegerField(allow_null=True)
+    tau_used = serializers.FloatField(allow_null=True)
+    on_time_probability = serializers.IntegerField(allow_null=True)
+    travel_mode = serializers.CharField()
+    route_summary = serializers.CharField()
+    route_key = serializers.CharField()
+    route_detail = serializers.CharField()
+    # 사용자가 고른 경로가 그대로 쓰였는지. 배차가 바뀌어 사라지면 서버가
+    # 대체 경로로 계산하는데, 화면이 그 사실을 알려야 한다.
+    route_choice_honored = serializers.SerializerMethodField()
+
+    # 계산에 쓴 값의 출처. 이동 시간만 실측이고 나머지는 아직 고정값이다.
+    # 화면에서 "이건 학습된 값" 처럼 오해하지 않게 서버가 명시한다.
+    prep_source = serializers.SerializerMethodField()
+    buffer_source = serializers.SerializerMethodField()
+    travel_time_source = serializers.SerializerMethodField()
+
+    def get_route_choice_honored(self, obj) -> bool | None:
+        chosen = (obj.event.route_key or "").strip()
+        if not chosen:
+            return None  # 고른 적이 없다
+        return chosen == (obj.route_key or "")
+
+    def get_prep_source(self, obj) -> str:
+        # 관측 기반 학습은 P3 항목이다. 지금은 온보딩 응답 또는 기본값이다.
+        if obj.prep_minutes is None:
+            return ""
+        return "onboarding" if obj.event.user.profile.onboarding_prep_min else "default"
+
+    def get_buffer_source(self, obj) -> str:
+        return "" if obj.buffer_minutes is None else "fixed"
+
+    def get_travel_time_source(self, obj) -> str:
+        return obj.travel_source or ""
+
+
+class EventSerializer(serializers.ModelSerializer):
+    """일정 조회용. 장소·태그·알람 계획을 펼쳐서 내린다.
+
+    클라이언트가 목록 한 번으로 화면을 그릴 수 있게 중첩해서 준다. 홈 화면이
+    일정마다 알람을 또 조회하면 N+1 왕복이 된다.
+    """
+
+    place = PlaceSerializer(read_only=True)
+    tag = EventTagSerializer(read_only=True)
+    alarm_plan = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Event
+        fields = (
+            "id",
+            "title",
+            "start_at",
+            "source",
+            "place",
+            "tag",
+            "tau_override",
+            "route_key",
+            "alarm_plan",
+            "created_at",
+        )
+        read_only_fields = ("id", "source", "created_at")
+
+    def get_alarm_plan(self, obj):
+        plan = getattr(obj, "alarm_plan", None)
+        if plan is None:
+            return None
+        return AlarmPlanSerializer(plan).data
+
+
+class PlaceInputSerializer(serializers.Serializer):
+    """일정 생성 시 함께 넘어오는 장소.
+
+    카카오 검색 결과를 그대로 받는다. `kakao_place_id` 가 같으면 기존 행을
+    재사용해 중복을 막는다.
+    """
+
+    name = serializers.CharField(max_length=120)
+    lat = serializers.FloatField(min_value=-90, max_value=90)
+    lng = serializers.FloatField(min_value=-180, max_value=180)
+    address = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    kakao_place_id = serializers.CharField(
+        max_length=40, required=False, allow_null=True, allow_blank=True
+    )
+
+    def resolve(self) -> Place:
+        data = self.validated_data
+        kakao_id = (data.get("kakao_place_id") or "").strip() or None
+
+        if kakao_id:
+            place, _ = Place.objects.update_or_create(
+                kakao_place_id=kakao_id,
+                defaults={
+                    "name": data["name"],
+                    "lat": data["lat"],
+                    "lng": data["lng"],
+                    "address": data.get("address", ""),
+                },
+            )
+            return place
+
+        # 수동 입력. 같은 이름·좌표가 이미 있으면 재사용한다.
+        place, _ = Place.objects.get_or_create(
+            name=data["name"],
+            lat=data["lat"],
+            lng=data["lng"],
+            kakao_place_id=None,
+            defaults={"address": data.get("address", "")},
+        )
+        return place
+
+
+class EventWriteSerializer(serializers.ModelSerializer):
+    """일정 생성·수정.
+
+    `user` 는 요청에서 받지 않는다. **뷰가 `request.user` 를 넣는다.**
+    받으면 남의 계정에 일정을 만들 수 있다.
+    """
+
+    place = PlaceInputSerializer(required=False, allow_null=True)
+    tag_key = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+    class Meta:
+        model = Event
+        fields = (
+            "id",
+            "title",
+            "start_at",
+            "place",
+            "tag_key",
+            "tau_override",
+            "route_key",
+        )
+        read_only_fields = ("id",)
+
+    def validate_route_key(self, value):
+        """`GET /api/routes/candidates` 가 준 key 형식만 받는다.
+
+        임의 문자열을 받으면 알람 계산 때 `resolve_route` 가 매번 실패해
+        `ROUTE_FAILED` 가 된다. 형식을 여기서 막는다.
+        """
+        key = (value or "").strip()
+        if not key:
+            return ""
+        if key in ("walk", "bicycle", "car") or key.startswith("transit:"):
+            return key[:120]
+        raise serializers.ValidationError(
+            "경로 형식이 올바르지 않다. walk/bicycle/car 또는 transit:... 이어야 한다."
+        )
+
+    def validate_title(self, value: str) -> str:
+        title = value.strip()
+        if not title:
+            raise serializers.ValidationError("제목을 입력해야 한다.")
+        return title
+
+    def validate_tag_key(self, value):
+        key = (value or "").strip()
+        if not key:
+            return None
+        if not EventTag.objects.filter(key=key).exists():
+            raise serializers.ValidationError(f"없는 태그다: {key}")
+        return key
+
+    @transaction.atomic
+    def create(self, validated_data):
+        place_data = validated_data.pop("place", None)
+        tag_key = validated_data.pop("tag_key", None)
+
+        event = Event(
+            user=self.context["request"].user,
+            source=Event.Source.MANUAL,
+            **validated_data,
+        )
+        event.place = self._resolve_place(place_data)
+        event.tag = EventTag.objects.filter(key=tag_key).first() if tag_key else None
+        event.save()
+        return event
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        if "place" in validated_data:
+            instance.place = self._resolve_place(validated_data.pop("place"))
+        if "tag_key" in validated_data:
+            key = validated_data.pop("tag_key")
+            instance.tag = EventTag.objects.filter(key=key).first() if key else None
+
+        for field, value in validated_data.items():
+            setattr(instance, field, value)
+        instance.save()
+        return instance
+
+    def _resolve_place(self, place_data) -> Place | None:
+        if not place_data:
+            return None
+        inner = PlaceInputSerializer(data=place_data)
+        inner.is_valid(raise_exception=True)
+        return inner.resolve()

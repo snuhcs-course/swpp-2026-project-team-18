@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+
+    <!--
+      JustInTime 디자인 토큰.
+      Figma "SWPP - 알람시간 자동 선정 앱 UI" 파일에서 그대로 가져온 값이다.
+      화면별 하드코딩 금지. 새 색이 필요하면 여기에 추가한다.
+    -->
+    <color name="jit_bg">#0E1320</color>
+    <color name="jit_surface">#1B2232</color>
+    <color name="jit_surface_2">#262F43</color>
+
+    <color name="jit_text_primary">#F5F7FA</color>
+    <color name="jit_text_secondary">#8D97A8</color>
+
+    <color name="jit_accent">#FFB35C</color>
+    <color name="jit_green">#4ADE80</color>
+    <color name="jit_blue">#6B9EFA</color>
+    <color name="jit_red">#F87171</color>
+
+    <!-- 소셜 로그인 브랜드 색 -->
+    <color name="jit_google_symbol">#4285F5</color>
+    <color name="jit_kakao">#FEE500</color>
+    <color name="jit_kakao_symbol">#3D210D</color>
+</resources>

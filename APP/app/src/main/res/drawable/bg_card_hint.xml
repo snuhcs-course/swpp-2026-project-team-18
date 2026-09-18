@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 보조 안내 카드. Figma 23:29 (#262F43, radius 12) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/jit_surface_2" />
+    <corners android:radius="12dp" />
+</shape>
