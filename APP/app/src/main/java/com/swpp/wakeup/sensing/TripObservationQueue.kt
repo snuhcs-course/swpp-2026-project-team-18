@@ -11,6 +11,7 @@ import com.swpp.wakeup.data.remote.ObservationBatchRequest
 import com.swpp.wakeup.data.remote.ObservationsApi
 import com.swpp.wakeup.data.remote.TripObservationInput
 import java.io.IOException
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * 관측 업로드 큐.
@@ -108,6 +109,13 @@ class TripObservationQueue(
         } catch (e: IOException) {
             Log.i(TAG, "네트워크가 없어 관측 ${items.size}건을 큐에 남긴다")
             0
+        } catch (e: CancellationException) {
+            // **정상 경로다.** 도착 판정이 나면 서비스가 바로 멈추면서 이
+            // 업로드를 취소한다. 큐에 그대로 남으므로 서비스 종료 직전의
+            // 마지막 flush 가 다시 보낸다(서버가 중복을 무시한다).
+            // 여기서 ERROR 로 남기면 실패처럼 보인다.
+            Log.i(TAG, "업로드가 취소됐다. 관측 ${items.size}건은 큐에 남아 재전송된다")
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "관측 업로드 중 예상하지 못한 실패. 큐에 남긴다", e)
             0
