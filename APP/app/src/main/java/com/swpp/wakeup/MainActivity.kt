@@ -296,7 +296,9 @@ private fun MainHost(
                         }
 
                         if (BuildConfig.DEV_TOOLS) {
-                            append("\n\nBASE_URL = ${BuildConfig.BASE_URL}")
+                            // 빌드에 박힌 값이 아니라 실제로 쓰는 주소를 보여준다.
+                            // 에뮬레이터면 10.0.2.2 로 바뀌어 있다.
+                            append("\n\n서버 = ${ApiClient.baseUrl}")
                             serverStatus?.let { append("\n$it") }
                         }
                     },

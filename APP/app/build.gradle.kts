@@ -28,6 +28,14 @@ val devServerHost: String = Properties().apply {
 
 val devServerUrl = "http://$devServerHost:8000/"
 
+/**
+ * 에뮬레이터가 호스트 PC 를 보는 주소. 고정값이다.
+ *
+ * 에뮬레이터는 자기 자신이 10.0.2.15 이고 호스트를 10.0.2.2 로 본다. 개발 PC 의
+ * LAN IP 로는 닿지 못한다(에뮬레이터 NAT 밖이다).
+ */
+val EMULATOR_SERVER_URL = "http://10.0.2.2:8000/"
+
 android {
     namespace = "com.swpp.wakeup"
     compileSdk {
@@ -55,10 +63,15 @@ android {
             // 기본값은 에뮬레이터용 10.0.2.2 다. 실기기는 local.properties 의
             // devServerHost 로 개발 PC 의 LAN IP 를 지정한다(위 주석 참고).
             buildConfigField("String", "BASE_URL", "\"$devServerUrl\"")
+            // 에뮬레이터 전용 주소. devServerHost 를 LAN IP 로 바꿔 둔 뒤
+            // 에뮬레이터로 돌리면 그 IP 에 닿지 못해 "서버에 연결할 수 없다" 가
+            // 뜬다. 한 APK 로 둘 다 되게 ApiClient 가 런타임에 고른다.
+            buildConfigField("String", "EMULATOR_BASE_URL", "\"$EMULATOR_SERVER_URL\"")
             buildConfigField("boolean", "DEV_TOOLS", "true")
         }
         release {
             buildConfigField("String", "BASE_URL", "\"$devServerUrl\"")
+            buildConfigField("String", "EMULATOR_BASE_URL", "\"$devServerUrl\"")
             buildConfigField("boolean", "DEV_TOOLS", "false")
             optimization {
                 enable = false

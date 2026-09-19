@@ -6,6 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.swpp.wakeup.domain.model.AlarmSchedule
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 /**
  * 정확 알람 등록·해제.
@@ -56,14 +59,25 @@ class AlarmScheduler(private val context: Context) {
         )
     }
 
-    /** 미루기. 지금부터 [minutes] 분 뒤로 다시 등록한다. */
+    /**
+     * 미루기. 지금부터 [minutes] 분 뒤로 다시 등록한다.
+     *
+     * **표시 라벨도 함께 고친다.** `alarmLabel` 은 계획을 받을 때 만들어 둔
+     * 문자열이라 시각만 바꾸면 화면과 로그가 원래 시각을 그대로 보여준다 —
+     * 11:10 으로 미뤘는데 화면에 11:04 가 뜨는 것을 에뮬레이터에서 확인했다.
+     */
     fun snooze(schedule: AlarmSchedule, minutes: Int) {
+        val at = System.currentTimeMillis() + minutes * 60_000L
+        val local = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault())
+
         val next = schedule.copy(
-            alarmAtMillis = System.currentTimeMillis() + minutes * 60_000L
+            alarmAtMillis = at,
+            alarmLabel = local.format(LABEL_FORMAT),
+            meridiem = if (local.hour < 12) "AM" else "PM",
         )
         store.upsert(next)
         register(next)
-        Log.i(TAG, "알람 미루기: 일정 ${next.eventId} → ${minutes}분 뒤")
+        Log.i(TAG, "알람 미루기: 일정 ${next.eventId} → ${minutes}분 뒤 (${next.alarmLabel})")
     }
 
     /**
@@ -162,5 +176,8 @@ class AlarmScheduler(private val context: Context) {
 
         /** showIntent 의 requestCode 가 발화용과 겹치지 않게 띄운다. */
         const val SHOW_REQUEST_OFFSET = 1_000_000
+
+        /** 알람 화면의 큰 시각. `EventRepository` 의 형식과 같아야 한다. */
+        val LABEL_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm")
     }
 }

@@ -11,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -181,6 +182,12 @@ private fun AlarmRingingScreen(
     Box(
         Modifier
             .fillMaxSize()
+            // **배경을 직접 칠한다.** 다른 화면은 MainActivity 의
+            // Scaffold(containerColor = JitColor.Bg) 안에 있어서 배경이
+            // 깔리지만 이 액티비티에는 Scaffold 가 없다. 빼먹으면 창 배경이
+            // 액티비티 테마(밝은 색)로 나오고 흰 바탕에 흰 글자가 된다 —
+            // 에뮬레이터에서 실제로 그렇게 떴다.
+            .background(JitColor.Bg)
             .safeDrawingPadding()
             .padding(
                 horizontal = JitSpace.ScreenHorizontal,
