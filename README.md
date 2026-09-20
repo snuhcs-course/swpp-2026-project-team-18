@@ -102,9 +102,20 @@ $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
 .\gradlew.bat installDebug
 ```
 
-From the emulator the host machine is `10.0.2.2` (see `BuildConfig.BASE_URL`).
-For a physical device, change `BASE_URL` in `app/build.gradle.kts` to your machine's
-LAN IP.
+From an emulator the host machine is `10.0.2.2`, and the app resolves that at runtime,
+so no configuration is needed. For a physical device put your machine's LAN IP in
+`local.properties` (git-ignored):
+
+```properties
+devServerHost=192.168.0.12
+```
+
+`APP/scripts/use_device.ps1` fills that in for you and checks the firewall and the
+connected device. You do not have to undo it to go back to the emulator — the app
+detects one and substitutes `10.0.2.2`, so a single build works on both.
+
+**See [docs/device-setup.md](docs/device-setup.md)** for the full walkthrough,
+including permissions, battery optimization and testing an actual commute.
 
 **3. Emulator setup**
 
@@ -147,13 +158,21 @@ cannot be computed; the banner on the home screen takes you straight to the sett
 │   │   ├── accounts/           User · Profile
 │   │   ├── events/             Place · EventTag · Event
 │   │   ├── planning/           AlarmPlan (alarm calculation)
+│   │   ├── observations/       TripObservation (real departure / arrival times)
 │   │   ├── routing/            Kakao clients
 │   │   └── common/             shared error format
 │   └── scripts/                API verification scripts
-└── docs/                       screenshots
+└── docs/                       guides and images referenced from this README
 ```
 
-Design documents (specifications, checklists) live in the **Wiki**.
+`docs/` holds what you need to run the project:
+
+- **[Running on a physical device](docs/device-setup.md)** — network setup, pairing,
+  permissions, and how to test a commute when the dev server stays at home
+- `screens-overview.png` — the Figma board capture used above
+
+Design documents (specifications, checklists, proposal drafts) are kept out of the
+repository on purpose and shared through the course **Wiki**.
 
 ---
 
@@ -174,7 +193,14 @@ GET   /api/events/tags                the six event categories
 
 GET   /api/places/search?q=           Kakao place search (proxied)
 GET   /api/routes/candidates          route candidates
+
+POST  /api/observations/batch         upload detected departures / arrivals
+GET   /api/observations               list, filterable by event, kind and time
 ```
+
+`/api/observations/batch` is idempotent on `(user, client_uuid)`. Detection happens
+mid-commute where there is often no network, so the app queues records on disk and
+resends them; a retry must not create a second row.
 
 **The app never calls Kakao directly.** An API key shipped in an APK can be extracted,
 so the server proxies those calls.
@@ -185,10 +211,21 @@ Every script makes real HTTP calls. Run them with the server up.
 
 ```powershell
 cd backend
-.\.venv\Scripts\python.exe scripts\check_auth_api.py      # auth, 18 cases
-.\.venv\Scripts\python.exe scripts\check_events_api.py    # events, 20 cases
-.\.venv\Scripts\python.exe scripts\check_route_api.py     # routes, 30 cases
-.\.venv\Scripts\python.exe scripts\db_status.py           # database summary
+.\.venv\Scripts\python.exe scripts\check_auth_api.py          # auth, 18 cases
+.\.venv\Scripts\python.exe scripts\check_events_api.py        # events, 20 cases
+.\.venv\Scripts\python.exe scripts\check_route_api.py         # routes, 30 cases
+.\.venv\Scripts\python.exe scripts\check_observations_api.py  # observations, 29 cases
+.\.venv\Scripts\python.exe scripts\db_status.py               # database summary
+```
+
+The app side has unit tests for the logic that cannot be checked by hand — the
+departure and arrival decisions, where blurry fixes and stray coordinates have to be
+reproduced deliberately:
+
+```powershell
+cd APP
+$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
+.\gradlew.bat testDebugUnitTest
 ```
 
 ---
