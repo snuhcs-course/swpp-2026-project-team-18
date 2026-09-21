@@ -1,0 +1,20 @@
+# 배포 전용 의존성. 로컬 개발에는 필요 없다.
+#
+# 설치:
+#   pip install -r requirements/prod.txt
+#
+# base.txt 를 포함하므로 이것만 설치하면 된다.
+-r base.txt
+
+# WSGI 서버. runserver 는 개발용이고 단일 스레드에 보안 검토가 안 돼 있다.
+# Django 문서가 운영 사용을 명시적으로 금지한다.
+gunicorn==23.0.0
+
+# Postgres 드라이버. psycopg3 의 binary 배포판을 쓴다 - 소스 빌드에 필요한
+# libpq-dev/컴파일러가 없는 이미지에서도 설치된다.
+psycopg[binary]==3.2.3
+
+# 정적 파일 서빙. Django admin 의 CSS·JS 가 이걸로 나간다.
+# DEBUG=False 면 Django 가 정적 파일을 서빙하지 않으므로 admin 이 스타일 없이
+# 뜬다. 앞단에 nginx 를 두지 않는 PaaS 배포에서는 whitenoise 가 그 역할을 한다.
+whitenoise==6.8.2

@@ -8,25 +8,32 @@ plugins {
 }
 
 /**
- * 개발 서버 호스트.
+ * 서버 주소 결정.
  *
- * 에뮬레이터는 호스트 PC 의 127.0.0.1 을 `10.0.2.2` 로 본다. **실기기는 그 주소를
- * 모른다** — 개발 PC 의 LAN IP 가 필요하다. 그 IP 는 사람마다 다르고 네트워크가
- * 바뀌면 같은 사람도 달라지므로 커밋되는 파일에 박아 두면 안 된다.
+ * 우선순위가 있고, 그 순서에 이유가 있다.
  *
- * `local.properties`(gitignore 대상) 에 아래처럼 적으면 그 값을 쓴다.
+ * 1. `local.properties` 의 `devServerHost` — **로컬 백엔드로 개발할 때.**
+ *    이 파일은 커밋되지 않으므로 각자 설정이 서로를 건드리지 않는다.
+ * 2. `gradle.properties` 의 `jitApiBaseUrl` — **팀 공용 서버.** 이 파일은
+ *    커밋되므로 레포를 clone 한 사람이 아무 설정 없이 같은 서버에 붙는다.
+ * 3. 둘 다 없으면 에뮬레이터 기본값(`10.0.2.2`).
  *
- *     devServerHost=192.168.0.12
- *
- * 없으면 에뮬레이터 기본값을 쓴다. 팀원은 각자 자기 IP 만 적으면 되고 서로의
- * 설정이 충돌하지 않는다.
+ * 1번이 2번보다 앞인 것이 핵심이다. 공용 서버가 기본값이어야 하지만, 백엔드를
+ * 고치는 사람은 자기 변경을 자기 PC 에서 확인해야 한다. 공용이 우선이면 로컬
+ * 서버를 띄워 놓고도 공용에 붙어 "왜 내 변경이 안 보이지" 가 된다.
  */
-val devServerHost: String = Properties().apply {
+val localProps = Properties().apply {
     val file = rootProject.file("local.properties")
     if (file.exists()) file.inputStream().use { load(it) }
-}.getProperty("devServerHost")?.trim()?.takeIf { it.isNotEmpty() } ?: "10.0.2.2"
+}
 
-val devServerUrl = "http://$devServerHost:8000/"
+/** 로컬 백엔드를 쓸 때만 채운다. 비어 있으면 공용 서버로 간다. */
+val devServerHost: String? =
+    localProps.getProperty("devServerHost")?.trim()?.takeIf { it.isNotEmpty() }
+
+/** 팀 공용 서버. `gradle.properties` 에 있고 커밋된다. */
+val sharedApiBaseUrl: String? =
+    (project.findProperty("jitApiBaseUrl") as String?)?.trim()?.takeIf { it.isNotEmpty() }
 
 /**
  * 에뮬레이터가 호스트 PC 를 보는 주소. 고정값이다.
@@ -35,6 +42,35 @@ val devServerUrl = "http://$devServerHost:8000/"
  * LAN IP 로는 닿지 못한다(에뮬레이터 NAT 밖이다).
  */
 val EMULATOR_SERVER_URL = "http://10.0.2.2:8000/"
+
+/** 실기기·릴리즈가 쓸 주소. */
+val apiBaseUrl: String = when {
+    devServerHost != null -> "http://$devServerHost:8000/"
+    sharedApiBaseUrl != null -> sharedApiBaseUrl.removeSuffix("/") + "/"
+    else -> EMULATOR_SERVER_URL
+}
+
+/**
+ * 에뮬레이터가 쓸 주소.
+ *
+ * 로컬 백엔드 모드에서만 10.0.2.2 로 우회한다. 공용 서버를 쓸 때 우회하면
+ * 에뮬레이터가 아무도 듣지 않는 호스트 포트를 찌른다.
+ */
+val emulatorBaseUrl: String =
+    if (devServerHost != null) EMULATOR_SERVER_URL else apiBaseUrl
+
+// 공용 서버(https)만 쓰는 빌드에서는 평문 트래픽이 필요 없다. 로컬 백엔드는
+// http 라서 허용해야 한다. 매니페스트 플레이스홀더로 넘겨 빌드마다 결정한다.
+val needsCleartext: Boolean = !apiBaseUrl.startsWith("https://")
+
+logger.lifecycle(
+    "[JustInTime] API=$apiBaseUrl (emulator=$emulatorBaseUrl, cleartext=$needsCleartext)" +
+        when {
+            devServerHost != null -> " ← local.properties devServerHost"
+            sharedApiBaseUrl != null -> " ← gradle.properties jitApiBaseUrl"
+            else -> " ← 기본값(에뮬레이터). 공용 서버 주소가 설정되지 않았다"
+        }
+)
 
 android {
     namespace = "com.swpp.wakeup"
@@ -50,6 +86,10 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // AndroidManifest 의 android:usesCleartextTraffic 값. 로컬 백엔드(http)
+        // 를 쓸 때만 켠다.
+        manifestPlaceholders["usesCleartextTraffic"] = needsCleartext.toString()
     }
 
     buildFeatures {
@@ -60,18 +100,18 @@ android {
 
     buildTypes {
         debug {
-            // 기본값은 에뮬레이터용 10.0.2.2 다. 실기기는 local.properties 의
-            // devServerHost 로 개발 PC 의 LAN IP 를 지정한다(위 주석 참고).
-            buildConfigField("String", "BASE_URL", "\"$devServerUrl\"")
-            // 에뮬레이터 전용 주소. devServerHost 를 LAN IP 로 바꿔 둔 뒤
-            // 에뮬레이터로 돌리면 그 IP 에 닿지 못해 "서버에 연결할 수 없다" 가
-            // 뜬다. 한 APK 로 둘 다 되게 ApiClient 가 런타임에 고른다.
-            buildConfigField("String", "EMULATOR_BASE_URL", "\"$EMULATOR_SERVER_URL\"")
+            // 공용 서버(gradle.properties jitApiBaseUrl)가 기본이고,
+            // local.properties 에 devServerHost 를 적으면 로컬 백엔드로 바뀐다.
+            buildConfigField("String", "BASE_URL", "\"$apiBaseUrl\"")
+            // 에뮬레이터 전용 주소. 로컬 백엔드 모드에서만 10.0.2.2 로 우회하고,
+            // 공용 서버를 쓸 때는 같은 주소를 쓴다. 한 APK 로 둘 다 되게
+            // ApiClient 가 런타임에 고른다.
+            buildConfigField("String", "EMULATOR_BASE_URL", "\"$emulatorBaseUrl\"")
             buildConfigField("boolean", "DEV_TOOLS", "true")
         }
         release {
-            buildConfigField("String", "BASE_URL", "\"$devServerUrl\"")
-            buildConfigField("String", "EMULATOR_BASE_URL", "\"$devServerUrl\"")
+            buildConfigField("String", "BASE_URL", "\"$apiBaseUrl\"")
+            buildConfigField("String", "EMULATOR_BASE_URL", "\"$apiBaseUrl\"")
             buildConfigField("boolean", "DEV_TOOLS", "false")
             optimization {
                 enable = false

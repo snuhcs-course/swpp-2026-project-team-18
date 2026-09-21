@@ -65,12 +65,16 @@ object ApiClient {
     /**
      * 실제로 쓸 서버 주소.
      *
-     * `local.properties` 의 `devServerHost` 를 실기기용 LAN IP 로 바꿔 두면
-     * 그 주소가 APK 에 박힌다. 그 APK 를 에뮬레이터에서 돌리면 LAN IP 에
-     * 닿지 못해 로그인부터 "서버에 연결할 수 없다" 가 된다 — 실제로 겪었다.
+     * 기본은 **팀 공용 서버**다(`gradle.properties` 의 `jitApiBaseUrl`, 커밋됨).
+     * 레포를 clone 한 사람이 아무 설정 없이 같은 서버·같은 데이터에 붙는다.
      *
-     * 에뮬레이터는 호스트를 항상 10.0.2.2 로 본다. 빌드 시점에 고를 수 없는
-     * 값이므로 런타임에 고른다. 한 APK 로 실기기와 에뮬레이터가 모두 된다.
+     * 백엔드를 고치는 사람은 `local.properties` 에 `devServerHost` 를 적어
+     * 자기 PC 로 돌린다. 그때만 주소가 `http://<호스트>:8000` 이 된다.
+     *
+     * **에뮬레이터 분기는 로컬 백엔드 모드에서만 의미가 있다.** 에뮬레이터는
+     * 호스트를 10.0.2.2 로 보고 개발 PC 의 LAN IP 에는 닿지 못한다. 공용 서버를
+     * 쓸 때는 두 값이 같으므로 분기해도 결과가 같다. 빌드 시점에 고를 수 없는
+     * 값이라 런타임에 고르고, 덕분에 한 APK 로 실기기와 에뮬레이터가 모두 된다.
      */
     val baseUrl: String
         get() = if (BuildConfig.DEBUG && isEmulator) {

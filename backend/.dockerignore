@@ -1,0 +1,25 @@
+# 이미지에 들어가면 안 되는 것들.
+#
+# .env 가 들어가면 시크릿이 이미지에 박힌다. 이미지를 받은 사람은 누구나
+# 읽을 수 있다. 환경변수는 런타임에 주입한다.
+.env
+*.env
+!.env.example
+
+# 로컬 DB. 공용 서버는 Postgres 를 쓴다. 이 파일이 들어가면 실수로
+# SQLite 에 붙어 재배포마다 데이터가 사라지는 상황을 만든다.
+db.sqlite3
+*.sqlite3
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+staticfiles/
+
+.git/
+.gitignore

@@ -1,0 +1,62 @@
+# Render 배포 청사진(Blueprint).
+#
+# 이 파일이 있으면 Render 에서 저장소를 연결할 때 서비스·DB·환경변수를 자동으로
+# 만든다. 대시보드에서 손으로 채우는 항목을 줄이려는 것이다.
+#
+# 쓰는 법은 docs/team-setup.md 를 볼 것.
+#
+# **Render 에 묶이지 않는다.** 실제 실행은 backend/Dockerfile 이 하므로
+# Railway·Fly·연구실 리눅스 서버로 옮길 때 이 파일만 버리면 된다.
+
+services:
+  - type: web
+    name: justintime-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: singapore
+    branch: main
+
+    # 무료 플랜은 15분 무응답이면 잠든다. 다시 깨는 데 30~60초 걸린다.
+    # 팀원이 "로그인이 안 된다" 고 할 때 대개 이것이다. 잠들지 않게 하려면
+    # 유료 플랜(Starter)으로 올려야 한다.
+    healthCheckPath: /api/health
+
+    envVars:
+      # Render 가 무작위로 생성한다. 개발용 키를 재사용하지 않는다.
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.prod
+
+      # 아래 Postgres 인스턴스의 접속 문자열을 자동으로 넣는다.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: justintime-db
+          property: connectionString
+
+      # Render 가 배포 도메인을 RENDER_EXTERNAL_HOSTNAME 으로 주고
+      # prod.py 가 그것을 ALLOWED_HOSTS 에 더한다. 커스텀 도메인을 붙이면
+      # 여기에 쉼표로 추가한다.
+      - key: DJANGO_ALLOWED_HOSTS
+        value: ".onrender.com"
+
+      - key: WEB_CONCURRENCY
+        value: "2"
+
+      # 카카오 경로·장소 검색 키. **대시보드에서 직접 넣는다.**
+      # 이 파일에 적으면 저장소에 시크릿이 들어간다.
+      - key: KAKAO_REST_API_KEY
+        sync: false
+
+databases:
+  - name: justintime-db
+    databaseName: justintime
+    plan: free
+    region: singapore
+
+    # 무료 Postgres 는 생성 후 30일이 지나면 만료된다. 만료되기 전에
+    # 백업하거나 유료로 올려야 한다. 대안은 Neon 무료 티어를 쓰고
+    # DATABASE_URL 을 직접 넣는 것이다(docs/team-setup.md 참고).

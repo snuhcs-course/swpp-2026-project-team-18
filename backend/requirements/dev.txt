@@ -1,5 +1,13 @@
 -r base.txt
 
+# Postgres 드라이버.
+#
+# 로컬 개발은 기본이 SQLite 라서 없어도 되지만, DATABASE_URL 을 팀 공용
+# Postgres 로 바꿔 확인할 때 필요하다. 없으면
+# "Error loading psycopg2 or psycopg module" 로 터지는데 원인이 드러나지
+# 않아 시간을 버린다. prod.txt 와 같은 버전을 고정한다.
+psycopg[binary]==3.2.3
+
 # 테스트
 pytest==8.3.4
 pytest-django==4.9.0
