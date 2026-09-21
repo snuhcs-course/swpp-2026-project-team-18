@@ -63,6 +63,8 @@ fun SignupScreen(
     onSubmitClick: () -> Unit,
     onBackToLoginClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 잠든 공용 서버를 깨우는 중. 오래 걸릴 때만 true 가 된다. */
+    waking: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -149,6 +151,17 @@ fun SignupScreen(
 
         if (error != null) {
             ErrorText(error)
+        }
+
+        // 잠든 서버를 깨우는 동안. 버튼만 돌고 있으면 앱이 멈춘 줄 안다.
+        if (waking) {
+            Text(
+                text = stringResource(R.string.auth_waking_server),
+                modifier = Modifier.fillMaxWidth(),
+                color = JitColor.Amber,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+            )
         }
 
         Spacer(Modifier.height(4.dp))

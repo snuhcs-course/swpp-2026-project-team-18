@@ -4,7 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.data.local.TokenStore
+import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.repository.AuthRepository
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,6 +40,15 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val error: String? = null,
         /** 로그인·가입이 끝나 다음 화면으로 넘어가야 하는 상태. */
         val authenticatedNickname: String? = null,
+
+        /**
+         * 잠든 서버를 깨우는 중.
+         *
+         * 공용 서버(Render 무료)는 15분 무응답이면 잠들고 깨는 데 수십 초가
+         * 걸린다. 그 동안 버튼만 돌고 있으면 사용자는 앱이 멈춘 줄 안다.
+         * 무슨 일이 일어나는지 화면에 적는다.
+         */
+        val waking: Boolean = false,
     ) {
         val canSubmitLogin: Boolean
             get() = !loading && email.isNotBlank() && password.isNotBlank()
@@ -97,21 +108,48 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * 깨우기 안내를 띄우기까지 기다리는 시간.
+     *
+     * 깨어 있는 서버는 0.1초대로 답한다. 그때도 "깨우는 중" 을 번쩍이면
+     * 문제가 있는 것처럼 보인다. 이 시간을 넘겨 응답이 없을 때만 알린다.
+     */
+    private val WAKE_HINT_DELAY_MILLIS = 2_000L
+
     private fun submit(block: suspend () -> AuthRepository.AuthResult) {
-        _state.update { it.copy(loading = true, error = null) }
+        _state.update { it.copy(loading = true, error = null, waking = false) }
         viewModelScope.launch {
+            // 쓰기 요청 앞에서 서버를 깨운다. 로그인은 POST 라서
+            // ColdStartRetryInterceptor 가 재시도해 주지 않는다 - 재시도하면
+            // 중복 처리 위험이 있어 의도적으로 제외했다. 대신 GET 하나로
+            // 먼저 깨우고, 깨어난 뒤에 자격증명을 보낸다.
+            val hint = launch {
+                delay(WAKE_HINT_DELAY_MILLIS)
+                _state.update { it.copy(waking = true) }
+            }
+            ServerWarmup.ensureAwake()
+            hint.cancel()
+            _state.update { it.copy(waking = false) }
+
             when (val result = block()) {
                 is AuthRepository.AuthResult.Success ->
                     _state.update {
                         it.copy(
                             loading = false,
+                            waking = false,
                             error = null,
                             authenticatedNickname = result.user.nickname,
                         )
                     }
 
-                is AuthRepository.AuthResult.Failure ->
-                    _state.update { it.copy(loading = false, error = result.message) }
+                is AuthRepository.AuthResult.Failure -> {
+                    // 타임아웃으로 실패했으면 "깨어 있다" 는 기록을 지운다.
+                    // 그러지 않으면 다음 시도에서 깨우기를 건너뛴다.
+                    ServerWarmup.invalidate()
+                    _state.update {
+                        it.copy(loading = false, waking = false, error = result.message)
+                    }
+                }
             }
         }
     }

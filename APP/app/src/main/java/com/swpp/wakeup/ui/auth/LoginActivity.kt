@@ -148,7 +148,8 @@ private fun AuthHost(
                     onGoogleClick = showSocialNotice,
                     onKakaoClick = showSocialNotice,
                     onBrowseClick = onBrowse,
-                    modifier = Modifier.padding(innerPadding)
+                    modifier = Modifier.padding(innerPadding),
+                    waking = state.waking
                 )
 
                 AuthViewModel.Screen.SIGNUP -> SignupScreen(
@@ -165,7 +166,8 @@ private fun AuthHost(
                     onPasswordConfirmChange = viewModel::onPasswordConfirmChange,
                     onSubmitClick = viewModel::signup,
                     onBackToLoginClick = viewModel::goToLogin,
-                    modifier = Modifier.padding(innerPadding)
+                    modifier = Modifier.padding(innerPadding),
+                    waking = state.waking
                 )
             }
         }

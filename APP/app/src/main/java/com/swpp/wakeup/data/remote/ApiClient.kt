@@ -56,9 +56,16 @@ object ApiClient {
             // 로그에 실제로 나간 헤더가 찍힌다.
             .addInterceptor(AuthInterceptor(tokenStore))
             .addInterceptor(logging)
+            // 재시도는 로깅 뒤에 둔다. 앞에 두면 재시도한 요청이 로그에
+            // 한 번만 찍혀 몇 번 시도했는지 알 수 없다.
+            .addInterceptor(ColdStartRetryInterceptor())
             .authenticator(TokenRefreshAuthenticator(tokenStore) { auth })
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            // 재시도까지 포함한 전체 상한. 이게 없으면 느린 망에서 요청이
+            // 무한정 매달려 화면이 영영 로딩 상태로 남는다.
+            .callTimeout(CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
     }
 
@@ -141,4 +148,27 @@ object ApiClient {
     /** `"password":"..."`, `"password_confirm":"..."` 형태를 잡는다. */
     private val SECRET_FIELD =
         Regex("\"(password|password_confirm|old_password|new_password)\"\\s*:\\s*\"[^\"]*\"")
+
+    // ---------------------------------------------------------------------
+    // 타임아웃
+    // ---------------------------------------------------------------------
+    // **콜드 스타트를 견디는 값이다.** 공용 서버는 Render 무료 플랜이고,
+    // 15분 동안 요청이 없으면 잠든다. 다시 깨는 데 측정값 11초, 문서상 최대
+    // 1분이 걸린다. 종전 값(연결 10초 / 읽기 15초)으로는 첫 요청이 그
+    // 안에 안 끝나 "서버에 연결할 수 없다" 가 떴다 - 실제로 측정해 확인했다.
+    //
+    // 깨어 있을 때 응답은 0.14초다. 타임아웃을 늘려도 정상 상태의 체감은
+    // 달라지지 않는다. 늘리는 비용은 "서버가 죽었을 때 오래 기다린다" 뿐이고,
+    // 그건 callTimeout 이 막는다.
+
+    /** 연결 수립. Render 엣지는 잠들어 있어도 비교적 빨리 받는다. */
+    private const val CONNECT_TIMEOUT_SECONDS = 20L
+
+    /** 응답 대기. 콜드 스타트 지연이 여기에 실린다. */
+    private const val READ_TIMEOUT_SECONDS = 60L
+
+    private const val WRITE_TIMEOUT_SECONDS = 20L
+
+    /** 재시도를 포함한 전체 상한. 이걸 넘으면 포기하고 화면에 알린다. */
+    private const val CALL_TIMEOUT_SECONDS = 90L
 }

@@ -123,6 +123,19 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    testOptions {
+        unitTests {
+            // JVM 단위 테스트에서 안드로이드 프레임워크 호출이 예외를 던지지
+            // 않고 기본값을 돌려주게 한다.
+            //
+            // 켜지 않으면 `android.util.Log` 를 부르는 코드를 단위 테스트할 수
+            // 없다 - "Method i in android.util.Log not mocked" 로 죽는다.
+            // 로그를 지우거나 로거를 주입하는 방법도 있지만, 로그는 실기기에서
+            // 원인을 찾는 유일한 창구라 빼고 싶지 않다.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {
