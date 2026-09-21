@@ -31,11 +31,15 @@ services:
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.prod
 
-      # 아래 Postgres 인스턴스의 접속 문자열을 자동으로 넣는다.
+      # Neon Postgres 접속 문자열. **대시보드에서 직접 넣는다.**
+      #
+      # Render 자체 Postgres 를 쓰지 않는다. 무료 플랜이 생성 30일 후 만료돼
+      # 학기 중에 데이터가 사라진다. Neon 무료 티어는 만료가 없다.
+      #
+      # 마이그레이션은 컨테이너 시작 시 자동으로 도니까 pooler 주소를 넣어도
+      # 된다. 손으로 DDL 을 돌릴 때만 `-pooler` 를 뺀 직접 주소를 쓴다.
       - key: DATABASE_URL
-        fromDatabase:
-          name: justintime-db
-          property: connectionString
+        sync: false
 
       # Render 가 배포 도메인을 RENDER_EXTERNAL_HOSTNAME 으로 주고
       # prod.py 가 그것을 ALLOWED_HOSTS 에 더한다. 커스텀 도메인을 붙이면
@@ -51,12 +55,10 @@ services:
       - key: KAKAO_REST_API_KEY
         sync: false
 
-databases:
-  - name: justintime-db
-    databaseName: justintime
-    plan: free
-    region: singapore
-
-    # 무료 Postgres 는 생성 후 30일이 지나면 만료된다. 만료되기 전에
-    # 백업하거나 유료로 올려야 한다. 대안은 Neon 무료 티어를 쓰고
-    # DATABASE_URL 을 직접 넣는 것이다(docs/team-setup.md 참고).
+# databases 블록을 두지 않는다.
+#
+# 여기에 Render Postgres 를 정의하면 DATABASE_URL 이 그쪽으로 자동 연결되고,
+# Neon 에 이관한 데이터가 보이지 않는다. 실제로 그렇게 배포돼서 이관한 데모
+# 계정으로 로그인이 안 됐다 - health 는 200 이었으므로 한참 뒤에 발견했다.
+#
+# DB 는 Neon 을 쓴다. DATABASE_URL 을 대시보드에서 직접 넣는다.

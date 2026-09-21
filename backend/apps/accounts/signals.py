@@ -21,8 +21,16 @@ from .models import Profile
 
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL, dispatch_uid="accounts.create_profile")
-def create_profile_for_new_user(sender, instance, created, **kwargs):
-    if not created:
+def create_profile_for_new_user(sender, instance, created, raw=False, **kwargs):
+    # fixture 적재 중에는 아무것도 만들지 않는다.
+    #
+    # `loaddata` 는 `raw=True` 로 저장한다. 이때 프로필을 만들면 fixture 안의
+    # 프로필과 충돌한다 - 사용자당 프로필은 하나여야 하는데(unique), 시그널이
+    # 먼저 만든 행이 그 자리를 차지해 적재가 IntegrityError 로 죽는다. 실제로
+    # SQLite -> Postgres 이관에서 겪었다.
+    #
+    # fixture 는 프로필을 함께 담고 있으므로 만들 이유도 없다.
+    if raw or not created:
         return
     # get_or_create 를 쓴다. 다른 경로가 이미 만들었더라도 터지지 않는다.
     Profile.objects.get_or_create(user=instance)
