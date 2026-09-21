@@ -222,26 +222,24 @@ docker run -p 8000:8000 \
 | `WEB_CONCURRENCY` | | gunicorn 워커 수, 기본 2 |
 | `DJANGO_CORS_ORIGINS` | | 웹 대시보드를 붙일 때 |
 
-### 연구실 리눅스 서버에 띄우는 경우
-
-Tailscale 로 묶여 있으면 도메인·TLS 없이도 팀원이 붙을 수 있다.
+### 직접 운영하는 서버에 띄우는 경우
 
 ```bash
-# 서버에서
 docker run -d --restart=always -p 8000:8000 \
   -e DJANGO_SECRET_KEY=... \
   -e DATABASE_URL=postgres://... \
-  -e DJANGO_ALLOWED_HOSTS=100.x.x.x \
-  -e DJANGO_SECURE_SSL_REDIRECT=0 \
+  -e DJANGO_ALLOWED_HOSTS=api.example.com \
   --name justintime-api justintime-api
 ```
 
-`--restart=always` 가 재부팅 후 자동 실행을 담당한다. 팀원 전원이 tailnet 에
-있어야 하고, `jitApiBaseUrl=http://100.x.x.x:8000/` 로 적는다. 이 경우 http
-라서 빌드가 평문 트래픽을 자동으로 허용한다.
+`--restart=always` 가 재부팅 후 자동 실행을 담당한다. `jitApiBaseUrl` 에는
+그 서버의 https 주소를 적는다.
 
-TLS 가 없으므로 토큰이 평문으로 나간다. tailnet 안에서는 WireGuard 로 암호화되지만
-**tailnet 밖으로 노출하면 안 된다.**
+**TLS 는 반드시 둔다.** 앱이 로그인 토큰을 헤더로 보내므로 평문으로 노출하면
+같은 네트워크에 있는 누구나 계정을 탈취할 수 있다. 앞단에 nginx·Caddy 를 두고
+인증서를 붙일 것. 인증서가 없는 상태로 임시 확인만 할 때는
+`DJANGO_SECURE_SSL_REDIRECT=0` 으로 리다이렉트를 끌 수 있지만, 그 구성을
+팀 공용으로 쓰지 않는다.
 
 ---
 

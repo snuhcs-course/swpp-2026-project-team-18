@@ -80,8 +80,10 @@ CSRF_TRUSTED_ORIGINS = [f"https://{h}" for h in ALLOWED_HOSTS if not h.startswit
 # "http 로 들어왔으니 https 로 보내야 한다" 고 판단해 무한 리다이렉트가 된다.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-# 자체 서버(Tailscale 내부 등)에 TLS 없이 띄우는 경우를 위한 탈출구.
-# 기본은 켠다 - 앱이 토큰을 평문으로 보내지 않게 하는 것이 기본값이어야 한다.
+# 인증서가 아직 없는 서버에서 임시로 확인할 때를 위한 탈출구.
+# 기본은 켠다 - 앱이 로그인 토큰을 헤더로 보내므로 평문으로 나가면 같은
+# 네트워크에 있는 누구나 계정을 탈취할 수 있다. 끄는 것은 임시 확인용이고
+# 팀 공용 구성으로 쓰지 않는다.
 SECURE_SSL_REDIRECT = os.getenv("DJANGO_SECURE_SSL_REDIRECT", "1") != "0"
 SESSION_COOKIE_SECURE = SECURE_SSL_REDIRECT
 CSRF_COOKIE_SECURE = SECURE_SSL_REDIRECT
