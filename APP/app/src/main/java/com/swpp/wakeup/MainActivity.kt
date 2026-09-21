@@ -256,6 +256,11 @@ private fun MainHost(
                     onRetry = viewModel::retryRouteChoice,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
+                    onOriginEditToggle = viewModel::onOriginEditToggle,
+                    onOriginQueryChange = viewModel::onOriginQueryChange,
+                    onOriginSearch = viewModel::searchOriginPlaces,
+                    onOriginSelect = viewModel::onOriginSelected,
+                    onUseCurrentLocation = viewModel::useCurrentLocationAsOrigin,
                 )
 
                 AppRoute.HomeSetup -> HomeSetupScreen(

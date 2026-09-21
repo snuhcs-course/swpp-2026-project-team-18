@@ -94,6 +94,7 @@ class EventRepository(
         place: PlaceSearchItem?,
         tagKey: String?,
         routeKey: String? = null,
+        origin: PlaceSearchItem? = null,
     ): Result<EventDto> = guard {
         val body = EventCreateRequest(
             title = title.trim(),
@@ -109,6 +110,11 @@ class EventRepository(
             },
             tagKey = tagKey,
             routeKey = routeKey?.takeIf { it.isNotBlank() },
+            // 경로 선택 때 쓴 출발지를 그대로 보낸다. 빠뜨리면 서버가 집 기준으로
+            // 계산해 사용자가 본 소요시간과 달라진다.
+            originLat = origin?.lat,
+            originLng = origin?.lng,
+            originLabel = origin?.name,
         )
         val response = api.create(body)
         unwrap(response)?.let { Result.Success(it) } ?: Result.Failure(errorMessage(response))
@@ -118,12 +124,22 @@ class EventRepository(
      * 경로 후보 조회.
      *
      * 서버가 외부 API 를 최대 4번 부르므로 사용자가 "경로 고르기" 를 눌렀을
-     * 때만 호출한다. 목적지 좌표만 보내고 출발지는 서버가 프로필에서 읽는다.
+     * 때만 호출한다.
+     *
+     * [origin] 이 null 이면 출발지를 보내지 않고 서버가 프로필 집을 쓴다.
+     * 사용자가 출발지를 바꿨으면 그 좌표를 보낸다.
      */
     suspend fun routeCandidates(
         destination: PlaceSearchItem,
+        origin: PlaceSearchItem? = null,
     ): Result<RouteChoice> = guard {
-        val response = api.routeCandidates(destination.lat, destination.lng)
+        val response = api.routeCandidates(
+            destLat = destination.lat,
+            destLng = destination.lng,
+            originLat = origin?.lat,
+            originLng = origin?.lng,
+            originLabel = origin?.name,
+        )
         val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
 
         val options = body.results.map { it.toOption() }
@@ -132,12 +148,33 @@ class EventRepository(
         }
         Result.Success(
             RouteChoice(
-                origin = body.origin?.label?.takeIf { it.isNotBlank() } ?: "집",
+                originLabel = body.origin?.label?.takeIf { it.isNotBlank() }
+                    ?: origin?.name ?: "집",
                 destination = destination.name,
                 options = options,
                 selectedKey = options.firstOrNull()?.key,
+                // 사용자가 고른 출발지만 좌표를 남긴다. 집을 쓴 경우 null 이라
+                // 일정 생성 때 출발지를 보내지 않고 서버 기본값에 맡긴다.
+                originLat = origin?.lat,
+                originLng = origin?.lng,
             )
         )
+    }
+
+    /**
+     * 현재 위치의 주소. 경로 선택 화면의 출발지 기본값에 쓴다.
+     *
+     * 주소가 없는 좌표(바다·국외)는 실패가 아니다. 그 경우 [Result.Success] 에
+     * null 이 담긴다 — 화면은 "현재 위치를 쓸 수 없음" 으로 안내하고 사용자가
+     * 직접 검색하게 둔다.
+     */
+    suspend fun reversePlace(lat: Double, lng: Double): Result<PlaceSearchItem?> = guard {
+        val response = api.reversePlace(lat, lng)
+        val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
+        if (body.degraded) {
+            return@guard Result.Failure("현재 위치의 주소를 불러오지 못했다.")
+        }
+        Result.Success(body.result)
     }
 
     suspend fun deleteEvent(id: Long): Result<Unit> = guard {

@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 5
 LOCAL_SEARCH_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
+COORD_TO_ADDRESS_URL = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
 TRANSIT_URL = "https://dapi.kakao.com/v2/routing/publictraffic"
 WALK_URL = "https://dapi.kakao.com/v2/routing/walk"
 BICYCLE_URL = "https://dapi.kakao.com/v2/routing/bicycle"
@@ -96,6 +97,48 @@ def search_places(query: str, size: int = 10) -> tuple[list[dict], bool]:
             # 좌표가 없는 항목은 장소로 쓸 수 없다. 조용히 건너뛴다.
             continue
     return places, False
+
+
+def coord_to_address(lat: float, lng: float) -> tuple[dict | None, bool]:
+    """좌표 → 주소. 경로 선택 화면의 출발지 기본값(현재 위치)에 쓴다.
+
+    GPS 는 좌표만 준다. 화면에 `37.4808, 126.9526` 을 띄우면 사용자는 그게
+    어디인지 알 수 없으므로 사람이 읽는 주소로 바꾼다.
+
+    카카오는 도로명(`road_address`)과 지번(`address`) 을 함께 준다. 도로명이
+    없는 지역이 있어서 지번으로 폴백한다. 반환 모양은 [search_places] 항목과
+    같게 맞춘다 — 앱이 같은 `PlaceSearchItem` 으로 받아 출발지 선택 UI를
+    재사용한다. `kakao_place_id` 는 없다(장소가 아니라 좌표라서).
+    """
+    qs = urllib.parse.urlencode({"x": f"{lng}", "y": f"{lat}"})
+    data, degraded = _get(f"{COORD_TO_ADDRESS_URL}?{qs}")
+    if degraded or not data:
+        return None, True
+
+    docs = data.get("documents") or []
+    if not docs:
+        # 바다나 국외 좌표면 문서가 빈다. 실패가 아니라 "주소 없음" 이다.
+        return None, False
+
+    doc = docs[0]
+    road = doc.get("road_address") or {}
+    jibun = doc.get("address") or {}
+
+    address = road.get("address_name") or jibun.get("address_name") or ""
+    # 이름은 건물명 > 도로명 주소 > 지번 주소 순으로 고른다.
+    name = road.get("building_name") or address or "현재 위치"
+
+    return (
+        {
+            "kakao_place_id": None,
+            "name": name,
+            "address": address,
+            "lat": lat,
+            "lng": lng,
+            "category": "",
+        },
+        False,
+    )
 
 
 def transit_minutes(

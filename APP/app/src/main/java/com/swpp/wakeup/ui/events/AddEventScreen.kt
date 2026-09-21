@@ -158,11 +158,13 @@ fun AddEventScreen(
 
         TagDropdown(state.tagKey, onTagChange, enabled = !state.submitting)
 
+        // 집이 없어도 경로를 고를 수 있다. 경로 선택 화면이 현재 위치를 출발지로
+        // 잡으므로 집이 없다고 막으면 쓸 수 있는 길을 닫는다.
         RouteRow(
             routeLabel = state.routeLabel,
-            enabled = state.canPickRoute && hasHome,
+            originLabel = state.originLabel,
+            enabled = state.canPickRoute,
             hasPlace = state.selectedPlace != null,
-            hasHome = hasHome,
             onClick = onPickRoute,
         )
 
@@ -174,11 +176,13 @@ fun AddEventScreen(
                 title = "장소를 넣지 않으면 알람이 계산되지 않음",
                 body = "이동 시간을 구할 수 없어서다. 일정은 저장되고 나중에 장소를 넣으면 계산됨",
             )
-        } else if (!hasHome) {
+        } else if (!hasHome && state.origin == null) {
+            // 집도 없고 출발지도 고르지 않은 상태에서만 경고한다. 경로 선택에서
+            // 출발지를 잡았으면 집이 없어도 계산되므로 경고가 거짓이 된다.
             NoticeCard(
                 dot = JitColor.Amber,
-                title = "집 위치가 없어 알람이 계산되지 않음",
-                body = "출발지가 필요함. 홈 화면의 안내에서 집 위치를 먼저 설정",
+                title = "출발지가 없어 알람이 계산되지 않음",
+                body = "경로 고르기에서 출발지를 정하거나, 홈 화면 안내에서 집 위치를 설정",
             )
         }
 
@@ -771,14 +775,13 @@ private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled:
 @Composable
 private fun RouteRow(
     routeLabel: String?,
+    originLabel: String?,
     enabled: Boolean,
     hasPlace: Boolean,
-    hasHome: Boolean,
     onClick: () -> Unit,
 ) {
     val hint = when {
         !hasPlace -> "장소를 먼저 고름"
-        !hasHome -> "집 위치를 먼저 설정"
         routeLabel != null -> "선택함"
         else -> "선택 안 함 · 최단 경로 사용"
     }
@@ -820,6 +823,16 @@ private fun RouteRow(
                 text = if (routeLabel != null) "변경 ›" else "›",
                 color = if (enabled) JitColor.TextSecondary else JitColor.Track,
                 fontSize = if (routeLabel != null) 12.sp else 16.sp,
+            )
+        }
+
+        // 어디서 출발하는 기준인지 적는다. 출발지가 집이 아닐 수 있으므로
+        // 숨기면 알람 시각을 설명할 수 없다.
+        originLabel?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                text = "$it 에서 출발",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
             )
         }
     }

@@ -29,12 +29,21 @@ data class RouteOption(
 /**
  * 경로 선택 화면 상태.
  *
- * [origin] 은 서버가 알려 준 출발지 이름이다. 앱이 프로필을 다시 읽지 않아도
- * "신림역 → 서울대학교 관악캠퍼스" 를 그릴 수 있다.
+ * [originLabel] 은 화면에 그릴 출발지 이름이고, [originLat]/[originLng] 는 그
+ * 좌표다. **좌표를 함께 들고 있어야 한다** — 사용자가 출발지를 바꾸면 같은
+ * 좌표를 일정 생성 요청에도 보내야 하고, 보내지 않으면 서버가 집 기준으로
+ * 알람을 계산해 화면에 보인 소요시간과 달라진다.
+ *
+ * 좌표가 null 이면 서버가 프로필 집을 쓴 것이다(사용자가 바꾸지 않은 상태).
  */
 data class RouteChoice(
-    val origin: String,
+    val originLabel: String,
     val destination: String,
     val options: List<RouteOption>,
     val selectedKey: String?,
-)
+    val originLat: Double? = null,
+    val originLng: Double? = null,
+) {
+    /** 사용자가 집 대신 다른 출발지를 고른 상태인지. */
+    val hasCustomOrigin: Boolean get() = originLat != null && originLng != null
+}

@@ -156,6 +156,32 @@ class Event(models.Model):
         "선택 경로", max_length=120, blank=True, default=""
     )
 
+    # 이 일정만의 출발지. null 이면 프로필의 집에서 출발한다.
+    #
+    # **왜 일정별로 저장하는가.** `route_key` 에는 수단만 들어 있고 출발지가
+    # 없다(`transit:2호선>5513`). 경로 선택 화면에서 집이 아닌 곳을 출발지로
+    # 골랐는데 이걸 저장하지 않으면, 알람 재계산이 집 좌표로 같은 key 를 다시
+    # 풀어 **다른 경로의 소요시간으로 알람을 잡는다.** 그러면서
+    # `route_choice_honored` 는 key 만 비교하므로 true 로 보고해 사용자를
+    # 속인다. 저장해서 후보 조회와 재계산이 같은 출발지를 보게 만든다.
+    #
+    # `Place` FK 를 쓰지 않는다. 현재 위치를 역지오코딩한 결과는
+    # `kakao_place_id` 가 없어서 `Place` 행이 계속 쌓이고, 출발지는 다른
+    # 일정과 공유할 이유도 없다.
+    origin_lat = models.FloatField(
+        "출발지 위도",
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(-90), MaxValueValidator(90)],
+    )
+    origin_lng = models.FloatField(
+        "출발지 경도",
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(-180), MaxValueValidator(180)],
+    )
+    origin_label = models.CharField("출발지 표시명", max_length=80, blank=True, default="")
+
     created_at = models.DateTimeField("생성 시각", auto_now_add=True)
     updated_at = models.DateTimeField("수정 시각", auto_now=True)
 
@@ -180,10 +206,35 @@ class Event(models.Model):
                 | (Q(tau_override__gte=0.5) & Q(tau_override__lte=0.999)),
                 name="events_event_tau_override_range",
             ),
+            # 위도·경도는 둘 다 있거나 둘 다 없어야 한다. 하나만 있으면
+            # 출발지를 절반만 아는 상태이고, 계산기가 조용히 집으로
+            # 돌아가 사용자가 고른 곳과 다르게 계산한다.
+            models.CheckConstraint(
+                condition=(
+                    Q(origin_lat__isnull=True) & Q(origin_lng__isnull=True)
+                )
+                | (Q(origin_lat__isnull=False) & Q(origin_lng__isnull=False)),
+                name="events_event_origin_pair",
+            ),
         ]
 
     def __str__(self):
         return f"{self.start_at:%m-%d %H:%M} {self.title}"
+
+    def resolve_origin(self, profile) -> tuple[float, float, str] | None:
+        """이 일정의 출발지 `(lat, lng, label)`. 정할 수 없으면 None.
+
+        일정에 지정된 출발지가 우선이고, 없으면 프로필의 집이다. 둘 다 없으면
+        None 이고 호출자가 `no_home` 으로 처리한다.
+
+        경로 후보 조회와 알람 재계산이 **반드시 같은 값을 봐야 한다.** 그래서
+        규칙을 모델에 두고 양쪽이 이 메서드를 부른다.
+        """
+        if self.origin_lat is not None and self.origin_lng is not None:
+            return self.origin_lat, self.origin_lng, self.origin_label or "출발지"
+        if profile.home_lat is not None and profile.home_lng is not None:
+            return profile.home_lat, profile.home_lng, profile.home_label or "집"
+        return None
 
     @property
     def effective_tau(self) -> float:

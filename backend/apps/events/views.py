@@ -109,6 +109,86 @@ class EventTagListView(APIView):
         return Response(EventTagSerializer(tags, many=True).data)
 
 
+# 카카오 경로·주소 API 가 다루는 범위. 한반도 남부와 그 주변 해역을 넉넉히 덮는다.
+#
+# 출발지를 요청으로 받기 시작하면서 이 엔드포인트가 전 세계 경로 프록시로
+# 쓰이는 것을 막는 장치다. 카카오가 국외 경로를 주지 않으므로 정상 사용에는
+# 걸리지 않는다.
+KOREA_LAT_RANGE = (32.5, 39.0)
+KOREA_LNG_RANGE = (124.0, 132.5)
+
+
+def in_service_area(lat: float, lng: float) -> bool:
+    """카카오가 경로를 줄 수 있는 범위인지."""
+    return (
+        KOREA_LAT_RANGE[0] <= lat <= KOREA_LAT_RANGE[1]
+        and KOREA_LNG_RANGE[0] <= lng <= KOREA_LNG_RANGE[1]
+    )
+
+
+def _error(code: str, message: str, http_status: int) -> Response:
+    return Response(
+        {"error": {"code": code, "message": message, "details": {}}},
+        status=http_status,
+    )
+
+
+def _resolve_origin(request, profile) -> tuple[dict | None, Response | None]:
+    """요청의 출발지를 정한다. `(origin, error_response)` 중 하나만 채워진다.
+
+    `origin_lat`/`origin_lng` 가 오면 그것을 쓰고, 없으면 프로필의 집으로
+    돌아간다. 둘 다 없으면 출발지를 모르므로 409 `no_home` 이다 — 집을
+    설정하지 않은 사용자도 출발지를 직접 골라 경로를 볼 수 있다는 뜻이다.
+
+    좌표 하나만 오는 요청(`origin_lat` 만)은 조용히 집으로 폴백하지 않고
+    400 으로 막는다. 사용자가 출발지를 지정했다고 믿는데 다른 곳에서
+    계산되는 상황을 만들지 않는다.
+    """
+    raw_lat = request.query_params.get("origin_lat")
+    raw_lng = request.query_params.get("origin_lng")
+
+    if raw_lat is None and raw_lng is None:
+        if profile.home_lat is None or profile.home_lng is None:
+            return None, _error(
+                "no_home",
+                "집 위치를 설정하거나 출발지를 직접 골라야 경로를 계산할 수 있다.",
+                status.HTTP_409_CONFLICT,
+            )
+        return (
+            {
+                "label": profile.home_label or "집",
+                "lat": profile.home_lat,
+                "lng": profile.home_lng,
+            },
+            None,
+        )
+
+    if raw_lat is None or raw_lng is None:
+        return None, _error(
+            "invalid_origin",
+            "origin_lat 과 origin_lng 는 함께 보내야 한다.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        lat = float(raw_lat)
+        lng = float(raw_lng)
+    except (TypeError, ValueError):
+        return None, _error(
+            "invalid_origin", "출발지 좌표를 읽을 수 없다.", status.HTTP_400_BAD_REQUEST
+        )
+
+    if not in_service_area(lat, lng):
+        return None, _error(
+            "invalid_origin",
+            "국내 좌표만 경로를 계산할 수 있다.",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    label = (request.query_params.get("origin_label") or "").strip()[:80]
+    return {"label": label or "출발지", "lat": lat, "lng": lng}, None
+
+
 class PlaceSearchView(APIView):
     """GET /api/places/search?q= — 카카오 로컬 검색 프록시.
 
@@ -128,11 +208,69 @@ class PlaceSearchView(APIView):
         return Response({"results": places, "degraded": degraded})
 
 
-class RouteCandidateView(APIView):
-    """GET /api/routes/candidates?dest_lat=&dest_lng= — 경로 후보 목록.
+class PlaceReverseView(APIView):
+    """GET /api/places/reverse?lat=&lng= — 좌표 → 주소 프록시.
 
-    출발지는 **프로필의 집 위치**다. 요청으로 받지 않는다. 임의 좌표를 받으면
-    이 엔드포인트가 아무 두 지점의 경로를 뽑아 주는 무료 프록시가 된다.
+    경로 선택 화면이 출발지 기본값으로 "현재 위치" 를 넣을 때 쓴다. GPS 는
+    좌표만 주므로 사람이 읽는 주소로 바꿔야 한다. [PlaceSearchView] 와 같은
+    이유로 서버가 대신 부른다 — 앱에 카카오 키를 넣지 않는다.
+
+    응답은 `{"result": {...}|null, "degraded": bool}`. `result` 가 null 인
+    경우는 두 가지다: 카카오 호출 실패(`degraded=true`) 또는 주소가 없는
+    좌표(바다·국외, `degraded=false`). 화면이 둘을 구분해야 하므로 분리한다.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "route"
+
+    def get(self, request):
+        try:
+            lat = float(request.query_params["lat"])
+            lng = float(request.query_params["lng"])
+        except (KeyError, TypeError, ValueError):
+            return Response(
+                {
+                    "error": {
+                        "code": "invalid_coordinate",
+                        "message": "lat 과 lng 가 필요하다.",
+                        "details": {},
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return Response(
+                {
+                    "error": {
+                        "code": "invalid_coordinate",
+                        "message": "좌표 범위를 벗어났다.",
+                        "details": {},
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        result, degraded = clients.coord_to_address(lat, lng)
+        return Response({"result": result, "degraded": degraded})
+
+
+class RouteCandidateView(APIView):
+    """GET /api/routes/candidates?dest_lat=&dest_lng=[&origin_lat=&origin_lng=&origin_label=]
+
+    출발지는 **기본이 프로필의 집 위치**이고, 사용자가 다른 곳에서 출발할 때만
+    `origin_*` 으로 덮어쓴다. 집에서만 출발한다는 가정이 틀렸기 때문이다 —
+    학교에서 바로 다음 수업으로 가거나 외출 중에 일정을 넣는 경우가 있다.
+
+    **임의 좌표를 받는 위험을 어떻게 막는가.** 원래 이 엔드포인트는 출발지를
+    아예 받지 않았다(back-spec.md 5.3.1). 아무 두 지점의 카카오 경로를 뽑아
+    주는 무료 프록시가 되는 것을 막으려던 것이다. 출발지를 열면서 그 자리를
+    세 가지로 대체한다:
+
+    1. 인증 필수 — 익명 호출이 불가능하다.
+    2. `route` 스로틀 — 한 번에 외부 API 를 최대 4번 부르므로 호출량을 묶는다.
+    3. **국내 좌표만 허용** — 카카오 경로 API 자체가 국내만 다루므로 정상
+       사용을 제한하지 않으면서, 전 세계 경로 프록시로 쓰이는 길을 막는다.
 
     카카오는 대중교통 후보를 항상 15개 주는데 대부분 같은 버스의 다른 환승
     조합이다. `clients.route_candidates()` 가 축별 대표만 추려 6개 이하로
@@ -140,7 +278,11 @@ class RouteCandidateView(APIView):
 
     **호출 비용** — 한 번에 외부 API 를 최대 4번 부른다. 사용자가 일정 추가
     화면에서 명시적으로 요청할 때만 부르고, 알람 재계산에서는 선택된 수단
-    하나만 조회한다. `route` 스로틀을 걸어 둔다.
+    하나만 조회한다.
+
+    고른 출발지는 화면에서 끝나지 않고 `Event.origin_*` 에 저장된다. 저장하지
+    않으면 알람 재계산이 집 좌표로 `route_key` 를 다시 풀어 **다른 경로의
+    소요시간으로 알람을 잡는다**(planning/services.py 3번 주석).
     """
 
     throttle_classes = [ScopedRateThrottle]
@@ -148,17 +290,10 @@ class RouteCandidateView(APIView):
 
     def get(self, request):
         profile = request.user.profile
-        if profile.home_lat is None or profile.home_lng is None:
-            return Response(
-                {
-                    "error": {
-                        "code": "no_home",
-                        "message": "집 위치를 먼저 설정해야 경로를 계산할 수 있다.",
-                        "details": {},
-                    }
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
+
+        origin, error = _resolve_origin(request, profile)
+        if error is not None:
+            return error
 
         try:
             dest_lat = float(request.query_params["dest_lat"])
@@ -188,18 +323,14 @@ class RouteCandidateView(APIView):
             )
 
         candidates, degraded = clients.route_candidates(
-            start_lat=profile.home_lat,
-            start_lng=profile.home_lng,
+            start_lat=origin["lat"],
+            start_lng=origin["lng"],
             end_lat=dest_lat,
             end_lng=dest_lng,
         )
         return Response(
             {
-                "origin": {
-                    "label": profile.home_label or "집",
-                    "lat": profile.home_lat,
-                    "lng": profile.home_lng,
-                },
+                "origin": origin,
                 "results": candidates,
                 "degraded": degraded,
             }

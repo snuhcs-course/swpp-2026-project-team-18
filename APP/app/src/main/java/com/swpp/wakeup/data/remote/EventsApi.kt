@@ -59,8 +59,28 @@ interface EventsApi {
     suspend fun searchPlaces(@Query("q") query: String): Response<PlaceSearchResponse>
 
     /**
-     * 경로 후보. 출발지는 **서버가 프로필 집 위치에서 가져온다** — 요청으로
-     * 보내지 않는다. 집이 없으면 409 다.
+     * 좌표 → 주소. 경로 선택 화면이 출발지 기본값으로 현재 위치를 넣을 때 쓴다.
+     *
+     * GPS 는 좌표만 주는데 화면에 `37.4808, 126.9526` 을 띄우면 사용자는 그게
+     * 어디인지 모른다. 카카오 호출은 서버가 대신한다 — 앱에 카카오 키를 넣지
+     * 않는다([searchPlaces] 와 같은 이유).
+     */
+    @GET("api/places/reverse")
+    suspend fun reversePlace(
+        @Query("lat") lat: Double,
+        @Query("lng") lng: Double,
+    ): Response<PlaceReverseResponse>
+
+    /**
+     * 경로 후보.
+     *
+     * 출발지를 보내지 않으면 서버가 프로필 집 위치를 쓴다. 집이 아닌 곳에서
+     * 출발할 때만 `originLat`/`originLng` 를 채운다. 집도 없고 출발지도 안
+     * 보내면 409 다.
+     *
+     * **좌표는 둘 다 보내거나 둘 다 비워야 한다.** 하나만 보내면 400 이다 —
+     * 절반만 지정된 출발지를 조용히 집으로 바꾸면 사용자가 고른 곳과 다르게
+     * 계산된다.
      *
      * 외부 API 를 최대 4번 부르므로 사용자가 명시적으로 요청할 때만 호출한다.
      */
@@ -68,6 +88,9 @@ interface EventsApi {
     suspend fun routeCandidates(
         @Query("dest_lat") destLat: Double,
         @Query("dest_lng") destLng: Double,
+        @Query("origin_lat") originLat: Double? = null,
+        @Query("origin_lng") originLng: Double? = null,
+        @Query("origin_label") originLabel: String? = null,
     ): Response<RouteCandidateResponse>
 
     companion object {
@@ -234,6 +257,18 @@ data class PlaceSearchResponse(
     val degraded: Boolean = false,
 )
 
+/**
+ * 좌표 → 주소 결과.
+ *
+ * [result] 가 null 인 경우가 두 가지다. [degraded] 가 true 면 카카오 호출이
+ * 실패한 것이고, false 면 그 좌표에 주소가 없는 것이다(바다·국외). 화면이
+ * "잠시 후 다시" 와 "여기는 주소가 없음" 을 구분해야 하므로 서버가 나눠 준다.
+ */
+data class PlaceReverseResponse(
+    val result: PlaceSearchItem? = null,
+    val degraded: Boolean = false,
+)
+
 data class PlaceSearchItem(
     @SerializedName("kakao_place_id") val kakaoPlaceId: String?,
     val name: String,
@@ -267,6 +302,15 @@ data class EventCreateRequest(
      * 해당 수단을 다시 조회한다.
      */
     @SerializedName("route_key") val routeKey: String? = null,
+    /**
+     * 집이 아닌 곳에서 출발할 때의 출발지. null 이면 서버가 프로필 집을 쓴다.
+     *
+     * **경로 선택 때 쓴 출발지와 반드시 같아야 한다.** 보내지 않으면 서버가
+     * 집 좌표로 [routeKey] 를 다시 풀어 다른 경로의 소요시간으로 알람을 잡는다.
+     */
+    @SerializedName("origin_lat") val originLat: Double? = null,
+    @SerializedName("origin_lng") val originLng: Double? = null,
+    @SerializedName("origin_label") val originLabel: String? = null,
 )
 
 data class EventUpdateRequest(

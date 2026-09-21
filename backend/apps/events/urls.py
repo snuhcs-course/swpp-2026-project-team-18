@@ -7,6 +7,7 @@ from .views import (
     EventListCreateView,
     EventRecomputeView,
     EventTagListView,
+    PlaceReverseView,
     PlaceSearchView,
     RouteCandidateView,
 )
@@ -21,5 +22,6 @@ urlpatterns = [
     path("events/<int:pk>", EventDetailView.as_view(), name="detail"),
     path("events/<int:pk>/recompute", EventRecomputeView.as_view(), name="recompute"),
     path("places/search", PlaceSearchView.as_view(), name="place_search"),
+    path("places/reverse", PlaceReverseView.as_view(), name="place_reverse"),
     path("routes/candidates", RouteCandidateView.as_view(), name="route_candidates"),
 ]

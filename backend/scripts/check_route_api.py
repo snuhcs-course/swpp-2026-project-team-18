@@ -249,8 +249,8 @@ check(
     str(plan3.get("route_choice_honored")),
 )
 
-# --- 9. 남의 집 좌표로 후보를 뽑을 수 없다 ----------------------------------
-# 출발지를 요청으로 받지 않으므로 파라미터를 넣어도 무시돼야 한다.
+# --- 9. 출발지 -------------------------------------------------------------
+# 출발지는 `origin_lat`/`origin_lng` 로만 받는다. 그 외 이름은 무시하고 집을 쓴다.
 res = requests.get(
     f"{BASE}/api/routes/candidates",
     params={
@@ -263,7 +263,56 @@ res = requests.get(
     timeout=60,
 )
 ok = res.status_code == 200 and (res.json().get("origin") or {}).get("label") == HOME["label"]
-check("출발지 파라미터는 무시됨", ok, str((res.json() or {}).get("origin")))
+check("모르는 출발지 파라미터는 무시됨", ok, str((res.json() or {}).get("origin")))
+
+# 집이 아닌 곳에서 출발할 수 있어야 한다. 집에서만 출발한다는 가정이 틀리기 때문이다.
+ORIGIN = {"lat": 37.5665, "lng": 126.9780, "label": "서울시청"}
+res = requests.get(
+    f"{BASE}/api/routes/candidates",
+    params={
+        "dest_lat": DEST["lat"],
+        "dest_lng": DEST["lng"],
+        "origin_lat": ORIGIN["lat"],
+        "origin_lng": ORIGIN["lng"],
+        "origin_label": ORIGIN["label"],
+    },
+    headers=auth,
+    timeout=60,
+)
+body = res.json() if res.status_code == 200 else {}
+origin = body.get("origin") or {}
+check(
+    "origin_* 을 보내면 그 출발지를 쓴다",
+    res.status_code == 200
+    and abs((origin.get("lat") or 0) - ORIGIN["lat"]) < 1e-6
+    and origin.get("label") == ORIGIN["label"],
+    f"status={res.status_code} origin={origin}",
+)
+
+# 좌표 하나만 오면 400 이다. 조용히 집으로 돌아가면 사용자가 고른 곳과
+# 다르게 계산되는데 아무도 알 수 없다.
+res = requests.get(
+    f"{BASE}/api/routes/candidates",
+    params={"dest_lat": DEST["lat"], "dest_lng": DEST["lng"], "origin_lat": ORIGIN["lat"]},
+    headers=auth,
+    timeout=30,
+)
+check("출발지 좌표가 반쪽이면 400", res.status_code == 400, f"status={res.status_code}")
+
+# 국외 좌표는 막는다. 카카오가 경로를 주지 않고, 열어 두면 이 엔드포인트가
+# 전 세계 경로 프록시가 된다.
+res = requests.get(
+    f"{BASE}/api/routes/candidates",
+    params={
+        "dest_lat": DEST["lat"],
+        "dest_lng": DEST["lng"],
+        "origin_lat": 48.8584,
+        "origin_lng": 2.2945,
+    },
+    headers=auth,
+    timeout=30,
+)
+check("국외 출발지는 400", res.status_code == 400, f"status={res.status_code}")
 
 # --- 10. 인증 없이는 401 ----------------------------------------------------
 res = requests.get(

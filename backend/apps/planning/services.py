@@ -72,10 +72,16 @@ def compute_and_store(event: Event) -> AlarmPlan:
         defaults["status"] = AlarmPlan.Status.NO_PLACE
         return _upsert(event, defaults)
 
-    # 2) 집 위치가 없으면 출발지를 모른다.
-    if profile.home_lat is None or profile.home_lng is None:
+    # 2) 출발지를 모르면 이동 시간을 구할 수 없다.
+    #
+    # 일정에 지정된 출발지가 우선이고 없으면 프로필의 집이다. 둘 다 없을 때만
+    # NO_HOME 이다 — 집을 설정하지 않았어도 일정마다 출발지를 골랐으면 알람을
+    # 계산할 수 있다.
+    origin = event.resolve_origin(profile)
+    if origin is None:
         defaults["status"] = AlarmPlan.Status.NO_HOME
         return _upsert(event, defaults)
+    origin_lat, origin_lng, _origin_label = origin
 
     # 3) 경로 조회.
     #
@@ -84,18 +90,20 @@ def compute_and_store(event: Event) -> AlarmPlan:
     # 보낸 값은 조작할 수 있다.
     #
     # 고르지 않았으면 서버가 도보·대중교통 중 빠른 쪽을 택한다.
+    # 출발지는 2번에서 정한 값을 쓴다. 여기서 프로필 집을 다시 읽으면, 사용자가
+    # 경로 선택 화면에서 고른 출발지와 달라져 엉뚱한 소요시간이 나온다.
     if event.route_key:
         route, degraded = clients.resolve_route(
             event.route_key,
-            start_lat=profile.home_lat,
-            start_lng=profile.home_lng,
+            start_lat=origin_lat,
+            start_lng=origin_lng,
             end_lat=event.place.lat,
             end_lng=event.place.lng,
         )
     else:
         route, degraded = clients.best_route(
-            start_lat=profile.home_lat,
-            start_lng=profile.home_lng,
+            start_lat=origin_lat,
+            start_lng=origin_lng,
             end_lat=event.place.lat,
             end_lng=event.place.lng,
         )

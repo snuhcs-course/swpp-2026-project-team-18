@@ -95,6 +95,9 @@ class EventSerializer(serializers.ModelSerializer):
             "tag",
             "tau_override",
             "route_key",
+            "origin_lat",
+            "origin_lng",
+            "origin_label",
             "alarm_plan",
             "created_at",
         )
@@ -169,8 +172,28 @@ class EventWriteSerializer(serializers.ModelSerializer):
             "tag_key",
             "tau_override",
             "route_key",
+            "origin_lat",
+            "origin_lng",
+            "origin_label",
         )
         read_only_fields = ("id",)
+
+    def validate(self, attrs):
+        """출발지 좌표는 둘 다 있거나 둘 다 없어야 한다.
+
+        하나만 받아 조용히 집으로 폴백하면, 사용자는 자기가 고른 곳에서
+        출발한다고 믿는데 알람은 집 기준으로 계산된다. 모델 CheckConstraint 와
+        같은 규칙을 API 층에서 먼저 막아 읽을 수 있는 오류를 준다.
+
+        부분 수정(PATCH)에서는 저장된 값과 합쳐서 판단한다.
+        """
+        lat = attrs.get("origin_lat", getattr(self.instance, "origin_lat", None))
+        lng = attrs.get("origin_lng", getattr(self.instance, "origin_lng", None))
+        if (lat is None) != (lng is None):
+            raise serializers.ValidationError(
+                {"origin_lat": "origin_lat 과 origin_lng 는 함께 보내야 한다."}
+            )
+        return attrs
 
     def validate_route_key(self, value):
         """`GET /api/routes/candidates` 가 준 key 형식만 받는다.
