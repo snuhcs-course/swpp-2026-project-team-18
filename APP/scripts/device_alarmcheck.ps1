@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$Target = "10.148.189.137:37551",
   [string]$Pkg = "com.swpp.wakeup",
   [string]$OutFile = "$env:TEMP\alarmcheck.txt"

@@ -17,7 +17,9 @@ import argparse
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 EMAIL = "demo@demo.com"
 PASSWORD = "demo1234"
@@ -113,12 +115,114 @@ def main() -> int:
         print(f"집 위치 설정 실패 (status={st}): {str(body)[:200]}")
         return 1
 
+    # 3. 일정. 없으면 홈 화면이 비어 보여서 보여줄 것이 없다.
     st, body = call(base, "/api/events", token=token)
-    n = len((body or {}).get("results") or []) if st == 200 else -1
-    print(f"현재 일정 {n}건")
+    existing = {e.get("title") for e in ((body or {}).get("results") or [])} if st == 200 else set()
+    print(f"현재 일정 {len(existing)}건")
+
+    created = 0
+    for spec in DEMO_EVENTS:
+        if spec["title"] in existing:
+            continue
+        place = resolve_place(base, token, spec["place_query"], spec["place_fallback"])
+        if place is None:
+            print(f"  장소를 찾지 못해 건너뜀: {spec['title']}")
+            continue
+
+        start_at = next_weekday_at(spec["days_ahead"], spec["hour"], spec["minute"])
+        st, ev = call(
+            base,
+            "/api/events",
+            "POST",
+            {
+                "title": spec["title"],
+                "start_at": start_at,
+                "place": place,
+                "tag_key": spec["tag_key"],
+            },
+            token=token,
+        )
+        if st == 201:
+            plan = (ev or {}).get("alarm_plan") or {}
+            print(
+                f"  + {spec['title']}  alarm_at={plan.get('alarm_at')} "
+                f"status={plan.get('status')}"
+            )
+            created += 1
+        else:
+            print(f"  일정 생성 실패 ({st}): {str(ev)[:200]}")
+
+    if created:
+        print(f"일정 {created}건 추가")
 
     print("\n완료. 앱에서 이 계정으로 로그인할 수 있다.")
     return 0
+
+
+# 데모용 일정.
+#
+# 제목 길이를 일부러 섞었다. 긴 제목("Algorithms Lecture")은 태그 칩이 세로로
+# 접히던 버그를 재현하던 값이라, 홈 목록을 열면 그 수정이 유지되는지 눈으로
+# 확인할 수 있다.
+DEMO_EVENTS = [
+    {
+        "title": "Algorithms Lecture",
+        "place_query": "서울대학교 관악캠퍼스",
+        "place_fallback": {"name": "서울대학교 관악캠퍼스", "lat": 37.459882, "lng": 126.951905},
+        "tag_key": "class",
+        "days_ahead": 1,
+        "hour": 9,
+        "minute": 0,
+    },
+    {
+        "title": "시험 준비",
+        "place_query": "서울대학교 중앙도서관",
+        "place_fallback": {"name": "서울대학교 관악캠퍼스", "lat": 37.459882, "lng": 126.951905},
+        "tag_key": "exam",
+        "days_ahead": 2,
+        "hour": 14,
+        "minute": 30,
+    },
+    {
+        "title": "저녁 약속",
+        "place_query": "압구정로데오거리",
+        "place_fallback": {"name": "압구정로데오거리", "lat": 37.527100, "lng": 127.039000},
+        "tag_key": "meetup",
+        "days_ahead": 3,
+        "hour": 18,
+        "minute": 0,
+    },
+]
+
+
+def resolve_place(base, token, query, fallback):
+    """장소를 서버 검색으로 해석한다. 실패하면 고정 좌표로 떨어진다.
+
+    검색을 먼저 쓰는 이유는 kakao_place_id 가 붙어야 같은 장소가 한 행으로
+    합쳐지기 때문이다. 좌표만 넣으면 Place 행이 계속 쌓인다.
+    """
+    st, body = call(base, f"/api/places/search?q={urllib.parse.quote(query)}", token=token)
+    if st == 200:
+        results = (body or {}).get("results") or []
+        if results:
+            r = results[0]
+            return {
+                "name": r["name"],
+                "lat": r["lat"],
+                "lng": r["lng"],
+                "address": r.get("address"),
+                "kakao_place_id": r.get("kakao_place_id"),
+            }
+    return fallback
+
+
+def next_weekday_at(days_ahead: int, hour: int, minute: int) -> str:
+    """지금부터 N일 뒤 해당 시각(KST). 항상 미래여야 알람이 등록된다."""
+    kst = timezone(timedelta(hours=9))
+    when = (datetime.now(kst) + timedelta(days=days_ahead)).replace(
+        hour=hour, minute=minute, second=0, microsecond=0
+    )
+    return when.isoformat()
 
 
 if __name__ == "__main__":

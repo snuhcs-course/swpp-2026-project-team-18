@@ -15,7 +15,7 @@
 | `device_alarmcheck.ps1` | Doze 예외·standby bucket·등록된 알람 확인 |
 | `device_applog.ps1` | 앱 PID 로만 걸러낸 logcat (시스템 로그 제외) |
 | `device_launch.ps1` | 앱 재시작 후 로그와 최상단 액티비티 확인 |
-| `device_netcheck.ps1` | 폰에서 서버까지 닿는지 (Tailscale 경유 포함) |
+| `device_netcheck.ps1` | 폰에서 공용 서버까지 닿는지. 인터페이스·DNS 확인 |
 | `device_wake.ps1` | 화면 깨우기 + 잠금 상태 확인 |
 | `device_ui.ps1` | UI 계층 덤프. 스크린샷이 검게 나올 때 화면 대신 읽는다 |
 | `device_shot.ps1` | 스크린샷 |
@@ -45,3 +45,9 @@ cd APP
   `$env:TEMP\*.txt` 로 쓰는 이유다. 파일을 열어 볼 것.
 - **Doze 예외를 먼저 걸지 말 것.** 기본 상태에서 One UI 가 알람을 얼마나
   지연시키는지가 측정해야 할 값이다. 먼저 풀면 그 데이터를 못 얻는다.
+- **`.ps1` 은 UTF-8 BOM 으로 저장한다.** Windows PowerShell 5.1 은 BOM 이
+  없는 파일을 CP949 로 읽어서, 한글 주석의 멀티바이트가 따옴표처럼 해석돼
+  파싱이 깨진다. 이 디렉터리의 스크립트는 전부 BOM 이 붙어 있다.
+- **Tailscale 은 팀 공용으로 쓰지 않는다.** 앱은 공개 HTTPS 서버를 보므로
+  VPN 이 필요 없다. 무선 디버깅이 막히는 망(eduroam 등)에서만 각자 자기
+  계정으로 쓰면 된다. 근거는 `docs/team-setup.md` 7절.

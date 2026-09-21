@@ -1,4 +1,4 @@
-# 앱을 재시작해 로그인까지 진행한다. 검증 중 여러 번 필요하다.
+﻿# 앱을 재시작해 로그인까지 진행한다. 검증 중 여러 번 필요하다.
 #
 # 왜 필요한가 — 알람 등록은 홈 화면이 새로 읽을 때만 일어난다(HomeViewModel.refresh).
 # MainActivity 는 exported=false 라서 adb 로 직접 띄울 수 없고, LoginActivity 는
