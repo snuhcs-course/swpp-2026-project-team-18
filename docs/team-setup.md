@@ -21,40 +21,48 @@ curl https://justintime-api.onrender.com/api/health
 # {"ok":true,"version":"0.1.0"}
 ```
 
-전 기능 확인 (계정 생성 → 경로 → 알람 → 관측까지 51개 항목):
+전 기능 확인 (계정 생성 → 경로 → 알람 → 관측까지 53개 항목):
 
 ```bash
 cd backend
 python scripts/check_deployed.py
 ```
 
-### 남은 작업 하나 — DB 를 Neon 으로 바꿀 것
+### 전환 완료 기록 — 서버가 Neon 을 본다
 
-**지금 서버는 Render 가 자동 생성한 Postgres 를 쓰고 있다.** 기능은 전부
-정상이지만 두 가지 문제가 있다.
+배포 서버의 `DATABASE_URL` 은 Neon **direct** 주소를 쓴다. 확인한 상태는 이렇다.
+
+| | |
+| --- | --- |
+| `check_same_db.py` | `rc=0` — 배포 서버가 만든 계정이 Neon 에서 보인다 |
+| `check_deployed.py` | 53 통과 / 0 실패 / 0 건너뜀 |
+| Neon 데이터 | 계정 3개 · 일정 3건 (`Algorithms Lecture` · `Dinner Plans` · `시험 준비`) |
+
+한동안 Render 가 자동 생성한 Postgres 에 붙어 있었다. 두 가지가 문제였다.
 
 1. Render 무료 Postgres 는 **생성 30일 후 만료**된다. 학기 중에 데이터가 사라진다.
-2. Neon 에 이관해 둔 데이터(계정 3개 · 일정 3건)가 그 DB 에는 없다.
+2. Neon 에 이관해 둔 데이터가 그 DB 에는 없었다.
 
-Render 대시보드 → `justintime-api` → **Environment** 에서 `DATABASE_URL` 을
-Neon **direct**(`-pooler` 없는) 주소로 바꾸면 끝난다. 저장하면 자동 재배포되고,
-컨테이너가 시작할 때 마이그레이션이 돌아 스키마가 맞춰진다.
+**그런데 겉으로는 정상으로 보였다.** `/api/health` 는 200 이었고
+`check_deployed.py` 는 51개 항목을 전부 통과했다. 둘 다 DB 를 보지 않기
+때문이다 — 검증 스크립트는 자기 계정을 새로 만들어 쓴다. 일정 id 가
+`7·8·9·10` 인 것을 Neon 의 `3·9·13` 과 대조해서야 알아챘다.
 
-바꾼 뒤 확인:
+그래서 `check_same_db.py` 를 만들었다. 앞으로 DB 주소를 건드리면 이걸 돌린다.
 
 ```powershell
 cd backend
 $env:DATABASE_URL="<Neon direct 주소>"
-python scripts/check_same_db.py   # 0 이면 같은 DB, 2 면 아직 아니다
-python scripts/check_deployed.py  # 기능 51개 항목
+python scripts/check_same_db.py   # 0 같은 DB / 2 다른 DB
+python scripts/check_deployed.py  # 기능 53개 항목
 ```
 
-**`check_deployed.py` 만으로는 부족하다.** 그 스크립트는 자기 계정을 새로
-만들어 검증하므로 어느 DB 에 붙어 있어도 통과한다 — 실제로 51/51 통과 상태에서
-Neon 이 아닌 DB 를 보고 있었다. `check_same_db.py` 가 그 구멍을 메운다.
+주소를 바꾸면 저장 시 자동 재배포된다. **바로 확인하면 아직 이전 DB 가 나온다** —
+Docker 빌드가 끝나야 새 컨테이너로 넘어간다. 1~3분 뒤에 다시 돌릴 것.
 
 > `render.yaml` 에서 Render Postgres 정의는 제거했다. 다시 Blueprint 를
-> 동기화해도 자체 DB 를 만들지 않는다.
+> 동기화해도 자체 DB 를 만들지 않는다. 남아 있는 Render Postgres 인스턴스는
+> 쓰이지 않으므로 대시보드에서 지워도 된다.
 
 ---
 
@@ -422,13 +430,25 @@ python scripts/check_same_db.py
 | `check_external_apis.py` | 외부 API | 카카오·기상청 키 상태 |
 | `db_counts.py` | 현재 `DATABASE_URL` | 모델별 행 수. 이관 전후 대조 |
 | `seed_demo_via_api.py` | 배포 서버 | 데모 계정 생성(HTTP) |
+| `purge_test_accounts.py` | 현재 `DATABASE_URL` | 검증 스크립트가 남긴 `depcheck_`·`dbprobe_` 계정 정리. 기본 dry-run |
 | `migrate_sqlite_to_postgres.py` | — | SQLite → Postgres 일회성 이관 |
 
 **로컬 대상 스크립트는 임시 계정을 만든다.** 끝에 지우지만 중간에 끊기면
 남는다. `DATABASE_URL` 이 공용 DB 를 가리킨 상태로 돌리지 말 것.
 
-`check_deployed.py` 가 만든 계정은 `depcheck_` 접두가 붙는다(사용자 삭제 API 가
-없어 남는다). 주기적으로 admin 에서 정리한다.
+`check_deployed.py` 가 만든 계정은 `depcheck_` 접두가 붙는다. 사용자 삭제 API 가
+없어 공용 DB 에 남으므로 `purge_test_accounts.py` 로 정리한다.
+
+```powershell
+cd backend
+$env:DATABASE_URL="<공용 DB 주소>"
+python scripts/purge_test_accounts.py        # 무엇이 지워지는지만 본다
+python scripts/purge_test_accounts.py --yes  # 실제로 지운다
+```
+
+기본이 dry-run 이다. 계정을 지우면 딸린 일정·알람계획·관측도 cascade 로
+사라지므로, 지울 목록과 남는 목록을 먼저 출력한다. **실행 전에 남는 목록에
+실제 계정이 다 있는지 눈으로 확인할 것.**
 
 ---
 
