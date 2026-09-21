@@ -9,7 +9,8 @@ buffer`, and **shows you the reasoning behind the number**.
 
 ![Screens](docs/screens-overview.png)
 
-> All 14 Figma screens. Columns are stages; screens below a frame are its children.
+> All 13 Figma screens, plus one input-state fragment of the add-event screen.
+> Columns are stages; screens below a frame are its children.
 
 ---
 

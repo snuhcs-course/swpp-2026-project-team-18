@@ -37,18 +37,21 @@ python scripts/check_deployed.py
 2. Neon 에 이관해 둔 데이터(계정 3개 · 일정 3건)가 그 DB 에는 없다.
 
 Render 대시보드 → `justintime-api` → **Environment** 에서 `DATABASE_URL` 을
-Neon 주소로 바꾸면 끝난다. 저장하면 자동 재배포되고, 컨테이너가 시작할 때
-마이그레이션이 돌아 스키마가 맞춰진다.
+Neon **direct**(`-pooler` 없는) 주소로 바꾸면 끝난다. 저장하면 자동 재배포되고,
+컨테이너가 시작할 때 마이그레이션이 돌아 스키마가 맞춰진다.
 
 바꾼 뒤 확인:
 
-```bash
-# 이관한 계정으로 로그인되면 Neon 을 쓰는 것이다
-python scripts/check_deployed.py
+```powershell
+cd backend
+$env:DATABASE_URL="<Neon direct 주소>"
+python scripts/check_same_db.py   # 0 이면 같은 DB, 2 면 아직 아니다
+python scripts/check_deployed.py  # 기능 51개 항목
 ```
 
-어느 DB 에 붙었는지 확실히 보려면 계정을 하나 만들고 Neon 에서 찾아본다.
-5절의 표를 참고할 것.
+**`check_deployed.py` 만으로는 부족하다.** 그 스크립트는 자기 계정을 새로
+만들어 검증하므로 어느 DB 에 붙어 있어도 통과한다 — 실제로 51/51 통과 상태에서
+Neon 이 아닌 DB 를 보고 있었다. `check_same_db.py` 가 그 구멍을 메운다.
 
 > `render.yaml` 에서 Render Postgres 정의는 제거했다. 다시 Blueprint 를
 > 동기화해도 자체 DB 를 만들지 않는다.
@@ -383,23 +386,24 @@ docker run -d --restart=always -p 8000:8000 \
 보이지만 엉뚱한 DB 를 쓰고 있을 수 있다.** 실제로 Render 가 자체 Postgres 를
 만들어 거기에 붙어 있었고, 이관한 데모 계정 로그인이 401 이 나서야 알았다.
 
-확실한 방법은 서버에 계정을 하나 만들고 그것이 기대하는 DB 에 나타나는지
-보는 것이다.
+**`check_deployed.py` 로는 못 잡는다.** 그 스크립트는 자기 계정을 새로 만들어
+검증하므로 어느 DB 에 붙어 있어도 통과한다. 실제로 51개 항목이 전부 통과한
+상태에서 배포 서버가 Neon 이 아닌 DB 를 보고 있었다.
 
-```bash
-# 1. 서버에 프로브 계정 생성
-curl -X POST https://justintime-api.onrender.com/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"dbprobe@example.com","nickname":"probe","password":"dbprobe12345","password_confirm":"dbprobe12345"}'
+전용 스크립트를 쓴다. **배포 서버 API 로 쓰고 내 `DATABASE_URL` 로 직접 읽어**
+같은 DB 인지 본다. 시드 데이터를 비교하지 않으므로 거짓 통과가 없다.
 
-# 2. Neon 에서 찾아본다
+```powershell
 cd backend
-$env:DATABASE_URL="<Neon 직접 주소>"
-python -c "import django,os;os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings.dev');django.setup();from django.contrib.auth import get_user_model as g;print(list(g().objects.values_list('email',flat=True)))"
+$env:DATABASE_URL="<Neon direct 주소>"
+python scripts/check_same_db.py
 ```
 
-프로브 계정이 Neon 목록에 있으면 서버가 Neon 을 쓰는 것이고, 없으면 다른
-DB 를 쓰는 것이다.
+| 종료 코드 | 뜻 |
+| --- | --- |
+| `0` | 같은 DB. 확인용 계정은 스크립트가 지운다 |
+| `2` | **다른 DB.** Render 의 `DATABASE_URL` 을 고쳐야 한다 |
+| `1` | 확인 실패(서버 무응답, `DATABASE_URL` 이 비어 SQLite 등) |
 
 ---
 
@@ -409,7 +413,8 @@ DB 를 쓰는 것이다.
 
 | 스크립트 | 대상 | 용도 |
 | --- | --- | --- |
-| `check_deployed.py` | **배포 서버** | 전 기능 51개 항목. HTTP 만 쓰므로 Django 설정이 필요 없다 |
+| `check_deployed.py` | **배포 서버** | 전 기능 51개 항목. HTTP 만 쓰므로 Django 설정이 필요 없다. **어느 DB 에 붙었는지는 보지 않는다** |
+| `check_same_db.py` | 배포 서버 + 내 DB | 둘이 같은 DB 인지. API 로 쓰고 DB 에서 직접 읽어 대조 |
 | `check_route_api.py` | 로컬 서버 | 경로 후보·선택 33개 항목 |
 | `check_origin_api.py` | 로컬 서버 | 출발지 선택 17개 항목 |
 | `check_events_api.py` | 로컬 서버 | 일정 CRUD |
