@@ -36,8 +36,14 @@ services:
       # Render 자체 Postgres 를 쓰지 않는다. 무료 플랜이 생성 30일 후 만료돼
       # 학기 중에 데이터가 사라진다. Neon 무료 티어는 만료가 없다.
       #
-      # 마이그레이션은 컨테이너 시작 시 자동으로 도니까 pooler 주소를 넣어도
-      # 된다. 손으로 DDL 을 돌릴 때만 `-pooler` 를 뺀 직접 주소를 쓴다.
+      # **`-pooler` 없는 direct 주소를 넣는다.** 이 컨테이너는 시작할 때
+      # migrate 를 돌린 뒤 gunicorn 을 띄우므로(backend/Dockerfile) 이 값
+      # 하나가 마이그레이션과 앱 런타임을 겸한다. pooler(PgBouncer 트랜잭션
+      # 모드)는 PREPARE 같은 세션 기능이 없어 마이그레이션이 깨질 수 있다.
+      #
+      # pooler 는 연결 고갈을 푸는 도구인데 우리는 그 문제가 없다 - 워커 2개에
+      # conn_max_age=600 이라 동시 연결이 2개 수준이고, Neon direct 한도는
+      # 0.25 CU 에서 약 104개다.
       - key: DATABASE_URL
         sync: false
 

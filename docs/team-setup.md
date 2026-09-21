@@ -162,6 +162,18 @@ devServerHost=192.168.0.12
    >
    > 어느 DB 에 붙었는지 확인하는 방법은 5절에 있다.
 
+   **`-pooler` 없는 direct 주소를 넣는다.** Neon 은 두 엔드포인트를 준다.
+
+   | | 용도 | 제약 |
+   | --- | --- | --- |
+   | `ep-xxx.` (direct) | **이걸 쓴다** | 연결 한도 약 104개(0.25 CU) |
+   | `ep-xxx-pooler.` | 연결이 수백 개로 늘면 | `PREPARE` 등 세션 기능 없음 → 마이그레이션이 깨질 수 있다 |
+
+   이 컨테이너는 시작할 때 `migrate` 를 돌린 뒤 `gunicorn` 을 띄우므로
+   (`backend/Dockerfile`) `DATABASE_URL` 하나가 둘을 겸한다. 그러면 위험한
+   쪽(마이그레이션)에 맞춰야 한다. pooler 는 연결 고갈을 푸는 도구인데 우리는
+   그 문제가 없다 — 워커 2개에 `conn_max_age=600` 이라 동시 연결이 2개 수준이다.
+
 4. 배포가 끝나면 주소가 나온다: `https://justintime-api.onrender.com`
 5. 확인
 
@@ -217,7 +229,7 @@ python scripts/db_counts.py
 # 1. 로컬 SQLite 덤프 (DATABASE_URL 이 비어 있어야 한다)
 python scripts/migrate_sqlite_to_postgres.py dump
 
-# 2. 공용 DB 로 적재 (직접 엔드포인트 - 호스트에서 -pooler 를 뺀 주소)
+# 2. 공용 DB 로 적재 (direct 주소 - 호스트에 -pooler 가 없는 쪽)
 $env:DATABASE_URL="postgresql://...ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
 python scripts/migrate_sqlite_to_postgres.py load
 

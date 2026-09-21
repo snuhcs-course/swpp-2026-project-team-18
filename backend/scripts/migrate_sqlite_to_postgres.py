@@ -10,6 +10,9 @@
     set DATABASE_URL=postgres://...        (PowerShell: $env:DATABASE_URL="...")
     python scripts/migrate_sqlite_to_postgres.py load
 
+Neon 을 쓸 때는 **`-pooler` 없는 direct 주소**를 넘긴다. pooler(PgBouncer
+트랜잭션 모드)는 `PREPARE` 같은 세션 기능이 없어 스키마 변경이 깨질 수 있다.
+
 왜 `dumpdata | loaddata` 인가. `dbshell` 로 SQL 을 옮기면 시퀀스·불리언 표현이
 DB 마다 달라 깨진다. Django 직렬화를 거치면 모델 계층에서 값이 검증된다.
 
