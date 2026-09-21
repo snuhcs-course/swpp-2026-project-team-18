@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -402,10 +403,6 @@ private fun EventPanel(event: UpcomingEvent, onClick: () -> Unit) {
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                 )
-                if (event.tag != null) {
-                    Spacer(Modifier.width(7.dp))
-                    JitChip(event.tag, JitColor.Accent)
-                }
             }
             Spacer(Modifier.height(4.dp))
             Text(
@@ -417,10 +414,16 @@ private fun EventPanel(event: UpcomingEvent, onClick: () -> Unit) {
 
         Spacer(Modifier.width(12.dp))
 
+        // 태그는 제목 옆이 아니라 이 열의 맨 위에 둔다. 제목 옆에 두면 긴 제목이
+        // 폭을 먹어 칩이 눌리고 글자가 세로로 접혔다. 여기서는 제목 길이와 무관하다.
         Column(
-            modifier = Modifier.width(64.dp),
+            modifier = Modifier.widthIn(min = 64.dp),
             horizontalAlignment = Alignment.End,
         ) {
+            if (event.tag != null) {
+                JitChip(event.tag, JitColor.Accent)
+                Spacer(Modifier.height(4.dp))
+            }
             Text(
                 text = event.alarmAt?.let { "알람 $it" } ?: "알람 —",
                 color = if (event.hasAlarm) JitColor.Accent else JitColor.TextSecondary,

@@ -99,11 +99,15 @@ fun JitChip(
             .background(container)
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
+        // 알약형이 전제다. 폭이 좁은 칸에 들어가도 글자가 세로로 접히면 안 된다.
+        // (좁은 Row 안에서 "수업" 이 "수"/"업" 으로 쌓이던 버그)
         Text(
             text = label,
             color = contentColor,
             fontSize = fontSize.sp,
             fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
