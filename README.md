@@ -1,5 +1,7 @@
 # JustInTime
 
+[![CI](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/workflows/ci.yml/badge.svg)](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/workflows/ci.yml)
+
 **An alarm you set by arrival confidence, not by clock time.**
 
 A normal alarm makes you pick "7:40". But what you actually want to decide is not a
@@ -23,8 +25,9 @@ buffer`, and **shows you the reasoning behind the number**.
 | ✅ | **Route selection** — pick from the candidates Kakao returns, e.g. 23 min with one transfer vs. 27 min with none | Done |
 | ✅ | **Visible reasoning** — prep / travel / buffer broken out, with each value labeled as measured or fixed | Done |
 | ✅ | **Per-category safety margin (τ)** — exams, presentations and trains wake you earlier | Done |
-| 🚧 | **On-time probability** — computed from a distribution once observations exist. Currently shown as "learning" | Planned |
-| 🚧 | **Exact alarm delivery** — full-screen intent over the lock screen, Doze handling | Planned |
+| ✅ | **Learning from your mornings** — one tap per prep block records how long it took and how much slack you had; the server shifts the distribution | Done |
+| 🚧 | **On-time probability** — the pipeline is complete end to end, but it stays blank until enough observations exist. The UI says why instead of guessing | Learning |
+| ✅ | **Exact alarm delivery** — `setAlarmClock` (survives Doze, shows the system next-alarm icon), full-screen intent over the lock screen, re-registration after reboot, app update and clock changes | Done |
 | 🚧 | **Replanning** — alternatives when you're already running late | Planned |
 | 🚧 | **Group rooms** — see everyone's expected arrival together | Planned |
 
@@ -47,8 +50,9 @@ observations accumulate, the value is computed from quantiles.
 | App | Native Android · Kotlin · **Jetpack Compose** · Material3 |
 | State | `ViewModel` + `StateFlow` + Coroutines |
 | Networking | Retrofit + Gson + OkHttp |
+| On-device storage | Room (offline cache of server responses) + WorkManager (background sync) |
 | Server | **Django + Django REST Framework** |
-| Database | SQLite (swappable to Postgres) |
+| Database | Postgres in deployment (Neon) · SQLite locally, switched by `DATABASE_URL` |
 | Auth | SimpleJWT (email + password) |
 | External APIs | Kakao Map (routing, place search), OpenAI, KMA weather, FCM |
 | Design | Figma |
@@ -151,29 +155,65 @@ cannot be computed; the banner on the home screen takes you straight to the sett
 ```
 ├── APP/                        Android (Kotlin + Compose)
 │   └── app/src/main/java/com/swpp/wakeup/
-│       ├── data/               API clients, local storage, repositories
+│       ├── alarm/              AlarmManager scheduling, full-screen alarm, boot re-register
+│       ├── background/         WorkManager — observation upload, plan sync
+│       ├── calendar/           device calendar reader (CalendarContract)
+│       ├── data/               remote (Retrofit) · local (Room cache, prefs) · repositories
 │       ├── domain/model/       view-facing models
-│       └── ui/                 auth · home · events · alarm · common · nav · theme
+│       ├── sensing/            departure / arrival detection, upload queues
+│       └── ui/                 auth · onboarding · home · events · routines · alarm
+│                               · morning · report · calendar · common · nav · theme
 ├── backend/                    Django + DRF
 │   ├── apps/
 │   │   ├── accounts/           User · Profile
-│   │   ├── events/             Place · EventTag · Event
-│   │   ├── planning/           AlarmPlan (alarm calculation)
+│   │   ├── events/             Place · EventTag · Event · calendar import
+│   │   ├── routines/           RoutineBlock, per-event checks, block observations
+│   │   ├── planning/           AlarmPlan, distributions, estimators
+│   │   ├── prediction/         parameter learning from observations
 │   │   ├── observations/       TripObservation (real departure / arrival times)
+│   │   ├── reports/            weekly report, probability calibration
 │   │   ├── routing/            Kakao clients
 │   │   └── common/             shared error format
-│   └── scripts/                API verification scripts
+│   └── scripts/                API verification scripts (see run_local_suite.py)
+├── .github/workflows/ci.yml    backend tests · contract checks · app build
 └── docs/                       guides and images referenced from this README
 ```
 
 `docs/` holds what you need to run the project:
 
+- **[Team setup](docs/team-setup.md)** — shared server and database, verification
+  scripts, CI, and how to tell whether the deployed code is stale
 - **[Running on a physical device](docs/device-setup.md)** — network setup, pairing,
   permissions, and how to test a commute when the dev server stays at home
 - `screens-overview.png` — the Figma board capture used above
 
 Design documents (specifications, checklists, proposal drafts) are kept out of the
 repository on purpose and shared through the course **Wiki**.
+
+---
+
+## Verification
+
+Three suites, all runnable locally. CI runs the same three on every push and pull
+request ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
+```bash
+cd backend && python -m pytest                       # 432 unit tests
+cd backend && python scripts/run_local_suite.py      # 8 HTTP suites against a live server
+cd APP     && ./gradlew testDebugUnitTest assembleDebug   # 117 unit tests + debug build
+```
+
+The middle one is the unusual part. `scripts/check_*.py` drive a **running** Django
+server over HTTP, which catches what the Django test client does not: a URL that was
+never wired up, a serializer field the app reads under a different name, a permission
+class that was left off. `run_local_suite.py` starts the server, pins the database to
+a local SQLite file, refuses to run if port 8000 is already taken — a stale server
+answering health checks made an entire suite pass against old code once — and shuts
+the server down afterwards.
+
+No secrets are needed. Without `KAKAO_REST_API_KEY` the checks that require route
+lookups are **skipped rather than failed**, so CI never burns the daily free quota
+that the team needs for development.
 
 ---
 

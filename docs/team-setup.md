@@ -422,11 +422,21 @@ python scripts/check_same_db.py
 
 `backend/scripts/` 에 있다. 전부 `python scripts/<이름>.py` 로 돈다.
 
+**먼저 이것부터.** 로컬 서버를 상대로 도는 8개를 한 번에 돌린다. 서버 기동, DB
+고정, 포트 확인을 알아서 하므로 손으로 창을 두 개 열 필요가 없다.
+
+```bash
+cd backend
+python scripts/run_local_suite.py                          # 8개 전부
+python scripts/run_local_suite.py --only check_events_api.py   # 하나만
+```
+
 | 스크립트 | 대상 | 용도 |
 | --- | --- | --- |
+| `run_local_suite.py` | 로컬 서버 | **아래 8개를 한 번에.** 서버를 띄우고 끝나면 내린다. CI 도 이것을 부른다 |
 | `check_deployed.py` | **배포 서버** | 전 기능. HTTP 만 쓰므로 Django 설정이 필요 없다. **어느 DB 에 붙었는지는 보지 않는다** |
 | `check_same_db.py` | 배포 서버 + 내 DB | 둘이 같은 DB 인지. API 로 쓰고 DB 에서 직접 읽어 대조 |
-| `check_app_contract.py` | 로컬 서버 + **앱 소스** | 앱 DTO 필드 이름이 서버 응답과 맞는지 83개 항목. 아래 설명 참고 |
+| `check_app_contract.py` | 로컬 서버 + **앱 소스** | 앱 DTO 필드 이름이 서버 응답과 맞는지 95개 항목. 아래 설명 참고 |
 | `check_route_api.py` | 로컬 서버 | 경로 후보·선택 33개 항목 |
 | `check_origin_api.py` | 로컬 서버 | 출발지 선택 17개 항목 |
 | `check_routines_api.py` | 로컬 서버 | 루틴 블록 CRUD·일정별 체크·블록 관측 45개 항목 |
@@ -456,18 +466,36 @@ python scripts/check_same_db.py
 뽑고, 실제 서버 응답에 그 이름이 전부 있는지 본다. 반대 방향(서버가 주는데 앱이
 읽지 않는 필드)도 경고로 알린다.
 
-```powershell
+```bash
 cd backend
-$env:DATABASE_URL="sqlite:///db.sqlite3"
-python manage.py runserver 127.0.0.1:8000 --noreload   # 다른 창에서
-python scripts/check_app_contract.py
+python scripts/run_local_suite.py --only check_app_contract.py
 ```
+
+#### 같은 함정의 다른 얼굴 — Gson 은 Kotlin 기본값도 모른다
+
+이름이 어긋난 필드를 버리는 것과 **같은 원인**으로 생기는 사고가 하나 더 있다.
+Gson 은 생성자를 건너뛰고 필드를 리플렉션으로 채우기 때문에, JSON 에 키가 없으면
+그 필드는 **선언이 non-null 이어도 null 로 남는다.** Kotlin 의 기본값은 적용되지
+않고, 컴파일러는 경고도 하지 않는다.
+
+디스크에 저장한 JSON 에서 이게 터진다. 구버전 앱이 저장한 알람 사본에는 뒤에
+추가한 `prepBlocks` 키가 없어서, 업그레이드 직후 `canLogBlocks` 가 그 null 을
+읽고 죽었다 — **알람을 해제하는 순간**, 사용자가 앱을 가장 필요로 하는 시점이다.
+
+그래서 되살리는 모든 경로가 `data/local/DiskCompat.kt` 의 `withDiskDefaults()` 를
+지난다. `AlarmSchedule` 이나 `MorningSession` 에 non-null 참조 필드를 추가하면
+거기도 고쳐야 하는데, 잊어도 `DiskCompatTest` 가 잡는다 — 필드 이름을
+하드코딩하지 않고 "정상 인스턴스에는 있는데 되살린 인스턴스에는 없는 키" 를
+찾기 때문이다.
 
 ### 포트가 이미 잡혀 있으면 멈출 것
 
 로컬 검증에서 가장 위험한 실수다. 남아 있던 서버가 8000 을 잡고 있으면 새로
 띄운 서버는 바인드에 실패하는데, 헬스체크는 **옛 서버의 200** 을 보고 기동
 성공으로 읽는다. 그 뒤 모든 검증이 구버전 코드를 상대로 돌면서 통과한다.
+
+`run_local_suite.py` 는 이걸 확인하고 **조용히 재사용하지 않고 멈춘다.** 직접
+서버를 띄워 돌릴 때는 아래로 확인할 것.
 
 ```powershell
 Get-NetTCPConnection -LocalPort 8000 -State Listen | Select-Object OwningProcess
@@ -492,8 +520,6 @@ python scripts/purge_test_accounts.py --yes  # 실제로 지운다
 기본이 dry-run 이다. 계정을 지우면 딸린 일정·알람계획·관측도 cascade 로
 사라지므로, 지울 목록과 남는 목록을 먼저 출력한다. **실행 전에 남는 목록에
 실제 계정이 다 있는지 눈으로 확인할 것.**
-
----
 
 ---
 
@@ -611,15 +637,45 @@ confidence_basis = models.CharField(max_length=32, blank=True, default="", db_de
 | 배경 동기화 | WorkManager — 관측 업로드(연결되는 순간), 계획 동기화(6시간) |
 | 캘린더 | 목록을 보여주고 **고른 것만** 보낸다. 장소는 찾아 주되 확정하지 않는다 |
 | 리포트 | 약속한 확률과 실제 정시율을 나란히. 표본 부족이면 판정하지 않는다 |
+| 아침 기록 | 알람 해제 시점에 세션이 시작된다. 블록당 탭 한 번(종료)으로 소요와 **그 블록 시작 시점의 슬랙**을 기록해 올린다. 이것이 준비 시간 학습의 유일한 재료다 |
 
 ### 검증 규모
 
 ```
 백엔드 pytest              432
-앱 단위 테스트              89
-로컬 HTTP 검증 스크립트     8개 전부 통과 (필드 계약 83항목 포함)
+앱 단위 테스트             117
+로컬 HTTP 검증 스크립트     8개 전부 통과 (항목 합계 약 257, 필드 계약 95항목 포함)
 빌드                       assembleDebug / assembleRelease 성공
+CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR 마다 돌린다
 ```
+
+세 가지를 손으로 돌리는 방법이다. CI 가 돌리는 것과 같다.
+
+```bash
+cd backend && python -m pytest                       # 432
+cd backend && python scripts/run_local_suite.py      # 8개 스크립트, 서버 기동까지 알아서 한다
+cd APP && ./gradlew testDebugUnitTest assembleDebug  # 117
+```
+
+### CI
+
+`.github/workflows/ci.yml` 에 잡 셋이 있다. 나눈 이유는 실패 원인을 제목에서
+바로 읽기 위한 것이다 — 하나로 합치면 "CI 실패" 만 보이고 로그를 열어야 어디가
+깨졌는지 알 수 있다.
+
+| 잡 | 하는 일 |
+| --- | --- |
+| `백엔드 pytest` | `config.settings.test` 로 432건. 메모리 SQLite 고정이라 환경변수를 하나도 주지 않는다 |
+| `앱-서버 계약 검사` | 서버를 실제로 띄우고 `check_*.py` 8개. pytest 가 못 잡는 라우팅 누락·직렬화 모양을 잡는다 |
+| `앱 단위 테스트 · 디버그 빌드` | JDK 25(데몬) + 21(툴체인), SDK `platforms;android-37.0` |
+
+**시크릿을 쓰지 않는다.** `KAKAO_REST_API_KEY` 를 넣지 않았다 — 무료 쿼터가
+계정당 하루 단위라 CI 가 그것을 태우면 사람이 개발을 못 한다. 키가 없으면 경로
+계산이 필요한 항목은 스크립트가 **건너뛴다**(실패가 아니다). 실제로 `.env` 를
+치우고 돌려 확인했다: 통과 85 · 실패 0 · 건너뜀 2.
+
+CI 는 `.env` 와 `local.properties` 가 **없는** 상태로 돈다. 그래서 커밋되지 않은
+파일에 기대는 코드가 섞여 들어오면 여기서 드러난다.
 
 ### 아직 없는 것
 
