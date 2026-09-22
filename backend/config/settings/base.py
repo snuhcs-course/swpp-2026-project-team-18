@@ -93,6 +93,21 @@ DATABASES = {
     "default": dj_database_url.parse(
         _DATABASE_URL or f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
         conn_max_age=600,
+        # **죽은 연결을 재사용하지 않게 한다. 이게 없으면 산발적으로 500 이 난다.**
+        #
+        # conn_max_age=600 은 연결을 10분간 재사용한다. 그런데 Neon 무료 티어는
+        # 유휴 시 컴퓨트를 중단하고(scale to zero), 그러면 Django 가 들고 있던
+        # 연결이 죽는다. 다음 요청이 그 죽은 연결로 쿼리를 던져 OperationalError
+        # 로 500 이 되고, Django 가 연결을 버린 뒤 **그 다음** 요청은 성공한다.
+        #
+        # 그래서 증상이 "가끔 500, 새로고침하면 정상" 이다. 원인을 짐작하기
+        # 어렵고 /api/health 는 DB 를 쓰지 않아 200 이라 더 헷갈린다. 실제로
+        # 로그인·가입이 간헐적으로 500 이 나 배포 코드를 의심했다.
+        #
+        # CONN_HEALTH_CHECKS 는 재사용 직전에 연결이 살아 있는지 확인하고
+        # 죽었으면 조용히 다시 연결한다(Django 4.1+). 비용은 요청당 가벼운
+        # 핑 한 번이고, 그 대가로 사용자가 보는 500 이 사라진다.
+        conn_health_checks=True,
     )
 }
 
