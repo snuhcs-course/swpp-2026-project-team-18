@@ -402,8 +402,148 @@ def main() -> int:
     else:
         skip("관측", "일정 생성 실패")
 
-    # --- 11. 남의 데이터 격리 ---------------------------------------------
-    print("\n[11] 격리")
+    # --- 11. 루틴 블록 (0.3.0) --------------------------------------------
+    #
+    # 여기서부터는 **0.3.0 에서 새로 배포된 것들**이다. 몇 주 동안 404 였던
+    # 엔드포인트라서 "존재한다" 와 "동작한다" 를 구분해 확인할 가치가 있다.
+    # 401 만 보고 배포됐다고 판단하면, 라우팅은 붙었는데 직렬화나 권한이 깨진
+    # 경우를 놓친다.
+    print("\n[11] 루틴 블록")
+    st, blocks = api("/api/routines/blocks")
+    check("블록 목록 200", st == 200, f"status={st} body={str(blocks)[:200]}")
+    check("페이지네이션 없이 배열", isinstance(blocks, list), f"type={type(blocks).__name__}")
+
+    st, shower = api(
+        "/api/routines/blocks",
+        "POST",
+        {"name": "샤워", "default_min_minutes": 12, "default_max_minutes": 18, "order": 1},
+    )
+    check("블록 생성 201", st == 201, f"status={st} body={str(shower)[:200]}")
+    shower_id = (shower or {}).get("id")
+
+    st, body = api(
+        "/api/routines/blocks",
+        "POST",
+        {"name": "뒤집힘", "default_min_minutes": 20, "default_max_minutes": 10},
+    )
+    check("뒤집힌 범위 400 (500 아님)", st == 400, f"status={st}")
+
+    if shower_id and event_id:
+        st, body = api(f"/api/events/{event_id}/blocks")
+        rows = (body or {}).get("blocks") or []
+        check("일정별 블록 200", st == 200, f"status={st}")
+        check("생성한 블록이 보인다", len(rows) >= 1, f"n={len(rows)}")
+
+        st, body = api(
+            f"/api/events/{event_id}/blocks",
+            "PUT",
+            {"selections": [{"block": shower_id, "checked": False}]},
+        )
+        check("일정별 체크 변경 200", st == 200, f"status={st} body={str(body)[:200]}")
+    else:
+        skip("일정별 블록", "블록 또는 일정 생성 실패")
+
+    # --- 12. 블록 관측 (0.3.0) --------------------------------------------
+    #
+    # 준비 시간 학습의 **유일한 재료**다. 이것이 안 돌면 confidence_basis 가
+    # 영원히 declared_range 에 머문다.
+    print("\n[12] 블록 관측")
+    if shower_id and event_id:
+        uid = f"depchk-blk-{uuid.uuid4().hex[:12]}"
+        batch = {
+            "observations": [
+                {
+                    "block": shower_id,
+                    "event": event_id,
+                    "observed_on": start_at.date().isoformat(),
+                    "duration_minutes": 21.0,
+                    "slack_minutes": 4.0,
+                    "was_parallel": False,
+                    "client_uuid": uid,
+                    "client_recorded_at": start_at.isoformat(),
+                }
+            ]
+        }
+        st, body = api("/api/routines/observations/batch", "POST", batch)
+        check("블록 관측 201", st == 201, f"status={st} body={str(body)[:300]}")
+        check("1건 적재", (body or {}).get("accepted") == 1, f"{body}")
+
+        # 오프라인 큐가 재전송한다. 같은 client_uuid 는 중복으로 세야 한다.
+        st, body = api("/api/routines/observations/batch", "POST", batch)
+        check("재전송은 중복 처리(멱등)", (body or {}).get("duplicated") == 1, f"status={st} {body}")
+
+        st, blocks = api("/api/routines/blocks")
+        row = next((b for b in blocks if b.get("id") == shower_id), {})
+        check("관측 수가 블록 응답에 실린다", row.get("observation_count") == 1, f"{row}")
+    else:
+        skip("블록 관측", "블록 또는 일정 생성 실패")
+
+    # --- 13. 캘린더 가져오기 (0.3.0) --------------------------------------
+    print("\n[13] 캘린더 가져오기")
+    cal_start = (datetime.now(KST) + timedelta(days=4)).replace(
+        hour=10, minute=30, second=0, microsecond=0
+    )
+    external_id = f"depchk-cal-{uuid.uuid4().hex[:8]}"
+    import_payload = {
+        "events": [
+            {
+                "external_id": external_id,
+                "title": "가져온 수업",
+                "start_at": cal_start.isoformat(),
+                "place": DEST,
+            }
+        ]
+    }
+    st, body = api("/api/events/import", "POST", import_payload)
+    check("가져오기 200", st == 200, f"status={st} body={str(body)[:300]}")
+    if st == 200:
+        check("created=1", (body or {}).get("created") == 1, f"{body}")
+        first = ((body or {}).get("results") or [{}])[0]
+        check(
+            "external_id 가 응답에 실린다",
+            first.get("external_id") == external_id,
+            f"{first.get('external_id')}",
+        )
+
+        # **같은 것을 다시 보내면 행이 늘지 않아야 한다.** 늘면 동기화마다
+        # 사본이 쌓이고, 재계산이 돌아 카카오 쿼터를 태운다.
+        st, again = api("/api/events/import", "POST", import_payload)
+        check("재전송 200", st == 200, f"status={st}")
+        check(
+            "재전송에 created=0 (upsert)",
+            (again or {}).get("created") == 0,
+            f"created={(again or {}).get('created')} updated={(again or {}).get('updated')}",
+        )
+
+    st, _ = api("/api/events/import", "POST", {"events": []})
+    check("빈 배치 400", st == 400, f"status={st}")
+
+    # --- 14. 리포트 (0.3.0) -----------------------------------------------
+    print("\n[14] 리포트")
+    st, weekly = api("/api/reports/weekly")
+    check("주간 리포트 200", st == 200, f"status={st} body={str(weekly)[:300]}")
+    if st == 200:
+        for field in ("week_start", "on_time_rate", "by_weekday", "late_causes"):
+            check(f"주간 리포트에 {field}", field in (weekly or {}), f"{sorted(weekly or {})}")
+
+    st, calib = api("/api/reports/calibration")
+    check("캘리브레이션 200", st == 200, f"status={st} body={str(calib)[:300]}")
+    if st == 200:
+        check("buckets 가 있다", "buckets" in (calib or {}), f"{sorted(calib or {})}")
+        # 표본이 없으면 판정하지 않아야 한다. 한 건으로 "과신" 이라고 말하면
+        # 사용자가 여유 설정을 잘못 바꾼다.
+        check(
+            "표본이 없으면 판정을 미룬다",
+            (calib or {}).get("verdict") in (None, "", "insufficient")
+            or (calib or {}).get("scored", 0) > 0,
+            f"verdict={(calib or {}).get('verdict')} scored={(calib or {}).get('scored')}",
+        )
+
+    st, _ = api("/api/reports/weekly", auth=False)
+    check("리포트도 토큰 없이 401", st == 401, f"status={st}")
+
+    # --- 15. 남의 데이터 격리 ---------------------------------------------
+    print("\n[15] 격리")
     other = f"depcheck_{uuid.uuid4().hex[:8]}@example.com"
     st, body = api(
         "/api/auth/register",
@@ -428,6 +568,20 @@ def main() -> int:
         if event_id:
             st, _ = other_api(f"/api/events/{event_id}")
             check("남의 일정 직접 조회 404", st == 404, f"status={st}")
+
+        # 0.3.0 신규 자원도 같은 격리를 받아야 한다. 라우팅만 붙이고 권한
+        # 클래스를 빠뜨리면 목록 전체가 새어 나간다.
+        st, body = other_api("/api/routines/blocks")
+        check(
+            "남의 루틴 블록은 안 보인다",
+            st == 200 and body == [],
+            f"status={st} {str(body)[:200]}",
+        )
+        if shower_id:
+            st, _ = other_api(f"/api/routines/blocks/{shower_id}")
+            check("남의 블록 직접 조회 404", st == 404, f"status={st}")
+            st, _ = other_api(f"/api/routines/blocks/{shower_id}", "DELETE")
+            check("남의 블록 삭제 404", st == 404, f"status={st}")
     else:
         skip("격리 확인", "두 번째 계정 생성 실패")
 

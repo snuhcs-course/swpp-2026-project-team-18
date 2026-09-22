@@ -69,12 +69,19 @@ curl https://justintime-api.onrender.com/api/health
 **version 이 0.3.0 미만이면 배포가 뒤처진 것이다.** 200 이 온다고 새 코드라는
 뜻이 아니다 — 판별 방법은 8절에 있다.
 
-전 기능 확인 (계정 생성 → 경로 → 알람 → 관측까지):
+전 기능 확인 (계정 → 경로 → 알람 → 관측 → 루틴 블록 → 캘린더 → 리포트):
 
 ```bash
 cd backend
-python scripts/check_deployed.py
+python scripts/check_deployed.py     # 82개 항목
 ```
+
+**현재 상태 (0.3.0 배포 확인 완료):** 통과 82 · 실패 0. 카카오 경로까지 살아
+있어서 알람이 실제로 계산된다.
+
+> 이 스크립트는 `depcheck_` 계정 두 개를 **Neon 에** 만든다. 사용자 삭제 API 가
+> 없으므로 끝나고 치울 것. `python scripts/purge_test_accounts.py` (기본 dry-run,
+> 목록을 확인한 뒤 `--yes`)
 
 ### 전환 완료 기록 — 서버가 Neon 을 본다
 
@@ -653,11 +660,33 @@ curl.exe -s -o NUL -w "%{http_code} reports/weekly`n"  "$base/api/reports/weekly
 3. **Events 탭에 실패한 배포**가 있는가 (빌드 오류·메모리 초과)
 4. Manual Deploy > **Deploy latest commit** 으로 즉시 띄울 수 있다
 
+### 401 은 "존재한다" 일 뿐이다
+
+위 방법은 라우팅이 붙었는지만 본다. **라우팅은 붙었는데 직렬화나 권한이 깨진
+경우를 놓친다.** 그래서 배포 뒤에는 기능까지 돌려 본다.
+
+```bash
+python scripts/check_deployed.py     # 82개 항목
+```
+
+0.3.0 기능(루틴 블록, 블록 관측, 캘린더 가져오기, 리포트)은 [11]~[15] 구간에서
+확인한다. 몇 주 동안 404 였던 엔드포인트라서 존재 여부와 동작을 나눠 본다.
+
 ### 마이그레이션과 코드가 어긋나면 500 이 난다
 
 한 번 겪은 조합이다. Neon 에 마이그레이션은 적용됐는데 컨테이너는 구버전이었다.
 새로 추가한 NOT NULL 컬럼을 구버전 코드가 INSERT 에 넣지 않아 **쓰기만** 500 이
 됐다. 읽기와 `/api/health` 는 정상이어서 겉으로는 멀쩡해 보였다.
+
+**이 상황은 배포가 두 단계인 한 반드시 생긴다** — 마이그레이션은 DB 에 즉시
+적용되고 코드는 컨테이너가 교체될 때 바뀐다. 그 사이가 항상 존재한다. 개발도
+Neon 을 보므로 로컬 `migrate` 한 번으로 그 상태가 만들어진다.
+
+그래서 검사를 스크립트로 만들었다. 새 컬럼을 추가하면 돌릴 것.
+
+```bash
+python scripts/check_db_defaults.py   # 검사 10건 · 위험 0건
+```
 
 그래서 새 컬럼에는 `db_default` 를 반드시 준다(Django 5.0+). Django 의 `default`
 는 파이썬 쪽 기본값이라 `AddField` 가 기존 행을 채운 뒤 **DB 기본값을 남기지
@@ -722,6 +751,8 @@ ServerWarmup  E  서버가 구버전입니다 (서버 0.1.0 · 앱 0.3.0). 새 �
 백엔드 pytest              432
 앱 단위 테스트             143
 로컬 HTTP 검증 스크립트     8개 전부 통과 (항목 합계 약 257, 필드 계약 95항목 포함)
+배포 서버 전 기능           82건 통과 · 실패 0 (check_deployed.py)
+DB 기본값 검사              10건 · 위험 0 (check_db_defaults.py)
 빌드                       assembleDebug / assembleRelease 성공
 CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR 마다 돌린다
 ```
