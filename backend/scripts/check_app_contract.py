@@ -630,6 +630,90 @@ def main() -> int:
     st, _ = api("/api/events/import", "POST", payload, auth=False)
     check("토큰 없이 401", st == 401, f"status={st}")
 
+    # --- 6.7 주간 리포트 --------------------------------------------------
+    print("\n[6.7] 주간 리포트 — WeeklyReportDto / CalibrationDto")
+    reports_api = APP_SRC / "data" / "remote" / "ReportsApi.kt"
+    if not reports_api.exists():
+        raise SystemExit(f"앱 소스를 찾지 못했다: {reports_api}")
+
+    weekly_fields = dto_wire_names(reports_api, "WeeklyReportDto")
+    calib_fields = dto_wire_names(reports_api, "CalibrationDto")
+    bucket_fields = dto_wire_names(reports_api, "CalibrationBucketDto")
+    cause_fields = dto_wire_names(reports_api, "LateCauseDto")
+    weekday_fields = dto_wire_names(reports_api, "WeekdayRowDto")
+
+    check("WeeklyReportDto 파싱", len(weekly_fields) >= 12, f"{weekly_fields}")
+    check("CalibrationDto 파싱", len(calib_fields) >= 7, f"{calib_fields}")
+
+    # 이 화면의 값어치는 "앱이 과신하는지" 를 보여주는 데 있다. 판정과 표본
+    # 부족 표시가 빠지면 화면이 앱을 변호하는 쪽으로 기운다.
+    check(
+        "앱이 verdict 를 읽는다",
+        "verdict" in calib_fields,
+        f"{calib_fields} — 없으면 과신 판정을 보여줄 수 없다",
+    )
+    check(
+        "앱이 버킷의 reliable 을 읽는다",
+        "reliable" in bucket_fields,
+        f"{bucket_fields} — 없으면 표본 1건을 계통 오차로 보고한다",
+    )
+    check(
+        "앱이 unobserved_count 를 읽는다",
+        "unobserved_count" in weekly_fields,
+        f"{weekly_fields} — 없으면 정시율이 실제보다 좋아 보인다",
+    )
+    check(
+        "앱이 원인 label 을 읽는다",
+        "label" in cause_fields,
+        f"{cause_fields} — primary 만 읽으면 '측정 못 함' 과 '계획이 짧음' 이 섞인다",
+    )
+
+    st, weekly_body = api("/api/reports/weekly")
+    if check("주간 리포트 200", st == 200, f"status={st} body={str(weekly_body)[:200]}"):
+        compare("주간 리포트", weekly_fields, weekly_body)
+        calib = weekly_body.get("calibration") or {}
+        check("calibration 이 중첩돼 있다", bool(calib), f"{str(calib)[:160]}")
+        if calib:
+            compare("주간 캘리브레이션", calib_fields, calib)
+        rows = weekly_body.get("by_weekday") or []
+        check("요일 7칸", len(rows) == 7, f"n={len(rows)}")
+        if rows:
+            compare("요일 행", weekday_fields, rows[0])
+
+    st, calib_body = api("/api/reports/calibration")
+    if check("캘리브레이션 200", st == 200, f"status={st}"):
+        compare("전체 캘리브레이션", calib_fields, calib_body)
+        app_verdicts = {"calibrated", "overconfident", "conservative", "insufficient"}
+        check(
+            "verdict 가 앱이 아는 4종 중 하나",
+            calib_body.get("verdict") in app_verdicts,
+            f"verdict={calib_body.get('verdict')} 앱이 아는 값={sorted(app_verdicts)}",
+        )
+        check(
+            "표본이 없으면 판정하지 않는다",
+            calib_body.get("scored_count") != 0
+            or calib_body.get("verdict") == "insufficient",
+            f"scored={calib_body.get('scored_count')} verdict={calib_body.get('verdict')}",
+        )
+        check(
+            "빈 버킷을 0 으로 내리지 않는다",
+            all(
+                b.get("actual_rate") is not None or b.get("total") == 0
+                for b in (calib_body.get("buckets") or [])
+            ),
+            f"buckets={str(calib_body.get('buckets'))[:160]}",
+        )
+
+    st, _ = api("/api/reports/weekly", auth=False)
+    check("리포트도 토큰 없이 401", st == 401, f"status={st}")
+
+    st, body = api("/api/reports/weekly?week=notadate")
+    check(
+        "잘못된 week 는 400 이 아니라 기본 주로 떨어진다",
+        st == 200 and bool(body.get("week_start")),
+        f"status={st} week_start={body.get('week_start')}",
+    )
+
     # --- 7. 오류 상세가 앱 칸으로 갈 수 있는가 ----------------------------
     print("\n[7] 오류 상세 — 입력칸 아래에 붙일 수 있어야 한다")
     st, err = api(

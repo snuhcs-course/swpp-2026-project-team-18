@@ -11,8 +11,11 @@ import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.repository.EventRepository
+import com.swpp.wakeup.data.repository.ReportRepository
 import com.swpp.wakeup.data.repository.RoutineRepository
 import com.swpp.wakeup.domain.model.AlarmPlanView
+import com.swpp.wakeup.domain.model.CalibrationView
+import com.swpp.wakeup.domain.model.WeeklyReportView
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.BlockDraft
 import com.swpp.wakeup.domain.model.CalendarImportState
@@ -58,6 +61,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = EventRepository(cache = cache)
     private val routines = RoutineRepository(cache = cache)
+
+    /**
+     * 리포트는 캐시하지 않는다.
+     *
+     * 지난 주를 되돌아보는 화면이라 아침에 급히 열지 않는다. 오프라인에서 열리지
+     * 않아도 손실이 작고, 대신 오래된 정시율을 지금 값처럼 보여주는 위험을
+     * 피한다 — 이 화면의 숫자가 사용자의 여유 설정을 바꾸므로 낡은 값이 더
+     * 위험하다.
+     */
+    private val reports = ReportRepository()
 
     /** 현재 위치 조회에 쓴다. [AndroidViewModel] 이라 누수 걱정이 없다. */
     private val appContext: android.content.Context = application.applicationContext
@@ -250,6 +263,65 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openHomeSetup() {
         _nav.update { it.copy(stack = it.stack + AppRoute.HomeSetup, forward = true) }
+    }
+
+    // --- 주간 리포트 ------------------------------------------------------
+
+    /**
+     * 리포트 화면 상태.
+     *
+     * [longTerm] 은 전체 기간(90일) 캘리브레이션이다. 주간 리포트 안에도 같은
+     * 구조가 있지만 한 주는 표본이 적어 대개 "표본 부족" 이 된다. 모델이
+     * 과신하는지는 긴 창으로 봐야 알 수 있어서 둘을 함께 받는다.
+     */
+    data class ReportState(
+        val loading: Boolean = true,
+        val error: String? = null,
+        val weekly: WeeklyReportView? = null,
+        val longTerm: CalibrationView? = null,
+        /** 보고 있는 주. null 이면 지난 주 */
+        val week: LocalDate? = null,
+    ) {
+        val hasData: Boolean get() = weekly != null
+    }
+
+    private val _report = MutableStateFlow(ReportState())
+    val report: StateFlow<ReportState> = _report.asStateFlow()
+
+    fun openReport() {
+        _nav.update { it.copy(stack = it.stack + AppRoute.WeeklyReport, forward = true) }
+        loadReport(_report.value.week)
+    }
+
+    fun loadReport(week: LocalDate? = null) {
+        _report.update { it.copy(loading = true, error = null, week = week) }
+        viewModelScope.launch {
+            when (val result = reports.weekly(week)) {
+                is ReportRepository.ReportResult.Success -> _report.update {
+                    it.copy(loading = false, error = null, weekly = result.data)
+                }
+
+                is ReportRepository.ReportResult.Failure -> _report.update {
+                    it.copy(loading = false, error = result.message)
+                }
+            }
+
+            // 긴 창 캘리브레이션은 실패해도 화면을 막지 않는다. 주간 리포트만
+            // 있어도 볼 것이 있다.
+            when (val long = reports.calibration()) {
+                is ReportRepository.ReportResult.Success ->
+                    _report.update { it.copy(longTerm = long.data) }
+
+                is ReportRepository.ReportResult.Failure ->
+                    Log.w(TAG, "전체 캘리브레이션 조회 실패: ${long.message}")
+            }
+        }
+    }
+
+    /** 한 주 앞뒤로 이동한다. 기준이 없으면 지난 주에서 출발한다. */
+    fun shiftReportWeek(weeks: Long) {
+        val base = _report.value.week ?: LocalDate.now().minusWeeks(1)
+        loadReport(base.plusWeeks(weeks))
     }
 
     // --- 캘린더 가져오기 --------------------------------------------------

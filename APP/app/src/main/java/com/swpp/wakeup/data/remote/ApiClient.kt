@@ -127,6 +127,8 @@ object ApiClient {
 
     val routines: RoutinesApi by lazy { retrofit.create(RoutinesApi::class.java) }
 
+    val reports: ReportsApi by lazy { retrofit.create(ReportsApi::class.java) }
+
     /** 초기화됐는지. 서비스·리시버는 Application 보다 먼저 깨어날 수 있다. */
     val isReady: Boolean get() = ::tokenStore.isInitialized
 

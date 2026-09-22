@@ -62,6 +62,7 @@ fun HomeScreen(
     onSetHomeClick: () -> Unit,
     onRoutineClick: () -> Unit,
     onCalendarClick: () -> Unit,
+    onReportClick: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -133,6 +134,44 @@ fun HomeScreen(
         item(key = "routine") { RoutineShortcut(onRoutineClick) }
 
         item(key = "calendar") { CalendarShortcut(onCalendarClick) }
+
+        item(key = "report") { ReportShortcut(onReportClick) }
+    }
+}
+
+/**
+ * 주간 리포트 입구.
+ *
+ * 설명에 "얼마나 맞았는지" 를 쓴다. 리포트를 "내 기록" 으로만 소개하면 사용자는
+ * 굳이 열지 않는다. 이 화면의 값어치는 **앱이 과신하는지 확인하는 것**이다.
+ */
+@Composable
+private fun ReportShortcut(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Button))
+            .background(JitColor.Surface)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(
+                text = "주간 리포트",
+                color = JitColor.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "앱이 말한 확률이 실제로 맞았는지 확인함",
+                color = JitColor.TextSecondary,
+                fontSize = 10.sp,
+            )
+        }
+        Text(text = "›", color = JitColor.TextSecondary, fontSize = 18.sp)
     }
 }
 
@@ -619,6 +658,7 @@ private fun HomeEmptyPreview() {
             onSetHomeClick = {},
             onRoutineClick = {},
             onCalendarClick = {},
+            onReportClick = {},
             onRetry = {},
         )
     }
@@ -657,6 +697,7 @@ private fun HomeFilledPreview() {
             onSetHomeClick = {},
             onRoutineClick = {},
             onCalendarClick = {},
+            onReportClick = {},
             onRetry = {},
         )
     }

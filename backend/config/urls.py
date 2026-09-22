@@ -26,4 +26,7 @@ urlpatterns = [
     # events/{id}/blocks 도 여기에 있다. 블록 개념의 소유자가 routines 이고,
     # events 가 routines 를 import 하면 의존 방향이 뒤집힌다.
     path("api/", include("apps.routines.urls")),
+    # back-spec.md 5.8 주간 리포트·캘리브레이션.
+    # 모델이 없다 — 요청 시점에 기존 관측에서 계산한다(apps/reports/services.py).
+    path("api/", include("apps.reports.urls")),
 ]

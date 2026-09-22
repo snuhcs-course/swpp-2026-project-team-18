@@ -59,6 +59,14 @@ sealed interface AppRoute {
      * 그건 민감할 수 있다. 자동 동기화를 두지 않은 이유다.
      */
     data object CalendarImport : AppRoute
+
+    /**
+     * Figma ⑨ 주간 리포트.
+     *
+     * **앱을 변호하는 화면이 아니다.** 앱이 말한 확률과 실제 정시율을 나란히
+     * 놓아 과신하고 있는지 사용자가 직접 보게 한다.
+     */
+    data object WeeklyReport : AppRoute
 }
 
 /**

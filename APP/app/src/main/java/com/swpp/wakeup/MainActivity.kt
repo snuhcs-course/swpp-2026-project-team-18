@@ -55,6 +55,7 @@ import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.ui.nav.AppRoute
+import com.swpp.wakeup.ui.report.WeeklyReportScreen
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
 import com.swpp.wakeup.ui.routines.RoutineEditorScreen
 import com.swpp.wakeup.ui.theme.JitColor
@@ -124,6 +125,7 @@ private fun MainHost(
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
     val routineState by viewModel.routine.collectAsStateWithLifecycle()
     val importState by viewModel.calendarImport.collectAsStateWithLifecycle()
+    val reportState by viewModel.report.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -243,6 +245,7 @@ private fun MainHost(
                     },
                     onRoutineClick = viewModel::openRoutineEditor,
                     onCalendarClick = viewModel::openCalendarImport,
+                    onReportClick = viewModel::openReport,
                     onRetry = viewModel::refresh,
                     modifier = Modifier.padding(innerPadding),
                 )
@@ -321,6 +324,18 @@ private fun MainHost(
                     },
                     onRetry = viewModel::loadCalendarCandidates,
                     onImport = viewModel::submitCalendarImport,
+                    modifier = Modifier.padding(innerPadding),
+                )
+
+                AppRoute.WeeklyReport -> WeeklyReportScreen(
+                    report = reportState.weekly,
+                    longTerm = reportState.longTerm,
+                    loading = reportState.loading,
+                    error = reportState.error,
+                    onBack = viewModel::goBack,
+                    onPreviousWeek = { viewModel.shiftReportWeek(-1) },
+                    onNextWeek = { viewModel.shiftReportWeek(1) },
+                    onRetry = { viewModel.loadReport(reportState.week) },
                     modifier = Modifier.padding(innerPadding),
                 )
             }
