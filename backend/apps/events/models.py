@@ -152,8 +152,14 @@ class Event(models.Model):
     # 계산할 때마다 이 key 로 해당 수단만 다시 조회한다(호출 1회).
     #
     # 비어 있으면 서버가 `best_route()` 로 알아서 고른다.
+    #
+    # `db_default` 를 반드시 함께 준다. Django 의 `default` 는 파이썬 쪽
+    # 기본값이라 `AddField` 가 기존 행을 채운 뒤 **DB 기본값을 남기지 않는다.**
+    # 그러면 이 컬럼을 모르는 구버전 코드의 INSERT 가 NOT NULL 제약을 위반해
+    # **쓰기만 500** 이 된다. 읽기와 `/api/health` 는 정상이라 겉으로는 멀쩡해
+    # 보인다 — 실제로 그 조합을 한 번 겪었다(docs/team-setup.md 8절).
     route_key = models.CharField(
-        "선택 경로", max_length=120, blank=True, default=""
+        "선택 경로", max_length=120, blank=True, default="", db_default=""
     )
 
     # 이 일정만의 출발지. null 이면 프로필의 집에서 출발한다.
@@ -180,7 +186,10 @@ class Event(models.Model):
         blank=True,
         validators=[MinValueValidator(-180), MaxValueValidator(180)],
     )
-    origin_label = models.CharField("출발지 표시명", max_length=80, blank=True, default="")
+    # `db_default` 를 주는 이유는 위 `route_key` 와 같다.
+    origin_label = models.CharField(
+        "출발지 표시명", max_length=80, blank=True, default="", db_default=""
+    )
 
     created_at = models.DateTimeField("생성 시각", auto_now_add=True)
     updated_at = models.DateTimeField("수정 시각", auto_now=True)

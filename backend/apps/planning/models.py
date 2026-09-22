@@ -125,9 +125,15 @@ class AlarmPlan(models.Model):
 
     # 실제로 계산에 쓴 경로 key. `Event.route_key` 와 다르면 사용자가 고른
     # 경로가 사라져 대체된 것이다. 화면이 그 사실을 알려야 한다.
-    route_key = models.CharField("사용한 경로", max_length=120, blank=True, default="")
+    # `db_default` 를 반드시 함께 준다. 이유는 `Event.route_key` 에 적어 두었다 —
+    # 없으면 이 컬럼을 모르는 구버전 코드의 INSERT 가 쓰기만 500 을 낸다.
+    route_key = models.CharField(
+        "사용한 경로", max_length=120, blank=True, default="", db_default=""
+    )
     # 탑승 노선 등 사람이 읽는 경로 설명. "2호선 → 5513"
-    route_detail = models.CharField("경로 상세", max_length=120, blank=True, default="")
+    route_detail = models.CharField(
+        "경로 상세", max_length=120, blank=True, default="", db_default=""
+    )
 
     computed_at = models.DateTimeField("계산 시각", auto_now=True)
 

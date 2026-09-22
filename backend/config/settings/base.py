@@ -9,6 +9,7 @@ from pathlib import Path
 import dj_database_url
 from dotenv import load_dotenv
 import os
+import tempfile
 
 # backend/config/settings/base.py → backend/
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -84,18 +85,32 @@ ASGI_APPLICATION = "config.asgi.application"
 # ---------------------------------------------------------------------------
 # 데이터베이스
 # ---------------------------------------------------------------------------
-# back-spec.md 논의 1번: Postgres 를 목표로 두되 초기에는 SQLite 로 간다.
-# 팀원 전원이 도커 없이 개발할 수 있어야 하고, DATABASE_URL 하나로 전환된다.
-# Postgres 고유 기능(JSONB 인덱스, ArrayField)을 쓰지 않는 한 마이그레이션도 그대로 돈다.
-# dj_database_url.config() 를 쓰지 않는다. 그 함수는 DATABASE_URL 이 "빈 문자열로
+# DB 는 `DATABASE_URL` 하나로 결정된다.
+#
+# **팀은 Neon Postgres 하나를 쓴다.** 로컬 SQLite 를 개발용으로 두지 않는다 —
+# 두면 로컬 데이터와 팀 데이터가 갈라지고 "지금 어느 DB 인가" 가 매번 질문이 된다.
+# 어느 설정 모듈도 조용히 로컬 DB 로 떨어지지 않는다.
+#
+#   config.settings.dev   비어 있으면 **시작을 거부한다**
+#   config.settings.prod  비어 있으면 **시작을 거부한다**
+#   config.settings.test  DATABASES 를 메모리 SQLite 로 **무조건 덮어쓴다**
+#
+# 그래서 아래 기본값은 실제로 도달하지 않는다. 그럼에도 남겨 두는 이유는
+# `dj_database_url.parse("")` 가 예외를 던져서, 설정 모듈을 새로 추가한 사람이
+# 원인을 알기 어려운 스택 트레이스를 보게 되기 때문이다. 도달하더라도 저장소에
+# 파일을 만들지 않도록 **임시 폴더**를 쓴다.
+#
+# dj_database_url.config() 는 쓰지 않는다. 그 함수는 DATABASE_URL 이 "빈 문자열로
 # 존재"하는 경우를 값이 있는 것으로 보고 default 를 무시해 DATABASES={} 를 돌려준다.
-# .env.example 에 `DATABASE_URL=` 를 자리만 잡아둔 상태로 복사하면 그대로 터진다.
-# 빈 문자열을 명시적으로 걸러 SQLite 로 떨어뜨린다.
 _DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+_UNREACHABLE_FALLBACK = (
+    "sqlite:///" + str(Path(tempfile.gettempdir()) / "jit_unconfigured.sqlite3").replace("\\", "/")
+)
 
 DATABASES = {
     "default": dj_database_url.parse(
-        _DATABASE_URL or f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+        _DATABASE_URL or _UNREACHABLE_FALLBACK,
         conn_max_age=600,
         # **죽은 연결을 재사용하지 않게 한다. 이게 없으면 산발적으로 500 이 난다.**
         #

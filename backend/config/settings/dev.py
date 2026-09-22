@@ -3,9 +3,47 @@
 import os
 import socket
 
+from django.core.exceptions import ImproperlyConfigured
+
 from .base import *  # noqa: F401,F403
 
 DEBUG = True
+
+# ---------------------------------------------------------------------------
+# DB 를 명시하지 않으면 시작하지 않는다
+# ---------------------------------------------------------------------------
+#
+# **팀은 DB 를 Neon 하나로 쓴다.** 예전에는 `DATABASE_URL` 이 비면 조용히 로컬
+# SQLite 로 떨어졌는데, 그 조용함이 문제였다 — `.env` 를 아직 안 받은 사람이
+# 서버를 띄우면 빈 SQLite 에 붙고, 화면에 아무것도 없는 이유를 "앱 버그" 로
+# 오해한다. 반대로 로컬 파일에 데이터를 쌓아 두면 그것이 팀 데이터와 갈라진다.
+#
+# 그래서 **어느 DB 에 붙는지 말하게 한다.** 둘 중 하나를 골라야 한다.
+#
+#   1. 팀 Neon 주소를 `backend/.env` 의 DATABASE_URL 에 넣는다 (기본).
+#   2. 일회용 SQLite 를 명시한다. 검증 스크립트가 쓰는 방식이다.
+#        $env:DATABASE_URL="sqlite:///$env:TEMP/jit_verify.sqlite3"
+#
+# `config.settings.test` 는 이 검사를 받지 않는다. 그쪽은 base 만 import 하고
+# DATABASES 를 메모리 SQLite 로 무조건 덮어쓴다 — 테스트가 팀 DB 에 붙어 테스트
+# 데이터베이스를 만들고 지우는 것을 막기 위한 설계다.
+if not os.getenv("DATABASE_URL", "").strip():
+    raise ImproperlyConfigured(
+        "DATABASE_URL 이 비어 있다. 어느 DB 에 붙을지 명시할 것.\n"
+        "\n"
+        "  팀 Neon 을 쓸 때 (기본):\n"
+        "    backend/.env 의 DATABASE_URL 에 Neon direct 주소를 넣는다.\n"
+        "    주소는 관리자에게 받는다 (docs/team-setup.md 1절).\n"
+        "\n"
+        "  일회용 로컬 DB 로 잠깐 돌릴 때:\n"
+        '    $env:DATABASE_URL="sqlite:///$env:TEMP/jit_scratch.sqlite3"\n'
+        "\n"
+        "  검증 스크립트를 돌릴 때는 아무것도 하지 않아도 된다.\n"
+        "    python scripts/run_local_suite.py   ← 일회용 DB 를 알아서 쓴다\n"
+        "\n"
+        '  주의: PowerShell 에서 $env:DATABASE_URL="" 는 값을 비우는 것이 아니라\n'
+        "  변수를 **삭제**한다. 그러면 .env 값이 다시 읽힌다."
+    )
 
 
 def _local_ipv4_addresses() -> list[str]:

@@ -52,7 +52,7 @@ observations accumulate, the value is computed from quantiles.
 | Networking | Retrofit + Gson + OkHttp |
 | On-device storage | Room (offline cache of server responses) + WorkManager (background sync) |
 | Server | **Django + Django REST Framework** |
-| Database | Postgres in deployment (Neon) · SQLite locally, switched by `DATABASE_URL` |
+| Database | **Neon Postgres — one database for both development and deployment** |
 | Auth | SimpleJWT (email + password) |
 | External APIs | Kakao Map (routing, place search), OpenAI, KMA weather, FCM |
 | Design | Figma |
@@ -206,10 +206,15 @@ cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 143 tests 
 The middle one is the unusual part. `scripts/check_*.py` drive a **running** Django
 server over HTTP, which catches what the Django test client does not: a URL that was
 never wired up, a serializer field the app reads under a different name, a permission
-class that was left off. `run_local_suite.py` starts the server, pins the database to
-a local SQLite file, refuses to run if port 8000 is already taken — a stale server
-answering health checks made an entire suite pass against old code once — and shuts
-the server down afterwards.
+class that was left off. `run_local_suite.py` starts the server, shuts it down
+afterwards, and refuses to run if port 8000 is already taken — a stale server
+answering health checks once made an entire suite pass against old code.
+
+It also pins the database to a **throwaway SQLite file in the temp directory**, never
+the team's Neon database. These scripts create close to a hundred accounts per run,
+and Neon is the only copy of the team's data. The same reasoning applies to `pytest`,
+which uses in-memory SQLite: neither is a second database to maintain, both exist only
+while the checks run.
 
 No secrets are needed. Without `KAKAO_REST_API_KEY` the checks that require route
 lookups are **skipped rather than failed**, so CI never burns the daily free quota

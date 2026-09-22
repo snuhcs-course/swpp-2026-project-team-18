@@ -12,9 +12,12 @@ SQLite 를 쓴다고 전제했지만, `backend/.env` 의 `DATABASE_URL` 이 공�
 
 를 "빈 문자열 대입" 이 아니라 **변수 삭제**로 처리한다. 변수가 사라지면
 `base.py` 의 `load_dotenv` 가 `.env` 값을 다시 넣는다. 즉 셸에서 비우려 할수록
-공용 DB 로 붙는다. 로컬로 고정하려면 값을 **명시**해야 한다.
+공용 DB 로 붙는다. 일회용 DB 로 고정하려면 값을 **명시**해야 한다.
 
-    $env:DATABASE_URL="sqlite:///db.sqlite3"
+    $env:DATABASE_URL="sqlite:///$env:TEMP/jit_scratch.sqlite3"
+
+보통은 직접 할 필요가 없다. `scripts/run_local_suite.py` 가 임시 폴더의 일회용
+SQLite 를 지정해 스크립트를 돌린다.
 
 이 함정은 눈에 보이지 않는다. 스크립트가 통과하고 로그도 정상이다. 그래서
 셸 습관이 아니라 코드로 막는다.
@@ -137,15 +140,22 @@ def require_local_database(*, exit_code: int = 2) -> None:
     print("=" * 74, file=sys.stderr)
     print(f"  현재 DB : {engine}  host={host}  name={name}", file=sys.stderr)
     print("", file=sys.stderr)
-    print("  이 스크립트는 검증용 계정과 일정을 만든다. 공용 DB 에서 돌리면", file=sys.stderr)
-    print("  팀 전체가 보는 목록이 테스트 데이터로 채워진다.", file=sys.stderr)
+    print("  이 스크립트는 검증용 계정과 일정을 만든다. 한 번 돌 때 계정이", file=sys.stderr)
+    print("  100개 가까이 생긴다. 팀 DB(Neon)는 **유일한 사본**이라 되돌릴", file=sys.stderr)
+    print("  방법이 없고, 사용자 삭제 API 도 없어서 한 번 들어가면 남는다.", file=sys.stderr)
     print("", file=sys.stderr)
-    print("  로컬 SQLite 로 고정하고 다시 실행할 것:", file=sys.stderr)
-    print('    $env:DATABASE_URL="sqlite:///db.sqlite3"', file=sys.stderr)
+    print("  이렇게 실행할 것 — 일회용 DB 를 알아서 쓴다:", file=sys.stderr)
+    print("    python scripts/run_local_suite.py", file=sys.stderr)
+    print(f"    python scripts/run_local_suite.py --only {sys.argv[0].split(chr(92))[-1]}", file=sys.stderr)
+    print("", file=sys.stderr)
+    print("  직접 고정하려면 임시 폴더를 쓴다(저장소에 파일을 남기지 않는다):", file=sys.stderr)
+    print('    $env:DATABASE_URL="sqlite:///$env:TEMP/jit_scratch.sqlite3"', file=sys.stderr)
     print("", file=sys.stderr)
     print('  **$env:DATABASE_URL="" 는 듣지 않는다.** PowerShell 이 변수를', file=sys.stderr)
-    print("  삭제해 버리고, 그러면 .env 의 값이 다시 읽힌다.", file=sys.stderr)
+    print("  삭제해 버리고, 그러면 .env 의 Neon 주소가 다시 읽힌다.", file=sys.stderr)
     print("", file=sys.stderr)
-    print(f"  의도한 경우에만: $env:{ESCAPE_HATCH}=\"1\"", file=sys.stderr)
+    print("  정말 Neon 을 상대로 돌려야 하면:", file=sys.stderr)
+    print(f'    $env:{ESCAPE_HATCH}="1"', file=sys.stderr)
+    print("    끝나고 scripts/purge_test_accounts.py 로 반드시 치울 것.", file=sys.stderr)
     print("=" * 74, file=sys.stderr)
     sys.exit(exit_code)

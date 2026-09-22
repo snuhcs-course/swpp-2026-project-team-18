@@ -11,8 +11,53 @@
 | 항목 | 값 |
 | --- | --- |
 | 공용 API 서버 | <https://justintime-api.onrender.com> (Render, 무료) |
+| **DB** | **Neon Postgres 하나** — 개발도 배포도 같은 DB를 본다 |
 | 앱 기본 주소 | `APP/gradle.properties` 의 `jitApiBaseUrl` (커밋됨) |
 | 공통 확인 계정 | `demo@demo.com` / `demo1234` (집=신림역) |
+
+### DB 는 하나다
+
+로컬 SQLite 를 개발용으로 두지 않는다. 두면 로컬 데이터와 팀 데이터가 갈라지고
+"지금 어느 DB 를 보고 있나" 가 매번 질문이 된다.
+
+그래서 **어느 설정도 조용히 로컬 DB 로 떨어지지 않는다.**
+
+| 설정 | `DATABASE_URL` 이 비면 |
+| --- | --- |
+| `config.settings.dev` | **시작을 거부한다** (안내 문구가 나온다) |
+| `config.settings.prod` | **시작을 거부한다** |
+| `config.settings.test` | 메모리 SQLite 로 무조건 덮어쓴다 (아래 참고) |
+
+예외가 둘 있는데, 둘 다 **관리하는 DB 가 아니라 실행 중에만 존재하는 것**이다.
+
+- `pytest` 432건 — 메모리 SQLite. pytest 는 테스트 데이터베이스를 **만들고
+  지운다.** Neon 에 대고 하면 팀 DB 인스턴스에 `test_neondb` 를 만들었다 지우게
+  되고, 싱가포르 왕복(질의당 약 75ms)이라 7초짜리 테스트가 몇 분이 된다.
+- `scripts/run_local_suite.py` — 임시 폴더의 일회용 SQLite. 검증 스크립트 8개가
+  한 번 돌 때 **계정 100개 가까이** 만든다. Neon 이 유일한 사본이 된 뒤로는 거기서
+  만들 이유가 더 없다.
+
+### 되돌릴 사본이 없다 — 작업 전에 백업할 것
+
+로컬 DB 가 없어졌으므로 실수를 되돌릴 안전망도 없어졌다. 아래는 전부 한 줄이고
+전부 팀 데이터를 지운다.
+
+```
+manage.py flush                    전체 삭제
+purge_test_accounts.py --yes       계정 삭제 (cascade 로 일정·관측까지)
+User.objects.filter(...).delete()  셸에서 한 줄
+```
+
+위험한 작업 전에 파일 하나 만들어 두면 된다.
+
+```bash
+cd backend
+python scripts/backup_db.py          # 임시 폴더에 JSON 으로 저장
+python scripts/backup_db.py --list   # 받아 둔 백업 목록
+```
+
+**백업 파일에는 비밀번호 해시가 들어 있다.** 그래서 기본 저장 위치를 저장소 밖에
+둔다. 커밋하지 말 것.
 
 상태 확인:
 
@@ -110,21 +155,26 @@ pip install -r requirements/dev.txt
 copy .env.example .env          # macOS/Linux: cp .env.example .env
 ```
 
-`.env` 에 최소 두 개를 채운다.
+`.env` 에 세 개를 채운다. **셋 다 저장소에 없다** — 관리자에게 받는다.
 
 | 키 | 값 |
 | --- | --- |
+| `DATABASE_URL` | Neon **direct** 주소 (`-pooler` 없는 쪽). 비우면 서버가 시작하지 않는다 |
 | `DJANGO_SECRET_KEY` | `python -c "import secrets; print(secrets.token_urlsafe(50))"` |
-| `KAKAO_REST_API_KEY` | 팀 공용 키를 받아 넣는다(저장소에 없다) |
+| `KAKAO_REST_API_KEY` | 팀 공용 키 |
 
-`DATABASE_URL` 은 **비워 두는 것을 권한다.** 비우면 로컬 SQLite 라서 마음대로
-망가뜨려도 팀에 영향이 없다. 공용 데이터로 확인할 일이 있을 때만 공용 주소를
-넣는다.
+`DATABASE_URL` 을 비워 두면 안내 문구와 함께 시작이 거부된다. 예전에는 조용히
+로컬 SQLite 로 떨어졌는데, 그러면 `.env` 를 아직 못 받은 사람이 **빈 DB 에 붙고도
+그 사실을 모른다** — 화면에 아무것도 없는 이유를 앱 버그로 오해하게 된다.
 
 ```bash
-python manage.py migrate
+python manage.py migrate        # 스키마가 이미 최신이면 아무것도 하지 않는다
 python manage.py runserver 0.0.0.0:8000
 ```
+
+> `migrate` 는 **팀 DB 에 즉시 반영된다.** 모델을 고치는 중이라면 새 컬럼에
+> `db_default` 를 줬는지 확인할 것 — 안 주면 배포가 교체되기 전까지 구버전
+> 컨테이너의 쓰기가 500 이 된다. `python scripts/check_db_defaults.py` 가 검사한다.
 
 로컬 서버로 앱을 돌리려면 `APP/local.properties` 에 한 줄 적는다. 이 파일은
 커밋되지 않으므로 서로의 설정이 충돌하지 않는다.
@@ -306,13 +356,17 @@ curl https://justintime-api.onrender.com/api/health
 아예 없애려면 Starter 플랜($7/월)으로 올린다. 외부에서 5분마다 `/api/health` 를
 치는 방법도 있지만 무료 인스턴스 시간(월 750시간)을 상시 소모해 한 달을 못 채운다.
 
-### 공용 DB 는 공용이다
+### 공용 DB 는 공용이다 — 이제 유일한 사본이기도 하다
 
-`DATABASE_URL` 을 공용 주소로 두고 로컬에서 작업하면 **팀 전체 데이터를
-건드린다.** 삭제·초기화 실험은 `DATABASE_URL` 을 비워 SQLite 에서 할 것.
+개발도 Neon 을 보기로 했으므로, 로컬에서 하는 모든 쓰기가 **팀 전체 데이터**다.
+그리고 로컬 사본이 없으니 되돌릴 곳도 없다.
 
-검증 스크립트(`backend/scripts/check_*.py`)는 임시 계정을 만들고 끝에
-지우지만, 중간에 끊기면 남는다.
+- 삭제·초기화 실험은 **일회용 DB 에서** 한다.
+  `$env:DATABASE_URL="sqlite:///$env:TEMP/jit_scratch.sqlite3"`
+- 위험한 작업 전에는 `python scripts/backup_db.py` 를 돌린다.
+- 검증 스크립트(`backend/scripts/check_*.py`)는 임시 계정을 만들고 끝에 지우지만
+  중간에 끊기면 남는다. 그래서 `_local_guard.py` 가 Neon 에서는 실행을 거부한다.
+  `run_local_suite.py` 로 돌리면 일회용 DB 를 알아서 쓴다.
 
 ### 시크릿은 저장소에 없다
 
@@ -434,8 +488,10 @@ python scripts/run_local_suite.py --only check_events_api.py   # 하나만
 | 스크립트 | 대상 | 용도 |
 | --- | --- | --- |
 | `run_local_suite.py` | 로컬 서버 | **아래 8개를 한 번에.** 서버를 띄우고 끝나면 내린다. CI 도 이것을 부른다 |
+| `check_db_defaults.py` | **Neon** | 나중에 추가된 NOT NULL 컬럼에 DB 기본값이 있는지. 없으면 배포 중 쓰기가 500 이 된다 |
+| `backup_db.py` | 현재 `DATABASE_URL` | JSON 백업. Neon 이 유일한 사본이라 위험한 작업 전에 돌린다 |
 | `_capabilities.py` | — | 카카오 키 유무 판정. "키가 없어서 못 함" 과 "깨져서 실패" 를 가른다 |
-| `_local_guard.py` | — | 공용 DB 로 검증 스크립트가 도는 것을 막는다 |
+| `_local_guard.py` | — | 팀 DB 로 검증 스크립트가 도는 것을 막는다 |
 | `check_deployed.py` | **배포 서버** | 전 기능. HTTP 만 쓰므로 Django 설정이 필요 없다. **어느 DB 에 붙었는지는 보지 않는다** |
 | `check_same_db.py` | 배포 서버 + 내 DB | 둘이 같은 DB 인지. API 로 쓰고 DB 에서 직접 읽어 대조 |
 | `check_app_contract.py` | 로컬 서버 + **앱 소스** | 앱 DTO 필드 이름이 서버 응답과 맞는지 95개 항목. 아래 설명 참고 |

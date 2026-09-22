@@ -15,10 +15,17 @@
 
 ## 이 러너가 막아 주는 세 가지 사고
 
-1. **공용 DB 오염.** `DATABASE_URL` 을 명시적으로 SQLite 로 고정한다. 셸에서
-   비우려는 시도(`$env:DATABASE_URL=""`)는 PowerShell 에서 변수 *삭제*로
-   처리되고, 그러면 `base.py` 의 `load_dotenv` 가 `.env` 의 공용 Neon 주소를
-   다시 읽는다. 실제로 그렇게 테스트 계정 21개가 팀 공용 DB 에 들어갔다.
+1. **유일한 DB 오염.** `DATABASE_URL` 을 임시 폴더의 **일회용 SQLite** 로 명시
+   고정한다. 셸에서 비우려는 시도(`$env:DATABASE_URL=""`)는 PowerShell 에서 변수
+   *삭제*로 처리되고, 그러면 `base.py` 의 `load_dotenv` 가 `.env` 의 Neon 주소를
+   다시 읽는다. 실제로 그렇게 테스트 계정 21개가 Neon 에 들어갔다.
+
+   이 스크립트들은 한 번 돌 때 계정 100개 가까이 만든다. Neon 이 **유일한 DB** 가
+   된 뒤로는 그것을 거기서 만들 이유가 더 없어졌다 — 되돌릴 사본이 없다.
+   검증 데이터는 남지 않아야 결과도 재현된다.
+
+   Neon 을 상대로 꼭 돌려야 하면 탈출구가 있다(`JIT_ALLOW_REMOTE_DB=1` 로 개별
+   스크립트 실행). 끝나고 `purge_test_accounts.py` 로 치울 것.
 
 2. **구버전 코드 검증.** 포트가 이미 잡혀 있으면 새 서버는 바인드에 실패하는데,
    헬스 체크는 남아 있던 옛 서버가 주는 200 을 보고 "기동 성공" 으로 읽는다.
@@ -27,6 +34,12 @@
    **조용히 재사용하지 않고 실패한다.**
 
 3. **서버 로그 유실.** 로그를 파이프로 받으면 셸이 잘라 먹는다. 파일로 받는다.
+
+## DB 는 Neon 하나인데 왜 여기만 SQLite 인가
+
+개발·앱 연동은 Neon 하나를 쓴다. 여기서 쓰는 것은 **관리하는 DB 가 아니라
+검증이 도는 동안만 존재하는 파일**이다(임시 폴더, 매 실행마다 다시 만들어짐).
+그래서 "DB 두 개" 가 아니다. `pytest` 가 메모리 SQLite 를 쓰는 것과 같은 성격이다.
 
 ## 외부 API 키가 없어도 된다
 
@@ -68,12 +81,26 @@ SCRIPTS = [
 ]
 
 
+def suite_database_url() -> str:
+    """검증용 **일회용** DB 주소.
+
+    저장소 폴더가 아니라 임시 폴더에 둔다. 예전에는 `backend/db.sqlite3` 를
+    썼는데, 그러면 팀이 "DB 는 Neon 하나" 로 정한 뒤에도 저장소에 SQLite 파일이
+    계속 되살아나 "이건 뭐지" 가 된다. 검증이 끝나면 지워도 되는 파일이므로
+    임시 폴더가 제 자리다.
+    """
+    path = Path(tempfile.gettempdir()) / "jit_verify.sqlite3"
+    # sqlite URL 은 슬래시를 쓴다. 윈도우 경로를 그대로 넣으면 역슬래시가
+    # 이스케이프로 해석된다.
+    return "sqlite:///" + str(path).replace("\\", "/")
+
+
 def local_env() -> dict[str, str]:
     """검증용 환경. `DATABASE_URL` 을 **반드시 명시**한다."""
     import os
 
     env = os.environ.copy()
-    env["DATABASE_URL"] = "sqlite:///db.sqlite3"
+    env["DATABASE_URL"] = suite_database_url()
     # 윈도우 콘솔 기본 코드페이지에서 한글 출력이 깨지는 것을 막는다.
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
@@ -159,9 +186,10 @@ def main() -> int:
 
     print("=" * 74)
     print("로컬 전체 회귀")
-    print(f"  python = {py}")
-    print(f"  DB     = {env['DATABASE_URL']}")
-    print(f"  서버로그= {log_path}")
+    print(f"  python  = {py}")
+    print(f"  DB      = {env['DATABASE_URL']}")
+    print("            ↑ 일회용. Neon 이 아니다 — 검증이 계정 100개를 만든다")
+    print(f"  서버로그 = {log_path}")
     print("=" * 74)
 
     migrate = subprocess.run(
