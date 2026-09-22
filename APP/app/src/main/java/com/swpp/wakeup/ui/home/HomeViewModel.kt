@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.alarm.AlarmScheduler
+import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.PlaceSearchItem
@@ -117,6 +118,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         refresh()
+        // 로그아웃이 정기 작업을 취소했으므로 다시 로그인했으면 되살려야 한다.
+        // Application.onCreate 는 프로세스당 한 번이라 로그아웃→로그인을 같은
+        // 프로세스에서 하면 그 경로만으로는 복구되지 않는다. KEEP 이라 중복
+        // 등록이 되지 않는다.
+        JitWork.ensurePeriodicSync(getApplication())
     }
 
     fun refresh() {
@@ -211,6 +217,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun logout() {
         tokenStore.clear()
         OfflineCache.wipeDetached(getApplication())
+        // 배경 작업도 거둔다. 워커가 로그인 여부를 확인해 아무 일도 하지 않지만,
+        // 로그아웃한 기기를 6시간마다 깨울 이유가 없다.
+        JitWork.cancelAll(getApplication())
     }
 
     /** 아바타에 쓸 두 글자. */

@@ -6,6 +6,7 @@ import androidx.core.content.edit
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
+import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.ObservationBatchRequest
 import com.swpp.wakeup.data.remote.ObservationsApi
@@ -33,7 +34,8 @@ class TripObservationQueue(
     private val api: ObservationsApi = ApiClient.observations,
 ) {
 
-    private val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
     private val gson = Gson()
 
     val pendingCount: Int get() = pending().size
@@ -49,12 +51,20 @@ class TripObservationQueue(
         }
     }
 
-    /** 판정 즉시 호출한다. 업로드보다 저장이 먼저다. */
+    /**
+     * 판정 즉시 호출한다. 업로드보다 저장이 먼저다.
+     *
+     * 저장한 뒤 **업로드 작업을 예약한다.** 지금 네트워크가 없어도 된다 —
+     * WorkManager 가 연결되는 순간 실행한다. 이것이 없으면 큐가 비는 계기가
+     * 앱을 여는 것뿐이어서, 앱을 며칠 열지 않은 사용자의 아침이 학습에
+     * 들어가지 않는다.
+     */
     fun enqueue(observation: TripObservationInput) {
         val next = pending().filterNot { it.clientUuid == observation.clientUuid } +
             observation
         write(next)
         Log.i(TAG, "관측 적재: ${observation.kind} (대기 ${next.size}건)")
+        JitWork.requestObservationUpload(appContext)
     }
 
     /**
