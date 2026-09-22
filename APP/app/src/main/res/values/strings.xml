@@ -21,9 +21,6 @@
     <string name="login_brand" translatable="false">JustInTime</string>
     <string name="login_tagline">도착 확률을 정하는 알람</string>
 
-    <string name="login_bullet_calendar">캘린더를 읽어 첫 일정을 자동으로 찾음</string>
-    <string name="login_bullet_learn">준비·이동 시간을 학습해 알람을 계산</string>
-    <string name="login_bullet_room">약속방에서 친구들의 도착 상황을 함께 확인</string>
 
     <string name="login_google">Google로 계속하기</string>
     <string name="login_kakao">카카오로 계속하기</string>

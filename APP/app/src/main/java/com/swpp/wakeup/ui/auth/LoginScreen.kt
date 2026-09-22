@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -38,7 +37,6 @@ import com.swpp.wakeup.ui.common.JitPrimaryButton
 import com.swpp.wakeup.ui.common.JitSocialButton
 import com.swpp.wakeup.ui.common.JitTextField
 import com.swpp.wakeup.ui.theme.JitColor
-import com.swpp.wakeup.ui.theme.JitRadius
 import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTheme
 
@@ -52,12 +50,21 @@ import com.swpp.wakeup.ui.theme.JitTheme
  * 상태를 갖지 않는다. 값과 콜백을 모두 호출자가 넘긴다. [AuthViewModel] 이
  * 상태를 소유하고 [LoginActivity] 가 연결한다.
  *
+ * 가치 제안 3줄("캘린더를 읽어…" 카드)은 **뺐다.** 로그인 화면이 설명을 읽는
+ * 자리가 아니고, 그 카드가 입력칸을 화면 아래로 밀어냈다. Figma 쪽에서도 지웠다
+ * (node 23:12 삭제).
+ *
  * Figma 와 의도적으로 다른 점.
  *  1) 목업 상단의 "6:12 / LTE 87%" 줄은 넣지 않았다. 실제 기기에서는 시스템
  *     상태바가 그 자리를 차지하므로 가짜 상태바는 중복이다.
  *  2) 약관 문구를 9sp 대신 11sp 로 올렸다. Figma 쪽도 11 로 맞춰 두었다.
  *  3) 키보드가 올라오면 화면이 좁아지므로 스크롤을 붙였다. 목업은 고정 800dp
  *     기준이라 이 상황이 없다.
+ *
+ * 목업의 스페이서(node 23:6)는 원래 남는 공간을 채우도록(`layoutGrow=1`) 돼 있어서
+ * 카드를 지우면 **로고가 아래로 내려갔다.** 여기 `Spacer(28.dp)` 는 고정이라 앱은
+ * 반대로 아래 요소가 위로 올라온다. 목업이 앱과 어긋나므로 Figma 쪽을 28 고정으로
+ * 바꿨다 — 상태바 아래 여백이 양쪽 모두 52 가 된다(12 + 28 + 12).
  */
 @Composable
 fun LoginScreen(
@@ -110,8 +117,6 @@ fun LoginScreen(
             fontSize = 14.sp,
             textAlign = TextAlign.Center
         )
-
-        ValuePropCard()
 
         JitTextField(
             label = stringResource(R.string.auth_email),
@@ -228,40 +233,6 @@ private fun BrandMark(modifier: Modifier = Modifier) {
                 .clip(CircleShape)
                 .background(JitColor.Accent)
         )
-    }
-}
-
-/** Figma 23:12 — 가치 제안 3줄 */
-@Composable
-private fun ValuePropCard(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(JitRadius.Card))
-            .background(JitColor.Surface)
-            .padding(JitSpace.CardPadding),
-        verticalArrangement = Arrangement.spacedBy(JitSpace.CardGap)
-    ) {
-        BulletRow(JitColor.Accent, stringResource(R.string.login_bullet_calendar))
-        BulletRow(JitColor.Blue, stringResource(R.string.login_bullet_learn))
-        BulletRow(JitColor.Green, stringResource(R.string.login_bullet_room))
-    }
-}
-
-@Composable
-private fun BulletRow(dotColor: Color, text: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(dotColor)
-        )
-        Spacer(Modifier.width(9.dp))
-        Text(text = text, color = JitColor.TextPrimary, fontSize = 12.sp)
     }
 }
 
