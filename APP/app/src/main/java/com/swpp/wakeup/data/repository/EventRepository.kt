@@ -2,6 +2,7 @@ package com.swpp.wakeup.data.repository
 
 import android.util.Log
 import com.swpp.wakeup.BuildConfig
+import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.remote.AlarmPlanDto
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.EventCreateRequest
@@ -44,6 +45,15 @@ import java.time.temporal.ChronoUnit
 class EventRepository(
     private val api: EventsApi = ApiClient.events,
     private val profileApi: ProfileApi = ApiClient.profile,
+    /**
+     * 오프라인 캐시. null 이면 캐시 없이 동작한다(테스트·초기화 전).
+     *
+     * **정본이 아니다.** 서버 조회가 성공하면 그 결과로 덮어쓰고, 실패했을
+     * 때만 읽는다. 캐시를 먼저 보여주고 나중에 갱신하는 방식(stale-while-revalidate)
+     * 은 쓰지 않는다 — 알람 시각이 화면에서 한 번 바뀌면 사용자가 어느 쪽을
+     * 믿어야 할지 알 수 없다.
+     */
+    private val cache: OfflineCache? = null,
 ) {
 
     sealed interface Result<out T> {
@@ -67,27 +77,98 @@ class EventRepository(
          * 필요한데 표시 문자열("7:40")에서는 되돌릴 수 없다.
          */
         val schedules: List<AlarmSchedule>,
+
+        /**
+         * 이 데이터가 캐시에서 왔는가.
+         *
+         * **호출부는 이때 알람을 다시 등록해서는 안 된다.** `AlarmScheduler.sync`
+         * 는 받은 목록으로 등록 상태를 갈아 끼우므로, 오래된 사본으로 부르면
+         * 이미 맞게 걸린 알람을 취소하거나 미뤄 둔 알람을 되돌린다. 오프라인일
+         * 때 등록된 알람은 이미 온라인에서 맞춰 둔 것이라 손댈 이유가 없다.
+         */
+        val fromCache: Boolean = false,
+        /** "12분 전 정보". 캐시에서 왔을 때만 채운다 */
+        val ageLabel: String? = null,
     )
 
-    suspend fun loadHome(): Result<HomeData> = guard {
-        val profile = unwrap(profileApi.get()) ?: return@guard Result.Failure(MESSAGE_UNKNOWN)
-        val page = unwrap(api.list()) ?: return@guard Result.Failure(MESSAGE_UNKNOWN)
+    /**
+     * 홈 화면 데이터. **네트워크 우선, 실패하면 캐시.**
+     *
+     * 캐시를 먼저 그리고 나중에 갱신하지 않는다. 알람 시각이 화면에서 한 번
+     * 바뀌면 사용자는 어느 쪽을 믿어야 할지 알 수 없고, 이 앱에서 그 혼란의
+     * 대가는 지각이다.
+     */
+    suspend fun loadHome(): Result<HomeData> {
+        val online = guard { loadHomeOnline() }
+        if (online is Result.Success) return online
+
+        // 네트워크가 실패했다. 사본으로라도 화면을 채운다 — 아침에 집을 나서야
+        // 하는 사용자에게 "불러오지 못했음" 만 보여주는 것은 도움이 안 된다.
+        return loadHomeFromCache() ?: online
+    }
+
+    private suspend fun loadHomeOnline(): Result<HomeData> {
+        val profileResponse = profileApi.get()
+        val profile = unwrap(profileResponse)
+            ?: return Result.Failure(errorMessage(profileResponse))
+        val pageResponse = api.list()
+        val page = unwrap(pageResponse)
+            ?: return Result.Failure(errorMessage(pageResponse))
         val events = page.results
 
-        val zone = ZoneId.systemDefault()
-        val mapped = events.mapNotNull { it.toUpcoming(zone) }
-        val sorted = mapped.sortedBy { it.startAtEpochSecond }
+        // 성공한 응답만 캐시에 남긴다. 실패 응답을 쓰면 다음 오프라인에서
+        // 빈 목록이 "일정 없음" 으로 보인다.
+        cache?.saveProfile(profile)
+        cache?.saveEvents(events)
 
-        Result.Success(
-            HomeData(
-                sections = groupByDay(sorted, zone),
-                nextAlarm = sorted.firstOrNull { it.alarmAt != null },
-                totalCount = sorted.size,
-                hasHome = profile.hasHome,
-                homeLabel = profile.homeLabel?.takeIf { it.isNotBlank() },
-                unplannedCount = sorted.count { it.alarmAt == null },
-                schedules = events.mapNotNull { it.toSchedule(zone, profile) },
+        return Result.Success(buildHome(events, profile, fromCache = false, ageLabel = null))
+    }
+
+    /**
+     * 캐시로 홈을 만든다. 캐시가 없으면 null.
+     *
+     * 프로필이 없으면 포기한다. 집 좌표가 없으면 이동 추적 기준점을 만들 수
+     * 없고, `hasHome` 을 추측하면 "집을 설정하라" 는 안내가 잘못 뜬다.
+     */
+    private suspend fun loadHomeFromCache(): Result<HomeData>? {
+        val store = cache ?: return null
+        if (!store.isUsable) return null
+
+        val profile = store.profile() ?: return null
+        val cached = store.events()
+        if (!cached.hit) return null
+
+        return Result.Success(
+            buildHome(
+                events = cached.items,
+                profile = profile,
+                fromCache = true,
+                ageLabel = cached.ageLabel,
             )
+        )
+    }
+
+    /** 온라인·오프라인이 **같은 매핑**을 타게 한 곳으로 모은다. */
+    private fun buildHome(
+        events: List<EventDto>,
+        profile: ProfileDto,
+        fromCache: Boolean,
+        ageLabel: String?,
+    ): HomeData {
+        val zone = ZoneId.systemDefault()
+        val sorted = events.mapNotNull { it.toUpcoming(zone) }
+            .sortedBy { it.startAtEpochSecond }
+
+        return HomeData(
+            sections = groupByDay(sorted, zone),
+            nextAlarm = sorted.firstOrNull { it.alarmAt != null },
+            totalCount = sorted.size,
+            hasHome = profile.hasHome,
+            homeLabel = profile.homeLabel?.takeIf { it.isNotBlank() },
+            unplannedCount = sorted.count { it.alarmAt == null },
+            schedules = events.mapNotNull { it.toSchedule(zone, profile) },
+            fromCache = fromCache,
+            ageLabel = ageLabel,
         )
     }
 
@@ -182,8 +263,14 @@ class EventRepository(
 
     suspend fun deleteEvent(id: Long): Result<Unit> = guard {
         val response = api.delete(id)
-        if (response.isSuccessful) Result.Success(Unit)
-        else Result.Failure(errorMessage(response))
+        if (response.isSuccessful) {
+            // 캐시에서도 지운다. 남겨 두면 다음 오프라인 조회에서 지운 일정이
+            // 되살아나고, 사용자는 삭제가 안 된 것으로 읽는다.
+            cache?.deleteEvent(id)
+            Result.Success(Unit)
+        } else {
+            Result.Failure(errorMessage(response))
+        }
     }
 
     suspend fun searchPlaces(query: String): Result<List<PlaceSearchItem>> = guard {
@@ -217,12 +304,21 @@ class EventRepository(
      * 목록을 훑어 찾지 않고 상세 엔드포인트를 부른다. 목록은 페이지 경계가
      * 있어 21번째 일정부터는 찾지 못한다.
      */
-    suspend fun loadPlan(eventId: Long): Result<AlarmPlanView> = guard {
-        val response = api.get(eventId)
-        val dto = unwrap(response)
-            ?: return@guard Result.Failure(errorMessage(response))
-        dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
-            ?: Result.Failure("알람이 아직 계산되지 않았다.")
+    suspend fun loadPlan(eventId: Long): Result<AlarmPlanView> {
+        val online = guard {
+            val response = api.get(eventId)
+            val dto = unwrap(response)
+                ?: return@guard Result.Failure(errorMessage(response))
+            cache?.saveEvent(dto)
+            dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
+                ?: Result.Failure("알람이 아직 계산되지 않았다.")
+        }
+        if (online is Result.Success) return online
+
+        // 근거 화면은 오프라인에서도 열려야 한다. 알람이 울린 아침에 "왜 지금
+        // 일어나야 하는가" 를 확인하려는 순간이 대개 지하철·엘리베이터 안이다.
+        val cached = cache?.event(eventId)?.toPlanView(ZoneId.systemDefault())
+        return if (cached != null) Result.Success(cached) else online
     }
 
     /**
@@ -236,8 +332,24 @@ class EventRepository(
         val response = api.recompute(eventId)
         val dto = unwrap(response)
             ?: return@guard Result.Failure(errorMessage(response))
+        cache?.saveEvent(dto)
         dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
             ?: Result.Failure("다시 계산했지만 알람을 만들 수 없었다.")
+    }
+
+    /** 서버가 돌려준 일정을 캐시에 반영한다. 블록 체크 저장 응답이 이 경로다. */
+    suspend fun cacheEvent(dto: EventDto) {
+        cache?.saveEvent(dto)
+    }
+
+    /**
+     * 캐시를 통째로 지운다. **로그아웃·계정 전환에서 반드시 부른다.**
+     *
+     * 캐시에는 집 위치와 다니는 장소가 들어 있다. 기기를 공유하거나 계정을
+     * 바꿨을 때 앞 사용자의 동선이 그대로 보이면 안 된다.
+     */
+    suspend fun clearCache() {
+        cache?.wipe()
     }
 
     /**

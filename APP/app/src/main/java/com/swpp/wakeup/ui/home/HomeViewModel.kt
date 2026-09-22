@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.alarm.AlarmScheduler
+import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.repository.EventRepository
@@ -40,8 +41,17 @@ import java.time.format.DateTimeFormatter
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val tokenStore = TokenStore(application)
-    private val repository = EventRepository()
-    private val routines = RoutineRepository()
+
+    /**
+     * 오프라인 캐시. **로그인한 계정으로 범위가 묶인다.**
+     *
+     * 이메일을 넘기지 않으면 캐시가 아무 일도 하지 않는다. 소유자 없는 행은
+     * 다음 사용자가 읽을 수 있고, 캐시에는 집 위치와 다니는 장소가 들어 있다.
+     */
+    private val cache = OfflineCache(application, tokenStore.email)
+
+    private val repository = EventRepository(cache = cache)
+    private val routines = RoutineRepository(cache = cache)
 
     /** 현재 위치 조회에 쓴다. [AndroidViewModel] 이라 누수 걱정이 없다. */
     private val appContext: android.content.Context = application.applicationContext
@@ -71,6 +81,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val nextRegisteredLabel: String? = null,
         /** 아직 서버로 올리지 못한 관측 수. 0 이 정상이다 */
         val pendingObservations: Int = 0,
+
+        /**
+         * 지금 보이는 목록이 캐시에서 온 것인가.
+         *
+         * 표시하지 않으면 사용자는 세 시간 전 알람 시각을 지금 값으로 믿는다.
+         * 알람 시각은 교통 상황에 따라 바뀌는 값이라 그 오해가 지각이 된다.
+         */
+        val offline: Boolean = false,
+        /** "12분 전 정보". [offline] 일 때만 채운다 */
+        val offlineAgeLabel: String? = null,
     ) {
         val isEmpty: Boolean get() = !loading && error == null && totalCount == 0
         val todayLine: String
@@ -114,9 +134,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             hasHome = result.data.hasHome,
                             homeLabel = result.data.homeLabel,
                             unplannedCount = result.data.unplannedCount,
+                            offline = result.data.fromCache,
+                            offlineAgeLabel = result.data.ageLabel,
                         )
                     }
-                    syncAlarms(result.data.schedules)
+                    syncAlarms(result.data.schedules, fromCache = result.data.fromCache)
                 }
 
                 is EventRepository.Result.Failure -> _state.update {
@@ -138,13 +160,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 알람 등록이 실패해도 화면은 살아 있어야 한다. 등록 실패로 목록까지
      * 못 보게 만들 이유가 없다.
      */
-    private fun syncAlarms(schedules: List<AlarmSchedule>) {
+    private fun syncAlarms(schedules: List<AlarmSchedule>, fromCache: Boolean) {
         val app = getApplication<Application>()
         val scheduler = AlarmScheduler(app)
         val queue = TripObservationQueue(app)
 
-        runCatching { scheduler.sync(schedules) }
-            .onFailure { Log.e(TAG, "알람 등록 실패", it) }
+        // **캐시로 그린 화면에서는 등록을 건드리지 않는다.** `sync` 는 받은
+        // 목록으로 등록 상태를 갈아 끼우므로, 오래된 사본으로 부르면 이미 맞게
+        // 걸린 알람을 취소하거나 사용자가 미뤄 둔 알람을 되돌린다. 오프라인에서
+        // 등록된 알람은 온라인일 때 맞춰 둔 것이라 그대로 두는 것이 옳다.
+        if (fromCache) {
+            Log.i(TAG, "캐시로 화면을 그렸다. 알람 등록은 건드리지 않는다")
+        } else {
+            runCatching { scheduler.sync(schedules) }
+                .onFailure { Log.e(TAG, "알람 등록 실패", it) }
+        }
 
         val registered = runCatching { scheduler.registered() }.getOrDefault(emptyList())
 
@@ -165,7 +195,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun logout() = tokenStore.clear()
+    /**
+     * 로그아웃.
+     *
+     * **캐시를 반드시 지운다.** 캐시에는 집 위치·목적지·일정 제목이 들어 있다.
+     * 기기를 공유하거나 계정을 바꿨을 때 앞 사용자의 동선이 보이면 안 된다.
+     *
+     * 삭제를 `viewModelScope` 로 하면 **지워지지 않는다.** 로그아웃 직후
+     * 액티비티가 끝나고 ViewModel 이 정리되면서 그 코루틴이 취소된다. 그래서
+     * 화면 수명과 분리된 [OfflineCache.wipeDetached] 를 쓴다.
+     *
+     * 교차 계정 노출은 이 삭제가 아니라 조회의 소유자 범위가 막는다. 여기서
+     * 다루는 것은 기기에 남는 **보존 기간**이다.
+     */
+    fun logout() {
+        tokenStore.clear()
+        OfflineCache.wipeDetached(getApplication())
+    }
 
     /** 아바타에 쓸 두 글자. */
     fun avatarInitials(): String {

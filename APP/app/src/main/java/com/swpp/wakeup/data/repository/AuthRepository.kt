@@ -18,6 +18,16 @@ import java.io.IOException
 class AuthRepository(
     private val tokenStore: TokenStore,
     private val api: AuthApi = ApiClient.auth,
+    /**
+     * 로그인 성공 시 **토큰을 저장하기 전에** 부른다.
+     *
+     * 앞 사용자의 캐시를 지운다. 로그아웃 시에도 지우지만 그 경로는 앱이 강제
+     * 종료되면 돌지 않는다. 여기서 한 번 더 지우면 그 구멍이 막힌다.
+     *
+     * **저장 전**인 것이 중요하다. 저장 후에 지우면 새 사용자의 첫 조회 결과와
+     * 경쟁해서 방금 받은 캐시를 날릴 수 있다.
+     */
+    private val onBeforeAuthenticated: suspend () -> Unit = {},
 ) {
 
     sealed interface AuthResult {
@@ -58,6 +68,9 @@ class AuthRepository(
             val response = block()
             val body = response.body()
             if (response.isSuccessful && body != null) {
+                // 토큰을 쓰기 전에 앞 사용자의 흔적을 지운다. 순서가 반대면
+                // 새 사용자의 첫 캐시와 경쟁한다.
+                onBeforeAuthenticated()
                 tokenStore.save(
                     access = body.access,
                     refresh = body.refresh,

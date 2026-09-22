@@ -3,6 +3,7 @@ package com.swpp.wakeup.ui.auth
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.repository.AuthRepository
@@ -22,7 +23,21 @@ import kotlinx.coroutines.launch
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val tokenStore = TokenStore(application)
-    private val repository = AuthRepository(tokenStore)
+
+    /**
+     * 로그인 성공 직전에 앞 사용자의 캐시를 지운다.
+     *
+     * 이 호출은 로그인 코루틴 안에서 **기다려서** 돈다. 그래야 새 사용자의 첫
+     * 조회가 캐시를 쓰기 전에 삭제가 끝난다. 디스크 삭제는 수 밀리초라 이미
+     * 네트워크를 기다리는 사용자에게 보이지 않는다.
+     */
+    private val repository = AuthRepository(
+        tokenStore = tokenStore,
+        onBeforeAuthenticated = {
+            // 소유자를 모르는 상태이므로 전부 지운다. 새 계정의 캐시는 아직 없다.
+            OfflineCache(application, ownerEmail = null).wipe()
+        },
+    )
 
     /** 어떤 화면을 보여줄지. 네비게이션 라이브러리 없이 두 화면만 오간다. */
     enum class Screen { LOGIN, SIGNUP }

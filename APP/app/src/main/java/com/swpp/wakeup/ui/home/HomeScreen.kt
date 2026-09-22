@@ -84,6 +84,12 @@ fun HomeScreen(
             )
         }
 
+        // 캐시로 그린 화면이면 가장 먼저 밝힌다. 알람 시각은 교통 상황에 따라
+        // 바뀌는 값이라, 오래된 값을 지금 값으로 믿으면 지각으로 이어진다.
+        if (state.offline) {
+            item(key = "offline") { OfflineNotice(state.offlineAgeLabel, onRetry) }
+        }
+
         // 집 위치가 없으면 어떤 일정도 알람을 계산할 수 없다. 가장 먼저 알린다.
         if (!state.hasHome) {
             item(key = "no-home") { NoHomeNotice(onSetHomeClick) }
@@ -231,6 +237,48 @@ private fun NoHomeNotice(onClick: () -> Unit) {
             text = "이동 시간을 구하려면 출발지가 필요함. 눌러서 설정",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
+        )
+    }
+}
+
+/**
+ * 저장된 정보로 그렸다는 안내.
+ *
+ * **나이를 함께 적는 것이 핵심이다.** "오프라인" 만 띄우면 사용자는 얼마나 오래된
+ * 값인지 모른다. 알람 시각은 교통 상황에 따라 달라지므로 세 시간 전 값을 지금
+ * 값으로 믿으면 지각한다.
+ *
+ * 기기에 걸린 알람은 그대로 유효하다는 것도 밝힌다 — 오프라인이라고 알람이
+ * 울리지 않을까 걱정할 필요가 없다.
+ */
+@Composable
+private fun OfflineNotice(ageLabel: String?, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Hint))
+            .background(JitColor.Surface2)
+            .clickable(onClick = onRetry)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        JitDotLabel(
+            text = ageLabel?.let { "오프라인 · $it" } ?: "오프라인 · 저장된 정보",
+            dotColor = JitColor.Amber,
+            textColor = JitColor.TextPrimary,
+            fontSize = 12,
+            dotSize = 6.dp,
+        )
+        Text(
+            text = "서버에 닿지 못해 마지막으로 받은 값을 보여줌. 이미 걸린 알람은 그대로 울림",
+            color = JitColor.TextSecondary,
+            fontSize = 11.sp,
+        )
+        Text(
+            text = "눌러서 다시 시도",
+            color = JitColor.Accent,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
         )
     }
 }

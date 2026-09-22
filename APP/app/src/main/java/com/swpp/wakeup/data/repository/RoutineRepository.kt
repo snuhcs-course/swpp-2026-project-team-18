@@ -2,6 +2,7 @@ package com.swpp.wakeup.data.repository
 
 import android.util.Log
 import com.swpp.wakeup.BuildConfig
+import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.BlockSelectionItem
 import com.swpp.wakeup.data.remote.BlockSelectionRequest
@@ -26,6 +27,14 @@ import kotlin.math.abs
  */
 class RoutineRepository(
     private val api: RoutinesApi = ApiClient.routines,
+    /**
+     * 오프라인 캐시. **정의 목록만** 캐시한다.
+     *
+     * 일정별 체크(`eventBlocks`)는 캐시하지 않는다. 그건 편집 대상이고, 오래된
+     * 사본을 편집 시작점으로 주면 사용자가 보지 못한 변경을 덮어쓴다. 오프라인
+     * 에서는 편집을 열지 않는 편이 맞다.
+     */
+    private val cache: OfflineCache? = null,
 ) {
 
     sealed interface RoutineResult<out T> {
@@ -42,11 +51,26 @@ class RoutineRepository(
         ) : RoutineResult<Nothing>
     }
 
-    /** 블록 정의 목록. 일정 문맥이 없으므로 `checked` 는 기본 포함값을 따른다. */
-    suspend fun blocks(): RoutineResult<List<RoutineBlockView>> = guard {
-        val response = api.blocks()
-        val body = unwrap(response) ?: return@guard failure(response)
-        RoutineResult.Success(body.map { it.toView() })
+    /**
+     * 블록 정의 목록. 일정 문맥이 없으므로 `checked` 는 기본 포함값을 따른다.
+     *
+     * **네트워크 우선, 실패하면 캐시.** 오프라인에서 목록을 보는 것은 안전하다 —
+     * 편집은 저장 시점에 서버를 타고, 그때 실패하면 그대로 알려 준다.
+     */
+    suspend fun blocks(): RoutineResult<List<RoutineBlockView>> {
+        val online = guard {
+            val response = api.blocks()
+            val body = unwrap(response) ?: return@guard failure(response)
+            cache?.saveBlocks(body)
+            RoutineResult.Success(body.map { it.toView() })
+        }
+        if (online is RoutineResult.Success) return online
+
+        val cached = cache?.blocks()
+        if (cached != null && cached.hit) {
+            return RoutineResult.Success(cached.items.map { it.toView() })
+        }
+        return online
     }
 
     /**
@@ -128,7 +152,11 @@ class RoutineRepository(
                 }
             ),
         )
-        unwrap(response)?.let { RoutineResult.Success(it) } ?: failure(response)
+        val updated = unwrap(response) ?: return@guard failure(response)
+        // 재계산된 일정을 캐시에도 반영한다. 빠뜨리면 다음 오프라인 조회에서
+        // 체크를 바꾸기 전의 알람 시각이 되살아난다.
+        cache?.saveEvent(updated)
+        RoutineResult.Success(updated)
     }
 
     // --- 내부 -------------------------------------------------------------

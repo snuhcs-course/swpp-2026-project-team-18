@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.compose.compiler)
     // app/google-services.json 을 읽어 리소스를 생성한다. 파일이 없으면 빌드 실패.
     alias(libs.plugins.google.services)
+    // Room 의 DAO·DB 구현을 생성한다.
+    alias(libs.plugins.ksp)
 }
 
 /**
@@ -173,6 +175,13 @@ dependencies {
 
     // 위치. 출발·도착 판별에 쓴다(sensing 패키지).
     implementation(libs.play.services.location)
+
+    // Room. **서버 응답 사본만** 담는 오프라인 캐시다. 정본은 서버이고
+    // 이 DB 를 잃어도 네트워크 왕복 한 번이면 복구된다 — 그래서 마이그레이션을
+    // 쓰지 않고 파괴적 재생성을 택했다(JitDatabase 주석 참고).
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

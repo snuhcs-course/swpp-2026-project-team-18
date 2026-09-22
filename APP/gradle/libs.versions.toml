@@ -32,6 +32,12 @@ firebaseBom = "34.19.0"
 # 이동을 따라가는 동안 화면이 꺼져 있어도 fix 가 끊기지 않아야 한다.
 # Play Services 는 firebase-messaging 이 이미 끌어오므로 새 런타임 의존은 아니다.
 playServicesLocation = "21.3.0"
+# --- Room (오프라인 캐시) ---
+# KSP 는 2.3.0 부터 **Kotlin 버전과 분리된** 자체 번호를 쓴다. 예전의
+# `<kotlin>-<ksp>` 형식(2.2.21-2.0.5 까지)과 섞어 쓰면 플러그인을 찾지 못한다.
+ksp = "2.3.12"
+# 2.x 계열 최신 안정판. Room 3.0 은 좌표가 바뀌고 아직 알파라 쓰지 않는다.
+room = "2.8.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -72,8 +78,16 @@ firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging
 # 위치
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 
+# Room. 오프라인 캐시용이다 — 서버 응답 사본만 담는다.
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 # Compose 컴파일러. AGP 9.3.2 내장 Kotlin(2.3.20)과 버전을 맞춰야 한다.
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlinBundled" }
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
+# Room 의 애노테이션 처리기를 돌린다. kapt 대신 KSP 를 쓰는 이유는 kapt 가
+# 스텁 생성을 거쳐 2배쯤 느리고, Room 이 KSP 를 1급으로 지원하기 때문이다.
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
