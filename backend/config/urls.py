@@ -22,4 +22,8 @@ urlpatterns = [
     path("api/", include("apps.events.urls")),
     # 이동 관측 — 앱이 GPS 로 판별한 실제 출발·도착 시각
     path("api/", include("apps.observations.urls")),
+    # back-spec.md 4.3 아침 루틴 블록 + 블록 관측
+    # events/{id}/blocks 도 여기에 있다. 블록 개념의 소유자가 routines 이고,
+    # events 가 routines 를 import 하면 의존 방향이 뒤집힌다.
+    path("api/", include("apps.routines.urls")),
 ]
