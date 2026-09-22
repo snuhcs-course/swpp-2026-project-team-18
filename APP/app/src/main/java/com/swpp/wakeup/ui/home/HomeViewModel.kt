@@ -11,6 +11,7 @@ import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.local.LocalStores
 import com.swpp.wakeup.data.local.MorningSessionStore
 import com.swpp.wakeup.data.local.OfflineCache
+import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.BlockObservationInput
 import com.swpp.wakeup.data.remote.PlaceSearchItem
@@ -272,6 +273,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 아무것도 지울 수 없다.
         LocalStores.wipeAll(getApplication())
         tokenStore.clear()
+        // 세션 종료 표시를 내린다. 남겨 두면 다음 로그인 직후 MainActivity 가
+        // 그것을 보고 로그인 화면으로 되돌린다 — 로그인이 안 되는 것처럼 보인다.
+        SessionState.clearExpired()
         OfflineCache.wipeDetached(getApplication())
         // 배경 작업도 거둔다. 워커가 로그인 여부를 확인해 아무 일도 하지 않지만,
         // 로그아웃한 기기를 6시간마다 깨울 이유가 없다.

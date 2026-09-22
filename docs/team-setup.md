@@ -744,12 +744,13 @@ ServerWarmup  E  서버가 구버전입니다 (서버 0.1.0 · 앱 0.3.0). 새 �
 | 캘린더 | 목록을 보여주고 **고른 것만** 보낸다. 장소는 찾아 주되 확정하지 않는다 |
 | 리포트 | 약속한 확률과 실제 정시율을 나란히. 표본 부족이면 판정하지 않는다 |
 | 아침 기록 | 알람 해제 시점에 세션이 시작된다. 블록당 탭 한 번(종료)으로 소요와 **그 블록 시작 시점의 슬랙**을 기록해 올린다. 이것이 준비 시간 학습의 유일한 재료다 |
+| 로그인 유지 | 한 번 로그인하면 **로그아웃할 때까지** 유지된다. access 30분이 만료되면 refresh 로 자동 갱신하고, **네트워크 오류로는 로그아웃되지 않는다** |
 
 ### 검증 규모
 
 ```
 백엔드 pytest              432
-앱 단위 테스트             143
+앱 단위 테스트             154
 로컬 HTTP 검증 스크립트     8개 전부 통과 (항목 합계 약 257, 필드 계약 95항목 포함)
 배포 서버 전 기능           82건 통과 · 실패 0 (check_deployed.py)
 DB 기본값 검사              10건 · 위험 0 (check_db_defaults.py)
@@ -762,7 +763,7 @@ CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR �
 ```bash
 cd backend && python -m pytest                       # 432
 cd backend && python scripts/run_local_suite.py      # 8개 스크립트, 서버 기동까지 알아서 한다
-cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 143 + lint
+cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 154 + lint
 ```
 
 ### CI
@@ -819,6 +820,38 @@ CI 는 `.env` 와 `local.properties` 가 **없는** 상태로 돈다. 그래서 
 
 러너는 **아무것도 검사하지 않고 0 을 돌려준 스크립트를 실패로 뒤집는다.** 다만
 건너뜀이 있으면 판정하지 않는다 — 키가 없어 전부 건너뛴 것은 정상이다.
+
+### 로그인 유지 — 무엇이 세션을 끝내는가
+
+토큰은 `TokenStore`(SharedPreferences)에 남고, `LoginActivity` 가 시작할 때
+`isLoggedIn` 을 보고 로그인 화면을 건너뛴다. 서버 설정은 **access 30분 /
+refresh 14일**이다(`SIMPLE_JWT`).
+
+access 가 만료되면 `TokenRefreshAuthenticator` 가 401 을 받아 refresh 로 갱신하고
+요청을 한 번 재시도한다. 여기서 **실패를 한 종류로 보면 안 된다.**
+
+| refresh 응답 | 판정 | 토큰 |
+| --- | --- | --- |
+| 200 + `access` | 갱신 | 새 access 저장 |
+| 400 · 401 · 403 | **거절** | 삭제 → 로그인 화면 |
+| 5xx · 404 · 429 | 보류 | **유지** |
+| IOException·타임아웃 | 보류 | **유지** |
+
+애매한 경우를 유지 쪽으로 기울인 것이 의도다. 잘못 지우면 사용자가 다시
+로그인해야 하고, 잘못 유지하면 다음 요청이 401 을 한 번 더 받을 뿐이다. 비용이
+비대칭이다. 예전에는 모든 실패를 만료로 봐서 **지하철에서 앱을 열면 로그아웃**됐다.
+
+배포 서버에 직접 물어 분기를 맞췄다. 정상 refresh 는 200 이고 본문 키가
+`['access']` 하나, 망가진 토큰은 401, 필드 누락은 400 이다. 같은 refresh 를 두 번
+써도 200 이라 **회전이 꺼져 있다**(`ROTATE_REFRESH_TOKENS` 미설정).
+
+> 서버에서 회전을 켜면 앱도 고쳐야 한다. 앱은 응답의 새 refresh 를 저장하지
+> 않으므로 `BLACKLIST_AFTER_ROTATION` 까지 켜는 순간 전원이 로그아웃된다.
+
+세션이 정말 끝나면 `SessionState` 가 화면에 알리고 `MainActivity` 가 로그인 화면으로
+되돌린다. 이 통보가 없으면 사용자는 홈에 남아 "다시 로그인해야 한다" 만 반복해서
+보고 나갈 길을 스스로 찾아야 한다 — 로그인 유지를 넣는 순간 드러나는 구멍이라
+함께 막았다.
 
 ### 로컬 저장소를 추가하는 사람에게 — 소유자 격리
 

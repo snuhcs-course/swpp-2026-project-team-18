@@ -1,5 +1,7 @@
 package com.swpp.wakeup.data.remote
 
+import android.util.Log
+import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.data.local.TokenStore
 import okhttp3.Authenticator
 import okhttp3.Interceptor
@@ -78,23 +80,56 @@ class TokenRefreshAuthenticator(
                 .build()
         }
 
-        val newAccess = runCatching {
+        return when (val outcome = tryRefresh(refresh)) {
+            is RefreshOutcome.Renewed -> {
+                tokenStore.updateAccess(outcome.access)
+                response.request.newBuilder()
+                    .header("Authorization", "Bearer ${outcome.access}")
+                    .build()
+            }
+
+            is RefreshOutcome.Rejected -> {
+                // 서버가 refresh 를 거절했다. 14일이 지났거나 토큰이 무효다.
+                Log.i(TAG, "세션 종료: ${outcome.reason}")
+                tokenStore.clear()
+                // 화면에 알린다. 알리지 않으면 사용자가 홈에 남아 "다시 로그인해야
+                // 한다" 만 반복해서 보고, 로그인 화면으로 갈 길을 스스로 찾아야 한다.
+                SessionState.markExpired(outcome.reason)
+                null
+            }
+
+            is RefreshOutcome.Undecided -> {
+                // **토큰을 지우지 않는다.** 네트워크가 끊긴 것을 만료로 오인하면
+                // 지하철에서 앱을 열었다는 이유로 로그아웃된다.
+                Log.w(TAG, "갱신 보류: ${outcome.reason}. 토큰을 유지한다")
+                null
+            }
+        }
+    }
+
+    /**
+     * refresh 를 한 번 시도하고 결과를 분류한다. 예외를 밖으로 던지지 않는다.
+     *
+     * **새 refresh 토큰을 저장하지 않는다.** 서버 응답 본문에 `access` 만 있기
+     * 때문이다(배포 서버에서 확인: 본문 키가 `['access']` 하나다). SimpleJWT 의
+     * `ROTATE_REFRESH_TOKENS` 가 꺼져 있어 같은 refresh 를 14일간 재사용할 수 있다.
+     *
+     * 서버에서 회전을 켜면 **여기도 함께 고쳐야 한다.** 응답의 새 refresh 를
+     * 저장하지 않으면 앱이 구 토큰을 계속 보내고, `BLACKLIST_AFTER_ROTATION` 까지
+     * 켜면 그 순간 전원이 로그아웃된다.
+     */
+    private fun tryRefresh(refresh: String): RefreshOutcome {
+        return try {
             val result = kotlinx.coroutines.runBlocking {
                 refreshApi().refresh(RefreshRequest(refresh))
             }
-            if (result.isSuccessful) result.body()?.access else null
-        }.getOrNull()
-
-        if (newAccess.isNullOrBlank()) {
-            // refresh 도 만료됐다. 다시 로그인해야 한다.
-            tokenStore.clear()
-            return null
+            RefreshOutcome.of(
+                code = result.code(),
+                access = result.body()?.access,
+            )
+        } catch (e: Throwable) {
+            RefreshOutcome.of(code = null, access = null, error = e)
         }
-
-        tokenStore.updateAccess(newAccess)
-        return response.request.newBuilder()
-            .header("Authorization", "Bearer $newAccess")
-            .build()
     }
 
     private fun responseCount(response: Response): Int {
@@ -105,5 +140,9 @@ class TokenRefreshAuthenticator(
             prior = prior.priorResponse
         }
         return count
+    }
+
+    private companion object {
+        const val TAG = "TokenRefresh"
     }
 }

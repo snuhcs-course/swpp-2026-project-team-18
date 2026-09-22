@@ -58,6 +58,7 @@ import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
+import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.ui.routines.RoutineEditorScreen
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitTheme
@@ -156,6 +157,19 @@ private fun MainHost(
     val scope = rememberCoroutineScope()
     var showAccountDialog by remember { mutableStateOf(false) }
     var serverStatus by remember { mutableStateOf<String?>(null) }
+
+    // 세션이 끝나면 로그인 화면으로 되돌린다.
+    //
+    // **이것이 없으면 로그인 유지가 함정이 된다.** refresh 가 만료되면
+    // authenticator 가 토큰을 지우는데, 화면은 그것을 모르고 홈에 남아 "다시
+    // 로그인해야 한다" 만 반복해서 보여준다. 앱을 다시 열어도 자동으로 들어오므로
+    // 사용자는 로그인 화면을 볼 방법을 스스로 찾아야 한다.
+    //
+    // 네트워크 실패로는 켜지지 않는다 — 그 판정은 RefreshOutcome 이 한다.
+    val sessionExpired by SessionState.expired.collectAsStateWithLifecycle()
+    LaunchedEffect(sessionExpired) {
+        if (sessionExpired) onLoggedOut()
+    }
 
     // 알림·위치 권한을 한 번 요청한다.
     //

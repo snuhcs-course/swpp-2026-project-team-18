@@ -31,6 +31,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.swpp.wakeup.MainActivity
 import com.swpp.wakeup.R
+import com.swpp.wakeup.data.local.SessionState
+import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitTheme
 import kotlinx.coroutines.launch
@@ -51,6 +53,34 @@ class LoginActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // ------------------------------------------------------------------
+        // 이미 로그인했으면 이 화면을 건너뛴다
+        // ------------------------------------------------------------------
+        //
+        // 토큰은 [TokenStore] 가 디스크에 들고 있고, access 가 만료되면
+        // [com.swpp.wakeup.data.remote.TokenRefreshAuthenticator] 가 refresh 로
+        // 갱신한다. 서버 설정은 access 30분 / refresh 14일이다. 즉 **유지할 재료는
+        // 처음부터 다 있었고** 진입점에서 그것을 보지 않았을 뿐이다.
+        //
+        // `setContent` **앞에서** 판단한다. 뒤에서 하면 로그인 화면이 한 프레임
+        // 그려진 뒤 전환되어 깜빡인다.
+        //
+        // 만료 여부는 검사하지 않는다. refresh 까지 죽었으면 첫 요청이 401 을 받고
+        // authenticator 가 토큰을 지우면서 [SessionState] 를 켜고, MainActivity 가
+        // 그것을 보고 이 화면으로 되돌린다. 클라이언트에서 JWT 를 파싱해 미리
+        // 판단할 수도 있지만, 서버 시계와 어긋나면 **멀쩡한 세션을 버리게** 된다.
+        if (TokenStore(this).isLoggedIn) {
+            // 앞선 세션이 남긴 만료 표시를 내린다. 남아 있으면 들어가자마자
+            // 다시 튕긴다.
+            SessionState.clearExpired()
+            goToMain(nickname = null)
+            return
+        }
+
+        // 여기까지 왔으면 로그인이 필요한 상태다. 앞 세션의 표시를 내려 둔다.
+        SessionState.clearExpired()
+
         enableEdgeToEdge()
 
         // 액티비티 전환을 페이드로 덮는다. 기본 전환은 창이 아래에서
@@ -76,7 +106,10 @@ class LoginActivity : ComponentActivity() {
         }
     }
 
-    /** @param nickname 환영 문구에 쓸 이름. 둘러보기로 들어오면 null 이다. */
+    /**
+     * @param nickname 환영 문구에 쓸 이름. 둘러보기와 **자동 로그인**은 null 이다.
+     *   앱을 다시 열 때마다 "환영합니다" 가 뜨면 성가시다.
+     */
     private fun goToMain(nickname: String?) {
         startActivity(
             Intent(this, MainActivity::class.java).apply {

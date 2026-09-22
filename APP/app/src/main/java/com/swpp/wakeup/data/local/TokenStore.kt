@@ -31,8 +31,21 @@ class TokenStore(context: Context) {
     val email: String?
         get() = prefs.getString(KEY_EMAIL, null)
 
+    /**
+     * 인증된 요청을 보낼 수 있는 상태인가.
+     *
+     * **refresh 토큰도 함께 요구한다.** access 만 있으면 그것이 만료된 순간
+     * 갱신할 재료가 없어서 복구 경로가 사라진다. 앱을 다시 열 때 이 값으로
+     * 로그인 화면을 건너뛰므로(LoginActivity), access 하나만 보고 들어가면
+     * 사용자가 홈에서 오류만 보면서 나갈 길을 못 찾는 상태가 된다.
+     *
+     * access 의 **만료는 검사하지 않는다.** 만료됐으면 첫 요청이 401 을 받고
+     * [com.swpp.wakeup.data.remote.TokenRefreshAuthenticator] 가 갱신한다.
+     * 클라이언트에서 JWT `exp` 를 파싱해 미리 판단할 수도 있지만, 기기 시계가
+     * 서버와 어긋나면 **멀쩡한 세션을 버리게** 된다.
+     */
     val isLoggedIn: Boolean
-        get() = !accessToken.isNullOrBlank()
+        get() = !accessToken.isNullOrBlank() && !refreshToken.isNullOrBlank()
 
     fun save(access: String, refresh: String, email: String, nickname: String) {
         prefs.edit()

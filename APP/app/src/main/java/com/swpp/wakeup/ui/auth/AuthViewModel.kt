@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.data.local.LocalStores
 import com.swpp.wakeup.data.local.OfflineCache
+import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.repository.AuthRepository
@@ -44,6 +45,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             // 그래서 소유자를 가리지 않고 전부 지운다 — 어느 계정의 잔재가
             // 남아 있는지 앱이 확신할 수 없다.
             LocalStores.wipeAll(application)
+            // 앞 세션이 남긴 만료 표시를 내린다. 남아 있으면 로그인에 성공해도
+            // MainActivity 가 곧바로 로그인 화면으로 되돌린다.
+            SessionState.clearExpired()
         },
     )
 
