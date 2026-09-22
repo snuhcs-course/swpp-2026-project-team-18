@@ -61,6 +61,7 @@ fun HomeScreen(
     onAddEventClick: () -> Unit,
     onSetHomeClick: () -> Unit,
     onRoutineClick: () -> Unit,
+    onCalendarClick: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -130,6 +131,45 @@ fun HomeScreen(
         // 항상 보여준다. 일정이 없는 새 계정이 먼저 할 일이 루틴 등록이다 —
         // 블록이 없으면 준비 시간이 한 덩어리라 확률 계산이 시작되지 않는다.
         item(key = "routine") { RoutineShortcut(onRoutineClick) }
+
+        item(key = "calendar") { CalendarShortcut(onCalendarClick) }
+    }
+}
+
+/**
+ * 캘린더 가져오기 입구.
+ *
+ * "가져오기" 라고 쓰고 "동기화" 라고 쓰지 않는다. 동기화는 계속 자동으로
+ * 맞춰진다는 뜻인데, 이 기능은 사용자가 고른 것만 한 번 올린다. 말과 동작이
+ * 다르면 사용자가 캘린더를 지웠을 때 앱에서도 사라질 것이라고 잘못 기대한다.
+ */
+@Composable
+private fun CalendarShortcut(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Button))
+            .background(JitColor.Surface)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(
+                text = "캘린더에서 가져오기",
+                color = JitColor.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "기기 캘린더의 앞으로 2주 일정을 보고 고른 것만 가져옴",
+                color = JitColor.TextSecondary,
+                fontSize = 10.sp,
+            )
+        }
+        Text(text = "›", color = JitColor.TextSecondary, fontSize = 18.sp)
     }
 }
 
@@ -578,6 +618,7 @@ private fun HomeEmptyPreview() {
             onAddEventClick = {},
             onSetHomeClick = {},
             onRoutineClick = {},
+            onCalendarClick = {},
             onRetry = {},
         )
     }
@@ -615,6 +656,7 @@ private fun HomeFilledPreview() {
             onAddEventClick = {},
             onSetHomeClick = {},
             onRoutineClick = {},
+            onCalendarClick = {},
             onRetry = {},
         )
     }

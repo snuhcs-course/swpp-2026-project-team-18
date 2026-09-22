@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from django.db import transaction
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
@@ -18,9 +19,11 @@ from apps.routing import clients
 
 from .models import Event, EventTag
 from .serializers import (
+    CalendarImportSerializer,
     EventSerializer,
     EventTagSerializer,
     EventWriteSerializer,
+    PlaceInputSerializer,
 )
 
 
@@ -101,6 +104,149 @@ class EventRecomputeView(_UserScopedMixin, APIView):
         return Response(EventSerializer(event, context={"request": request}).data)
 
 
+class EventCalendarImportView(_UserScopedMixin, APIView):
+    """POST /api/events/import — 기기 캘린더 일정을 가져온다.
+
+    ## 멱등하다
+
+    `(user, external_id)` 로 upsert 한다. 같은 요청을 다시 보내면 행이 늘지
+    않는다. 동기화는 반복 실행되는 것이 정상이므로 이게 없으면 목록이 사본으로
+    찬다.
+
+    ## 변경이 없으면 재계산하지 않는다
+
+    이게 쿼터를 지키는 핵심이다. 앱이 열릴 때마다 동기화하면, 재계산을 무조건
+    돌 경우 일정 20건짜리 계정이 **한 번 열 때마다 카카오 20콜**을 쓴다. 무료
+    쿼터는 하루 1,000건이다. 제목·시각·장소가 그대로면 계획도 그대로다.
+
+    ## 사용자가 앱에서 고친 것을 덮어쓰지 않는다
+
+    `route_key`·`origin_*`·`tau_override` 는 건드리지 않는다. 캘린더에는 그런
+    정보가 없으므로 매번 빈 값으로 밀면 사용자가 고른 경로와 출발지가 동기화
+    한 번에 사라진다.
+
+    ## 지운 일정이 되살아나는 문제
+
+    앱에서 지운 일정이 캘린더에 남아 있으면 다시 가져올 수 있다. 삭제 이력을
+    두지 않는 대신 **가져오기를 자동으로 돌리지 않는다** — 사용자가 목록에서
+    고른 것만 보낸다. 그러면 되살리는 것도 사용자의 선택이다.
+    """
+
+    # 새 일정마다 카카오 경로를 부른다. 연속 호출로 쿼터를 태우지 못하게 막는다.
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "route"
+
+    def post(self, request):
+        serializer = CalendarImportSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        rows = serializer.validated_data["events"]
+
+        created: list[Event] = []
+        updated: list[Event] = []
+        unchanged: list[Event] = []
+
+        with transaction.atomic():
+            existing = {
+                event.external_id: event
+                for event in Event.objects.filter(
+                    user=request.user,
+                    external_id__in=[r["external_id"] for r in rows],
+                ).select_related("place")
+            }
+
+            for row in rows:
+                place = self._resolve_place(row.get("place"))
+                tag = (
+                    EventTag.objects.filter(key=row["tag_key"]).first()
+                    if row.get("tag_key")
+                    else None
+                )
+                event = existing.get(row["external_id"])
+
+                if event is None:
+                    event = Event.objects.create(
+                        user=request.user,
+                        source=Event.Source.CALENDAR,
+                        external_id=row["external_id"],
+                        title=row["title"],
+                        start_at=row["start_at"],
+                        place=place,
+                        tag=tag,
+                    )
+                    created.append(event)
+                    continue
+
+                # 계획에 영향을 주는 값만 비교한다. 제목은 계획을 바꾸지 않지만
+                # 화면에 보이므로 갱신은 한다 — 재계산 여부와는 따로 판단한다.
+                #
+                # **시각은 분 단위로 비교한다.** 계획은 분 단위로 계산되므로
+                # 초 이하의 차이는 알람을 바꾸지 못한다. 초까지 비교하면 시각을
+                # 미세하게 다르게 보내는 클라이언트가 동기화마다 전건 재계산을
+                # 유발해 카카오 쿼터를 태운다.
+                plan_changed = (
+                    _minute(event.start_at) != _minute(row["start_at"])
+                    or event.place_id != (place.pk if place else None)
+                )
+                display_changed = event.title != row["title"] or event.tag_id != (
+                    tag.pk if tag else None
+                )
+
+                if not plan_changed and not display_changed:
+                    unchanged.append(event)
+                    continue
+
+                event.title = row["title"]
+                # 분이 같으면 저장된 시각을 그대로 둔다. 초만 다른 값을 계속
+                # 덮어쓰면 위의 분 단위 비교가 무의미해진다(매번 새 초가 저장됨).
+                if plan_changed:
+                    event.start_at = row["start_at"]
+                event.place = place
+                event.tag = tag
+                # source 를 calendar 로 승격한다. 직접 만든 일정에 같은
+                # external_id 가 붙는 경로는 없지만, 있었다면 출처가 바뀐 것이
+                # 사실이다.
+                event.source = Event.Source.CALENDAR
+                event.save()
+
+                if plan_changed:
+                    updated.append(event)
+                else:
+                    # 제목만 바뀌었다. 계획은 그대로이므로 카카오를 부르지 않는다.
+                    unchanged.append(event)
+
+            # 계획 계산은 트랜잭션 안에서 한다. 일정은 들어갔는데 계획이 없는
+            # 중간 상태를 남기지 않는다.
+            for event in created + updated:
+                planning_services.compute_and_store(event)
+
+        touched = created + updated + unchanged
+        for event in touched:
+            event.refresh_from_db()
+
+        return Response(
+            {
+                "created": len(created),
+                "updated": len(updated),
+                "unchanged": len(unchanged),
+                # 계산을 실제로 돌린 건수. 쿼터 소모량이 눈에 보여야 한다.
+                "recomputed": len(created) + len(updated),
+                "results": EventSerializer(
+                    touched, many=True, context={"request": request}
+                ).data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def _resolve_place(self, place_data):
+        if not place_data:
+            return None
+        inner = PlaceInputSerializer(data=place_data)
+        inner.is_valid(raise_exception=True)
+        return inner.resolve()
+
+
 class EventTagListView(APIView):
     """GET /api/events/tags — 태그 목록. 일정 추가 화면의 선택지다."""
 
@@ -119,6 +265,16 @@ from .geo import (  # noqa: E402,F401
     KOREA_LNG_RANGE,
     in_service_area,
 )
+
+
+def _minute(value):
+    """초 이하를 버린다. 캘린더 가져오기의 변경 판정에 쓴다.
+
+    알람 계획은 분 단위로 계산된다. 초까지 비교하면 시각을 미세하게 다르게
+    보내는 클라이언트 때문에 동기화마다 전건이 "변경" 으로 잡혀 카카오 쿼터를
+    태운다. 그 비용은 사용자에게 보이지 않으면서 하루 한도를 말린다.
+    """
+    return None if value is None else value.replace(second=0, microsecond=0)
 
 
 def _error(code: str, message: str, http_status: int) -> Response:

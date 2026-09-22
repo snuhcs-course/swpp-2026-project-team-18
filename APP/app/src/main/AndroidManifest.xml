@@ -39,6 +39,19 @@
     -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
+    <!--
+      기기 캘린더에서 일정을 가져온다.
+
+      **읽기만 요청한다.** WRITE_CALENDAR 는 받지 않는다 — 이 앱은 캘린더를
+      고칠 이유가 없고, 쓰기 권한을 요청하면 사용자가 "내 캘린더를 건드리겠다"
+      로 읽어 거절할 이유가 생긴다.
+
+      가져오기는 **사용자가 목록에서 고른 것만** 서버로 보낸다. 자동으로
+      전부 올리지 않는다 — 캘린더에는 일정 제목이 들어 있고, 그건 민감할 수
+      있는 개인 정보다. 권한이 없어도 직접 입력으로 앱을 쓸 수 있다.
+    -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+
     <!-- 위치 없이도 앱은 쓸 수 있다. 판별 기능만 비활성된다. -->
     <uses-feature
         android:name="android.hardware.location.gps"

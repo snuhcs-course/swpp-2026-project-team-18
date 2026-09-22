@@ -532,6 +532,104 @@ def main() -> int:
         f"{(patched or {}).get('included_by_default')}",
     )
 
+    # --- 6.5 캘린더 가져오기 ----------------------------------------------
+    print("\n[6.5] 캘린더 가져오기 — CalendarEventInput / CalendarImportResponse")
+    import_req = dto_wire_names(events_api, "CalendarEventInput")
+    import_res = dto_wire_names(events_api, "CalendarImportResponse")
+
+    check(
+        "앱이 external_id 를 보낸다",
+        "external_id" in import_req,
+        f"{import_req} — 없으면 동기화마다 사본이 쌓인다",
+    )
+    check(
+        "앱이 external_id 를 읽는다",
+        "external_id" in event_fields,
+        f"{event_fields} — 없으면 '이미 가져온 일정' 을 구분할 수 없다",
+    )
+
+    cal_start = (datetime.now(KST) + timedelta(days=5)).replace(
+        hour=10, minute=30, second=0, microsecond=0
+    )
+    payload = {
+        "events": [
+            {
+                "external_id": "ctr-cal-1:1",
+                "title": "가져온 수업",
+                "start_at": cal_start.isoformat(),
+                "place": DEST,
+            }
+        ]
+    }
+    # 앱이 실제로 보내는 필드 이름만 담았는지.
+    sent = set(payload["events"][0])
+    check(
+        "앱 요청 DTO 이름이 본문과 일치",
+        sent <= set(import_req),
+        f"앱={sorted(import_req)} 요청={sorted(sent)}",
+    )
+
+    st, body = api("/api/events/import", "POST", payload)
+    if check("가져오기 200", st == 200, f"status={st} body={str(body)[:200]}"):
+        compare("가져오기 응답", import_res, body)
+        check(
+            "created=1",
+            body.get("created") == 1,
+            f"created={body.get('created')} updated={body.get('updated')}",
+        )
+        check(
+            "results 가 일정 객체 목록",
+            isinstance(body.get("results"), list)
+            and body["results"]
+            and "alarm_plan" in body["results"][0],
+            f"results={str(body.get('results'))[:160]}",
+        )
+        check(
+            "external_id 가 응답에 실려 온다",
+            (body.get("results") or [{}])[0].get("external_id") == "ctr-cal-1:1",
+            f"{(body.get('results') or [{}])[0].get('external_id')}",
+        )
+        check(
+            "source=calendar",
+            (body.get("results") or [{}])[0].get("source") == "calendar",
+            f"{(body.get('results') or [{}])[0].get('source')}",
+        )
+
+        # 멱등성과 쿼터. 같은 요청을 다시 보내면 행이 늘지 않고 재계산도 없다.
+        st2, again = api("/api/events/import", "POST", payload)
+        check("재전송 200", st2 == 200, f"status={st2}")
+        check(
+            "재전송은 행을 늘리지 않는다",
+            again.get("created") == 0 and again.get("unchanged") == 1,
+            f"created={again.get('created')} unchanged={again.get('unchanged')}",
+        )
+        check(
+            "변경이 없으면 재계산하지 않는다 (카카오 쿼터)",
+            again.get("recomputed") == 0,
+            f"recomputed={again.get('recomputed')} — 0 이어야 한다",
+        )
+
+    st, _ = api(
+        "/api/events/import",
+        "POST",
+        {
+            "events": [
+                {
+                    "external_id": "ctr-cal-past",
+                    "title": "지난 일정",
+                    "start_at": (datetime.now(KST) - timedelta(days=1)).isoformat(),
+                }
+            ]
+        },
+    )
+    check("지난 일정은 400", st == 400, f"status={st}")
+
+    st, _ = api("/api/events/import", "POST", {"events": []}, auth=True)
+    check("빈 배치는 400", st == 400, f"status={st}")
+
+    st, _ = api("/api/events/import", "POST", payload, auth=False)
+    check("토큰 없이 401", st == 401, f"status={st}")
+
     # --- 7. 오류 상세가 앱 칸으로 갈 수 있는가 ----------------------------
     print("\n[7] 오류 상세 — 입력칸 아래에 붙일 수 있어야 한다")
     st, err = api(

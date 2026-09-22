@@ -52,6 +52,21 @@ interface EventsApi {
     @POST("api/events/{id}/recompute")
     suspend fun recompute(@Path("id") id: Long): Response<EventDto>
 
+    /**
+     * 기기 캘린더 일정을 가져온다.
+     *
+     * **멱등하다.** `external_id` 로 upsert 하므로 같은 요청을 다시 보내도 행이
+     * 늘지 않는다. 서버는 제목·시각·장소가 그대로인 일정을 재계산하지 않는다 —
+     * 그게 없으면 동기화마다 카카오 쿼터를 일정 수만큼 먹는다.
+     *
+     * **전부 통과하거나 전부 실패한다.** 한 건이 잘못되면 400 이고 아무것도
+     * 들어가지 않는다. 절반만 반영되면 사용자가 무엇이 들어갔는지 알 수 없다.
+     */
+    @POST("api/events/import")
+    suspend fun importCalendar(
+        @Body body: CalendarImportRequest,
+    ): Response<CalendarImportResponse>
+
     @GET("api/events/tags")
     suspend fun tags(): Response<List<EventTagDto>>
 
@@ -128,7 +143,15 @@ data class EventDto(
     val id: Long,
     val title: String,
     @SerializedName("start_at") val startAt: String,
+    /** `manual` / `calendar` / `nlp` */
     val source: String,
+    /**
+     * 캘린더에서 가져온 일정의 원본 식별자. 직접 입력이면 null.
+     *
+     * 가져오기 화면이 **이미 가져온 일정**을 알아야 기본 선택에서 뺄 수 있다.
+     * 그러지 않으면 앱에서 지운 일정이 다음 가져오기에서 되살아난다.
+     */
+    @SerializedName("external_id") val externalId: String? = null,
     val place: PlaceDto?,
     val tag: EventTagDto?,
     @SerializedName("tau_override") val tauOverride: Double?,
@@ -318,6 +341,46 @@ data class PrepBlockDto(
     @SerializedName("observation_count") val observationCount: Int = 0,
     /** `observed` 또는 `declared` */
     val source: String? = null,
+)
+
+/** 캘린더 가져오기 요청. 서버 `CalendarImportSerializer` 와 짝이다. */
+data class CalendarImportRequest(
+    val events: List<CalendarEventInput>,
+) {
+    companion object {
+        /** 서버 배치 상한. 넘기면 400 이다 */
+        const val MAX_ITEMS = 50
+    }
+}
+
+data class CalendarEventInput(
+    /**
+     * 중복 방지의 축. 같은 값을 다시 보내면 서버가 갱신만 한다.
+     *
+     * 앱은 `"<캘린더 이벤트 id>:<시작 밀리초>"` 를 쓴다. 반복 일정은 발생분마다
+     * 같은 이벤트 id 를 공유하므로 id 만으로는 매주 수업이 한 건으로 합쳐진다.
+     */
+    @SerializedName("external_id") val externalId: String,
+    val title: String,
+    /** ISO 8601 (오프셋 포함) */
+    @SerializedName("start_at") val startAt: String,
+    /** 좌표로 해석된 장소. 없으면 서버 계획이 `no_place` 가 된다 */
+    val place: PlaceInput? = null,
+    @SerializedName("tag_key") val tagKey: String? = null,
+)
+
+data class CalendarImportResponse(
+    val created: Int = 0,
+    val updated: Int = 0,
+    val unchanged: Int = 0,
+    /**
+     * 실제로 알람을 다시 계산한 건수.
+     *
+     * 이 값이 곧 소모한 카카오 경로 쿼터다. 화면에 보여 줄 필요는 없지만
+     * 로그로 남겨야 "왜 쿼터가 말랐는지" 를 나중에 설명할 수 있다.
+     */
+    val recomputed: Int = 0,
+    val results: List<EventDto> = emptyList(),
 )
 
 data class PlaceSearchResponse(

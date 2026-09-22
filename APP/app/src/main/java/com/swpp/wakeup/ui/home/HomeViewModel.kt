@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.background.JitWork
+import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.PlaceSearchItem
@@ -14,8 +15,10 @@ import com.swpp.wakeup.data.repository.RoutineRepository
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.BlockDraft
+import com.swpp.wakeup.domain.model.CalendarImportState
 import com.swpp.wakeup.domain.model.DropCost
 import com.swpp.wakeup.domain.model.EventSection
+import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.RoutineEditorState
 import com.swpp.wakeup.sensing.CurrentLocation
 import com.swpp.wakeup.sensing.TripObservationQueue
@@ -23,11 +26,13 @@ import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.nav.NavState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -245,6 +250,155 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openHomeSetup() {
         _nav.update { it.copy(stack = it.stack + AppRoute.HomeSetup, forward = true) }
+    }
+
+    // --- 캘린더 가져오기 --------------------------------------------------
+
+    private val _calendarImport = MutableStateFlow(CalendarImportState())
+    val calendarImport: StateFlow<CalendarImportState> = _calendarImport.asStateFlow()
+
+    fun openCalendarImport() {
+        _nav.update { it.copy(stack = it.stack + AppRoute.CalendarImport, forward = true) }
+        _calendarImport.value = CalendarImportState(loading = true)
+        loadCalendarCandidates()
+    }
+
+    /**
+     * 캘린더를 읽어 후보를 만든다.
+     *
+     * 권한이 없으면 **읽지 않고** 그 사실을 상태에 담는다. 권한 없음과 "앞으로
+     * 일정이 없음" 은 사용자가 할 일이 완전히 다르다.
+     */
+    fun loadCalendarCandidates() {
+        val app = getApplication<Application>()
+        if (!DeviceCalendar.hasPermission(app)) {
+            _calendarImport.value = CalendarImportState(permissionDenied = true)
+            return
+        }
+
+        _calendarImport.update {
+            it.copy(loading = true, permissionDenied = false, error = null)
+        }
+        viewModelScope.launch {
+            // ContentResolver 질의는 디스크를 탄다. 메인 스레드에서 하면 목록이
+            // 큰 캘린더에서 프레임이 끊긴다.
+            val events = withContext(Dispatchers.IO) { DeviceCalendar.read(app) }
+
+            when (val result = repository.buildImportCandidates(events)) {
+                is EventRepository.Result.Success -> {
+                    _calendarImport.update {
+                        it.copy(loading = false, error = null, candidates = result.data)
+                    }
+                    resolvePlaces(result.data)
+                }
+
+                is EventRepository.Result.Failure -> _calendarImport.update {
+                    it.copy(loading = false, error = result.message)
+                }
+            }
+        }
+    }
+
+    /**
+     * 장소 문자열을 좌표로 찾아 본다.
+     *
+     * **확정하지 않는다.** 결과를 화면에 보여 사용자가 확인·해제하게 한다.
+     * 첫 검색 결과를 말없이 쓰면 엉뚱한 좌표로 알람이 잡히고, 사용자는 알람이
+     * 틀린 뒤에야 안다.
+     *
+     * 선택된 것만, 그리고 상한까지만 찾는다. 후보 200건을 전부 검색하면 서버의
+     * 카카오 검색 호출이 200번이다.
+     */
+    private fun resolvePlaces(candidates: List<ImportCandidate>) {
+        val targets = candidates
+            .filter { it.selected && it.source.location != null }
+            .take(MAX_PLACE_LOOKUPS)
+        if (targets.isEmpty()) return
+
+        viewModelScope.launch {
+            targets.forEach { candidate ->
+                val query = candidate.source.location ?: return@forEach
+                markResolving(candidate.externalId, true)
+                val found = when (val r = repository.searchPlaces(query)) {
+                    is EventRepository.Result.Success -> r.data.firstOrNull()
+                    is EventRepository.Result.Failure -> null
+                }
+                _calendarImport.update { state ->
+                    state.copy(
+                        candidates = state.candidates.map {
+                            if (it.externalId == candidate.externalId) {
+                                it.copy(resolvedPlace = found, resolving = false)
+                            } else {
+                                it
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private fun markResolving(externalId: String, resolving: Boolean) {
+        _calendarImport.update { state ->
+            state.copy(
+                candidates = state.candidates.map {
+                    if (it.externalId == externalId) it.copy(resolving = resolving) else it
+                }
+            )
+        }
+    }
+
+    fun toggleImportCandidate(externalId: String) {
+        _calendarImport.update { state ->
+            state.copy(
+                error = null,
+                candidates = state.candidates.map {
+                    if (it.externalId == externalId) it.copy(selected = !it.selected) else it
+                },
+            )
+        }
+    }
+
+    /** 권한 요청 결과를 받는다. 허용됐으면 바로 읽는다. */
+    fun onCalendarPermissionResult(granted: Boolean) {
+        if (granted) loadCalendarCandidates()
+        else _calendarImport.update { it.copy(permissionDenied = true, loading = false) }
+    }
+
+    fun submitCalendarImport() {
+        val state = _calendarImport.value
+        if (!state.canImport) return
+        val selected = state.candidates.filter { it.selected }
+
+        _calendarImport.update { it.copy(importing = true, error = null) }
+        viewModelScope.launch {
+            when (val result = repository.importCalendar(selected)) {
+                is EventRepository.Result.Success -> {
+                    val data = result.data
+                    _calendarImport.update {
+                        it.copy(
+                            importing = false,
+                            resultLabel = buildString {
+                                append("${data.created}건 추가")
+                                if (data.updated > 0) append(", ${data.updated}건 갱신")
+                                if (data.unchanged > 0) append(", ${data.unchanged}건 그대로")
+                            },
+                            done = true,
+                        )
+                    }
+                    // 알람 등록까지 갱신한다. 가져온 일정의 알람이 걸려야 의미가 있다.
+                    refresh()
+                }
+
+                is EventRepository.Result.Failure -> _calendarImport.update {
+                    it.copy(importing = false, error = result.message)
+                }
+            }
+        }
+    }
+
+    fun resetCalendarImport() {
+        _calendarImport.value = CalendarImportState()
     }
 
     // --- 루틴 블록 --------------------------------------------------------
@@ -1011,5 +1165,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          */
         const val DEFINITION_NOTICE =
             "저장함 · 이미 계산된 알람은 그대로다. 알람 화면의 \"다시 계산\" 으로 반영한다"
+
+        /**
+         * 가져오기 화면에서 장소를 찾아 볼 최대 건수.
+         *
+         * 후보 하나마다 서버가 카카오 검색을 한 번 부른다. 2주치 캘린더가
+         * 빽빽한 사용자는 후보가 100건을 넘을 수 있어서 전부 찾으면 검색
+         * 쿼터를 한 화면에서 태운다. 선택된 것부터 이만큼만 찾고, 나머지는
+         * 사용자가 켜면 다음 조회에서 찾는다.
+         */
+        const val MAX_PLACE_LOOKUPS = 20
     }
 }

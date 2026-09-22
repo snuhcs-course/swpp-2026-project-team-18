@@ -42,8 +42,10 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
+import com.swpp.wakeup.ui.calendar.CalendarImportScreen
 import com.swpp.wakeup.ui.alarm.RiskChoiceScreen
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.ui.events.AddEventScreen
@@ -121,6 +123,7 @@ private fun MainHost(
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
     val routineState by viewModel.routine.collectAsStateWithLifecycle()
+    val importState by viewModel.calendarImport.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -188,6 +191,20 @@ private fun MainHost(
             snackbarHostState.showSnackbar("집 위치를 저장했습니다")
         }
     }
+    LaunchedEffect(importState.done) {
+        if (importState.done) {
+            val label = importState.resultLabel
+            viewModel.goBack()
+            viewModel.resetCalendarImport()
+            snackbarHostState.showSnackbar(label ?: "캘린더에서 가져왔습니다")
+        }
+    }
+
+    // 캘린더 권한은 **사용자가 가져오기를 누를 때만** 요청한다. 앱을 처음 열
+    // 때 함께 묶어 요청하면 무엇에 쓰는지 모르는 상태로 거절하게 된다.
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> viewModel.onCalendarPermissionResult(granted) }
 
     Scaffold(
         containerColor = JitColor.Bg,
@@ -225,6 +242,7 @@ private fun MainHost(
                         viewModel.openHomeSetup()
                     },
                     onRoutineClick = viewModel::openRoutineEditor,
+                    onCalendarClick = viewModel::openCalendarImport,
                     onRetry = viewModel::refresh,
                     modifier = Modifier.padding(innerPadding),
                 )
@@ -291,6 +309,18 @@ private fun MainHost(
                 AppRoute.RoutineEditor, is AppRoute.EventBlocks -> RoutineHost(
                     state = routineState,
                     viewModel = viewModel,
+                    modifier = Modifier.padding(innerPadding),
+                )
+
+                AppRoute.CalendarImport -> CalendarImportScreen(
+                    state = importState,
+                    onBack = viewModel::goBack,
+                    onToggle = viewModel::toggleImportCandidate,
+                    onRequestPermission = {
+                        calendarPermissionLauncher.launch(DeviceCalendar.PERMISSION)
+                    },
+                    onRetry = viewModel::loadCalendarCandidates,
+                    onImport = viewModel::submitCalendarImport,
                     modifier = Modifier.padding(innerPadding),
                 )
             }

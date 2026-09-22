@@ -51,6 +51,14 @@ sealed interface AppRoute {
      * 뭘 할지" 라서 저장하면 **그 일정만 즉시 재계산**된다.
      */
     data class EventBlocks(val eventId: Long) : AppRoute
+
+    /**
+     * 기기 캘린더에서 일정 가져오기.
+     *
+     * **사용자가 고른 것만 서버로 보낸다.** 캘린더에는 일정 제목이 들어 있고
+     * 그건 민감할 수 있다. 자동 동기화를 두지 않은 이유다.
+     */
+    data object CalendarImport : AppRoute
 }
 
 /**

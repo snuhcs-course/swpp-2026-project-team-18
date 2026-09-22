@@ -119,6 +119,10 @@ class EventSerializer(serializers.ModelSerializer):
             "title",
             "start_at",
             "source",
+            # 캘린더에서 가져온 일정의 원본 식별자. 직접 입력이면 null 이다.
+            # 클라이언트가 "이미 가져온 일정" 을 알아야 목록에서 중복 선택을
+            # 막을 수 있다.
+            "external_id",
             "place",
             "tag",
             "tau_override",
@@ -129,7 +133,7 @@ class EventSerializer(serializers.ModelSerializer):
             "alarm_plan",
             "created_at",
         )
-        read_only_fields = ("id", "source", "created_at")
+        read_only_fields = ("id", "source", "external_id", "created_at")
 
     def get_alarm_plan(self, obj):
         plan = getattr(obj, "alarm_plan", None)
@@ -312,3 +316,87 @@ class EventWriteSerializer(serializers.ModelSerializer):
         inner = PlaceInputSerializer(data=place_data)
         inner.is_valid(raise_exception=True)
         return inner.resolve()
+
+
+class CalendarEventInputSerializer(serializers.Serializer):
+    """기기 캘린더에서 가져온 일정 한 건.
+
+    `EventWriteSerializer` 와 따로 두는 이유가 셋이다.
+
+    1. **`external_id` 가 필수다.** 이 값이 중복 방지의 축이다. 없으면 같은
+       캘린더 일정이 동기화마다 새로 쌓인다.
+    2. `route_key`·`origin_*`·`tau_override` 를 받지 않는다. 그건 사용자가 앱에서
+       고른 값이고, 가져오기가 덮어써서는 안 된다 — 캘린더에는 그런 정보가
+       없으므로 매번 빈 값으로 밀어 사용자 설정을 지우게 된다.
+    3. **지난 일정을 거부한다.** 과거 시각으로 계획을 만들면 알람이 즉시 울릴
+       시각으로 계산되거나 등록에서 조용히 버려진다. 클라이언트가 시간 창을
+       좁혀 보내야 한다.
+    """
+
+    external_id = serializers.CharField(max_length=120)
+    title = serializers.CharField(max_length=120)
+    start_at = serializers.DateTimeField()
+    place = PlaceInputSerializer(required=False, allow_null=True)
+    tag_key = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+
+    def validate_external_id(self, value: str) -> str:
+        key = (value or "").strip()
+        if not key:
+            raise serializers.ValidationError("external_id 를 비울 수 없다.")
+        return key
+
+    def validate_title(self, value: str) -> str:
+        title = (value or "").strip()
+        if not title:
+            raise serializers.ValidationError("제목을 입력해야 한다.")
+        return title
+
+    def validate_tag_key(self, value):
+        key = (value or "").strip()
+        if not key:
+            return None
+        if not EventTag.objects.filter(key=key).exists():
+            raise serializers.ValidationError(f"없는 태그다: {key}")
+        return key
+
+    def validate_start_at(self, value):
+        from django.utils import timezone
+
+        if value <= timezone.now():
+            raise serializers.ValidationError(
+                "지난 일정은 가져올 수 없다. 앞으로의 일정만 보낼 것."
+            )
+        return value
+
+
+class CalendarImportSerializer(serializers.Serializer):
+    """캘린더 가져오기 배치.
+
+    **전부 검증한 뒤 전부 적용한다.** 중간에 실패해 절반만 들어가면 사용자가
+    무엇이 반영됐는지 알 수 없고, 다시 시도했을 때 어디서부터인지도 모른다.
+
+    상한이 있는 이유는 쿼터다. 새로 만들어진 일정마다 카카오 경로를 한 번
+    부르므로, 한 요청이 무료 쿼터(일 1,000건)의 상당 부분을 먹을 수 있다.
+    """
+
+    events = CalendarEventInputSerializer(many=True)
+
+    MAX_ITEMS = 50
+
+    def validate_events(self, value):
+        if not value:
+            raise serializers.ValidationError("가져올 일정이 없다.")
+        if len(value) > self.MAX_ITEMS:
+            raise serializers.ValidationError(
+                f"한 번에 {self.MAX_ITEMS}건까지 가져올 수 있다."
+            )
+
+        # 같은 요청 안의 중복. 그대로 두면 update_or_create 가 두 번 돌아
+        # 뒤의 것이 앞의 것을 덮어쓰는데, 어느 쪽이 남는지가 순서에 달린다.
+        seen: set[str] = set()
+        for row in value:
+            key = row["external_id"]
+            if key in seen:
+                raise serializers.ValidationError(f"external_id 가 중복됐다: {key}")
+            seen.add(key)
+        return value

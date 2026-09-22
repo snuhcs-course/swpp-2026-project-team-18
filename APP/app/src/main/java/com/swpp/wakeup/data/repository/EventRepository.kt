@@ -2,9 +2,13 @@ package com.swpp.wakeup.data.repository
 
 import android.util.Log
 import com.swpp.wakeup.BuildConfig
+import com.swpp.wakeup.calendar.CalendarEvent
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.remote.AlarmPlanDto
 import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.data.remote.CalendarEventInput
+import com.swpp.wakeup.data.remote.CalendarImportRequest
+import com.swpp.wakeup.data.remote.CalendarImportResponse
 import com.swpp.wakeup.data.remote.EventCreateRequest
 import com.swpp.wakeup.data.remote.EventDto
 import com.swpp.wakeup.data.remote.EventTagDto
@@ -20,6 +24,7 @@ import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ConfidenceView
 import com.swpp.wakeup.domain.model.EventSection
+import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.PlanRow
 import com.swpp.wakeup.domain.model.PrepBlockLine
 import com.swpp.wakeup.domain.model.RouteChoice
@@ -343,6 +348,82 @@ class EventRepository(
     }
 
     /**
+     * 기기 캘린더에서 읽은 후보를 만든다.
+     *
+     * 이미 가져온 것(`external_id` 가 서버에 있는 것)은 기본 선택에서 뺀다 —
+     * 앱에서 지운 일정이 다시 살아나는 것이 가장 짜증나는 경우다. 다시 보내도
+     * 서버가 갱신만 하므로 위험하지는 않고, 사용자가 켜면 들어간다.
+     *
+     * 이미 가져온 목록은 **서버 조회가 실패하면 비운다.** 그때는 전부 "새 것"
+     * 으로 보이는데, 잘못 보내도 서버가 upsert 하므로 중복이 생기지 않는다.
+     */
+    suspend fun buildImportCandidates(
+        events: List<CalendarEvent>,
+    ): Result<List<ImportCandidate>> = guard {
+        val known = unwrap(api.list())
+            ?.results
+            ?.mapNotNull { it.externalId?.takeIf(String::isNotBlank) }
+            ?.toSet()
+            ?: emptySet()
+
+        val zone = ZoneId.systemDefault()
+        Result.Success(
+            events.map { event ->
+                val imported = event.externalId in known
+                ImportCandidate(
+                    source = event,
+                    selected = !imported,
+                    alreadyImported = imported,
+                    whenLabel = importWhenLabel(event.startAtMillis, zone),
+                )
+            }
+        )
+    }
+
+    /**
+     * 고른 후보를 서버로 보낸다.
+     *
+     * 응답의 일정을 캐시에 넣는다 — 가져온 직후 오프라인이 되어도 목록이 보인다.
+     */
+    suspend fun importCalendar(
+        candidates: List<ImportCandidate>,
+    ): Result<CalendarImportResponse> = guard {
+        if (candidates.isEmpty()) return@guard Result.Failure("가져올 일정을 고르지 않았다.")
+
+        val body = CalendarImportRequest(
+            events = candidates.map { candidate ->
+                CalendarEventInput(
+                    externalId = candidate.externalId,
+                    title = candidate.source.title,
+                    startAt = candidate.source.startAtIso,
+                    place = candidate.resolvedPlace?.let {
+                        PlaceInput(
+                            name = it.name,
+                            lat = it.lat,
+                            lng = it.lng,
+                            address = it.address,
+                            kakaoPlaceId = it.kakaoPlaceId,
+                        )
+                    },
+                    // 태그는 캘린더에서 알 수 없다. 서버가 프로필 기본 τ 를 쓴다.
+                    tagKey = null,
+                )
+            }
+        )
+
+        val response = api.importCalendar(body)
+        val result = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
+
+        result.results.forEach { cache?.saveEvent(it) }
+        Log.i(
+            TAG,
+            "캘린더 가져오기: 추가 ${result.created} 갱신 ${result.updated} " +
+                "그대로 ${result.unchanged} (재계산 ${result.recomputed})",
+        )
+        Result.Success(result)
+    }
+
+    /**
      * 캐시를 통째로 지운다. **로그아웃·계정 전환에서 반드시 부른다.**
      *
      * 캐시에는 집 위치와 다니는 장소가 들어 있다. 기기를 공유하거나 계정을
@@ -415,6 +496,18 @@ private val DATE_FORMAT = DateTimeFormatter.ofPattern("M월 d일")
 private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 
 private fun dayLabel(date: LocalDate): String = DAY_NAMES[date.dayOfWeek.value - 1]
+
+/**
+ * 가져오기 후보의 시각 표시. "10월 5일 월 09:00"
+ *
+ * 홈 목록과 달리 **날짜를 반드시 보여준다.** 후보는 2주치가 섞여 있어서 시각만
+ * 보면 언제 것인지 알 수 없다.
+ */
+private fun importWhenLabel(startAtMillis: Long, zone: ZoneId): String {
+    val local = java.time.Instant.ofEpochMilli(startAtMillis).atZone(zone)
+    return "${local.format(DATE_FORMAT)} ${dayLabel(local.toLocalDate())} " +
+        local.format(TIME_FORMAT)
+}
 
 /**
  * 경로 후보를 화면용으로 바꾼다.
