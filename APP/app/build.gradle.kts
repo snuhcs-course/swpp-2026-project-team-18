@@ -84,8 +84,14 @@ android {
         applicationId = "com.swpp.wakeup"
         minSdk = 34
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        // 서버 APP_VERSION 과 같은 자리수를 쓴다. 실기기에서 "어느 빌드인가" 를
+        // 서버 버전과 나란히 읽을 수 있어야 원인을 좁힐 수 있다.
+        //   0.1.0  P1 — 고정 규칙 알람
+        //   0.2.0  P2 — 분포 기반 확신도 알람, 루틴 블록
+        //   0.3.0  프로토타입 완성 — 근거 카드, 오프라인 캐시, 배경 동기화,
+        //          캘린더 가져오기, 주간 리포트
+        versionName = "0.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

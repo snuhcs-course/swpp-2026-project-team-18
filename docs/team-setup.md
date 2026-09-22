@@ -18,10 +18,13 @@
 
 ```bash
 curl https://justintime-api.onrender.com/api/health
-# {"ok":true,"version":"0.1.0"}
+# {"ok":true,"version":"0.3.0"}
 ```
 
-전 기능 확인 (계정 생성 → 경로 → 알람 → 관측까지 53개 항목):
+**version 이 0.3.0 미만이면 배포가 뒤처진 것이다.** 200 이 온다고 새 코드라는
+뜻이 아니다 — 판별 방법은 8절에 있다.
+
+전 기능 확인 (계정 생성 → 경로 → 알람 → 관측까지):
 
 ```bash
 cd backend
@@ -190,7 +193,7 @@ devServerHost=192.168.0.12
 
    ```bash
    curl https://justintime-api.onrender.com/api/health
-   # {"ok":true,"version":"0.1.0"}
+   # {"ok":true,"version":"0.3.0"}
    ```
 
 6. 데모 계정을 만든다. 두 방법이 있고 결과는 같다.
@@ -421,17 +424,57 @@ python scripts/check_same_db.py
 
 | 스크립트 | 대상 | 용도 |
 | --- | --- | --- |
-| `check_deployed.py` | **배포 서버** | 전 기능 51개 항목. HTTP 만 쓰므로 Django 설정이 필요 없다. **어느 DB 에 붙었는지는 보지 않는다** |
+| `check_deployed.py` | **배포 서버** | 전 기능. HTTP 만 쓰므로 Django 설정이 필요 없다. **어느 DB 에 붙었는지는 보지 않는다** |
 | `check_same_db.py` | 배포 서버 + 내 DB | 둘이 같은 DB 인지. API 로 쓰고 DB 에서 직접 읽어 대조 |
+| `check_app_contract.py` | 로컬 서버 + **앱 소스** | 앱 DTO 필드 이름이 서버 응답과 맞는지 83개 항목. 아래 설명 참고 |
 | `check_route_api.py` | 로컬 서버 | 경로 후보·선택 33개 항목 |
 | `check_origin_api.py` | 로컬 서버 | 출발지 선택 17개 항목 |
+| `check_routines_api.py` | 로컬 서버 | 루틴 블록 CRUD·일정별 체크·블록 관측 45개 항목 |
 | `check_events_api.py` | 로컬 서버 | 일정 CRUD |
 | `check_observations_api.py` | 로컬 서버 | 관측 업로드 |
+| `check_timezone.py` | 로컬 서버 | KST↔UTC 변환. 어긋나면 알람이 9시간 틀어진다 |
+| `check_auth_api.py` | 로컬 서버 | 회원가입·로그인·토큰 갱신 |
 | `check_external_apis.py` | 외부 API | 카카오·기상청 키 상태 |
 | `db_counts.py` | 현재 `DATABASE_URL` | 모델별 행 수. 이관 전후 대조 |
 | `seed_demo_via_api.py` | 배포 서버 | 데모 계정 생성(HTTP) |
 | `purge_test_accounts.py` | 현재 `DATABASE_URL` | 검증 스크립트가 남긴 `depcheck_`·`dbprobe_` 계정 정리. 기본 dry-run |
 | `migrate_sqlite_to_postgres.py` | — | SQLite → Postgres 일회성 이관 |
+
+### `check_app_contract.py` — 앱이 조용히 필드를 버리는 것을 잡는다
+
+앱은 **Gson** 으로 역직렬화한다. Gson 은 JSON 에 없는 필드를 조용히 null 로
+두고, 이름이 어긋난 필드도 **예외 없이** 버린다. 그래서
+`@SerializedName("prep_breakdown")` 을 잘못 적어도 앱은 정상 동작하는 것처럼
+보이고 화면에만 값이 비어 보인다. 그 증상은 "서버가 아직 안 주는 것" 과 구별되지
+않는다.
+
+실제로 `confidence_basis` 와 `prep_breakdown` 이 서버에는 있는데 앱 DTO 에는
+없어서 몇 주 동안 버려졌다. 근거 카드가 비어 있는 이유를 "학습이 덜 됐다" 로
+오해했다.
+
+이 스크립트는 앱의 Kotlin 파일에서 `@SerializedName` 을 읽어 **와이어 이름**을
+뽑고, 실제 서버 응답에 그 이름이 전부 있는지 본다. 반대 방향(서버가 주는데 앱이
+읽지 않는 필드)도 경고로 알린다.
+
+```powershell
+cd backend
+$env:DATABASE_URL="sqlite:///db.sqlite3"
+python manage.py runserver 127.0.0.1:8000 --noreload   # 다른 창에서
+python scripts/check_app_contract.py
+```
+
+### 포트가 이미 잡혀 있으면 멈출 것
+
+로컬 검증에서 가장 위험한 실수다. 남아 있던 서버가 8000 을 잡고 있으면 새로
+띄운 서버는 바인드에 실패하는데, 헬스체크는 **옛 서버의 200** 을 보고 기동
+성공으로 읽는다. 그 뒤 모든 검증이 구버전 코드를 상대로 돌면서 통과한다.
+
+```powershell
+Get-NetTCPConnection -LocalPort 8000 -State Listen | Select-Object OwningProcess
+Stop-Process -Id <PID>
+```
+
+배포 쪽의 같은 함정이 아래 "배포된 코드가 뒤처졌는지 판별" 이다.
 
 **로컬 대상 스크립트는 임시 계정을 만든다.** 끝에 지우지만 중간에 끊기면
 남는다. `DATABASE_URL` 이 공용 DB 를 가리킨 상태로 돌리지 말 것.
@@ -491,3 +534,97 @@ Tailscale 을 쓰면 폰의 무선 디버깅 화면에 Wi-Fi 주소가 아니라
 
 실기기 연결은 `docs/device-setup.md`, 기기 디버깅 도구는
 `APP/scripts/README.md` 를 볼 것.
+
+---
+
+## 8. 배포된 코드가 뒤처졌는지 판별
+
+**`/api/health` 가 200 이어도 새 코드가 떴다는 뜻이 아니다.** Render 자동 배포가
+멈추면 옛 컨테이너가 그대로 돌면서 200 을 준다. 그 상태에서 "배포 서버 검증
+통과" 는 **구버전 결과**다. 실제로 그 함정에 빠져 여러 커밋이 배포되지 않은 채
+검증을 통과했다.
+
+버전 문자열만 믿지도 않는다. `APP_VERSION` 을 올리는 것을 잊을 수 있다. 그래서
+**새 엔드포인트의 응답 코드**로 판별한다 — 인증이 필요한 경로는 배포됐으면 401,
+미배포면 404 다. 이 구분이 핵심이다.
+
+```powershell
+$base = "https://justintime-api.onrender.com"
+
+# 1) 버전
+curl.exe "$base/api/health"
+#    {"ok":true,"version":"0.3.0"}  ← 0.3.0 미만이면 구버전
+
+# 2) 엔드포인트 존재 (토큰 없이 부른다)
+#    401 = 배포됨 · 404 = 미배포
+curl.exe -s -o NUL -w "%{http_code} routines/blocks`n" "$base/api/routines/blocks"
+curl.exe -s -o NUL -w "%{http_code} events/import`n"   "$base/api/events/import"
+curl.exe -s -o NUL -w "%{http_code} reports/weekly`n"  "$base/api/reports/weekly"
+```
+
+미배포로 나오면 대시보드에서 확인한다.
+
+1. Settings > Build & Deploy > **Auto-Deploy 가 Yes 인가**
+2. 연결 **Branch 가 `main`** 인가
+3. **Events 탭에 실패한 배포**가 있는가 (빌드 오류·메모리 초과)
+4. Manual Deploy > **Deploy latest commit** 으로 즉시 띄울 수 있다
+
+### 마이그레이션과 코드가 어긋나면 500 이 난다
+
+한 번 겪은 조합이다. Neon 에 마이그레이션은 적용됐는데 컨테이너는 구버전이었다.
+새로 추가한 NOT NULL 컬럼을 구버전 코드가 INSERT 에 넣지 않아 **쓰기만** 500 이
+됐다. 읽기와 `/api/health` 는 정상이어서 겉으로는 멀쩡해 보였다.
+
+그래서 새 컬럼에는 `db_default` 를 반드시 준다(Django 5.0+). Django 의 `default`
+는 파이썬 쪽 기본값이라 `AddField` 가 기존 행을 채운 뒤 **DB 기본값을 남기지
+않는다** — 구버전 코드의 INSERT 가 그 컬럼을 비운 채 보내면 제약 위반이 된다.
+
+```python
+# 이렇게 쓴다
+confidence_basis = models.CharField(max_length=32, blank=True, default="", db_default="")
+```
+
+---
+
+## 9. 지금 구현된 것 (0.3.0)
+
+프로토타입 범위가 닫혔다. 아래가 실제로 도는 것이다.
+
+### 서버
+
+| 영역 | 내용 |
+| --- | --- |
+| 분포 엔진 | Normal·Empirical·Mixture, `convolve`(정규+정규는 해석해), `max_of`(병렬 블록), 베이지안 갱신, shrinkage. **numpy 를 쓰지 않는다** |
+| 확신도 | `on_time_probability` 는 준비·이동 **양쪽** 변동성이 있을 때만 채운다. 없으면 `confidence_basis` 가 이유를 말한다(4종) |
+| 루틴 블록 | 사용자별 정의 CRUD, 일정별 체크(저장 시 그 일정만 재계산), 블록 관측 배치 |
+| 학습 | 관측 기반 모수 갱신, 경로 보정 계수, `slack_coef`. Celery 대신 관리 커맨드 |
+| 캘린더 | `POST /api/events/import` — `external_id` 로 upsert. **변경 없으면 재계산하지 않는다**(카카오 쿼터) |
+| 리포트 | `/api/reports/weekly`, `/api/reports/calibration` — 모델 없이 기존 관측에서 파생 |
+
+### 앱
+
+| 영역 | 내용 |
+| --- | --- |
+| 근거 카드 | 준비 블록별 내역, 신고 범위 대비 실측, 확률이 없는 이유와 **사용자가 할 일** |
+| 루틴 편집기 | 정의 편집 / 일정별 체크 두 모드. 일정별은 저장 한 번에 묶어 보낸다 |
+| 오프라인 | Room 캐시. 응답 JSON 을 그대로 저장해 온라인·오프라인 화면이 같은 매핑을 탄다 |
+| 배경 동기화 | WorkManager — 관측 업로드(연결되는 순간), 계획 동기화(6시간) |
+| 캘린더 | 목록을 보여주고 **고른 것만** 보낸다. 장소는 찾아 주되 확정하지 않는다 |
+| 리포트 | 약속한 확률과 실제 정시율을 나란히. 표본 부족이면 판정하지 않는다 |
+
+### 검증 규모
+
+```
+백엔드 pytest              432
+앱 단위 테스트              89
+로컬 HTTP 검증 스크립트     8개 전부 통과 (필드 계약 83항목 포함)
+빌드                       assembleDebug / assembleRelease 성공
+```
+
+### 아직 없는 것
+
+- **푸시(FCM)** — 의존성만 있고 코드가 없다. P4 범위다
+- **자연어 일정 입력** — OpenAI 연동 미착수
+- **날씨 보정** — 기상청 클라이언트는 있으나 계획에 반영하지 않는다
+- **실기기 검증** — 이 문서 작성 시점에 연결된 기기가 없어 못 했다.
+  `APP/scripts/device_*.ps1` 로 한다
