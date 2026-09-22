@@ -125,6 +125,8 @@ object ApiClient {
         retrofit.create(ObservationsApi::class.java)
     }
 
+    val routines: RoutinesApi by lazy { retrofit.create(RoutinesApi::class.java) }
+
     /** 초기화됐는지. 서비스·리시버는 Application 보다 먼저 깨어날 수 있다. */
     val isReady: Boolean get() = ::tokenStore.isInitialized
 
@@ -142,6 +144,39 @@ object ApiClient {
                 ?.error?.message?.takeIf { it.isNotBlank() }
         } catch (e: JsonSyntaxException) {
             null
+        }
+    }
+
+    /**
+     * 실패 응답의 **필드별** 오류를 뽑는다. `details` 안의 것이다.
+     *
+     * 서버는 `{"error":{"details":{"name":["같은 이름의 블록이 이미 있다."]}}}`
+     * 형태로 준다. 값이 배열이라 첫 항목만 쓴다 — 한 필드에 오류가 여러 개
+     * 달릴 수 있지만 입력칸 아래에 한 줄만 들어간다.
+     *
+     * 이걸 쓰면 "입력값을 확인해야 한다" 대신 **어느 칸이 왜 틀렸는지**를
+     * 그 칸 아래에 붙일 수 있다. 서버만 알 수 있는 검증(이름 중복)은 클라이언트가
+     * 미리 잡을 수 없으므로 이 경로가 필요하다.
+     */
+    fun parseErrorFields(raw: String?): Map<String, String> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        val details = try {
+            Gson().fromJson(raw, ApiErrorEnvelope::class.java)?.error?.details
+        } catch (e: JsonSyntaxException) {
+            null
+        } ?: return emptyMap()
+
+        return buildMap {
+            details.forEach { (field, value) ->
+                val text = when (value) {
+                    is String -> value
+                    is List<*> -> value.filterNotNull().joinToString(" ") { it.toString() }
+                    // 중첩 객체(`details.place.lat`)는 화면에 붙일 칸이 없다.
+                    // 무시하고 상위 message 를 쓰게 둔다.
+                    else -> null
+                }
+                text?.takeIf { it.isNotBlank() }?.let { put(field, it) }
+            }
         }
     }
 

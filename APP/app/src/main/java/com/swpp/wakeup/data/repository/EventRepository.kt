@@ -10,14 +10,17 @@ import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.EventsApi
 import com.swpp.wakeup.data.remote.PlaceInput
 import com.swpp.wakeup.data.remote.PlaceSearchItem
+import com.swpp.wakeup.data.remote.PrepBlockDto
 import com.swpp.wakeup.data.remote.ProfileApi
 import com.swpp.wakeup.data.remote.ProfileDto
 import com.swpp.wakeup.data.remote.ProfileUpdateRequest
 import com.swpp.wakeup.data.remote.RouteCandidateDto
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
+import com.swpp.wakeup.domain.model.ConfidenceView
 import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.PlanRow
+import com.swpp.wakeup.domain.model.PrepBlockLine
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.RouteOption
 import com.swpp.wakeup.domain.model.UpcomingEvent
@@ -222,6 +225,29 @@ class EventRepository(
             ?: Result.Failure("알람이 아직 계산되지 않았다.")
     }
 
+    /**
+     * 이 일정만 다시 계산한다.
+     *
+     * **사용자가 명시적으로 요청할 때만 부른다.** 서버가 카카오 경로 API 를
+     * 호출하므로 무료 쿼터(일 1,000건)를 먹는다. 루틴 블록 **정의**를 고친
+     * 뒤가 대표적인 경우다 — 서버는 정의 변경에 자동 재계산을 걸지 않는다.
+     */
+    suspend fun recomputePlan(eventId: Long): Result<AlarmPlanView> = guard {
+        val response = api.recompute(eventId)
+        val dto = unwrap(response)
+            ?: return@guard Result.Failure(errorMessage(response))
+        dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
+            ?: Result.Failure("다시 계산했지만 알람을 만들 수 없었다.")
+    }
+
+    /**
+     * 서버가 준 일정을 계획 화면용으로 바꾼다.
+     *
+     * 블록 체크를 저장하면 서버가 갱신된 일정을 그대로 돌려준다. 그걸 쓰면
+     * 재조회 왕복이 없다. 매핑 규칙이 이 파일 안에만 있어야 하므로 여기에 둔다.
+     */
+    fun planFrom(dto: EventDto): AlarmPlanView? = dto.toPlanView(ZoneId.systemDefault())
+
     // --- 내부 -------------------------------------------------------------
 
     /**
@@ -348,6 +374,110 @@ private fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
     )
 }
 
+/**
+ * 준비 시간 한 줄의 근거 문구.
+ *
+ * **5 가지를 구분해야 한다.** 예전에는 `onboarding` 과 나머지 둘로만 갈라서
+ * 블록 관측으로 학습된 값까지 "고정값 · 기본 30분" 으로 적었다. 학습이 되고
+ * 있는데 화면이 아니라고 말하면 사용자가 블록을 등록할 이유를 못 느낀다.
+ */
+private fun prepNote(plan: AlarmPlanDto, blockCount: Int): String {
+    val blocks = if (blockCount > 0) "블록 ${blockCount}개" else "블록"
+    return when (plan.prepSource) {
+        AlarmPlanDto.PREP_OBSERVED ->
+            "실측 학습값 · $blocks 의 실제 소요로 갱신됨"
+
+        AlarmPlanDto.PREP_DECLARED_RANGE ->
+            "신고 범위 기반 · $blocks. 실제 소요가 쌓이면 학습값으로 바뀜"
+
+        AlarmPlanDto.PREP_DECLARED_POINT ->
+            "신고 고정값 · $blocks 의 범위가 한 점임. 범위를 주면 확률이 계산됨"
+
+        AlarmPlanDto.PREP_ONBOARDING ->
+            "고정값 · 집 설정에서 답한 값. 루틴 블록을 등록하면 항목별로 쪼개짐"
+
+        else ->
+            "고정값 · 기본값을 씀. 루틴 블록을 등록하면 항목별로 쪼개짐"
+    }
+}
+
+/** 소수 첫째 자리까지. 정수면 소수점을 뗀다 — "14분" 이 "14.0분" 보다 읽기 쉽다. */
+private fun minutesLabel(value: Double): String {
+    val rounded = Math.round(value * 10) / 10.0
+    return if (rounded == Math.floor(rounded)) "${rounded.toInt()}분"
+    else "${rounded}분"
+}
+
+private fun PrepBlockDto.toLine(): PrepBlockLine {
+    val learned = source == "observed" || observationCount > 0
+
+    val bits = buildList {
+        // 신고 범위를 먼저 적는다. 학습값이 이 범위를 벗어났을 때 그 차이가
+        // 바로 보여야 한다 — 그게 학습이 일어났다는 증거다.
+        if (declaredMin != null && declaredMax != null) {
+            if (declaredMin == declaredMax) add("신고 ${declaredMin}분")
+            else add("신고 ${declaredMin}~${declaredMax}분")
+        }
+        if (learned) add("관측 ${observationCount}회로 학습됨")
+        else add("관측 없음")
+        if (parallelizable) add("병렬 진행")
+    }
+
+    return PrepBlockLine(
+        blockId = blockId,
+        name = name,
+        minutesLabel = minutesLabel(minutes),
+        minutes = minutes,
+        detail = bits.joinToString(" · "),
+        learned = learned,
+        parallelizable = parallelizable,
+    )
+}
+
+/**
+ * 확률과 그 근거.
+ *
+ * 확률이 null 인 이유를 `confidence_basis` 로 나눠 적는다. "학습 중" 만
+ * 띄우면 사용자는 기다리는 것 말고 할 수 있는 일이 없다고 생각한다. 실제로는
+ * 대개 사용자가 할 수 있는 일이 있다 — 블록에 범위를 넣거나 같은 경로를
+ * 몇 번 다니는 것이다.
+ */
+private fun AlarmPlanDto.toConfidence(): ConfidenceView {
+    val percent = onTimeProbability
+    if (percent != null) {
+        return ConfidenceView(
+            percent = percent.coerceIn(0, 100),
+            headline = "정시 도착 확률 ${percent.coerceIn(0, 100)}%",
+            reason = null,
+            action = null,
+        )
+    }
+
+    val (reason, action) = when (confidenceBasis) {
+        AlarmPlanDto.BASIS_POINT_ESTIMATE ->
+            "준비·이동 둘 다 단일 추정값이라 분포가 없음" to
+                "루틴 블록에 최소~최대 범위를 넣으면 확률 계산이 시작됨"
+
+        AlarmPlanDto.BASIS_TRAVEL_UNKNOWN ->
+            "준비 시간은 분포가 있지만 이동 시간은 경로 조회값 하나뿐임" to
+                "같은 경로를 몇 번 다니면 이동 변동성이 쌓임"
+
+        AlarmPlanDto.BASIS_PREP_UNKNOWN ->
+            "이동 시간은 분포가 있지만 준비 시간이 고정값임" to
+                "루틴 블록에 최소~최대 범위를 넣으면 됨"
+
+        // 확률도 근거도 없는 경우. status != ok 이면 이 카드는 그려지지 않는다.
+        else -> "아직 확률을 계산할 근거가 부족함" to null
+    }
+
+    return ConfidenceView(
+        percent = null,
+        headline = "정시 도착 확률 학습 중",
+        reason = reason,
+        action = action,
+    )
+}
+
 private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     val plan = alarmPlan ?: return null
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
@@ -363,19 +493,20 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     // 근거 한 줄에 **출처**를 함께 적는다. 세 값의 신뢰도가 다르다 —
     // 이동 시간만 카카오 실측이고 준비·버퍼는 아직 고정값이다. 구분해 주지
     // 않으면 셋 다 학습된 값처럼 읽힌다.
+    val prepBlocks = (plan.prepBreakdown ?: emptyList()).map { it.toLine() }
+
     val rows = buildList {
         plan.prepMinutes?.let {
-            val note = when (plan.prepSource) {
-                "onboarding" -> "고정값 · 집 설정에서 답한 값. 관측이 쌓이면 학습값으로 바뀜"
-                else -> "고정값 · 기본 30분. 집 설정에서 바꿀 수 있음"
-            }
-            add(PlanRow("준비 시간", it, note, PlanRow.Kind.PREP))
+            add(PlanRow("준비 시간", it, prepNote(plan, prepBlocks.size), PlanRow.Kind.PREP))
         }
         plan.travelMinutes?.let {
             val label = plan.travelMode?.takeIf(String::isNotBlank)?.let { m -> "$m 이동" }
                 ?: "이동 시간"
             val bits = buildList {
                 add("실측")
+                // 집이 아닌 출발지면 **먼저** 밝힌다. 이동 시간이 그 좌표
+                // 기준으로 계산됐는데 화면이 감추면 알람 시각이 설명되지 않는다.
+                originLabel?.takeIf { l -> l.isNotBlank() }?.let { l -> add("${l}에서 출발") }
                 plan.routeDetail?.takeIf(String::isNotBlank)?.let(::add)
                 plan.routeSummary?.takeIf(String::isNotBlank)?.let(::add)
             }
@@ -413,7 +544,9 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         remaining = remaining,
         onTimeProbability = plan.onTimeProbability,
         tauUsed = plan.tauUsed,
+        confidence = plan.toConfidence(),
         breakdown = rows,
+        prepBlocks = prepBlocks,
         totalMinutes = plan.totalMinutes,
         arrivalLine = arriveLocal?.let { "${it.format(ALARM_FORMAT)} 도착 예정" },
         status = plan.status,

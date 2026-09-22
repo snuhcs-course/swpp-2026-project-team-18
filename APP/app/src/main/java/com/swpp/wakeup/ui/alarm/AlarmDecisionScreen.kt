@@ -30,7 +30,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.AlarmPlanView
+import com.swpp.wakeup.domain.model.ConfidenceView
 import com.swpp.wakeup.domain.model.PlanRow
+import com.swpp.wakeup.domain.model.PrepBlockLine
 import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.common.JitChip
 import com.swpp.wakeup.ui.common.JitDotLabel
@@ -55,6 +57,15 @@ fun AlarmDecisionScreen(
     plan: AlarmPlanView?,
     onBack: () -> Unit,
     onChangeRisk: () -> Unit,
+    /** 이 아침에 할 블록 고르기. 저장하면 이 일정만 즉시 재계산된다 */
+    onEditBlocks: () -> Unit,
+    /**
+     * 알람만 다시 계산.
+     *
+     * 루틴 블록 **정의**를 고친 뒤 지금 반영하고 싶을 때 쓴다. 서버가 카카오
+     * 경로 API 를 부르므로 사용자가 누를 때만 호출한다.
+     */
+    onRecompute: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -121,6 +132,10 @@ fun AlarmDecisionScreen(
 
         Spacer(Modifier.height(4.dp))
 
+        // 준비 시간을 바꾸는 입구. 확률이 없는 이유가 대개 "블록에 범위가 없다"
+        // 라서, 그 안내 바로 아래에 행동할 자리를 둔다.
+        BlocksEntryCard(plan, onEditBlocks)
+
         if (plan.isComputed) {
             JitPrimaryButton(label = "이 알람으로 설정", onClick = onBack)
             Row(
@@ -135,6 +150,16 @@ fun AlarmDecisionScreen(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .clickable(onClick = onChangeRisk)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+                Text(
+                    text = "다시 계산",
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onRecompute)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
@@ -203,31 +228,47 @@ private fun RecommendedAlarmCard(plan: AlarmPlanView) {
  */
 @Composable
 private fun ProbabilityRow(plan: AlarmPlanView) {
-    val probability = plan.onTimeProbability
-    if (probability == null) {
+    val confidence = plan.confidence
+
+    if (confidence.isLearning) {
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             JitDotLabel(
-                text = "정시 도착 확률 학습 중",
+                text = confidence.headline,
                 dotColor = JitColor.TextSecondary,
                 textColor = JitColor.TextSecondary,
                 fontSize = 13,
                 dotSize = 8.dp,
             )
+            confidence.reason?.let {
+                Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
+            }
+            // 할 수 있는 일이 있으면 강조색으로 적는다. "기다려라" 만 있으면
+            // 사용자는 기능이 고장났다고 읽는다.
+            confidence.action?.let {
+                Text(text = "→ $it", color = JitColor.Accent, fontSize = 10.sp)
+            }
+        }
+        return
+    }
+
+    // 목표치(τ)를 넘겼는지로 색을 정한다. 90% 고정으로 비교하면 τ=0.99 를
+    // 고른 사용자에게 95% 를 초록으로 보여주게 된다 — 목표 미달인데 안심시킨다.
+    val color = if (confidence.meets(plan.tauUsed)) JitColor.Green else JitColor.Amber
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        JitDotLabel(
+            text = confidence.headline,
+            dotColor = color,
+            textColor = color,
+            fontSize = 14,
+            dotSize = 8.dp,
+        )
+        if (!confidence.meets(plan.tauUsed)) {
             Text(
-                text = "실제 준비·이동 시간이 쌓이면 분포로 확률을 계산함. " +
-                    "지금은 경로 조회값 하나만 있어서 확률을 만들 수 없음",
+                text = "목표치보다 낮음. 지각 위험을 낮추면 알람이 앞당겨짐",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
         }
-    } else {
-        JitDotLabel(
-            text = "정시 도착 확률 $probability%",
-            dotColor = if (probability >= 90) JitColor.Green else JitColor.Amber,
-            textColor = if (probability >= 90) JitColor.Green else JitColor.Amber,
-            fontSize = 14,
-            dotSize = 8.dp,
-        )
     }
 }
 
@@ -239,6 +280,11 @@ private fun BreakdownCard(plan: AlarmPlanView) {
 
         plan.breakdown.forEach { row ->
             BreakdownRow(row, plan.maxRowMinutes)
+            // 블록 내역을 준비 시간 **바로 아래**에 들여 쓴다. 별도 카드로
+            // 빼면 어느 줄을 쪼갠 것인지 연결이 끊긴다.
+            if (row.kind == PlanRow.Kind.PREP && plan.prepBlocks.isNotEmpty()) {
+                PrepBlockList(plan.prepBlocks)
+            }
         }
 
         HorizontalDivider(color = JitColor.Track)
@@ -265,6 +311,117 @@ private fun BreakdownCard(plan: AlarmPlanView) {
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
+        }
+    }
+}
+
+/**
+ * 블록 편집 입구.
+ *
+ * 블록이 없을 때와 있을 때의 문구가 다르다. 없으면 **확률이 만들어지지 않는
+ * 이유**가 여기라서 그 사실을 말해야 하고, 있으면 "이 아침만 조정" 이라는
+ * 것을 밝혀야 한다 — 기본 설정을 바꾸는 것으로 오해하면 다른 날짜까지 바뀐
+ * 줄 알게 된다.
+ */
+@Composable
+private fun BlocksEntryCard(plan: AlarmPlanView, onClick: () -> Unit) {
+    val empty = plan.prepBlocks.isEmpty()
+
+    JitCard(
+        modifier = Modifier.clickable(onClick = onClick),
+        padding = 14.dp,
+        gap = 6.dp,
+        accented = empty && plan.confidence.isLearning,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            JitDotLabel(
+                text = if (empty) "아침 루틴을 등록하면 근거가 생김" else "이 아침 할 일 고르기",
+                dotColor = if (empty) JitColor.Amber else JitColor.Accent,
+                fontSize = 13,
+                dotSize = 7.dp,
+            )
+            Text("›", color = JitColor.TextSecondary, fontSize = 18.sp)
+        }
+        Text(
+            text = if (empty) {
+                "준비 시간이 한 덩어리라 왜 그 값인지 설명할 수 없음. 항목으로 쪼개고 " +
+                    "최소~최대 범위를 주면 정시 도착 확률이 계산됨"
+            } else {
+                "체크를 바꾸면 이 일정의 알람만 다시 계산됨. 기본값은 그대로 남음"
+            },
+            color = JitColor.TextSecondary,
+            fontSize = 10.sp,
+        )
+    }
+}
+
+/**
+ * 준비 블록 내역.
+ *
+ * 왼쪽 세로선으로 "위 줄을 쪼갠 것" 임을 표시한다. 각 줄에 신고 범위와 관측
+ * 수를 적어 학습이 일어나고 있는지 사용자가 직접 확인할 수 있게 한다.
+ *
+ * 합계를 여기서 다시 더하지 않는다. 병렬 블록은 합이 아니라 max 로 들어가므로
+ * 화면이 더하면 위 줄의 값과 어긋난다.
+ */
+@Composable
+private fun PrepBlockList(blocks: List<PrepBlockLine>) {
+    Row(modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 2.dp)) {
+        Box(
+            Modifier
+                .width(2.dp)
+                .height((blocks.size * 34).dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(JitColor.Track)
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            blocks.forEach { block ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier
+                                    .size(5.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (block.learned) JitColor.Green
+                                        else JitColor.TextSecondary
+                                    )
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = block.name,
+                                color = JitColor.TextPrimary,
+                                fontSize = 11.sp,
+                            )
+                            if (block.parallelizable) {
+                                Spacer(Modifier.width(5.dp))
+                                JitChip("병렬", JitColor.Blue, fontSize = 8)
+                            }
+                        }
+                        Text(
+                            text = block.detail,
+                            color = JitColor.TextSecondary,
+                            fontSize = 9.sp,
+                        )
+                    }
+                    Text(
+                        text = block.minutesLabel,
+                        color = if (block.learned) JitColor.Green else JitColor.TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
         }
     }
 }
@@ -367,10 +524,21 @@ private fun AlarmDecisionPreview() {
                 remaining = "7시간 28분 남음",
                 onTimeProbability = null,
                 tauUsed = 0.90,
+                confidence = ConfidenceView(
+                    percent = null,
+                    headline = "정시 도착 확률 학습 중",
+                    reason = "준비 시간은 분포가 있지만 이동 시간은 경로 조회값 하나뿐임",
+                    action = "같은 경로를 몇 번 다니면 이동 변동성이 쌓임",
+                ),
                 breakdown = listOf(
-                    PlanRow("준비 시간", 28, "온보딩에서 답한 값. 관측이 쌓이면 학습값으로 바뀜", PlanRow.Kind.PREP),
+                    PlanRow("준비 시간", 28, "신고 범위 기반 · 블록 3개. 실제 소요가 쌓이면 학습값으로 바뀜", PlanRow.Kind.PREP),
                     PlanRow("버스 이동", 20, "카카오 실측 경로 · 20분 · 4.6km · 환승 1회", PlanRow.Kind.TRAVEL),
                     PlanRow("안전 버퍼", 10, "문 앞에서 실제 출발까지의 여유", PlanRow.Kind.BUFFER),
+                ),
+                prepBlocks = listOf(
+                    PrepBlockLine(1, "샤워", "14분", 14.0, "신고 12~18분 · 관측 7회로 학습됨", true, false),
+                    PrepBlockLine(2, "아침 식사", "9분", 9.0, "신고 8~15분 · 관측 없음", false, false),
+                    PrepBlockLine(3, "세탁기", "5분", 5.0, "신고 5분 · 관측 없음 · 병렬 진행", false, true),
                 ),
                 totalMinutes = 58,
                 arrivalLine = "8:50 도착 예정",
@@ -379,6 +547,8 @@ private fun AlarmDecisionPreview() {
             ),
             onBack = {},
             onChangeRisk = {},
+            onEditBlocks = {},
+            onRecompute = {},
             onDelete = {},
         )
     }

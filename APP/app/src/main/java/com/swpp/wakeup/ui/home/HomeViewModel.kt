@@ -8,9 +8,13 @@ import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.repository.EventRepository
+import com.swpp.wakeup.data.repository.RoutineRepository
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
+import com.swpp.wakeup.domain.model.BlockDraft
+import com.swpp.wakeup.domain.model.DropCost
 import com.swpp.wakeup.domain.model.EventSection
+import com.swpp.wakeup.domain.model.RoutineEditorState
 import com.swpp.wakeup.sensing.CurrentLocation
 import com.swpp.wakeup.sensing.TripObservationQueue
 import com.swpp.wakeup.domain.model.RouteChoice
@@ -37,6 +41,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val tokenStore = TokenStore(application)
     private val repository = EventRepository()
+    private val routines = RoutineRepository()
 
     /** 현재 위치 조회에 쓴다. [AndroidViewModel] 이라 누수 걱정이 없다. */
     private val appContext: android.content.Context = application.applicationContext
@@ -185,6 +190,306 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openHomeSetup() {
         _nav.update { it.copy(stack = it.stack + AppRoute.HomeSetup, forward = true) }
+    }
+
+    // --- 루틴 블록 --------------------------------------------------------
+
+    private val _routine = MutableStateFlow(RoutineEditorState())
+    val routine: StateFlow<RoutineEditorState> = _routine.asStateFlow()
+
+    /**
+     * 블록 **정의** 편집 화면을 연다.
+     *
+     * 일정 문맥이 없으므로 저장해도 알람이 다시 계산되지 않는다. 화면이 그
+     * 사실을 안내한다.
+     */
+    fun openRoutineEditor() {
+        _nav.update { it.copy(stack = it.stack + AppRoute.RoutineEditor, forward = true) }
+        _routine.value = RoutineEditorState(loading = true)
+        loadBlocks(eventId = null)
+    }
+
+    /**
+     * 일정 하나의 블록 체크 화면을 연다.
+     *
+     * 저장하면 **그 일정만** 즉시 재계산된다.
+     */
+    fun openEventBlocks(eventId: Long) {
+        val title = _plan.value?.eventTitle
+            ?: _state.value.sections
+                .flatMap { it.events }
+                .firstOrNull { it.id == eventId }
+                ?.let { "${it.startTime} ${it.title}" }
+
+        _nav.update {
+            it.copy(stack = it.stack + AppRoute.EventBlocks(eventId), forward = true)
+        }
+        _routine.value = RoutineEditorState(
+            loading = true,
+            eventId = eventId,
+            eventTitle = title,
+        )
+        loadBlocks(eventId)
+    }
+
+    private fun loadBlocks(eventId: Long?) {
+        viewModelScope.launch {
+            val result = if (eventId == null) {
+                routines.blocks()
+            } else {
+                routines.eventBlocks(eventId)
+            }
+            when (result) {
+                is RoutineRepository.RoutineResult.Success -> _routine.update {
+                    it.copy(
+                        loading = false,
+                        error = null,
+                        blocks = result.data,
+                        // 저장할 때 바뀐 것만 보내기 위한 기준선.
+                        original = result.data.associate { b -> b.id to b.checked },
+                    )
+                }
+
+                is RoutineRepository.RoutineResult.Failure -> _routine.update {
+                    it.copy(loading = false, error = result.message)
+                }
+            }
+        }
+    }
+
+    fun clearRoutineMessages() = _routine.update { it.copy(error = null, notice = null) }
+
+    /**
+     * 체크를 바꾼다. **서버로 보내지 않는다.**
+     *
+     * 일정별 모드에서 저장 한 번에 묶어 보내야 한다 — 체크마다 요청하면
+     * 재계산이 그만큼 돌고 카카오 경로 쿼터(일 1,000건)를 먹는다. 정의 모드에서는
+     * 기본 포함값을 바꾸는 것이므로 [toggleIncludedByDefault] 가 따로 처리한다.
+     */
+    fun toggleBlockChecked(id: Long) {
+        _routine.update { state ->
+            state.copy(
+                notice = null,
+                blocks = state.blocks.map {
+                    if (it.id == id) it.copy(checked = !it.checked) else it
+                },
+            )
+        }
+    }
+
+    /**
+     * 기본 포함값을 바꾼다. 정의 모드 전용이고 **즉시 저장**한다.
+     *
+     * 이건 재계산을 유발하지 않으므로(서버가 정의 변경에 자동 재계산을 걸지
+     * 않는다) 요청마다 보내도 쿼터 문제가 없다.
+     */
+    fun toggleIncludedByDefault(id: Long) {
+        val block = _routine.value.blocks.firstOrNull { it.id == id } ?: return
+        val next = !block.includedByDefault
+
+        // 낙관적 갱신. 실패하면 되돌린다.
+        _routine.update { state ->
+            state.copy(
+                notice = null,
+                blocks = state.blocks.map {
+                    if (it.id == id) it.copy(includedByDefault = next, checked = next) else it
+                },
+            )
+        }
+
+        viewModelScope.launch {
+            when (val r = routines.setIncludedByDefault(id, next)) {
+                is RoutineRepository.RoutineResult.Success -> _routine.update { state ->
+                    state.copy(
+                        blocks = state.blocks.map { if (it.id == id) r.data else it },
+                        original = state.original + (id to r.data.checked),
+                        notice = DEFINITION_NOTICE,
+                    )
+                }
+
+                is RoutineRepository.RoutineResult.Failure -> _routine.update { state ->
+                    state.copy(
+                        error = r.message,
+                        blocks = state.blocks.map {
+                            if (it.id == id) block else it
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 일정별 체크를 저장하고 알람을 다시 받는다.
+     *
+     * 서버가 갱신된 일정을 그대로 돌려주므로 재조회가 필요 없다. 알람 시각이
+     * 바뀌었으니 홈도 새로 읽어 **기기 알람 등록까지** 갱신한다 — 이걸 빼면
+     * 서버는 새 시각을 알지만 기기는 옛 시각으로 울린다.
+     */
+    fun saveEventBlocks() {
+        val state = _routine.value
+        val eventId = state.eventId ?: return
+        if (!state.dirty) {
+            _routine.update { it.copy(notice = "바뀐 항목이 없다.") }
+            return
+        }
+
+        _routine.update { it.copy(saving = true, error = null, notice = null) }
+        viewModelScope.launch {
+            when (val r = routines.setEventBlocks(eventId, state.changes)) {
+                is RoutineRepository.RoutineResult.Success -> {
+                    val plan = repository.planFrom(r.data)
+                    if (plan != null) _plan.value = plan
+
+                    _routine.update {
+                        it.copy(
+                            saving = false,
+                            // 저장된 상태가 새 기준선이다.
+                            original = it.blocks.associate { b -> b.id to b.checked },
+                            notice = plan?.alarmAt?.let { at -> "저장함 · 알람 $at" }
+                                ?: "저장함 · 알람을 계산할 수 없다",
+                        )
+                    }
+                    refresh()
+                }
+
+                is RoutineRepository.RoutineResult.Failure -> _routine.update {
+                    it.copy(saving = false, error = r.message)
+                }
+            }
+        }
+    }
+
+    // --- 루틴 블록: 추가·수정 --------------------------------------------
+
+    fun startNewBlock() {
+        _routine.update {
+            it.copy(editing = BlockDraft(), error = null, notice = null)
+        }
+    }
+
+    fun startEditBlock(id: Long) {
+        val block = _routine.value.blocks.firstOrNull { it.id == id } ?: return
+        _routine.update {
+            it.copy(
+                error = null,
+                notice = null,
+                editing = BlockDraft(
+                    id = block.id,
+                    name = block.name,
+                    minText = block.minMinutes.toString(),
+                    maxText = block.maxMinutes.toString(),
+                    dropCost = block.dropCost,
+                    parallelizable = block.parallelizable,
+                    includedByDefault = block.includedByDefault,
+                ),
+            )
+        }
+    }
+
+    fun dismissBlockDraft() = _routine.update { it.copy(editing = null) }
+
+    /** 입력 중에는 오류를 지운다. 타이핑하는데 빨간 글씨가 남아 있으면 거슬린다. */
+    private fun editDraft(transform: (BlockDraft) -> BlockDraft) {
+        _routine.update { state ->
+            val draft = state.editing ?: return@update state
+            state.copy(editing = transform(draft).copy(errors = emptyMap()))
+        }
+    }
+
+    fun onDraftName(v: String) = editDraft { it.copy(name = v.take(BlockDraft.MAX_NAME)) }
+
+    fun onDraftMin(v: String) = editDraft { it.copy(minText = v.filter(Char::isDigit).take(3)) }
+
+    fun onDraftMax(v: String) = editDraft { it.copy(maxText = v.filter(Char::isDigit).take(3)) }
+
+    fun onDraftDropCost(cost: DropCost) = editDraft { it.copy(dropCost = cost) }
+
+    fun onDraftParallel(v: Boolean) = editDraft { it.copy(parallelizable = v) }
+
+    fun onDraftIncluded(v: Boolean) = editDraft { it.copy(includedByDefault = v) }
+
+    /**
+     * 블록을 저장한다.
+     *
+     * 클라이언트 검증을 먼저 돌려 왕복을 아끼고, 서버만 아는 검증(이름 중복)은
+     * 응답의 필드 오류를 입력칸 아래로 되돌린다.
+     */
+    fun saveBlockDraft() {
+        val draft = _routine.value.editing ?: return
+        val checked = draft.validate()
+        if (checked.errors.isNotEmpty()) {
+            _routine.update { it.copy(editing = checked) }
+            return
+        }
+
+        _routine.update { it.copy(saving = true, error = null, notice = null) }
+        viewModelScope.launch {
+            val result = if (checked.isNew) {
+                routines.createBlock(checked)
+            } else {
+                routines.updateBlock(checked)
+            }
+            when (result) {
+                is RoutineRepository.RoutineResult.Success -> {
+                    _routine.update { it.copy(saving = false, editing = null) }
+                    // 목록을 다시 읽는다. 관측 통계와 정렬이 서버 계산이라
+                    // 응답 하나를 끼워 넣는 것보다 확실하다.
+                    loadBlocks(_routine.value.eventId)
+                    _routine.update { it.copy(notice = DEFINITION_NOTICE) }
+                }
+
+                is RoutineRepository.RoutineResult.Failure -> {
+                    val fieldErrors = RoutineRepository.toDraftErrors(result.fieldErrors)
+                    _routine.update {
+                        it.copy(
+                            saving = false,
+                            // 필드 오류가 있으면 칸 아래에 붙인다. 없으면
+                            // 화면 상단에 한 줄로 알린다.
+                            error = if (fieldErrors.isEmpty()) result.message else null,
+                            editing = checked.copy(errors = fieldErrors),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun deleteBlock(id: Long) {
+        _routine.update { it.copy(saving = true, error = null, notice = null) }
+        viewModelScope.launch {
+            when (val r = routines.deleteBlock(id)) {
+                is RoutineRepository.RoutineResult.Success -> {
+                    _routine.update { it.copy(saving = false, editing = null) }
+                    loadBlocks(_routine.value.eventId)
+                    _routine.update { it.copy(notice = DEFINITION_NOTICE) }
+                }
+
+                is RoutineRepository.RoutineResult.Failure -> _routine.update {
+                    it.copy(saving = false, error = r.message)
+                }
+            }
+        }
+    }
+
+    /**
+     * 이 일정의 알람을 다시 계산한다.
+     *
+     * 블록 **정의**를 고친 뒤 지금 반영하고 싶을 때 쓴다. 서버가 카카오 경로
+     * API 를 부르므로 사용자가 명시적으로 눌렀을 때만 호출한다.
+     */
+    fun recomputePlan(eventId: Long) {
+        viewModelScope.launch {
+            when (val r = repository.recomputePlan(eventId)) {
+                is EventRepository.Result.Success -> {
+                    _plan.value = r.data
+                    refresh()
+                }
+
+                is EventRepository.Result.Failure ->
+                    _state.update { it.copy(error = r.message) }
+            }
+        }
     }
 
     // --- 경로 선택 (Figma ⑬) ---------------------------------------------
@@ -642,5 +947,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val TAG = "HomeViewModel"
+
+        /**
+         * 블록 **정의**를 고쳤을 때의 안내.
+         *
+         * 서버가 정의 변경에 자동 재계산을 걸지 않는다(카카오 쿼터). 그 사실을
+         * 알리지 않으면 사용자는 알람 시각이 그대로인 것을 고장으로 여긴다.
+         */
+        const val DEFINITION_NOTICE =
+            "저장함 · 이미 계산된 알람은 그대로다. 알람 화면의 \"다시 계산\" 으로 반영한다"
     }
 }

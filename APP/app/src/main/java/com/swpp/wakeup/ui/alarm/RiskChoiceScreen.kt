@@ -22,6 +22,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.AlarmPlanView
+import com.swpp.wakeup.domain.model.ConfidenceView
 import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.JitProgressBar
@@ -224,6 +225,12 @@ private fun RiskChoicePreview() {
                 remaining = null,
                 onTimeProbability = null,
                 tauUsed = 0.90,
+                confidence = ConfidenceView(
+                    percent = null,
+                    headline = "정시 도착 확률 학습 중",
+                    reason = "준비·이동 둘 다 단일 추정값이라 분포가 없음",
+                    action = "루틴 블록에 최소~최대 범위를 넣으면 확률 계산이 시작됨",
+                ),
                 breakdown = emptyList(),
                 totalMinutes = 58,
                 arrivalLine = "8:50 도착 예정",

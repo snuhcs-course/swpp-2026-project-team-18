@@ -35,6 +35,22 @@ sealed interface AppRoute {
 
     /** 집 위치 설정. 알람 계산의 출발지라서 없으면 계산이 안 된다 */
     data object HomeSetup : AppRoute
+
+    /**
+     * 아침 루틴 블록 **정의** 편집.
+     *
+     * 여기서 고친 것은 설정 변경이라 서버가 즉시 재계산하지 않는다. 다음
+     * 계산에 반영되고, 당장 보고 싶으면 알람 결정 화면의 재계산을 쓴다.
+     */
+    data object RoutineEditor : AppRoute
+
+    /**
+     * 일정 하나의 블록 체크.
+     *
+     * [RoutineEditor] 와 목록은 같지만 저장 대상이 다르다 — 이쪽은 "이 아침에
+     * 뭘 할지" 라서 저장하면 **그 일정만 즉시 재계산**된다.
+     */
+    data class EventBlocks(val eventId: Long) : AppRoute
 }
 
 /**

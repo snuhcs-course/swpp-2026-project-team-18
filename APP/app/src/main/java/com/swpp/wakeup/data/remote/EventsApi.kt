@@ -134,6 +134,18 @@ data class EventDto(
     @SerializedName("tau_override") val tauOverride: Double?,
     /** 사용자가 고른 경로. 비어 있으면 서버가 최단 경로를 자동으로 쓴다 */
     @SerializedName("route_key") val routeKey: String?,
+
+    /**
+     * 이 일정에 저장된 출발지. **null 이면 프로필 집에서 출발한다.**
+     *
+     * 화면이 이걸 읽어야 하는 이유: 집이 아닌 곳에서 출발하도록 만든 일정은
+     * 이동 시간이 그 좌표 기준으로 계산된다. 화면이 출발지를 감추면 사용자는
+     * 집 기준이라고 믿고, 알람 시각이 왜 이런지 설명되지 않는다.
+     */
+    @SerializedName("origin_lat") val originLat: Double? = null,
+    @SerializedName("origin_lng") val originLng: Double? = null,
+    @SerializedName("origin_label") val originLabel: String? = null,
+
     @SerializedName("alarm_plan") val alarmPlan: AlarmPlanDto?,
     @SerializedName("created_at") val createdAt: String?,
 )
@@ -219,6 +231,20 @@ data class AlarmPlanDto(
     @SerializedName("total_minutes") val totalMinutes: Int?,
     @SerializedName("tau_used") val tauUsed: Double?,
     @SerializedName("on_time_probability") val onTimeProbability: Int?,
+    /**
+     * [onTimeProbability] 가 null 인 **이유**. 화면이 구체적으로 안내해야
+     * 사용자가 할 행동이 정해진다. 값마다 사용자가 할 일이 다르다.
+     *
+     * | 값 | 뜻 | 사용자가 할 일 |
+     * | --- | --- | --- |
+     * | `observed` | 준비·이동 둘 다 관측 기반. 확률이 있다 | — |
+     * | `point_estimate` | 둘 다 점추정 | 루틴 블록을 등록한다 |
+     * | `travel_variance_unknown` | 준비만 변동성 있음 | 같은 경로를 몇 번 다닌다 |
+     * | `prep_variance_unknown` | 이동만 변동성 있음 | 블록에 범위를 넣는다 |
+     *
+     * `status != ok` 면 빈 문자열이다.
+     */
+    @SerializedName("confidence_basis") val confidenceBasis: String?,
     @SerializedName("travel_mode") val travelMode: String?,
     @SerializedName("route_summary") val routeSummary: String?,
     /** 실제 계산에 쓴 경로 key */
@@ -243,14 +269,56 @@ data class AlarmPlanDto(
     @SerializedName("prep_source") val prepSource: String?,
     @SerializedName("buffer_source") val bufferSource: String?,
     @SerializedName("travel_time_source") val travelTimeSource: String?,
+
+    /**
+     * 준비 시간을 블록별로 쪼갠 내역. 루틴 블록이 없으면 **빈 배열**이다.
+     *
+     * 합이 [prepMinutes] 와 다를 수 있다. 병렬 블록은 합이 아니라 max 로
+     * 들어가고, 각 행은 반올림된 값이다. 화면에서 합을 다시 계산하지 않는다.
+     */
+    @SerializedName("prep_breakdown") val prepBreakdown: List<PrepBlockDto>? = null,
 ) {
     companion object {
         const val STATUS_OK = "ok"
         const val STATUS_NO_HOME = "no_home"
         const val STATUS_NO_PLACE = "no_place"
         const val STATUS_ROUTE_FAILED = "route_failed"
+
+        /** [confidenceBasis] 의 값. 서버 `apps/planning/estimators.py` 와 짝이다. */
+        const val BASIS_OBSERVED = "observed"
+        const val BASIS_POINT_ESTIMATE = "point_estimate"
+        const val BASIS_TRAVEL_UNKNOWN = "travel_variance_unknown"
+        const val BASIS_PREP_UNKNOWN = "prep_variance_unknown"
+
+        /** [AlarmPlanDto.prepSource] 의 값. */
+        const val PREP_OBSERVED = "observed"
+        const val PREP_DECLARED_RANGE = "declared_range"
+        const val PREP_DECLARED_POINT = "declared_point"
+        const val PREP_ONBOARDING = "onboarding"
+        const val PREP_FIXED = "fixed"
     }
 }
+
+/**
+ * 준비 시간 블록 한 줄. 서버 `estimators.py` 의 breakdown 항목과 짝이다.
+ *
+ * [minutes] 는 **분포의 평균**이라 소수다. 신고한 범위([declaredMin]~[declaredMax])
+ * 와 다를 수 있다 — 관측이 쌓이면 베이지안 갱신으로 평균이 이동한다.
+ * 그 차이가 "학습이 되고 있다" 는 증거라서 화면이 둘을 나란히 보여준다.
+ */
+data class PrepBlockDto(
+    @SerializedName("block_id") val blockId: Long?,
+    val name: String,
+    val minutes: Double,
+    @SerializedName("declared_min") val declaredMin: Int?,
+    @SerializedName("declared_max") val declaredMax: Int?,
+    val parallelizable: Boolean = false,
+    @SerializedName("drop_cost") val dropCost: String? = null,
+    /** 이 블록에 쌓인 관측 수. 0 이면 신고값만 쓰고 있다 */
+    @SerializedName("observation_count") val observationCount: Int = 0,
+    /** `observed` 또는 `declared` */
+    val source: String? = null,
+)
 
 data class PlaceSearchResponse(
     val results: List<PlaceSearchItem>,

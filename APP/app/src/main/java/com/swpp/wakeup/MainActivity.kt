@@ -53,6 +53,8 @@ import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.ui.nav.AppRoute
+import com.swpp.wakeup.ui.routines.BlockDraftSheet
+import com.swpp.wakeup.ui.routines.RoutineEditorScreen
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitTheme
 import kotlinx.coroutines.launch
@@ -118,6 +120,7 @@ private fun MainHost(
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
+    val routineState by viewModel.routine.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -162,7 +165,13 @@ private fun MainHost(
 
     // 안드로이드 뒤로 버튼을 화면 스택에 연결한다. 스택이 하나면 기본 동작
     // (앱 종료)에 맡긴다.
-    BackHandler(enabled = nav.canGoBack) { viewModel.goBack() }
+    //
+    // 블록 편집 폼은 같은 경로 안에서 겹쳐 뜨므로 스택에 없다. 폼이 열려
+    // 있으면 먼저 닫는다 — 그러지 않으면 뒤로가 폼과 목록을 한꺼번에 건너뛴다.
+    val draftOpen = routineState.editing != null
+    BackHandler(enabled = nav.canGoBack || draftOpen) {
+        if (draftOpen) viewModel.dismissBlockDraft() else viewModel.goBack()
+    }
 
     // 일정 추가·집 설정이 끝나면 홈으로 되돌린다.
     LaunchedEffect(addState.done) {
@@ -215,6 +224,7 @@ private fun MainHost(
                         viewModel.resetHomeSetup()
                         viewModel.openHomeSetup()
                     },
+                    onRoutineClick = viewModel::openRoutineEditor,
                     onRetry = viewModel::refresh,
                     modifier = Modifier.padding(innerPadding),
                 )
@@ -223,6 +233,8 @@ private fun MainHost(
                     plan = plan,
                     onBack = viewModel::goBack,
                     onChangeRisk = { viewModel.openRiskChoice(route.eventId) },
+                    onEditBlocks = { viewModel.openEventBlocks(route.eventId) },
+                    onRecompute = { viewModel.recomputePlan(route.eventId) },
                     onDelete = { viewModel.deleteEvent(route.eventId) },
                     modifier = Modifier.padding(innerPadding),
                 )
@@ -271,6 +283,14 @@ private fun MainHost(
                     onPrepChange = viewModel::onHomePrepChange,
                     onSubmit = viewModel::submitHomeSetup,
                     onBack = viewModel::goBack,
+                    modifier = Modifier.padding(innerPadding),
+                )
+
+                // 정의 편집과 일정별 체크가 같은 화면을 쓴다. 상태의 eventId 로
+                // 갈리고, 저장 동작이 다르다는 사실은 화면이 문구로 밝힌다.
+                AppRoute.RoutineEditor, is AppRoute.EventBlocks -> RoutineHost(
+                    state = routineState,
+                    viewModel = viewModel,
                     modifier = Modifier.padding(innerPadding),
                 )
             }
@@ -341,4 +361,52 @@ private fun MainHost(
             },
         )
     }
+}
+
+/**
+ * 루틴 블록 화면 호스트.
+ *
+ * 목록과 편집 폼을 **같은 경로 안에서** 바꿔 그린다. 폼을 별도 경로로 올리면
+ * 저장 후 목록으로 돌아가는 길에 pop 을 두 번 해야 하고, 항목을 연달아 고칠 때
+ * 화면 전환 애니메이션이 반복돼 거슬린다.
+ *
+ * 뒤로 처리는 `MainHost` 의 [BackHandler] 가 담당한다 — 폼이 열려 있으면
+ * 폼만 닫는다.
+ */
+@Composable
+private fun RoutineHost(
+    state: com.swpp.wakeup.domain.model.RoutineEditorState,
+    viewModel: HomeViewModel,
+    modifier: Modifier = Modifier,
+) {
+    val draft = state.editing
+    if (draft != null) {
+        BlockDraftSheet(
+            draft = draft,
+            saving = state.saving,
+            onName = viewModel::onDraftName,
+            onMin = viewModel::onDraftMin,
+            onMax = viewModel::onDraftMax,
+            onDropCost = viewModel::onDraftDropCost,
+            onParallel = viewModel::onDraftParallel,
+            onIncluded = viewModel::onDraftIncluded,
+            onSave = viewModel::saveBlockDraft,
+            onDelete = viewModel::deleteBlock,
+            onDismiss = viewModel::dismissBlockDraft,
+            modifier = modifier,
+        )
+        return
+    }
+
+    RoutineEditorScreen(
+        state = state,
+        onBack = viewModel::goBack,
+        onToggleChecked = viewModel::toggleBlockChecked,
+        onToggleIncludedByDefault = viewModel::toggleIncludedByDefault,
+        onEditBlock = viewModel::startEditBlock,
+        onNewBlock = viewModel::startNewBlock,
+        onSaveEventBlocks = viewModel::saveEventBlocks,
+        onDismissMessages = viewModel::clearRoutineMessages,
+        modifier = modifier,
+    )
 }

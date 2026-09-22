@@ -60,6 +60,7 @@ fun HomeScreen(
     onEventClick: (UpcomingEvent) -> Unit,
     onAddEventClick: () -> Unit,
     onSetHomeClick: () -> Unit,
+    onRoutineClick: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -119,6 +120,47 @@ fun HomeScreen(
                 AddEventButton(onAddEventClick)
             }
         }
+
+        // 항상 보여준다. 일정이 없는 새 계정이 먼저 할 일이 루틴 등록이다 —
+        // 블록이 없으면 준비 시간이 한 덩어리라 확률 계산이 시작되지 않는다.
+        item(key = "routine") { RoutineShortcut(onRoutineClick) }
+    }
+}
+
+/**
+ * 아침 루틴 편집 입구.
+ *
+ * 계정 메뉴에 숨기지 않고 목록에 둔다. 루틴 블록이 없으면 확률이 만들어지지
+ * 않으므로 이 앱을 쓰는 데 필요한 설정인데, 다이얼로그 안에 있으면 아무도
+ * 찾지 못한다.
+ */
+@Composable
+private fun RoutineShortcut(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Button))
+            .background(JitColor.Surface)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column {
+            Text(
+                text = "아침 루틴 설정",
+                color = JitColor.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "준비 시간을 항목으로 쪼개면 근거가 생기고 확률 계산이 시작됨",
+                color = JitColor.TextSecondary,
+                fontSize = 10.sp,
+            )
+        }
+        Text(text = "›", color = JitColor.TextSecondary, fontSize = 18.sp)
     }
 }
 
@@ -487,6 +529,7 @@ private fun HomeEmptyPreview() {
             onEventClick = {},
             onAddEventClick = {},
             onSetHomeClick = {},
+            onRoutineClick = {},
             onRetry = {},
         )
     }
@@ -523,6 +566,7 @@ private fun HomeFilledPreview() {
             onEventClick = {},
             onAddEventClick = {},
             onSetHomeClick = {},
+            onRoutineClick = {},
             onRetry = {},
         )
     }

@@ -36,8 +36,23 @@ data class AlarmPlanView(
     /** 적용된 τ. 예 0.90 */
     val tauUsed: Double?,
 
+    /**
+     * 확률을 그리는 데 필요한 것 전부. 확률이 없을 때의 이유와 사용자가 할
+     * 일까지 담는다. 화면이 `confidence_basis` 문자열을 직접 분기하지 않게
+     * 저장소에서 문구로 바꿔 둔다.
+     */
+    val confidence: ConfidenceView,
+
     /** 준비·이동·버퍼 분해 */
     val breakdown: List<PlanRow>,
+
+    /**
+     * 준비 시간을 블록별로 쪼갠 내역. 루틴 블록이 없으면 빈 목록이다.
+     *
+     * [breakdown] 의 "준비 시간" 한 줄을 펼친 것이다. 합이 그 줄과 다를 수
+     * 있다 — 병렬 블록은 max 로 들어간다.
+     */
+    val prepBlocks: List<PrepBlockLine> = emptyList(),
     val totalMinutes: Int?,
     /** "8:50 도착 예정" */
     val arrivalLine: String?,
@@ -77,3 +92,53 @@ data class PlanRow(
 ) {
     enum class Kind { PREP, TRAVEL, BUFFER }
 }
+
+/**
+ * 정시 도착 확률의 표시 형태.
+ *
+ * **[percent] 가 null 인 것이 정상 상태다.** 서버는 준비·이동 **양쪽** 모두
+ * 변동성을 알 때만 확률을 만든다. 한쪽만 알 때 없는 쪽을 0 분산으로 치면
+ * "92% 정시 도착" 이 실제로는 "이동이 예측대로라면 92%" 가 되는데 그 조건이
+ * 화면에 없다. 그래서 서버가 비워 두고, 화면은 [reason] 과 [action] 으로
+ * 왜 비었는지와 무엇을 하면 채워지는지를 밝힌다.
+ */
+data class ConfidenceView(
+    /** 0~100. null 이면 아직 계산할 수 없다 */
+    val percent: Int?,
+    /** "정시 도착 확률 92%" / "정시 도착 확률 학습 중" */
+    val headline: String,
+    /** [percent] 가 null 일 때 그 이유. 있으면 null */
+    val reason: String?,
+    /** 사용자가 하면 확률이 생기는 일. 없거나 할 일이 없으면 null */
+    val action: String?,
+) {
+    val isLearning: Boolean get() = percent == null
+
+    /** 확률이 목표치를 넘겼는지. 초록/노랑 구분에 쓴다 */
+    fun meets(tau: Double?): Boolean {
+        val p = percent ?: return false
+        val target = tau?.takeIf { it in 0.0..1.0 }?.let { (it * 100).toInt() } ?: 90
+        return p >= target
+    }
+}
+
+/**
+ * 준비 블록 한 줄.
+ *
+ * [detail] 에 신고 범위와 관측 수를 함께 적는다. "샤워 14분" 만 보여주면
+ * 사용자가 신고한 12~18분에서 왜 14분이 나왔는지 알 수 없다.
+ */
+data class PrepBlockLine(
+    val blockId: Long?,
+    val name: String,
+    /** "14분" / "4.5분" — 소수 첫째 자리까지, 정수면 생략 */
+    val minutesLabel: String,
+    /** 막대 길이 계산용 */
+    val minutes: Double,
+    /** "신고 12~18분 · 관측 7회로 학습됨" */
+    val detail: String,
+    /** 관측 기반이면 true. 화면이 색으로 구분한다 */
+    val learned: Boolean,
+    /** 병렬 블록. 합계에 그대로 더해지지 않는다는 표시가 필요하다 */
+    val parallelizable: Boolean,
+)
