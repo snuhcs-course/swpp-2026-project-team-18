@@ -129,7 +129,10 @@ def main() -> int:
     # --- 2. 배포 서버로 쓴다 ----------------------------------------------
     marker = uuid.uuid4().hex[:12]
     email = f"dbprobe_{marker}@example.com"
-    password = "dbprobe12345"
+    # 이메일 접두와 닮지 않은 값이어야 한다. Django 의
+    # UserAttributeSimilarityValidator 가 유사도 0.7 을 넘으면 가입을 거부하고,
+    # "dbprobe12345" 는 정확히 그 경계였다 — 무작위 접미사에 따라 깜빡인다.
+    password = "Qs4-amber-window-71"
     st, body = api(
         base,
         "/api/auth/register",

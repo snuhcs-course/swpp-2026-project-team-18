@@ -16,7 +16,7 @@ P3 에서 `TravelObservation` 이 쌓이면 이 표에 분위수 필드를 더�
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.db.models import Q
+from django.db.models import Q, Value
 
 
 class AlarmPlan(models.Model):
@@ -84,19 +84,34 @@ class AlarmPlan(models.Model):
     #   point_estimate            둘 다 점추정. 알람은 나오지만 확률은 없다
     #   travel_variance_unknown   준비만 변동성 있음
     #   prep_variance_unknown     이동만 변동성 있음
+    #
+    # **`db_default` 를 반드시 둔다.** Django 의 `default` 는 파이썬 계층에만
+    # 있어서 DB 에는 기본값이 남지 않는다. 그러면 마이그레이션이 먼저 적용되고
+    # 코드 배포가 늦어지는 순간(무중단 배포, 롤백, 팀원이 migrate 만 먼저 돌린
+    # 경우) **구버전 코드의 INSERT 가 NOT NULL 위반으로 500 을 낸다.**
+    # 실제로 그렇게 배포 서버가 깨졌다 — 읽기는 정상이고 /api/health 도 200
+    # 이어서 겉으로는 멀쩡해 보였다.
     confidence_basis = models.CharField(
-        "확신도 근거", max_length=32, blank=True, default=""
+        "확신도 근거", max_length=32, blank=True, default="", db_default=""
     )
 
     # 준비 시간의 출처. 화면이 "실측" / "신고 범위" / "고정값" 을 구분한다.
     # 세 값의 신뢰도가 다른데 나란히 놓으면 전부 학습된 값처럼 읽힌다
     # (front-spec S_alarm 의 지적).
-    prep_source = models.CharField("준비시간 출처", max_length=24, blank=True, default="")
+    prep_source = models.CharField(
+        "준비시간 출처", max_length=24, blank=True, default="", db_default=""
+    )
 
     # 블록별 내역. 근거 카드와 "무엇을 버릴까" 판단에 쓴다.
     # 리스트라 JSONField 로 둔다. 별도 표로 빼면 계획을 덮어쓸 때마다
     # 행을 지우고 다시 넣어야 하는데, 이력이 필요한 데이터가 아니다.
-    prep_breakdown = models.JSONField("준비 내역", default=list, blank=True)
+    prep_breakdown = models.JSONField(
+        "준비 내역",
+        default=list,
+        blank=True,
+        # 위 confidence_basis 와 같은 이유. JSON 배열 리터럴을 DB 기본값으로 둔다.
+        db_default=Value("[]", output_field=models.JSONField()),
+    )
 
     # 분포의 τ 분위수 원값(분). 반올림 전이라 재계산 비교에 쓴다.
     total_quantile_minutes = models.FloatField(

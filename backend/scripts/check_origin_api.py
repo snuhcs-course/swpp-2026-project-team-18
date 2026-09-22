@@ -61,7 +61,7 @@ def check(label, ok, note=""):
 
 
 email = f"origin_{uuid.uuid4().hex[:8]}@example.com"
-password = "originchk1234"
+password = "Zr9-copper-meadow-43"  # 이메일 접두와 유사하면 가입이 400 이 된다(유사도 0.7 임계)
 
 res = requests.post(
     f"{BASE}/api/auth/register",

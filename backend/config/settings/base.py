@@ -168,4 +168,12 @@ FCM_CREDENTIALS_PATH = os.getenv("FCM_CREDENTIALS_PATH", "")
 REDIS_URL = os.getenv("REDIS_URL", "")
 
 # /api/health 가 반환하는 값. 클라이언트가 서버 버전을 확인하는 데 쓴다.
-APP_VERSION = "0.1.0"
+#
+# **배포할 때마다 올린다.** 이 값이 고정이면 "새 코드가 떴는지" 를 알 방법이
+# 없다. 실제로 그 때문에 막혔다 — 마이그레이션은 적용됐는데 코드는 구버전이라
+# INSERT 가 500 나는 상태였고, /api/health 는 200 이고 version 도 그대로여서
+# 원인을 좁히는 데 시간이 걸렸다.
+#
+#   0.1.0  P1 — 고정 규칙 알람
+#   0.2.0  P2 — 분포 기반 확신도 알람, 루틴 블록, 경로 보정
+APP_VERSION = "0.2.0"
