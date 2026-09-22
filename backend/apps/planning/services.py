@@ -1,22 +1,37 @@
 """알람 계산.
 
-    알람 시각 = 일정 시작 − 안전 버퍼 − 이동 시간 − 준비 시간
+    알람 시각 = 일정 시작 − 안전 버퍼 − (준비 + 이동)의 τ 분위수
 
-**지금 계산할 수 있는 것과 못 하는 것**
+## 1단계에서 2단계로
 
-| 항목 | 출처 | 상태 |
+전에는 점추정치를 그대로 뺐다.
+
+    알람 = 시작 − 10분 − 이동(카카오) − 준비(온보딩 값)
+
+지금은 준비·이동을 **분포**로 만들고 합성한 뒤 τ 분위수를 쓴다. τ 는
+사용자가 고르는 확신도다(0.5~0.999). 태그가 기본값을 주고 일정별로
+덮을 수 있다.
+
+**합성 후에 분위수를 구한다.** 준비의 90% 분위수와 이동의 90% 분위수를
+따로 구해 더하면 둘이 동시에 나쁜 경우를 가정하게 되어 결합 확신도가
+99% 가 된다. 그만큼 알람이 이르고 사용자는 잠을 잃는다.
+
+## 관측이 없으면 1단계와 똑같이 동작한다
+
+분산의 출처가 없으면 `sd=0` 이 되어 τ 분위수가 평균과 같아진다. 즉
+
+    블록 없음 + 경로 보정 없음  →  전과 동일한 알람, 확률은 null
+
+이게 의도다. 변동성을 모르는데 τ 를 반영하면 없는 근거로 사용자의 잠을
+빼앗는다. 분산은 사용자가 신고한 블록 범위나 관측된 경로 보정에서만 나온다.
+근거는 `estimators.py` 상단에 정리했다.
+
+| 항목 | 출처 | 변동성 |
 | --- | --- | --- |
-| 이동 시간 | 카카오 경로 API 실측 조회 | 가능 |
-| 준비 시간 | 프로필 `onboarding_prep_min` | 가능 (사용자가 답한 값) |
-| 안전 버퍼 | 고정 10분 | 가능 |
-| **정시 도착 확률** | 관측 분포 필요 | **불가 → null** |
-
-확률을 못 만드는 이유는 두 가지다. 새 계정에 관측이 없고, 카카오 응답에도
-변동성 정보가 없다(checklist "BE-P0-06 결론"). 그래서 `on_time_probability` 를
-비워 두고 화면이 "학습 중" 으로 표시한다. 임의의 90% 를 넣으면 화면은
-그럴싸해지지만 사용자를 속이는 것이다.
-
-P3 에서 `TravelObservation` 이 쌓이면 분위수를 계산해 채운다.
+| 이동 시간 | 카카오 경로 API 실측 조회 | `RouteCorrection` 이 있을 때만 |
+| 준비 시간 | 루틴 블록 범위 + 블록 관측 | 블록이 있을 때만 |
+| 안전 버퍼 | 고정 10분 | 없음(확정값) |
+| 정시 도착 확률 | 위 둘 모두 변동성이 있을 때 | — |
 """
 
 from __future__ import annotations
@@ -25,10 +40,12 @@ import logging
 from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Avg, Count, StdDev
 
 from apps.events.models import Event
 from apps.routing import clients
 
+from . import estimators
 from .models import AlarmPlan
 
 logger = logging.getLogger(__name__)
@@ -38,6 +55,40 @@ DEFAULT_BUFFER_MINUTES = 10
 
 # 프로필에 준비시간이 없을 때 쓰는 값. 온보딩(S1)에서 사용자가 답하면 대체된다.
 FALLBACK_PREP_MINUTES = 30
+
+
+def _block_observation_stats(user_id: int) -> dict[int, tuple[float, float, int]]:
+    """블록별 관측 통계를 한 번에 가져온다.
+
+    `{block_id: (평균, 표준편차, 표본수)}`. 블록마다 쿼리를 날리면 N+1 이다.
+
+    SQLite 에는 `STDDEV` 가 없어서 `StdDev` 집계가 실패할 수 있다. 그 경우
+    평균과 표본수만 쓰고 표준편차는 None 으로 둔다 — `block_distribution` 이
+    신고 범위의 폭으로 대체한다.
+    """
+    from apps.routines.models import BlockObservation
+
+    qs = BlockObservation.objects.filter(user_id=user_id).values("block_id")
+    try:
+        rows = list(
+            qs.annotate(
+                avg=Avg("duration_minutes"),
+                sd=StdDev("duration_minutes"),
+                n=Count("id"),
+            )
+        )
+    except Exception:  # noqa: BLE001 - 백엔드가 STDDEV 를 지원하지 않는 경우
+        logger.info("StdDev 집계를 쓸 수 없다. 평균과 표본수만 사용한다.")
+        rows = [
+            {**r, "sd": None}
+            for r in qs.annotate(avg=Avg("duration_minutes"), n=Count("id"))
+        ]
+
+    return {
+        r["block_id"]: (r["avg"], r["sd"], r["n"])
+        for r in rows
+        if r["avg"] is not None
+    }
 
 
 @transaction.atomic
@@ -60,6 +111,10 @@ def compute_and_store(event: Event) -> AlarmPlan:
         "buffer_minutes": None,
         "tau_used": None,
         "on_time_probability": None,
+        "confidence_basis": "",
+        "prep_source": "",
+        "prep_breakdown": [],
+        "total_quantile_minutes": None,
         "travel_mode": "",
         "travel_source": "",
         "route_summary": "",
@@ -111,14 +166,38 @@ def compute_and_store(event: Event) -> AlarmPlan:
         defaults["status"] = AlarmPlan.Status.ROUTE_FAILED
         return _upsert(event, defaults)
 
-    # 4) 계산
-    prep = profile.onboarding_prep_min or FALLBACK_PREP_MINUTES
-    travel = route["minutes"]
+    # 4) 분포 추정.
+    #
+    # 준비: 루틴 블록이 있으면 블록 조합에서, 없으면 온보딩 값 하나에서.
+    # 이동: 카카오 점추정치에 관측된 경로 보정을 적용.
+    tau = event.effective_tau
     buffer_min = DEFAULT_BUFFER_MINUTES
 
-    arrive_at = event.start_at - timedelta(minutes=buffer_min)
-    depart_by = arrive_at - timedelta(minutes=travel)
-    alarm_at = depart_by - timedelta(minutes=prep)
+    prep = estimators.estimate_prep(
+        event,
+        profile,
+        fallback_minutes=FALLBACK_PREP_MINUTES,
+        observations=_block_observation_stats(event.user_id),
+    )
+    travel = estimators.estimate_travel(
+        minutes=route["minutes"],
+        route_key=route.get("key", "") or "",
+        mode=route.get("mode", "") or "",
+        # 보정은 출발 시각의 시간대로 나뉘어 있다. 출발 시각은 알람 계산
+        # 결과라 아직 모르므로 일정 시작 시각으로 근사한다 — 같은 아침이라
+        # 시간대 버킷이 거의 같다.
+        depart_at=event.start_at,
+    )
+
+    math_ = estimators.compute_alarm_math(prep, travel, buffer_min, tau)
+
+    # 5) 시각으로 환산.
+    #
+    # 도착 예정은 일정 시작에서 버퍼를 뺀 시각이다. 출발 시각은 거기서
+    # 이동 시간을 뺀 값이고, 알람은 거기서 준비 시간을 뺀 값이다.
+    arrive_at = event.start_at - timedelta(minutes=math_.buffer_minutes)
+    depart_by = arrive_at - timedelta(minutes=math_.travel_minutes)
+    alarm_at = depart_by - timedelta(minutes=math_.prep_minutes)
 
     defaults.update(
         {
@@ -126,16 +205,27 @@ def compute_and_store(event: Event) -> AlarmPlan:
             "alarm_at": alarm_at,
             "depart_by": depart_by,
             "arrive_at": arrive_at,
-            "prep_minutes": prep,
-            "travel_minutes": travel,
-            "buffer_minutes": buffer_min,
-            "tau_used": event.effective_tau,
-            # 관측이 없으므로 확률은 비운다. 위 표 참고.
-            "on_time_probability": None,
-            "travel_mode": route.get("mode", "")[:20],
-            "travel_source": route.get("source", "")[:30],
+            "prep_minutes": math_.prep_minutes,
+            "travel_minutes": math_.travel_minutes,
+            "buffer_minutes": math_.buffer_minutes,
+            "tau_used": tau,
+            "on_time_probability": math_.on_time_probability,
+            "confidence_basis": math_.confidence_basis,
+            "prep_source": math_.prep_source,
+            "prep_breakdown": math_.prep_breakdown,
+            "total_quantile_minutes": round(
+                math_.total_minutes - math_.buffer_minutes, 2
+            ),
+            "travel_mode": (route.get("mode") or "")[:20],
+            # 보정이 적용됐으면 그 사실을 남긴다. 나중에 실측과 비교할 때
+            # "카카오 원값" 과 "보정값" 을 구분해야 한다.
+            "travel_source": (
+                f"{route.get('source', '')}+{travel.source}"
+                if travel.source != "kakao"
+                else (route.get("source") or "")
+            )[:30],
             # 요약 문자열은 clients 가 만든다. 같은 규칙을 두 곳에 두지 않는다.
-            "route_summary": (route.get("summary") or f"{travel}분")[:200],
+            "route_summary": (route.get("summary") or f"{math_.travel_minutes}분")[:200],
             "route_key": (route.get("key") or "")[:120],
             "route_detail": (route.get("detail") or "")[:120],
         }

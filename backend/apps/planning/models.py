@@ -66,12 +66,41 @@ class AlarmPlan(models.Model):
         validators=[MinValueValidator(0.5), MaxValueValidator(0.999)],
     )
 
-    # 관측이 쌓이기 전에는 null 이다. 임의값을 채우지 않는다.
+    # 준비·이동 **양쪽** 모두 변동성이 있을 때만 채운다. 한쪽만 있으면
+    # 없는 쪽을 0 분산으로 치게 되어 확신도를 과대 보고한다. 근거는
+    # `apps/planning/estimators.py` 상단에 있다.
     on_time_probability = models.PositiveSmallIntegerField(
         "정시 도착 확률(%)",
         null=True,
         blank=True,
         validators=[MaxValueValidator(100)],
+    )
+
+    # 확률을 낼 수 있었는지, 못 냈으면 왜인지. 화면이 "학습 중" 문구를
+    # 구체적으로 쓸 수 있게 한다 — "관측이 없다" 와 "이동 변동성만 모른다" 는
+    # 사용자가 할 수 있는 행동이 다르다.
+    #
+    #   observed                  둘 다 관측 기반. 확률이 있다
+    #   point_estimate            둘 다 점추정. 알람은 나오지만 확률은 없다
+    #   travel_variance_unknown   준비만 변동성 있음
+    #   prep_variance_unknown     이동만 변동성 있음
+    confidence_basis = models.CharField(
+        "확신도 근거", max_length=32, blank=True, default=""
+    )
+
+    # 준비 시간의 출처. 화면이 "실측" / "신고 범위" / "고정값" 을 구분한다.
+    # 세 값의 신뢰도가 다른데 나란히 놓으면 전부 학습된 값처럼 읽힌다
+    # (front-spec S_alarm 의 지적).
+    prep_source = models.CharField("준비시간 출처", max_length=24, blank=True, default="")
+
+    # 블록별 내역. 근거 카드와 "무엇을 버릴까" 판단에 쓴다.
+    # 리스트라 JSONField 로 둔다. 별도 표로 빼면 계획을 덮어쓸 때마다
+    # 행을 지우고 다시 넣어야 하는데, 이력이 필요한 데이터가 아니다.
+    prep_breakdown = models.JSONField("준비 내역", default=list, blank=True)
+
+    # 분포의 τ 분위수 원값(분). 반올림 전이라 재계산 비교에 쓴다.
+    total_quantile_minutes = models.FloatField(
+        "합성 분위수(분)", null=True, blank=True
     )
 
     # 이동 시간의 출처를 남긴다. 나중에 실측과 비교할 때 필요하다.

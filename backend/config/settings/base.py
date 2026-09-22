@@ -32,15 +32,18 @@ INSTALLED_APPS = [
     "corsheaders",
     # local
     # back-spec.md 2절은 앱 12개를 정의하지만 필요한 것부터 추가한다.
-    # 나머지(routines, weather, prediction, rooms, reports, nlp, push)는
-    # 해당 페이즈에서 붙인다.
+    # 나머지(weather, rooms, nlp, push)는 해당 페이즈에서 붙인다.
     "apps.accounts",
     "apps.events",
     "apps.planning",
-    # 앱이 GPS 로 판별한 실제 출발·도착 시각. 분포 학습의 유일한 재료다.
+    # 앱이 GPS 로 판별한 실제 출발·도착 시각. 분포 학습의 재료다.
     "apps.observations",
-    # 카카오 경로·로컬 검색 클라이언트. 모델이 없고 clients.py 만 있다.
+    # 아침 루틴 블록과 블록별 관측. 준비 시간 분포의 재료다.
+    "apps.routines",
+    # 카카오 경로·로컬 검색 클라이언트 + 경로 보정 계수(RouteCorrection).
     "apps.routing",
+    # 학습 결과 아티팩트. 전역·개인 분포 모수를 담는다.
+    "apps.prediction",
 ]
 
 MIDDLEWARE = [

@@ -36,7 +36,21 @@ BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
 # 검증 스크립트가 쓰는 접두. 실제 사용자 이메일과 겹칠 일이 없는 값들이다.
-DEFAULT_PREFIXES = ("depcheck_", "dbprobe_")
+#
+# 스크립트마다 접두가 다르다. 새 검증 스크립트를 만들면 여기에 추가할 것 —
+# 빠뜨리면 공용 DB 에 계정이 계속 쌓인다.
+DEFAULT_PREFIXES = (
+    "depcheck_",   # check_deployed.py
+    "dbprobe_",    # check_same_db.py
+    "tester_",     # check_auth_api.py
+    "ev_a_",       # check_events_api.py
+    "ev_b_",
+    "obs_a_",      # check_observations_api.py
+    "obs_b_",
+    "rt_",         # check_route_api.py
+    "origin_",     # check_origin_api.py
+    "tz_",         # check_timezone.py
+)
 
 
 def main() -> int:

@@ -8,6 +8,22 @@
     .venv\\Scripts\\python.exe scripts\\check_origin_api.py
 """
 
+# --- 공용 DB 보호 -----------------------------------------------------------
+# 이 스크립트는 검증용 계정과 일정을 만든다. 공용 DB 에서 돌리면 팀 전체가
+# 보는 목록이 테스트 데이터로 채워진다. 실제로 그런 사고가 있었다 -
+# 근거와 재현 조건은 scripts/_local_guard.py 상단에 적어 두었다.
+#
+# **부수효과가 생기기 전에** 돌아야 하므로 맨 위에 둔다.
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from _local_guard import require_local_database  # noqa: E402
+
+require_local_database()
+# ---------------------------------------------------------------------------
+
+
 import os
 import sys
 import uuid
@@ -18,6 +34,9 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
 django.setup()
+
+# 공용/원격 DB 에서 돌리지 못하게 막는다. 이 스크립트는 검증용 계정과
+
 
 from django.contrib.auth import get_user_model  # noqa: E402
 

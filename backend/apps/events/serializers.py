@@ -25,8 +25,19 @@ class EventTagSerializer(serializers.ModelSerializer):
 class AlarmPlanSerializer(serializers.Serializer):
     """일정에 딸린 알람 계획.
 
-    `on_time_probability` 는 **null 일 수 있다.** 관측이 쌓이기 전에는 확률을
-    만들 수 없다. 클라이언트는 null 을 "학습 중" 으로 표시한다.
+    `on_time_probability` 는 **null 일 수 있다.** 준비·이동 **양쪽** 모두
+    변동성이 있을 때만 채운다. 한쪽만 있으면 없는 쪽을 0 분산으로 치게 되어
+    확신도를 과대 보고한다.
+
+    왜 null 인지는 `confidence_basis` 가 알려준다. 화면이 "학습 중" 문구를
+    구체적으로 쓸 수 있어야 한다 — 사용자가 할 수 있는 행동이 다르다.
+
+    | confidence_basis | 뜻 | 사용자가 할 일 |
+    | --- | --- | --- |
+    | `observed` | 둘 다 관측 기반. 확률이 있다 | — |
+    | `point_estimate` | 둘 다 점추정 | 루틴 블록을 등록하면 시작된다 |
+    | `travel_variance_unknown` | 준비만 변동성 있음 | 같은 경로를 몇 번 다니면 쌓인다 |
+    | `prep_variance_unknown` | 이동만 변동성 있음 | 루틴 블록에 범위를 넣으면 된다 |
     """
 
     status = serializers.CharField()
@@ -40,16 +51,21 @@ class AlarmPlanSerializer(serializers.Serializer):
     total_minutes = serializers.IntegerField(allow_null=True)
     tau_used = serializers.FloatField(allow_null=True)
     on_time_probability = serializers.IntegerField(allow_null=True)
+    # 확률이 없을 때 그 이유. 위 표 참고.
+    confidence_basis = serializers.CharField()
     travel_mode = serializers.CharField()
     route_summary = serializers.CharField()
     route_key = serializers.CharField()
     route_detail = serializers.CharField()
+    # 블록별 내역. 근거 카드가 "샤워 14분 · 옷 5분" 을 그린다.
+    # 블록이 없으면 빈 배열이다.
+    prep_breakdown = serializers.JSONField()
     # 사용자가 고른 경로가 그대로 쓰였는지. 배차가 바뀌어 사라지면 서버가
     # 대체 경로로 계산하는데, 화면이 그 사실을 알려야 한다.
     route_choice_honored = serializers.SerializerMethodField()
 
-    # 계산에 쓴 값의 출처. 이동 시간만 실측이고 나머지는 아직 고정값이다.
-    # 화면에서 "이건 학습된 값" 처럼 오해하지 않게 서버가 명시한다.
+    # 계산에 쓴 값의 출처. 세 값의 신뢰도가 다른데 나란히 놓으면 전부
+    # 학습된 값처럼 읽힌다(front-spec S_alarm 의 지적). 서버가 명시한다.
     prep_source = serializers.SerializerMethodField()
     buffer_source = serializers.SerializerMethodField()
     travel_time_source = serializers.SerializerMethodField()
@@ -61,10 +77,19 @@ class AlarmPlanSerializer(serializers.Serializer):
         return chosen == (obj.route_key or "")
 
     def get_prep_source(self, obj) -> str:
-        # 관측 기반 학습은 P3 항목이다. 지금은 온보딩 응답 또는 기본값이다.
+        """준비 시간의 출처.
+
+        이제 계산기가 직접 기록한다. 추측하지 않는다.
+
+          observed        블록 관측 기반
+          declared_range  블록에 범위를 신고했다 (변동성 있음)
+          declared_point  블록을 신고했지만 범위가 한 점이다
+          onboarding      블록이 없어 온보딩 응답을 썼다
+          fixed           온보딩도 없어 기본값을 썼다
+        """
         if obj.prep_minutes is None:
             return ""
-        return "onboarding" if obj.event.user.profile.onboarding_prep_min else "default"
+        return obj.prep_source or "fixed"
 
     def get_buffer_source(self, obj) -> str:
         return "" if obj.buffer_minutes is None else "fixed"
