@@ -104,6 +104,22 @@ class AlarmScheduler(private val context: Context) {
     }
 
     /**
+     * 등록된 알람 전부 해제. **로그아웃에서 부른다.**
+     *
+     * 사본만 지우고 `PendingIntent` 를 남기면 **로그아웃한 계정의 알람이 그대로
+     * 울린다.** 그때는 사본이 없으니 앱이 그 알람이 무엇인지 설명할 수도 없다.
+     *
+     * @return 해제한 건수
+     */
+    fun cancelAll(): Int {
+        val scheduled = store.all()
+        scheduled.forEach { cancelPendingIntent(it.eventId) }
+        store.replaceAll(emptyList())
+        Log.i(TAG, "알람 전체 해제: ${scheduled.size}건")
+        return scheduled.size
+    }
+
+    /**
      * 지금 등록된 알람. 알람 시각 오름차순.
      *
      * 홈 화면이 "몇 개 등록됐고 다음이 언제인지" 를 보여줄 때 쓴다. 실기기에서

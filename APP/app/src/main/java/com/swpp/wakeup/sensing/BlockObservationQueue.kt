@@ -7,6 +7,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
 import com.swpp.wakeup.background.JitWork
+import com.swpp.wakeup.data.local.discardIfForeign
+import com.swpp.wakeup.data.local.stampOwner
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.BlockObservationBatchRequest
 import com.swpp.wakeup.data.remote.BlockObservationInput
@@ -48,6 +50,11 @@ class BlockObservationQueue(
     val pendingCount: Int get() = pending().size
 
     fun pending(): List<BlockObservationInput> {
+        // 앞 사용자의 큐를 지금 로그인한 계정의 토큰으로 올리면 안 된다. 서버가
+        // 남의 블록 id 를 거절하겠지만, 거절받기 위해 남의 기록을 보내는 것
+        // 자체가 틀렸다. 그 토큰은 이미 없으므로 올릴 길도 없다 — 버린다.
+        if (prefs.discardIfForeign(appContext)) return emptyList()
+
         val raw = prefs.getString(KEY_PENDING, null) ?: return emptyList()
         return try {
             gson.fromJson<List<BlockObservationInput>>(raw, TYPE).orEmpty()
@@ -140,6 +147,12 @@ class BlockObservationQueue(
             if (items.isEmpty()) remove(KEY_PENDING)
             else putString(KEY_PENDING, gson.toJson(items.takeLast(MAX_PENDING)))
         }
+        prefs.stampOwner(appContext)
+    }
+
+    /** 큐를 통째로 비운다. **로그아웃·계정 전환에서 부른다.** */
+    fun wipe() {
+        prefs.edit { clear() }
     }
 
     private companion object {

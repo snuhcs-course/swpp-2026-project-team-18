@@ -6,6 +6,8 @@ import androidx.core.content.edit
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
+import com.swpp.wakeup.data.local.discardIfForeign
+import com.swpp.wakeup.data.local.stampOwner
 import com.swpp.wakeup.data.local.withDiskDefaults
 import com.swpp.wakeup.domain.model.AlarmSchedule
 
@@ -23,11 +25,20 @@ import com.swpp.wakeup.domain.model.AlarmSchedule
  */
 class ScheduledAlarmStore(context: Context) {
 
-    private val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
     private val gson = Gson()
 
     /** 등록해 둔 알람 전부. 순서는 알람 시각 오름차순. */
     fun all(): List<AlarmSchedule> {
+        // 다른 계정이 로그인해 있으면 앞 사용자의 알람을 울리지 않는다. 잠금화면
+        // 위에 남의 일정 제목이 뜨는 일이 생긴다.
+        //
+        // **로그인 정보가 없을 때는 막지 않는다.** refresh 토큰이 만료되면
+        // AuthInterceptor 가 토큰을 지우는데, 그때 막으면 세션이 끊긴 사용자의
+        // 알람이 재부팅 뒤 울리지 않는다. 9시 수업은 그대로 있다.
+        if (prefs.discardIfForeign(appContext)) return emptyList()
+
         val raw = prefs.getString(KEY_SCHEDULES, null) ?: return emptyList()
         return try {
             gson.fromJson<List<AlarmSchedule>>(raw, TYPE).orEmpty()
@@ -48,6 +59,12 @@ class ScheduledAlarmStore(context: Context) {
         prefs.edit {
             putString(KEY_SCHEDULES, gson.toJson(schedules.sortedBy { it.alarmAtMillis }))
         }
+        prefs.stampOwner(appContext)
+    }
+
+    /** 사본을 통째로 비운다. **로그아웃·계정 전환에서 부른다.** */
+    fun wipe() {
+        prefs.edit { clear() }
     }
 
     fun find(eventId: Long): AlarmSchedule? = all().firstOrNull { it.eventId == eventId }

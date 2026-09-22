@@ -23,8 +23,8 @@ import com.swpp.wakeup.domain.model.MorningSession
  */
 class MorningSessionStore(context: Context) {
 
-    private val prefs = context.applicationContext
-        .getSharedPreferences(FILE, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
     private val gson = Gson()
 
     /**
@@ -34,6 +34,10 @@ class MorningSessionStore(context: Context) {
      * 가 뜨고, 거기서 탭하면 소요가 18시간으로 올라가 학습을 망친다.
      */
     fun current(): MorningSession? {
+        // 다른 계정의 기록이면 없는 것으로 다룬다. 이것이 없으면 계정을 바꾼
+        // 사용자가 앞 사람의 블록 이름과 진행 상황을 그대로 본다.
+        if (prefs.discardIfForeign(appContext)) return null
+
         val raw = prefs.getString(KEY_SESSION, null) ?: return null
         val session = try {
             // withDiskDefaults 를 지우지 말 것. Gson 은 JSON 에 없는 키를 Kotlin
@@ -104,10 +108,17 @@ class MorningSessionStore(context: Context) {
 
     fun save(session: MorningSession) {
         prefs.edit { putString(KEY_SESSION, gson.toJson(session)) }
+        prefs.stampOwner(appContext)
     }
 
+    /** 기록만 지운다. 소유자 표시는 남겨 둔다. */
     fun clear() {
         prefs.edit { remove(KEY_SESSION) }
+    }
+
+    /** 소유자 표시까지 전부 지운다. **로그아웃·계정 전환에서 부른다.** */
+    fun wipe() {
+        prefs.edit { clear() }
     }
 
     private companion object {

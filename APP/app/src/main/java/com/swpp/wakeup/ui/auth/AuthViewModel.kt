@@ -3,6 +3,7 @@ package com.swpp.wakeup.ui.auth
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.swpp.wakeup.data.local.LocalStores
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ServerWarmup
@@ -36,6 +37,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         onBeforeAuthenticated = {
             // 소유자를 모르는 상태이므로 전부 지운다. 새 계정의 캐시는 아직 없다.
             OfflineCache(application, ownerEmail = null).wipe()
+            // 앞 사용자의 알람 사본·관측 큐·아침 기록도 같이 지운다. 로그아웃이
+            // 이미 지웠겠지만, 앱이 강제 종료됐으면 그 경로가 돌지 않았다.
+            //
+            // 여기서는 토큰이 아직 저장되기 전이라 소유자 판정이 "모름" 이다.
+            // 그래서 소유자를 가리지 않고 전부 지운다 — 어느 계정의 잔재가
+            // 남아 있는지 앱이 확신할 수 없다.
+            LocalStores.wipeAll(application)
         },
     )
 

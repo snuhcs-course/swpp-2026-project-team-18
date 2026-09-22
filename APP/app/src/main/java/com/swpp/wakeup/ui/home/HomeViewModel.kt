@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.calendar.DeviceCalendar
+import com.swpp.wakeup.data.local.LocalStores
 import com.swpp.wakeup.data.local.MorningSessionStore
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
@@ -251,11 +252,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 다루는 것은 기기에 남는 **보존 기간**이다.
      */
     fun logout() {
+        // 순서가 있다. **토큰보다 먼저 지운다** — 지우기 판정이 "지금 로그인한
+        // 계정" 을 보므로, 토큰이 먼저 사라지면 소유자를 모르는 상태가 되어
+        // 아무것도 지울 수 없다.
+        LocalStores.wipeAll(getApplication())
         tokenStore.clear()
         OfflineCache.wipeDetached(getApplication())
         // 배경 작업도 거둔다. 워커가 로그인 여부를 확인해 아무 일도 하지 않지만,
         // 로그아웃한 기기를 6시간마다 깨울 이유가 없다.
         JitWork.cancelAll(getApplication())
+
+        // 화면에 남은 아침 기록도 즉시 지운다. 지우지 않으면 로그아웃 뒤에도
+        // 홈 카드가 남은 블록 수를 보여 준다.
+        _morning.value = null
+        _state.update { it.copy(morningBlocksLeft = null) }
     }
 
     /** 아바타에 쓸 두 글자. */
