@@ -11,6 +11,9 @@ from django.db import transaction
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+# 집도 출발지다. 일정의 `origin_*` 과 같은 범위 규칙을 써야 한다.
+from apps.events.geo import in_service_area
+
 from .models import Profile, User
 
 
@@ -92,6 +95,24 @@ class LoginSerializer(TokenObtainPairSerializer):
     }
 
     def validate(self, attrs):
+        """이메일을 정규화한 뒤 인증한다.
+
+        **가입은 소문자로 저장하는데 로그인은 정규화하지 않았다.**
+        `RegisterSerializer.validate_email` 이 `.strip().lower()` 를 하므로
+        `New@Example.COM` 으로 가입하면 `new@example.com` 이 저장된다. 그런데
+        로그인에서 같은 문자열을 입력하면 조회가 실패해 401 이 났다.
+
+        모바일 키보드가 첫 글자를 대문자로 바꾸는 일이 흔하다. 사용자는
+        자기가 쓴 이메일을 그대로 입력했는데 로그인이 안 되는 상태가 된다.
+        저장 규칙과 조회 규칙이 같아야 한다.
+
+        비밀번호는 정규화하지 않는다 — 앞뒤 공백도 사용자가 의도한 문자다
+        (`RegisterSerializer` 의 `trim_whitespace=False` 와 같은 이유).
+        """
+        field = self.username_field  # USERNAME_FIELD 가 email 이다
+        if isinstance(attrs.get(field), str):
+            attrs[field] = attrs[field].strip().lower()
+
         data = super().validate(attrs)
         data["user"] = UserSerializer(self.user).data
         return data
@@ -131,4 +152,19 @@ class ProfileSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"home_lat": "집 위도와 경도는 함께 설정해야 한다."}
             )
+
+        # **범위 검증이 없었다.** `home_lat=999, home_lng=999` 가 200 으로
+        # 저장됐고, 그 값이 `Event.resolve_origin` 을 통해 알람 계산으로 흘러
+        # 카카오를 국외(라기보다 불가능한) 좌표로 불렀다. 쿼터를 쓰고 실패한다.
+        #
+        # 일정의 `origin_*` 과 같은 규칙을 쓴다 — 집도 출발지이므로 다를 이유가 없다.
+        if lat is not None and lng is not None:
+            if not (-90 <= lat <= 90):
+                raise serializers.ValidationError({"home_lat": "위도 범위를 벗어났다."})
+            if not (-180 <= lng <= 180):
+                raise serializers.ValidationError({"home_lng": "경도 범위를 벗어났다."})
+            if not in_service_area(lat, lng):
+                raise serializers.ValidationError(
+                    {"home_lat": "국내 좌표만 집으로 설정할 수 있다."}
+                )
         return attrs

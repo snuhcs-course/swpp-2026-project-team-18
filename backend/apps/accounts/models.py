@@ -94,8 +94,21 @@ class Profile(models.Model):
         User, on_delete=models.CASCADE, related_name="profile", verbose_name="사용자"
     )
 
-    home_lat = models.FloatField("집 위도", null=True, blank=True)
-    home_lng = models.FloatField("집 경도", null=True, blank=True)
+    # 집은 알람 계산의 출발지다. 값이 이상하면 카카오 호출이 실패하고
+    # 알람이 계산되지 않는다. 범위를 모델 검증기와 DB 제약 양쪽에 둔다 —
+    # 시리얼라이저만으로는 admin·shell·시드 경로를 막지 못한다.
+    home_lat = models.FloatField(
+        "집 위도",
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(-90), MaxValueValidator(90)],
+    )
+    home_lng = models.FloatField(
+        "집 경도",
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(-180), MaxValueValidator(180)],
+    )
     home_label = models.CharField("집 표시명", max_length=80, blank=True)
 
     # 도착 확률 목표. 0.90 이면 "정시 도착 확률 90%".
@@ -120,7 +133,28 @@ class Profile(models.Model):
             models.CheckConstraint(
                 condition=Q(default_tau__gte=0.5) & Q(default_tau__lte=0.999),
                 name="accounts_profile_default_tau_range",
-            )
+            ),
+            # 좌표 범위. 시리얼라이저에도 있지만 DB 에 박아 둔다 — admin·shell·
+            # 시드 커맨드는 시리얼라이저를 타지 않는다. `home_lat=999` 가 저장되면
+            # 알람 계산이 조용히 실패한다.
+            models.CheckConstraint(
+                condition=Q(home_lat__isnull=True)
+                | (Q(home_lat__gte=-90) & Q(home_lat__lte=90)),
+                name="accounts_profile_home_lat_range",
+            ),
+            models.CheckConstraint(
+                condition=Q(home_lng__isnull=True)
+                | (Q(home_lng__gte=-180) & Q(home_lng__lte=180)),
+                name="accounts_profile_home_lng_range",
+            ),
+            # 위도·경도는 둘 다 있거나 둘 다 없어야 한다. 하나만 있으면
+            # `resolve_origin` 이 절반만 아는 좌표를 반환한다. `Event.origin_*`
+            # 과 같은 규칙이다.
+            models.CheckConstraint(
+                condition=(Q(home_lat__isnull=True) & Q(home_lng__isnull=True))
+                | (Q(home_lat__isnull=False) & Q(home_lng__isnull=False)),
+                name="accounts_profile_home_pair",
+            ),
         ]
 
     def __str__(self):

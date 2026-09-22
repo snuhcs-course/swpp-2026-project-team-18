@@ -5,6 +5,9 @@ from __future__ import annotations
 from django.db import transaction
 from rest_framework import serializers
 
+# 서비스 범위 판정. `views.py` 가 아니라 `geo.py` 에서 가져온다 — 시리얼라이저가
+# 뷰를 import 하면 순환이 된다.
+from .geo import in_service_area
 from .models import Event, EventTag, Place
 
 
@@ -150,6 +153,23 @@ class PlaceInputSerializer(serializers.Serializer):
         max_length=40, required=False, allow_null=True, allow_blank=True
     )
 
+    def validate(self, attrs):
+        """목적지도 국내여야 한다.
+
+        **출발지만 막고 있었다.** 파리를 목적지로 넣으면 일정이 201 로
+        생성되고, 알람 계산이 카카오에 국외 목적지를 물어 쿼터를 쓰고 실패한다.
+        경로의 양 끝이 모두 국내여야 카카오가 답한다.
+
+        `Place` 는 전역 공유 표라서 더 중요하다 — 국외 행이 쌓이면 다른
+        사용자의 검색 결과에도 섞인다.
+        """
+        lat, lng = attrs.get("lat"), attrs.get("lng")
+        if lat is not None and lng is not None and not in_service_area(lat, lng):
+            raise serializers.ValidationError(
+                {"lat": "국내 좌표만 목적지로 쓸 수 있다."}
+            )
+        return attrs
+
     def resolve(self) -> Place:
         data = self.validated_data
         kakao_id = (data.get("kakao_place_id") or "").strip() or None
@@ -217,6 +237,15 @@ class EventWriteSerializer(serializers.ModelSerializer):
         if (lat is None) != (lng is None):
             raise serializers.ValidationError(
                 {"origin_lat": "origin_lat 과 origin_lng 는 함께 보내야 한다."}
+            )
+
+        # 국내 좌표만 받는다. `GET /api/routes/candidates` 는 이미 막고 있었는데
+        # **여기에는 검사가 없어서 국외 출발지가 일정에 저장됐다.** 그러면
+        # 알람 계산이 국외 좌표로 카카오를 불러 쿼터를 쓰고 실패한다.
+        # 규칙은 `geo.in_service_area` 한 곳에 둔다.
+        if lat is not None and lng is not None and not in_service_area(lat, lng):
+            raise serializers.ValidationError(
+                {"origin_lat": "국내 좌표만 출발지로 쓸 수 있다."}
             )
         return attrs
 

@@ -109,21 +109,16 @@ class EventTagListView(APIView):
         return Response(EventTagSerializer(tags, many=True).data)
 
 
-# 카카오 경로·주소 API 가 다루는 범위. 한반도 남부와 그 주변 해역을 넉넉히 덮는다.
+# 서비스 범위 판정은 `geo.py` 로 옮겼다. 시리얼라이저도 같은 규칙을 써야 하는데
+# 시리얼라이저가 뷰를 import 하면 순환이 되기 때문이다. 실제로 그 때문에
+# 일정 생성에는 검사가 빠져 국외 출발지가 통과했다.
 #
-# 출발지를 요청으로 받기 시작하면서 이 엔드포인트가 전 세계 경로 프록시로
-# 쓰이는 것을 막는 장치다. 카카오가 국외 경로를 주지 않으므로 정상 사용에는
-# 걸리지 않는다.
-KOREA_LAT_RANGE = (32.5, 39.0)
-KOREA_LNG_RANGE = (124.0, 132.5)
-
-
-def in_service_area(lat: float, lng: float) -> bool:
-    """카카오가 경로를 줄 수 있는 범위인지."""
-    return (
-        KOREA_LAT_RANGE[0] <= lat <= KOREA_LAT_RANGE[1]
-        and KOREA_LNG_RANGE[0] <= lng <= KOREA_LNG_RANGE[1]
-    )
+# 기존 import 경로를 쓰는 코드가 있을 수 있어 이름을 여기서도 노출한다.
+from .geo import (  # noqa: E402,F401
+    KOREA_LAT_RANGE,
+    KOREA_LNG_RANGE,
+    in_service_area,
+)
 
 
 def _error(code: str, message: str, http_status: int) -> Response:
