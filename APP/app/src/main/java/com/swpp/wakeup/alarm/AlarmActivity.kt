@@ -35,6 +35,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
+import com.swpp.wakeup.MainActivity
+import com.swpp.wakeup.data.local.MorningSessionStore
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.sensing.TripTrackingService
@@ -120,7 +122,16 @@ class AlarmActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** 알람을 끄고 이동 추적을 시작한다. */
+    /**
+     * 알람을 끄고 이동 추적과 아침 기록을 시작한다.
+     *
+     * 아침 기록은 **준비 시간 학습의 유일한 재료**다. 신고 범위만으로는 분포의
+     * 사전값밖에 만들 수 없다. 여기서 시작하지 않으면 사용자가 나중에 기록할
+     * 계기가 없다 — 이미 준비를 다 한 뒤에는 각 항목이 몇 분이었는지 모른다.
+     *
+     * 블록이 없으면 기록 화면을 띄우지 않는다. 기록할 것이 없는데 화면을 띄우면
+     * 아침에 쓸데없는 단계가 하나 늘어난다.
+     */
     private fun dismiss() {
         val current = schedule ?: return
         stopEverything()
@@ -133,6 +144,13 @@ class AlarmActivity : ComponentActivity() {
                 "추적을 시작하지 않는다 (기준점 ${current.canTrack}, " +
                     "권한 ${LocationPermissions.granted(this)})",
             )
+        }
+
+        val session = MorningSessionStore(this).start(current)
+        if (session != null) {
+            // 알람 액티비티는 별도 태스크(taskAffinity="")라서 여기서 화면을
+            // 더 쌓지 않는다. 앱 태스크의 MainActivity 를 아침 기록 경로로 연다.
+            startActivity(MainActivity.morningIntent(this, current.eventId))
         }
         finish()
     }

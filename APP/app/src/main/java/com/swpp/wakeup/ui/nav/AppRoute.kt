@@ -67,6 +67,14 @@ sealed interface AppRoute {
      * 놓아 과신하고 있는지 사용자가 직접 보게 한다.
      */
     data object WeeklyReport : AppRoute
+
+    /**
+     * 아침 기록. 알람을 해제하면 여기로 온다.
+     *
+     * **준비 시간 학습의 유일한 입구다.** 신고 범위("샤워 12~18분")는 분포의
+     * 사전값일 뿐이고, 여기서 실제 소요가 쌓여야 평균이 움직인다.
+     */
+    data object MorningProgress : AppRoute
 }
 
 /**

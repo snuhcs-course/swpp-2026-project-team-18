@@ -73,7 +73,65 @@ interface RoutinesApi {
         @Path("id") eventId: Long,
         @Body body: BlockSelectionRequest,
     ): Response<EventDto>
+
+    /**
+     * 블록 관측 배치 업로드.
+     *
+     * **이것이 준비 시간 학습의 유일한 재료다.** 신고 범위만으로는 분포의
+     * 사전값밖에 만들 수 없고, 실제 소요가 쌓여야 평균이 이동한다. 리포트의
+     * `prep_over`(준비가 얼마나 초과됐나)도 이 데이터가 없으면 전부 "측정 안 됨"
+     * 이 된다.
+     *
+     * 멱등하다 — 같은 `client_uuid` 는 서버가 무시한다. 아침에 판정하고
+     * 네트워크가 없으면 큐에 남았다가 재전송되므로 필수다.
+     */
+    @POST("api/routines/observations/batch")
+    suspend fun uploadObservations(
+        @Body body: BlockObservationBatchRequest,
+    ): Response<BlockObservationBatchResponse>
 }
+
+data class BlockObservationBatchRequest(
+    val observations: List<BlockObservationInput>,
+) {
+    companion object {
+        /** 서버 `BlockObservationBatchSerializer.MAX_ITEMS` 와 같아야 한다 */
+        const val MAX_ITEMS = 200
+    }
+}
+
+/**
+ * 블록 관측 한 건. 서버 `BlockObservationSerializer` 와 필드가 1:1 이다.
+ *
+ * 이름이 어긋나면 400 이 난다. `scripts/check_app_contract.py` 가 지킨다.
+ */
+data class BlockObservationInput(
+    /** 블록 id */
+    val block: Long,
+    /** 어느 아침이었나. 일정이 지워져도 관측은 남는다 */
+    val event: Long? = null,
+    /** `YYYY-MM-DD` */
+    @SerializedName("observed_on") val observedOn: String,
+    @SerializedName("duration_minutes") val durationMinutes: Double,
+    /**
+     * 그 블록을 시작할 때 쓸 수 있었던 여유(분). 음수면 이미 늦은 상태였다.
+     *
+     * 서버의 `slack_coef` 학습에 쓴다 — 여유가 많은 날은 준비가 느려진다.
+     * 이 상관을 분리하지 않으면 "이 사람은 원래 느리다" 로 잘못 학습된다.
+     */
+    @SerializedName("slack_minutes") val slackMinutes: Double? = null,
+    @SerializedName("was_parallel") val wasParallel: Boolean = false,
+    /** 멱등 키. 판정 시점에 만들고 재전송해도 같은 값을 쓴다 */
+    @SerializedName("client_uuid") val clientUuid: String,
+    @SerializedName("client_recorded_at") val clientRecordedAt: String,
+)
+
+data class BlockObservationBatchResponse(
+    val accepted: Int = 0,
+    /** 이미 있어서 무시된 건수. 이것도 "서버에 있다" 는 확인이다 */
+    val duplicated: Int = 0,
+    val results: List<Long> = emptyList(),
+)
 
 /**
  * 블록 하나.

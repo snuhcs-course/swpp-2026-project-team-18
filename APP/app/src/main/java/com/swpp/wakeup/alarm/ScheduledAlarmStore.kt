@@ -6,6 +6,7 @@ import androidx.core.content.edit
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
 import com.google.gson.reflect.TypeToken
+import com.swpp.wakeup.data.local.withDiskDefaults
 import com.swpp.wakeup.domain.model.AlarmSchedule
 
 /**
@@ -30,6 +31,10 @@ class ScheduledAlarmStore(context: Context) {
         val raw = prefs.getString(KEY_SCHEDULES, null) ?: return emptyList()
         return try {
             gson.fromJson<List<AlarmSchedule>>(raw, TYPE).orEmpty()
+                // 지우지 말 것. 구버전이 저장한 JSON 에는 뒤에 추가된 필드의
+                // 키가 없고, Gson 은 그 자리를 Kotlin 기본값이 아니라 null 로
+                // 남긴다. 이유는 [withDiskDefaults] 에 적어 뒀다.
+                .map { it.withDiskDefaults() }
                 .sortedBy { it.alarmAtMillis }
         } catch (e: JsonSyntaxException) {
             // 모양이 바뀌었으면 버린다. 다음 서버 동기화가 다시 채운다.

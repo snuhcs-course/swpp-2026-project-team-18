@@ -9,6 +9,7 @@ import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.repository.EventRepository
+import com.swpp.wakeup.sensing.BlockObservationQueue
 import com.swpp.wakeup.sensing.TripObservationQueue
 
 /**
@@ -86,7 +87,9 @@ class PlanSyncWorker(
 
     private suspend fun flushObservations() {
         runCatching { TripObservationQueue(applicationContext).flush() }
-            .onFailure { Log.w(TAG, "관측 업로드 실패. 큐에 남는다", it) }
+            .onFailure { Log.w(TAG, "이동 관측 업로드 실패. 큐에 남는다", it) }
+        runCatching { BlockObservationQueue(applicationContext).flush() }
+            .onFailure { Log.w(TAG, "블록 관측 업로드 실패. 큐에 남는다", it) }
     }
 
     internal companion object {

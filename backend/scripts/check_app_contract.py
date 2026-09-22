@@ -532,6 +532,85 @@ def main() -> int:
         f"{(patched or {}).get('included_by_default')}",
     )
 
+    # --- 6.4 블록 관측 = 준비 시간 학습의 유일한 입구 ----------------------
+    print("\n[6.4] 블록 관측 — BlockObservationInput")
+    obs_fields = dto_wire_names(routines_api, "BlockObservationInput")
+    obs_res = dto_wire_names(routines_api, "BlockObservationBatchResponse")
+
+    check("BlockObservationInput 파싱", len(obs_fields) >= 7, f"{obs_fields}")
+    check(
+        "앱이 slack_minutes 를 보낸다",
+        "slack_minutes" in obs_fields,
+        f"{obs_fields} — 없으면 slack_coef 를 학습할 수 없다",
+    )
+    check(
+        "앱이 client_uuid 를 보낸다",
+        "client_uuid" in obs_fields,
+        f"{obs_fields} — 없으면 재전송이 같은 아침을 두 번 학습시킨다",
+    )
+
+    obs_uuid = f"ctr-blk-{uuid.uuid4().hex[:10]}"
+    obs_payload = {
+        "observations": [
+            {
+                "block": shower_id,
+                "event": event_id,
+                "observed_on": start_at.date().isoformat(),
+                "duration_minutes": 21.5,
+                "slack_minutes": 6.0,
+                "was_parallel": False,
+                "client_uuid": obs_uuid,
+                "client_recorded_at": start_at.isoformat(),
+            }
+        ]
+    }
+    sent = set(obs_payload["observations"][0])
+    check(
+        "앱 관측 DTO 이름이 본문과 일치",
+        sent <= set(obs_fields),
+        f"앱={sorted(obs_fields)} 요청={sorted(sent)}",
+    )
+
+    st, body = api("/api/routines/observations/batch", "POST", obs_payload)
+    if check("블록 관측 업로드 201", st == 201, f"status={st} body={str(body)[:200]}"):
+        compare("관측 업로드 응답", obs_res, body)
+        check("1건 적재", body.get("accepted") == 1, f"{body}")
+
+        st2, again = api("/api/routines/observations/batch", "POST", obs_payload)
+        check(
+            "재전송은 무시된다 (멱등)",
+            (again or {}).get("duplicated") == 1,
+            f"status={st2} {again} — 아니면 같은 아침이 두 번 학습된다",
+        )
+
+        # 학습 루프가 실제로 닫혔는지. 관측이 블록 목록에 반영돼야 앱이
+        # "실측 평균" 을 보여줄 수 있다.
+        st3, blocks_after = api("/api/routines/blocks")
+        row = next(
+            (b for b in (blocks_after or []) if b.get("id") == shower_id), {}
+        )
+        check(
+            "관측 수가 블록 응답에 보인다",
+            (row.get("observation_count") or 0) >= 1,
+            f"observation_count={row.get('observation_count')}",
+        )
+        check(
+            "실측 평균이 블록 응답에 보인다",
+            row.get("observed_mean_minutes") is not None,
+            f"observed_mean_minutes={row.get('observed_mean_minutes')} "
+            "— 없으면 앱이 학습 여부를 보여줄 수 없다",
+        )
+
+    st, _ = api(
+        "/api/routines/observations/batch",
+        "POST",
+        {"observations": []},
+    )
+    check("빈 배치는 400", st == 400, f"status={st}")
+
+    st, _ = api("/api/routines/observations/batch", "POST", obs_payload, auth=False)
+    check("관측도 토큰 없이 401", st == 401, f"status={st}")
+
     # --- 6.5 캘린더 가져오기 ----------------------------------------------
     print("\n[6.5] 캘린더 가져오기 — CalendarEventInput / CalendarImportResponse")
     import_req = dto_wire_names(events_api, "CalendarEventInput")

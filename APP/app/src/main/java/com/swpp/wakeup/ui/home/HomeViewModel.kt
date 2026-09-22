@@ -7,8 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.calendar.DeviceCalendar
+import com.swpp.wakeup.data.local.MorningSessionStore
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
+import com.swpp.wakeup.data.remote.BlockObservationInput
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.data.repository.ReportRepository
@@ -22,7 +24,9 @@ import com.swpp.wakeup.domain.model.CalendarImportState
 import com.swpp.wakeup.domain.model.DropCost
 import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.ImportCandidate
+import com.swpp.wakeup.domain.model.MorningSession
 import com.swpp.wakeup.domain.model.RoutineEditorState
+import com.swpp.wakeup.sensing.BlockObservationQueue
 import com.swpp.wakeup.sensing.CurrentLocation
 import com.swpp.wakeup.sensing.TripObservationQueue
 import com.swpp.wakeup.domain.model.RouteChoice
@@ -72,6 +76,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     private val reports = ReportRepository()
 
+    /** 블록 관측 큐. 아침 기록이 여기로 들어가고 WorkManager 가 올린다. */
+    private val blockQueue = BlockObservationQueue(application)
+
     /** 현재 위치 조회에 쓴다. [AndroidViewModel] 이라 누수 걱정이 없다. */
     private val appContext: android.content.Context = application.applicationContext
 
@@ -110,6 +117,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val offline: Boolean = false,
         /** "12분 전 정보". [offline] 일 때만 채운다 */
         val offlineAgeLabel: String? = null,
+
+        /**
+         * 진행 중인 아침 기록에서 아직 안 마친 항목 수.
+         *
+         * null 이면 진행 중인 기록이 없다. 0 이면 전부 마쳤지만 "끝내기" 를
+         * 누르지 않은 상태다 — 그때도 입구를 보여줘야 큐에 남은 것이 정리된다.
+         */
+        val morningBlocksLeft: Int? = null,
     ) {
         val isEmpty: Boolean get() = !loading && error == null && totalCount == 0
         val todayLine: String
@@ -136,6 +151,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         refresh()
+        // 알람 액티비티가 세션을 만들어 두었을 수 있다. 홈 카드가 보이려면
+        // 여기서 한 번 읽어야 한다.
+        reloadMorning()
         // 로그아웃이 정기 작업을 취소했으므로 다시 로그인했으면 되살려야 한다.
         // Application.onCreate 는 프로세스당 한 번이라 로그아웃→로그인을 같은
         // 프로세스에서 하면 그 경로만으로는 복구되지 않는다. KEEP 이라 중복
@@ -206,16 +224,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 registeredAlarms = registered.size,
                 nextRegisteredLabel = registered.firstOrNull()?.alarmLabel,
-                pendingObservations = queue.pendingCount,
+                pendingObservations = pendingObservationCount(),
             )
         }
 
         // 지하철에서 판정된 관측이 큐에 남아 있을 수 있다. 연결됐으니 올린다.
+        // 아침 기록도 같이 올린다 — 사용자는 씻는 동안 앱을 떠나 있었다.
         viewModelScope.launch {
-            val sent = queue.flush()
-            if (sent > 0) {
-                _state.update { it.copy(pendingObservations = queue.pendingCount) }
-            }
+            queue.flush()
+            runCatching { blockQueue.flush() }
+            _state.update { it.copy(pendingObservations = pendingObservationCount()) }
         }
     }
 
@@ -264,6 +282,110 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun openHomeSetup() {
         _nav.update { it.copy(stack = it.stack + AppRoute.HomeSetup, forward = true) }
     }
+
+    // --- 아침 기록 --------------------------------------------------------
+
+    private val morningStore = MorningSessionStore(application)
+
+    /**
+     * 진행 중인 아침 기록.
+     *
+     * null 이면 기록할 것이 없다. 알람을 해제하면
+     * [com.swpp.wakeup.alarm.AlarmActivity] 가 세션을 만들고 이 화면으로 보낸다.
+     */
+    private val _morning = MutableStateFlow(morningStore.current())
+    val morning: StateFlow<MorningSession?> = _morning.asStateFlow()
+
+    /** 화면에 들어올 때마다 디스크에서 다시 읽는다. 알람 액티비티가 만들었을 수 있다. */
+    fun reloadMorning() {
+        val session = morningStore.current()
+        _morning.value = session
+        _state.update { it.copy(morningBlocksLeft = session?.remaining?.size) }
+    }
+
+    fun openMorning() {
+        reloadMorning()
+        if (_morning.value == null) return
+        _nav.update { it.copy(stack = it.stack + AppRoute.MorningProgress, forward = true) }
+    }
+
+    /**
+     * 블록 하나를 마쳤다고 기록한다.
+     *
+     * **디스크 기록과 큐 적재가 먼저다.** 업로드는 WorkManager 가 연결되는
+     * 순간 한다. 아침에는 네트워크가 없을 수 있고, 사용자는 곧 앱을 떠난다 —
+     * 여기서 네트워크를 기다리면 그 기록이 사라진다.
+     *
+     * 소요와 여유는 [MorningSession] 이 계산한다. 여유는 **블록 시작 시점**
+     * 기준이다 — 끝난 뒤로 재면 오래 걸린 블록일수록 여유가 적게 나와
+     * `slack_coef` 학습의 상관이 뒤집힌다.
+     */
+    fun markBlockDone(blockId: Long) {
+        val session = _morning.value ?: return
+        val block = session.blocks.firstOrNull { it.blockId == blockId } ?: return
+        if (block.doneAtMillis != null) return
+
+        val now = System.currentTimeMillis()
+        val duration = session.durationOf(blockId, now)
+        val slack = session.slackAtStartOf(blockId)
+
+        val next = session.mark(blockId, now)
+        morningStore.save(next)
+        _morning.value = next
+        _state.update { it.copy(morningBlocksLeft = next.remaining.size) }
+
+        blockQueue.enqueue(
+            BlockObservationInput(
+                block = blockId,
+                event = session.eventId,
+                observedOn = LocalDate.now().toString(),
+                durationMinutes = duration,
+                slackMinutes = slack,
+                wasParallel = block.parallelizable,
+                // 멱등 키를 **여기서** 만든다. 재전송할 때 새로 만들면 서버가
+                // 중복을 걸러내지 못해 같은 아침이 두 번 학습된다.
+                clientUuid = "blk-${session.eventId}-$blockId-${session.startedAtMillis}",
+                clientRecordedAt = OffsetDateTime.now().toString(),
+            )
+        )
+
+        _state.update { it.copy(pendingObservations = pendingObservationCount()) }
+    }
+
+    /**
+     * 마지막 기록을 되돌린다.
+     *
+     * **서버에 올라간 것은 지우지 않는다.** 되돌리기는 화면의 진행 상태만
+     * 고친다 — 삭제 API 가 없고, 있더라도 이미 학습에 들어갔을 수 있다. 대신
+     * 다시 마치면 같은 `client_uuid` 로 올라가 서버가 중복으로 무시한다.
+     * 즉 되돌린 뒤 고쳐 마친 값은 반영되지 않는다. 그 한계를 화면이 적는다.
+     */
+    fun undoLastBlock() {
+        val session = _morning.value ?: return
+        val next = session.undoLast()
+        morningStore.save(next)
+        _morning.value = next
+        _state.update { it.copy(morningBlocksLeft = next.remaining.size) }
+    }
+
+    /** 기록을 끝낸다. 남은 블록은 기록하지 않는다 — 안 한 것과 같다. */
+    fun finishMorning() {
+        morningStore.clear()
+        _morning.value = null
+        _state.update { it.copy(morningBlocksLeft = null) }
+        viewModelScope.launch {
+            // 떠나기 전에 한 번 올려 본다. 실패해도 큐에 남는다.
+            runCatching { blockQueue.flush() }
+            _state.update { it.copy(pendingObservations = pendingObservationCount()) }
+        }
+        goBack()
+    }
+
+    /** 두 큐를 합쳐 센다. 화면은 "올리지 못한 기록" 하나로 보여준다. */
+    private fun pendingObservationCount(): Int =
+        runCatching {
+            TripObservationQueue(getApplication()).pendingCount + blockQueue.pendingCount
+        }.getOrDefault(0)
 
     // --- 주간 리포트 ------------------------------------------------------
 

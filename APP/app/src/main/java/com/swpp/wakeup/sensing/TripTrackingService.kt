@@ -19,6 +19,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.gson.Gson
 import com.swpp.wakeup.alarm.AlarmNotifications
+import com.swpp.wakeup.data.local.withDiskDefaults
 import com.swpp.wakeup.data.remote.TripObservationInput
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import kotlinx.coroutines.CoroutineScope
@@ -90,7 +91,12 @@ class TripTrackingService : Service() {
 
         val raw = intent?.getStringExtra(EXTRA_SCHEDULE)
         val parsed = raw?.let {
-            runCatching { gson.fromJson(it, AlarmSchedule::class.java) }.getOrNull()
+            runCatching {
+                // 이 JSON 은 같은 버전이 만들었을 것이나, 시스템이 들고 있던
+                // 낡은 Intent 가 재전달될 수 있다. 되살리는 모든 경로를 같은
+                // 방식으로 다룬다 — 이유는 [withDiskDefaults] 에 있다.
+                gson.fromJson(it, AlarmSchedule::class.java)?.withDiskDefaults()
+            }.getOrNull()
         }
 
         if (parsed == null) {

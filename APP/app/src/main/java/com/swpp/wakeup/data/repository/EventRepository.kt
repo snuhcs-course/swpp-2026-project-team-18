@@ -27,6 +27,7 @@ import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.PlanRow
 import com.swpp.wakeup.domain.model.PrepBlockLine
+import com.swpp.wakeup.domain.model.ScheduledBlock
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.RouteOption
 import com.swpp.wakeup.domain.model.UpcomingEvent
@@ -809,6 +810,18 @@ private fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedul
         homeLng = profile.homeLng,
         destLat = place?.lat,
         destLng = place?.lng,
+        prepMinutes = plan.prepMinutes,
+        // 블록 목록을 알람과 함께 저장한다. 알람이 울리는 순간 네트워크가
+        // 없을 수 있고, 그때 목록을 조회하지 못하면 아침 기록을 시작할 수 없다.
+        prepBlocks = (plan.prepBreakdown ?: emptyList()).mapNotNull { row ->
+            val id = row.blockId ?: return@mapNotNull null
+            ScheduledBlock(
+                blockId = id,
+                name = row.name,
+                plannedMinutes = row.minutes,
+                parallelizable = row.parallelizable,
+            )
+        },
     )
 }
 

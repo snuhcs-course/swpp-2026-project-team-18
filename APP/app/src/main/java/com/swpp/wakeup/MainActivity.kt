@@ -53,6 +53,7 @@ import com.swpp.wakeup.ui.events.HomeSetupScreen
 import com.swpp.wakeup.ui.events.RouteChoiceScreen
 import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
+import com.swpp.wakeup.ui.morning.MorningProgressScreen
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
@@ -85,11 +86,14 @@ class MainActivity : ComponentActivity() {
 
         // 로그인 직후에만 환영 문구를 띄운다. 앱을 다시 열 때는 띄우지 않는다.
         val welcomeNickname = intent.getStringExtra(EXTRA_WELCOME_NICKNAME)
+        // 알람을 해제하고 넘어온 경우. 아침 기록 화면으로 바로 들어간다.
+        val openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
 
         setContent {
             JitTheme {
                 MainHost(
                     welcomeNickname = welcomeNickname,
+                    openMorning = openMorning,
                     onLoggedOut = ::backToLogin,
                 )
             }
@@ -107,6 +111,25 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** 로그인 직후 환영 문구에 쓸 닉네임. 없으면 문구를 띄우지 않는다. */
         const val EXTRA_WELCOME_NICKNAME = "welcome_nickname"
+
+        /** 알람 해제 후 아침 기록 화면으로 바로 들어갈지. */
+        const val EXTRA_OPEN_MORNING = "open_morning"
+
+        /**
+         * 알람 해제 직후 아침 기록으로 들어가는 인텐트.
+         *
+         * `CLEAR_TOP` 과 `SINGLE_TOP` 을 함께 준다. 앱이 이미 떠 있으면 새
+         * 인스턴스를 만들지 않고 기존 태스크를 앞으로 가져온다 — 알람 화면은
+         * 별도 태스크라서 여기서 스택을 쌓으면 뒤로 가기가 이상해진다.
+         */
+        fun morningIntent(context: android.content.Context, eventId: Long): Intent =
+            Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_OPEN_MORNING, true)
+                // eventId 는 지금 쓰지 않는다. 세션이 디스크에 하나뿐이라
+                // 화면이 그것을 읽으면 된다. 로그에서 짝을 맞추려고 남긴다.
+                .putExtra("morning_event_id", eventId)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }
 
@@ -114,6 +137,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MainHost(
     welcomeNickname: String?,
+    openMorning: Boolean,
     onLoggedOut: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel()
@@ -126,6 +150,7 @@ private fun MainHost(
     val routineState by viewModel.routine.collectAsStateWithLifecycle()
     val importState by viewModel.calendarImport.collectAsStateWithLifecycle()
     val reportState by viewModel.report.collectAsStateWithLifecycle()
+    val morningSession by viewModel.morning.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -202,6 +227,16 @@ private fun MainHost(
         }
     }
 
+    // 알람을 해제하고 넘어왔으면 아침 기록으로 바로 들어간다. 한 번만 한다 —
+    // 사용자가 뒤로 나갔는데 다시 밀어 넣으면 화면을 벗어날 수 없다.
+    var morningOpened by remember { mutableStateOf(false) }
+    LaunchedEffect(openMorning) {
+        if (openMorning && !morningOpened) {
+            morningOpened = true
+            viewModel.openMorning()
+        }
+    }
+
     // 캘린더 권한은 **사용자가 가져오기를 누를 때만** 요청한다. 앱을 처음 열
     // 때 함께 묶어 요청하면 무엇에 쓰는지 모르는 상태로 거절하게 된다.
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
@@ -246,6 +281,7 @@ private fun MainHost(
                     onRoutineClick = viewModel::openRoutineEditor,
                     onCalendarClick = viewModel::openCalendarImport,
                     onReportClick = viewModel::openReport,
+                    onMorningClick = viewModel::openMorning,
                     onRetry = viewModel::refresh,
                     modifier = Modifier.padding(innerPadding),
                 )
@@ -336,6 +372,15 @@ private fun MainHost(
                     onPreviousWeek = { viewModel.shiftReportWeek(-1) },
                     onNextWeek = { viewModel.shiftReportWeek(1) },
                     onRetry = { viewModel.loadReport(reportState.week) },
+                    modifier = Modifier.padding(innerPadding),
+                )
+
+                AppRoute.MorningProgress -> MorningProgressScreen(
+                    session = morningSession,
+                    onBack = viewModel::goBack,
+                    onMarkDone = viewModel::markBlockDone,
+                    onUndo = viewModel::undoLastBlock,
+                    onFinish = viewModel::finishMorning,
                     modifier = Modifier.padding(innerPadding),
                 )
             }

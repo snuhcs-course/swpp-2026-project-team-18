@@ -6,10 +6,11 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.sensing.BlockObservationQueue
 import com.swpp.wakeup.sensing.TripObservationQueue
 
 /**
- * 밀린 이동 관측을 서버에 올린다.
+ * 밀린 관측을 서버에 올린다. **이동 관측과 아침 블록 기록 둘 다.**
  *
  * ## 왜 워커가 필요한가
  *
@@ -46,12 +47,20 @@ class ObservationUploadWorker(
             return Result.retry()
         }
 
-        val queue = TripObservationQueue(applicationContext)
-        val before = queue.pendingCount
+        // 두 큐를 모두 비운다. 같은 네트워크 창에서 처리해야 라디오를 한 번만
+        // 켠다. 이동 관측(GPS 판정)과 블록 관측(아침 기록)은 출처가 다르지만
+        // 올려야 하는 시점은 같다.
+        val trips = TripObservationQueue(applicationContext)
+        val blocks = BlockObservationQueue(applicationContext)
+
+        val before = trips.pendingCount + blocks.pendingCount
         if (before == 0) return Result.success()
 
-        val sent = queue.flush()
-        val after = queue.pendingCount
+        // 한쪽이 실패해도 다른 쪽은 올린다. 예외로 묶으면 이동 관측의 형식
+        // 오류가 아침 기록까지 막는다.
+        val sent = runCatching { trips.flush() }.getOrDefault(0) +
+            runCatching { blocks.flush() }.getOrDefault(0)
+        val after = trips.pendingCount + blocks.pendingCount
 
         Log.i(TAG, "관측 업로드: 대기 ${before}건 → 처리 ${sent}건, 남음 ${after}건")
 

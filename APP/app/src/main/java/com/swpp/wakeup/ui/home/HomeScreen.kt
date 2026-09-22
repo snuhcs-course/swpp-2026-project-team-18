@@ -63,6 +63,7 @@ fun HomeScreen(
     onRoutineClick: () -> Unit,
     onCalendarClick: () -> Unit,
     onReportClick: () -> Unit,
+    onMorningClick: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -90,6 +91,13 @@ fun HomeScreen(
         // 바뀌는 값이라, 오래된 값을 지금 값으로 믿으면 지각으로 이어진다.
         if (state.offline) {
             item(key = "offline") { OfflineNotice(state.offlineAgeLabel, onRetry) }
+        }
+
+        // 진행 중인 아침 기록. 사용자는 씻으러 갔다가 돌아온다 — 재진입 경로가
+        // 없으면 그 아침의 기록이 반쯤 남은 채 버려지고, 준비 시간 학습에
+        // 들어갈 재료가 사라진다.
+        state.morningBlocksLeft?.let { left ->
+            item(key = "morning") { MorningShortcut(left, onMorningClick) }
         }
 
         // 집 위치가 없으면 어떤 일정도 알람을 계산할 수 없다. 가장 먼저 알린다.
@@ -355,6 +363,46 @@ private fun OfflineNotice(ageLabel: String?, onRetry: () -> Unit) {
         )
         Text(
             text = "눌러서 다시 시도",
+            color = JitColor.Accent,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+/**
+ * 진행 중인 아침 기록으로 돌아가는 입구.
+ *
+ * 알람을 해제하면 기록 화면이 뜨지만 사용자는 곧 씻으러 간다. 돌아왔을 때
+ * 재진입 경로가 없으면 그 아침의 기록이 반쯤 남은 채 버려지고, 준비 시간
+ * 학습에 들어갈 재료가 사라진다.
+ */
+@Composable
+private fun MorningShortcut(blocksLeft: Int, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Hint))
+            .background(JitColor.Surface2)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        JitDotLabel(
+            text = if (blocksLeft > 0) "아침 기록 ${blocksLeft}개 남음" else "아침 기록 정리 필요",
+            dotColor = JitColor.Accent,
+            textColor = JitColor.TextPrimary,
+            fontSize = 12,
+            dotSize = 6.dp,
+        )
+        Text(
+            text = "항목을 마칠 때마다 탭하면 실제 소요가 기록됨. 이 기록이 준비 시간 " +
+                "학습의 유일한 재료임",
+            color = JitColor.TextSecondary,
+            fontSize = 11.sp,
+        )
+        Text(
+            text = "눌러서 이어가기",
             color = JitColor.Accent,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -659,6 +707,7 @@ private fun HomeEmptyPreview() {
             onRoutineClick = {},
             onCalendarClick = {},
             onReportClick = {},
+            onMorningClick = {},
             onRetry = {},
         )
     }
@@ -698,6 +747,7 @@ private fun HomeFilledPreview() {
             onRoutineClick = {},
             onCalendarClick = {},
             onReportClick = {},
+            onMorningClick = {},
             onRetry = {},
         )
     }
