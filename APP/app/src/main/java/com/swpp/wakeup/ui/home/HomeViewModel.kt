@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.alarm.AlarmScheduler
+import com.swpp.wakeup.BuildConfig
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.local.LocalStores
@@ -13,6 +14,8 @@ import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.BlockObservationInput
 import com.swpp.wakeup.data.remote.PlaceSearchItem
+import com.swpp.wakeup.data.remote.ServerVersion
+import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.data.repository.ReportRepository
 import com.swpp.wakeup.data.repository.RoutineRepository
@@ -185,7 +188,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 is EventRepository.Result.Failure -> _state.update {
-                    it.copy(loading = false, error = result.message)
+                    // 배포가 뒤처졌다고 확인된 상태면 그 사실을 함께 말한다.
+                    // 그러지 않으면 "불러오지 못했습니다" 만 남고, 그 증상은 앱
+                    // 버그와 구별되지 않는다. 실제로 팀이 그 방향으로 시간을 썼다.
+                    val message = if (ServerWarmup.serverBehind) {
+                        result.message + "\n\n" +
+                            ServerVersion.behindMessage(
+                                BuildConfig.VERSION_NAME,
+                                ServerWarmup.serverVersion,
+                            )
+                    } else {
+                        result.message
+                    }
+                    it.copy(loading = false, error = message)
                 }
             }
         }

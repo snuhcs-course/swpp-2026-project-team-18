@@ -200,7 +200,7 @@ request ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 ```bash
 cd backend && python -m pytest                       # 432 unit tests
 cd backend && python scripts/run_local_suite.py      # 8 HTTP suites against a live server
-cd APP     && ./gradlew testDebugUnitTest assembleDebug   # 117 unit tests + debug build
+cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 143 tests + lint + build
 ```
 
 The middle one is the unusual part. `scripts/check_*.py` drive a **running** Django

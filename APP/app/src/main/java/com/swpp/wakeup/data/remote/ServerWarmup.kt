@@ -1,6 +1,7 @@
 package com.swpp.wakeup.data.remote
 
 import android.util.Log
+import com.swpp.wakeup.BuildConfig
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
@@ -35,6 +36,21 @@ object ServerWarmup {
     private var lastOkAt: Long = 0L
 
     /**
+     * 마지막으로 확인한 서버 버전. 아직 확인하지 못했으면 null.
+     *
+     * `/api/health` 가 처음부터 주고 있던 값인데 앱이 버리고 있었다. 배포가
+     * 뒤처지면 새 엔드포인트가 404 가 되고, 그 증상은 앱 버그와 **구별되지
+     * 않는다.** 이 값을 들고 있으면 그 자리에서 원인을 말할 수 있다.
+     */
+    @Volatile
+    var serverVersion: String? = null
+        private set
+
+    /** 서버가 앱보다 오래됐다고 확인됐는가. 모르면 false. */
+    val serverBehind: Boolean
+        get() = ServerVersion.isServerBehind(BuildConfig.VERSION_NAME, serverVersion)
+
+    /**
      * 서버가 응답할 수 있는 상태인지 확인한다.
      *
      * @return 깨어 있음을 확인했으면 true. 실패해도 **호출자는 계속 진행해야
@@ -55,10 +71,11 @@ object ServerWarmup {
 
             val started = System.currentTimeMillis()
             val ok = withTimeoutOrNull(TIMEOUT_MILLIS) {
-                runCatching { ApiClient.health.health() }
+                val response = runCatching { ApiClient.health.health() }
                     .onFailure { Log.i(TAG, "깨우기 실패: ${it.javaClass.simpleName}") }
                     .getOrNull()
-                    ?.ok == true
+                response?.version?.let { rememberVersion(it) }
+                response?.ok == true
             } ?: false
 
             val elapsed = System.currentTimeMillis() - started
@@ -75,6 +92,26 @@ object ServerWarmup {
                 Log.w(TAG, "깨우지 못했다 (${elapsed}ms). 본 요청을 그대로 보낸다.")
             }
             ok
+        }
+    }
+
+    /**
+     * 확인한 버전을 기억하고, 뒤처졌으면 **한 번만** 크게 남긴다.
+     *
+     * 매번 찍으면 로그가 그 줄로 덮여 다른 원인을 못 찾는다. 버전이 바뀌면
+     * (즉 배포가 되면) 다시 찍을 수 있게 값으로 비교한다.
+     */
+    private fun rememberVersion(version: String) {
+        if (serverVersion == version) return
+        serverVersion = version
+
+        if (ServerVersion.isServerBehind(BuildConfig.VERSION_NAME, version)) {
+            // Log.e 를 쓴다. 이 상태에서는 앱이 하는 모든 새 요청이 404 로
+            // 실패하고, 그 증상은 앱 버그와 똑같이 보인다. 원인을 찾는 사람이
+            // 로그를 훑을 때 눈에 걸려야 한다.
+            Log.e(TAG, ServerVersion.behindMessage(BuildConfig.VERSION_NAME, version))
+        } else {
+            Log.i(TAG, "서버 버전 $version (앱 ${BuildConfig.VERSION_NAME})")
         }
     }
 

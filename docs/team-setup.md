@@ -612,6 +612,25 @@ curl.exe -s -o NUL -w "%{http_code} reports/weekly`n"  "$base/api/reports/weekly
 confidence_basis = models.CharField(max_length=32, blank=True, default="", db_default="")
 ```
 
+### 앱이 스스로 알려 준다
+
+이제 앱이 `/api/health` 의 `version` 을 받아 자기 `versionName` 과 비교한다.
+서버가 더 낮으면 로그에 `Log.e` 로 남기고, 화면의 실패 메시지 뒤에 이유를 붙인다.
+
+```
+ServerWarmup  E  서버가 구버전입니다 (서버 0.1.0 · 앱 0.3.0). 새 기능이 404 로
+                 실패합니다. Render 대시보드 > Manual Deploy > Deploy latest
+                 commit 으로 배포하세요.
+```
+
+**이 값은 처음부터 응답에 있었고 앱이 버리고 있었다.** 배포가 뒤처지면 새
+엔드포인트가 404 로 돌아오는데, 그 증상은 앱 버그와 구별되지 않아서 실제로 팀이
+앱을 의심하며 시간을 썼다. 이제 그 자리에서 원인을 말한다.
+
+서버가 **더 높은** 경우는 경고하지 않는다 — 서버를 먼저 올리고 앱을 배포하는 것이
+정상 순서다. 읽을 수 없는 버전 문자열도 경고하지 않는다. 틀린 경고를 한 번 보면
+다음 진짜 경고도 무시되기 때문이다. `ServerVersionTest` 가 그 경계를 고정한다.
+
 ---
 
 ## 9. 지금 구현된 것 (0.3.0)
@@ -645,7 +664,7 @@ confidence_basis = models.CharField(max_length=32, blank=True, default="", db_de
 
 ```
 백엔드 pytest              432
-앱 단위 테스트             131
+앱 단위 테스트             143
 로컬 HTTP 검증 스크립트     8개 전부 통과 (항목 합계 약 257, 필드 계약 95항목 포함)
 빌드                       assembleDebug / assembleRelease 성공
 CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR 마다 돌린다
@@ -656,7 +675,7 @@ CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR �
 ```bash
 cd backend && python -m pytest                       # 432
 cd backend && python scripts/run_local_suite.py      # 8개 스크립트, 서버 기동까지 알아서 한다
-cd APP && ./gradlew testDebugUnitTest assembleDebug  # 131
+cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 143 + lint
 ```
 
 ### CI
