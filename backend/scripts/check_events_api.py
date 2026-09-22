@@ -29,6 +29,8 @@ from _local_guard import require_local_database  # noqa: E402
 require_local_database()
 # ---------------------------------------------------------------------------
 
+from _capabilities import banner, kakao_configured, kakao_skip_reason  # noqa: E402
+
 
 import json
 import urllib.error
@@ -43,6 +45,8 @@ from datetime import datetime, timedelta, timezone
 BASE = "http://127.0.0.1:8000"
 KST = timezone(timedelta(hours=9))
 results: list[tuple[str, bool, str]] = []
+skipped: list[tuple[str, str]] = []
+HAS_KAKAO = kakao_configured()
 
 
 def call(method, path, body=None, token=None):
@@ -70,6 +74,17 @@ def check(name, cond, note):
     print(f"{'[ OK ]' if cond else '[FAIL]'} {name}\n       {note}\n")
 
 
+def skip(name, why):
+    """검사할 수 없었던 항목. 실패로 적지 않는다.
+
+    키가 없어서 못 한 것을 실패로 적으면 CI 가 항상 빨갛고, 빨간불이 상수가 되면
+    팀이 그것을 무시한다. 대신 **키가 있는데 실패하면 그것은 실패다** —
+    `_capabilities` 가 그 구분을 한다.
+    """
+    skipped.append((name, why))
+    print(f"[SKIP] {name}\n       {why}\n")
+
+
 def signup(slug: str, nickname: str):
     """slug 는 ASCII 여야 한다. 이메일 검증기가 한글을 거부한다."""
     email = f"ev_{slug}_{uuid.uuid4().hex[:6]}@snu.ac.kr"
@@ -83,6 +98,7 @@ def signup(slug: str, nickname: str):
 
 print("=" * 74)
 print("일정 API 검증")
+print(banner())
 print("=" * 74 + "\n")
 
 st, body = call("GET", "/api/health")
@@ -113,12 +129,25 @@ check("태그 시드", st == 200 and "class" in keys and "exam" in keys,
       f"status={st} keys={keys}")
 
 # 4) 장소 검색 (카카오 프록시)
-st, body = call("GET", "/api/places/search?" + urllib.parse.urlencode({"q": "서울대학교 302동"}),
-                token=token_a)
-places = body.get("results", [])
-first_place = places[0] if places else None
-check("장소 검색 프록시", st == 200 and first_place is not None,
-      f"status={st} 개수={len(places)} 첫결과={first_place.get('name') if first_place else None}")
+if HAS_KAKAO:
+    st, body = call("GET", "/api/places/search?" + urllib.parse.urlencode({"q": "서울대학교 302동"}),
+                    token=token_a)
+    places = body.get("results", [])
+    first_place = places[0] if places else None
+    check("장소 검색 프록시", st == 200 and first_place is not None,
+          f"status={st} 개수={len(places)} 첫결과={first_place.get('name') if first_place else None}")
+else:
+    skip("장소 검색 프록시", kakao_skip_reason())
+    # 검색을 못 해도 **장소가 붙은 일정**은 만들어야 한다. 그게 없으면 뒤따르는
+    # NO_HOME·소유자 격리·삭제 검사까지 줄줄이 못 돈다 — 그 검사들은 카카오와
+    # 아무 상관이 없다. 좌표를 직접 준다(서울대 302동).
+    first_place = {
+        "name": "서울대학교 302동",
+        "lat": 37.4487,
+        "lng": 126.9520,
+        "address": "서울 관악구 관악로 1",
+        "kakao_place_id": None,
+    }
 
 # 5) 일정 추가 — 집 위치가 없으니 알람 계획은 NO_HOME
 start = (datetime.now(KST) + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
@@ -176,12 +205,19 @@ check("집 위치 설정", st == 200 and prof.get("has_home") is True,
 st, body = call("GET", "/api/events", token=token_a)
 items = body if isinstance(body, list) else body.get("results", [])
 plan = (items[0].get("alarm_plan") or {}) if items else {}
-ok = plan.get("status") == "ok" and plan.get("alarm_at")
-check("집 위치 설정 후 알람 계산됨", ok,
-      f"status={plan.get('status')} alarm_at={plan.get('alarm_at')} "
-      f"준비={plan.get('prep_minutes')}분 이동={plan.get('travel_minutes')}분 "
-      f"버퍼={plan.get('buffer_minutes')}분 합계={plan.get('total_minutes')}분 "
-      f"수단={plan.get('travel_mode')!r} 경로={plan.get('route_summary')!r}")
+note = (f"status={plan.get('status')} alarm_at={plan.get('alarm_at')} "
+        f"준비={plan.get('prep_minutes')}분 이동={plan.get('travel_minutes')}분 "
+        f"버퍼={plan.get('buffer_minutes')}분 합계={plan.get('total_minutes')}분 "
+        f"수단={plan.get('travel_mode')!r} 경로={plan.get('route_summary')!r}")
+if HAS_KAKAO:
+    check("집 위치 설정 후 알람 계산됨", plan.get("status") == "ok" and plan.get("alarm_at"), note)
+else:
+    # 이동시간을 못 구하니 계획이 ok 가 될 수 없다. 다만 **어떤 상태든 서버가
+    # 죽지 않고 이유를 말해야 한다** — 그것은 카카오와 무관하므로 검사한다.
+    skip("집 위치 설정 후 알람 계산됨", f"{kakao_skip_reason()} · {note}")
+    check("경로를 못 구해도 상태와 이유를 돌려준다",
+          bool(plan.get("status")) and bool(plan.get("status_label")),
+          f"status={plan.get('status')} label={plan.get('status_label')!r}")
 
 # 12) 확률은 여전히 null — 관측이 없으므로 만들 수 없다
 check("확률은 null (학습 데이터 없음)", plan.get("on_time_probability") is None,
@@ -189,16 +225,27 @@ check("확률은 null (학습 데이터 없음)", plan.get("on_time_probability"
       f"tau_used={plan.get('tau_used')}")
 
 # 13) 준비시간이 프로필 값을 따르는지
-check("준비시간이 프로필 값(28분)을 씀", plan.get("prep_minutes") == 28,
-      f"prep_minutes={plan.get('prep_minutes')}")
+if HAS_KAKAO:
+    check("준비시간이 프로필 값(28분)을 씀", plan.get("prep_minutes") == 28,
+          f"prep_minutes={plan.get('prep_minutes')}")
+else:
+    # 계획 자체가 만들어지지 않으면 prep_minutes 가 없다.
+    skip("준비시간이 프로필 값(28분)을 씀", kakao_skip_reason())
 
 # 14) 수정 → 재계산
 new_start = (start + timedelta(hours=2)).isoformat()
 st, updated = call("PATCH", f"/api/events/{event_id}", {"start_at": new_start}, token=token_a)
 new_plan = (updated or {}).get("alarm_plan") or {}
-moved = new_plan.get("alarm_at") != plan.get("alarm_at")
-check("시각 수정 시 알람 재계산", st == 200 and moved,
-      f"status={st} 이전={plan.get('alarm_at')} 이후={new_plan.get('alarm_at')}")
+if HAS_KAKAO:
+    check("시각 수정 시 알람 재계산", st == 200 and
+          new_plan.get("alarm_at") != plan.get("alarm_at"),
+          f"status={st} 이전={plan.get('alarm_at')} 이후={new_plan.get('alarm_at')}")
+else:
+    # alarm_at 이 양쪽 다 없어서 "변했는가" 를 볼 수 없다. 수정 자체가 200 인
+    # 것과 재계산이 돌았다는 것(started_at 이 반영됐다)은 확인한다.
+    skip("시각 수정 시 알람 재계산", kakao_skip_reason())
+    check("시각 수정 요청은 200", st == 200,
+          f"status={st} start_at={(updated or {}).get('start_at')}")
 
 # 15) 장소 없는 일정은 NO_PLACE
 st, no_place = call("POST", "/api/events", {
@@ -230,9 +277,11 @@ check("없는 태그 400", st == 400, f"status={st} message={msg!r}")
 print("=" * 74)
 print("요약")
 print("=" * 74)
-w = max(len(n) for n, _, _ in results)
+w = max([len(n) for n, _, _ in results] + [len(n) for n, _ in skipped])
 for name, ok, _ in results:
     print(f"  {name:{w}}  {'OK' if ok else 'FAIL'}")
+for name, _ in skipped:
+    print(f"  {name:{w}}  SKIP")
 n_ok = sum(1 for _, ok, _ in results if ok)
-print(f"\n  {n_ok}/{len(results)} 통과")
+print(f"\n  통과 {n_ok} / 실패 {len(results) - n_ok} / 건너뜀 {len(skipped)}")
 raise SystemExit(0 if n_ok == len(results) else 1)

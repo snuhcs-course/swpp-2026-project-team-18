@@ -40,6 +40,8 @@ django.setup()
 
 from django.contrib.auth import get_user_model  # noqa: E402
 
+from _capabilities import banner, kakao_configured, kakao_skip_reason  # noqa: E402
+
 BASE = os.environ.get("JIT_BASE", "http://127.0.0.1:8000")
 
 HOME = {"lat": 37.484267, "lng": 126.929745, "label": "신림역"}
@@ -47,7 +49,8 @@ DEST = {"lat": 37.459882, "lng": 126.951905, "name": "서울대학교 관악캠�
 # 집과 충분히 떨어진 곳. 소요시간이 확실히 달라야 비교가 의미 있다.
 ORIGIN = {"lat": 37.5665, "lng": 126.9780, "label": "서울시청"}
 
-passed, failed = 0, 0
+passed, failed, skipped = 0, 0, 0
+HAS_KAKAO = kakao_configured()
 
 
 def check(label, ok, note=""):
@@ -58,6 +61,17 @@ def check(label, ok, note=""):
     else:
         failed += 1
         print(f"  [FAIL] {label}  {note}")
+
+
+def skip(label, why=""):
+    """검사할 수 없었던 항목. 실패로 세지 않는다.
+
+    **키가 있는데 실패하면 그것은 실패다.** 판정은 결과가 아니라 키 유무로
+    한다 — 자세한 근거는 `_capabilities` 상단에 있다.
+    """
+    global skipped
+    skipped += 1
+    print(f"  [SKIP] {label}  {why or kakao_skip_reason()}")
 
 
 email = f"origin_{uuid.uuid4().hex[:8]}@example.com"
@@ -81,6 +95,7 @@ auth = {"Authorization": f"Bearer {res.json()['access']}"}
 
 print("=" * 74)
 print("출발지 선택 검증")
+print(banner())
 print("=" * 74)
 
 # --- 1. 집 없이도 출발지를 직접 주면 경로가 나온다 --------------------------
@@ -109,7 +124,10 @@ check(
     str(origin_echo),
 )
 candidates = body.get("results") or []
-check("후보가 1개 이상", len(candidates) >= 1, f"n={len(candidates)}")
+if HAS_KAKAO:
+    check("후보가 1개 이상", len(candidates) >= 1, f"n={len(candidates)}")
+else:
+    skip("후보가 1개 이상", f"{kakao_skip_reason()} · n={len(candidates)}")
 picked = candidates[0]["key"] if candidates else None
 minutes_from_origin = candidates[0]["minutes"] if candidates else None
 
@@ -159,16 +177,27 @@ res = requests.get(
 check("좌표→주소 200", res.status_code == 200, f"status={res.status_code}")
 rev = (res.json() or {}) if res.status_code == 200 else {}
 result = rev.get("result")
-check(
-    "주소 1건을 돌려준다",
-    bool(result and result.get("address")),
-    f"degraded={rev.get('degraded')} result={result}",
-)
-check(
-    "좌표는 보낸 값 그대로",
-    bool(result) and abs((result.get("lat") or 0) - ORIGIN["lat"]) < 1e-6,
-    str(result),
-)
+if HAS_KAKAO:
+    check(
+        "주소 1건을 돌려준다",
+        bool(result and result.get("address")),
+        f"degraded={rev.get('degraded')} result={result}",
+    )
+    check(
+        "좌표는 보낸 값 그대로",
+        bool(result) and abs((result.get("lat") or 0) - ORIGIN["lat"]) < 1e-6,
+        str(result),
+    )
+else:
+    skip("주소 1건을 돌려준다", f"{kakao_skip_reason()} · degraded={rev.get('degraded')}")
+    skip("좌표는 보낸 값 그대로")
+    # 키가 없어도 **이것은** 지켜야 한다. 역지오코딩이 실패할 때 500 을 내면
+    # 앱의 출발지 선택 화면이 통째로 죽는다. degraded 로 알려야 한다.
+    check(
+        "역지오코딩 실패는 degraded 로 알린다 (500 아님)",
+        res.status_code == 200 and rev.get("degraded") is True,
+        f"status={res.status_code} degraded={rev.get('degraded')}",
+    )
 
 res = requests.get(
     f"{BASE}/api/places/reverse",
@@ -200,11 +229,23 @@ check(
     f"origin_lat={created.get('origin_lat')}",
 )
 plan = created.get("alarm_plan") or {}
-check(
-    "집이 없어도 status=ok (출발지가 있으니)",
-    plan.get("status") == "ok",
-    f"status={plan.get('status')} label={plan.get('status_label')!r}",
-)
+if HAS_KAKAO:
+    check(
+        "집이 없어도 status=ok (출발지가 있으니)",
+        plan.get("status") == "ok",
+        f"status={plan.get('status')} label={plan.get('status_label')!r}",
+    )
+else:
+    skip("집이 없어도 status=ok (출발지가 있으니)",
+         f"{kakao_skip_reason()} · status={plan.get('status')}")
+    # 이동시간을 못 구해도 **no_home 으로 떨어지면 안 된다.** 출발지가 있으니
+    # 집이 없다는 진단은 틀렸고, 그 문구는 사용자를 엉뚱한 설정으로 보낸다.
+    # 이 판정은 카카오와 무관하다.
+    check(
+        "출발지가 있으면 no_home 으로 진단하지 않는다",
+        plan.get("status") != "no_home",
+        f"status={plan.get('status')} label={plan.get('status_label')!r}",
+    )
 travel_from_origin = plan.get("travel_minutes")
 
 # --- 7. 출발지를 집으로 바꾸면 소요시간이 달라진다 --------------------------
@@ -227,13 +268,19 @@ res = requests.patch(
 check("출발지 비우기 200", res.status_code == 200, f"status={res.status_code} {res.text[:200]}")
 plan_home = (res.json() or {}).get("alarm_plan") or {}
 travel_from_home = plan_home.get("travel_minutes")
-check(
-    "출발지를 바꾸면 이동 시간이 달라진다",
-    travel_from_origin is not None
-    and travel_from_home is not None
-    and travel_from_origin != travel_from_home,
-    f"origin={travel_from_origin}분 home={travel_from_home}분",
-)
+if HAS_KAKAO:
+    check(
+        "출발지를 바꾸면 이동 시간이 달라진다",
+        travel_from_origin is not None
+        and travel_from_home is not None
+        and travel_from_origin != travel_from_home,
+        f"origin={travel_from_origin}분 home={travel_from_home}분",
+    )
+else:
+    # 양쪽 다 None 이라 "달라졌는가" 를 물을 수 없다. 이것이 이 스크립트의 핵심
+    # 항목이므로 건너뛴 사실을 분명히 남긴다.
+    skip("출발지를 바꾸면 이동 시간이 달라진다",
+         f"{kakao_skip_reason()} · origin={travel_from_origin} home={travel_from_home}")
 
 # --- 8. 반쪽 좌표는 API 층에서 막힌다 ---------------------------------------
 res = requests.patch(
@@ -248,6 +295,6 @@ check("일정에 반쪽 좌표는 400", res.status_code == 400, f"status={res.st
 get_user_model().objects.filter(email=email).delete()
 
 print("=" * 74)
-print(f"통과 {passed} / 실패 {failed}")
+print(f"통과 {passed} / 실패 {failed} / 건너뜀 {skipped}")
 print("=" * 74)
 raise SystemExit(1 if failed else 0)

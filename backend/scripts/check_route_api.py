@@ -53,6 +53,8 @@ django.setup()
 from django.contrib.auth import get_user_model  # noqa: E402
 from django.utils import timezone as djtz  # noqa: E402
 
+from _capabilities import banner, kakao_configured, kakao_skip_reason  # noqa: E402
+
 HOME = {"lat": 37.484267, "lng": 126.929745, "label": "신림역"}
 DEST = {
     "name": "서울대학교 관악캠퍼스",
@@ -63,10 +65,24 @@ DEST = {
 }
 
 results: list[tuple[str, bool, str]] = []
+skipped: list[tuple[str, str]] = []
+HAS_KAKAO = kakao_configured()
 
 
 def check(name: str, ok: bool, note: str = "") -> None:
     results.append((name, bool(ok), note))
+
+
+def skip(name: str, why: str = "") -> None:
+    """검사할 수 없었던 항목. 실패로 세지 않는다.
+
+    이 스크립트는 거의 전부가 카카오 경로 응답에 달려 있다. 그래도 통째로
+    건너뛰지 않는다 — 좌표 검증·권한·`route_key` 형식 같은 **서버 자체 로직**은
+    키 없이도 확인할 수 있고, 그것이 회귀하면 여기서 잡아야 한다.
+
+    판정은 결과가 아니라 키 유무로 한다. 근거는 `_capabilities` 상단에 있다.
+    """
+    skipped.append((name, why or kakao_skip_reason()))
 
 
 def brief(res) -> str:
@@ -141,90 +157,129 @@ res = requests.get(
 check("후보 조회 200", res.status_code == 200, f"status={res.status_code}")
 body = res.json() if res.status_code == 200 else {}
 candidates = body.get("results") or []
-check("후보가 2개 이상", len(candidates) >= 2, f"n={len(candidates)}")
+
+# 출발지 에코는 카카오와 무관하다. 후보가 비어도 서버는 어디서 출발하는지
+# 말해야 한다 — 앱이 그 값을 화면에 띄운다.
 check(
     "출발지가 프로필 집",
     (body.get("origin") or {}).get("label") == HOME["label"],
     str(body.get("origin")),
 )
-check(
-    "후보 key 중복 없음",
-    len({c["key"] for c in candidates}) == len(candidates),
-)
-check(
-    "소요시간 오름차순",
-    [c["minutes"] for c in candidates] == sorted(c["minutes"] for c in candidates),
-)
-check(
-    "모든 후보에 mode·minutes·key 있음",
-    all(c.get("mode") and c.get("minutes") and c.get("key") for c in candidates),
-)
-check(
-    "가장 빠름 라벨이 첫 항목에만",
-    sum(1 for c in candidates if c.get("reason") == "가장 빠름") == 1
-    and candidates[0].get("reason") == "가장 빠름",
-    str([c.get("reason") for c in candidates]),
-)
+
+if HAS_KAKAO:
+    check("후보가 2개 이상", len(candidates) >= 2, f"n={len(candidates)}")
+    check(
+        "후보 key 중복 없음",
+        len({c["key"] for c in candidates}) == len(candidates),
+    )
+    check(
+        "소요시간 오름차순",
+        [c["minutes"] for c in candidates] == sorted(c["minutes"] for c in candidates),
+    )
+    check(
+        "모든 후보에 mode·minutes·key 있음",
+        all(c.get("mode") and c.get("minutes") and c.get("key") for c in candidates),
+    )
+    check(
+        "가장 빠름 라벨이 첫 항목에만",
+        sum(1 for c in candidates if c.get("reason") == "가장 빠름") == 1
+        and candidates[0].get("reason") == "가장 빠름",
+        str([c.get("reason") for c in candidates]),
+    )
+else:
+    for label in (
+        "후보가 2개 이상",
+        "후보 key 중복 없음",
+        "소요시간 오름차순",
+        "모든 후보에 mode·minutes·key 있음",
+        "가장 빠름 라벨이 첫 항목에만",
+    ):
+        skip(label)
+    # 키가 없어도 **빈 목록으로 200** 이어야 한다. 500 을 내면 앱의 경로 선택
+    # 화면이 통째로 죽는다. 이 판정은 카카오 응답 내용과 무관하다.
+    check("경로를 못 구해도 200 과 빈 목록", res.status_code == 200 and candidates == [],
+          f"status={res.status_code} n={len(candidates)}")
 
 # 가장 빠른 것이 아닌 후보를 고른다. 선택이 실제로 반영되는지 보려면
 # 기본값(최단)과 달라야 한다.
-transit_pool = [c for c in candidates if c["key"].startswith("transit:")]
 chosen = None
 for c in reversed(candidates):
     if c is not candidates[0]:
         chosen = c
         break
-assert chosen is not None, "고를 후보가 없다"
+
+# 예전에는 여기서 맨 `assert` 로 중단했다. 카카오 키가 없으면 스크립트가
+# Traceback 으로 죽어서 **뒤에 있는 33개 중 10여 개의 키 무관 검사까지 전부
+# 못 돌았다.** 중단하지 않고 그 구간만 건너뛴다.
+if chosen is None and HAS_KAKAO:
+    check("고를 후보가 있다", False, f"후보 {len(candidates)}개 — 경로 조회가 회귀했다")
 
 # --- 5. 경로를 골라 일정 생성 ------------------------------------------------
 start = (djtz.localtime() + timedelta(days=1)).replace(
     hour=9, minute=0, second=0, microsecond=0
 )
-res = requests.post(
-    f"{BASE}/api/events",
-    json={
-        "title": "경로 선택 확인",
-        "start_at": start.isoformat(),
-        "tag_key": "class",
-        "place": DEST,
-        "route_key": chosen["key"],
-    },
-    headers=auth,
-    timeout=60,
-)
+create_payload = {
+    "title": "경로 선택 확인",
+    "start_at": start.isoformat(),
+    "tag_key": "class",
+    "place": DEST,
+}
+if chosen:
+    create_payload["route_key"] = chosen["key"]
+
+res = requests.post(f"{BASE}/api/events", json=create_payload, headers=auth, timeout=60)
+# 경로를 못 골랐어도 일정은 만들어져야 한다. 뒤의 `route_key` 형식 검증과
+# 권한 검사가 이 일정을 쓴다.
 check("경로 지정 일정 생성 201", res.status_code == 201, f"status={res.status_code} {brief(res)}")
 event = res.json() if res.status_code == 201 else {}
 plan = event.get("alarm_plan") or {}
 
-check("일정에 route_key 저장", event.get("route_key") == chosen["key"], str(event.get("route_key")))
-check("알람 상태 ok", plan.get("status") == "ok", str(plan.get("status")))
-check(
-    "선택한 경로의 소요시간이 쓰임",
-    plan.get("travel_minutes") == chosen["minutes"],
-    f"plan={plan.get('travel_minutes')} chosen={chosen['minutes']}",
-)
-check(
-    "사용한 경로 key 가 선택과 일치",
-    plan.get("route_key") == chosen["key"],
-    f"{plan.get('route_key')} vs {chosen['key']}",
-)
-check("route_choice_honored=true", plan.get("route_choice_honored") is True, str(plan.get("route_choice_honored")))
-check(
-    "이동시간 출처가 카카오",
-    (plan.get("travel_time_source") or "").startswith("kakao_"),
-    str(plan.get("travel_time_source")),
-)
-check("준비시간 출처 onboarding", plan.get("prep_source") == "onboarding", str(plan.get("prep_source")))
-check("버퍼 출처 fixed", plan.get("buffer_source") == "fixed", str(plan.get("buffer_source")))
+if chosen:
+    check("일정에 route_key 저장", event.get("route_key") == chosen["key"], str(event.get("route_key")))
+    check("알람 상태 ok", plan.get("status") == "ok", str(plan.get("status")))
+    check(
+        "선택한 경로의 소요시간이 쓰임",
+        plan.get("travel_minutes") == chosen["minutes"],
+        f"plan={plan.get('travel_minutes')} chosen={chosen['minutes']}",
+    )
+    check(
+        "사용한 경로 key 가 선택과 일치",
+        plan.get("route_key") == chosen["key"],
+        f"{plan.get('route_key')} vs {chosen['key']}",
+    )
+    check("route_choice_honored=true", plan.get("route_choice_honored") is True,
+          str(plan.get("route_choice_honored")))
+    check(
+        "이동시간 출처가 카카오",
+        (plan.get("travel_time_source") or "").startswith("kakao_"),
+        str(plan.get("travel_time_source")),
+    )
+    check("준비시간 출처 onboarding", plan.get("prep_source") == "onboarding",
+          str(plan.get("prep_source")))
+    check("버퍼 출처 fixed", plan.get("buffer_source") == "fixed", str(plan.get("buffer_source")))
+else:
+    for label in (
+        "일정에 route_key 저장",
+        "알람 상태 ok",
+        "선택한 경로의 소요시간이 쓰임",
+        "사용한 경로 key 가 선택과 일치",
+        "route_choice_honored=true",
+        "이동시간 출처가 카카오",
+        "준비시간 출처 onboarding",
+        "버퍼 출처 fixed",
+    ):
+        skip(label)
 
 # 산식: 시작 - 버퍼 - 이동 - 준비 = 알람
 if plan.get("status") == "ok":
     total = plan["prep_minutes"] + plan["travel_minutes"] + plan["buffer_minutes"]
     check("total_minutes 일치", plan.get("total_minutes") == total, f"{plan.get('total_minutes')} vs {total}")
+else:
+    skip("total_minutes 일치", f"계획 상태가 {plan.get('status')} — 값이 없다")
 
 # --- 6. 경로를 바꾸면 알람이 다시 계산된다 -----------------------------------
-other = candidates[0]
-if other["key"] != chosen["key"]:
+other = candidates[0] if candidates else None
+if other and chosen and other["key"] != chosen["key"]:
     res = requests.patch(
         f"{BASE}/api/events/{event['id']}",
         json={"route_key": other["key"]},
@@ -243,6 +298,9 @@ if other["key"] != chosen["key"]:
         plan2.get("alarm_at") != plan.get("alarm_at"),
         f"{plan.get('alarm_at')} -> {plan2.get('alarm_at')}",
     )
+else:
+    for label in ("경로 변경 200", "바꾼 경로의 소요시간으로 재계산", "알람 시각이 달라짐"):
+        skip(label, "바꿔 볼 다른 후보가 없다" if HAS_KAKAO else kakao_skip_reason())
 
 # --- 7. 잘못된 route_key 는 400 --------------------------------------------
 res = requests.patch(
@@ -262,7 +320,12 @@ res = requests.patch(
 )
 check("route_key 비우기 200", res.status_code == 200, f"status={res.status_code}")
 plan3 = (res.json() or {}).get("alarm_plan") or {}
-check("비우면 상태 ok 유지", plan3.get("status") == "ok", str(plan3.get("status")))
+if HAS_KAKAO:
+    check("비우면 상태 ok 유지", plan3.get("status") == "ok", str(plan3.get("status")))
+else:
+    skip("비우면 상태 ok 유지", f"{kakao_skip_reason()} · status={plan3.get('status')}")
+# 이것은 키와 무관하다. 고른 적이 없으면 "지켰다/못 지켰다" 를 말할 수 없으므로
+# null 이어야 한다. false 로 내리면 앱이 "서버가 내 선택을 무시했다" 고 표시한다.
 check(
     "고른 적 없으면 honored=null",
     plan3.get("route_choice_honored") is None,
@@ -347,6 +410,7 @@ get_user_model().objects.filter(email=email).delete()
 
 print("=" * 74)
 print("경로 선택 API 검증")
+print(banner())
 print("=" * 74)
 passed = 0
 for name, ok, note in results:
@@ -354,8 +418,10 @@ for name, ok, note in results:
     tail = f"   {note}" if (note and not ok) else ""
     print(f"  {name:<40} {mark}{tail}")
     passed += ok
+for name, why in skipped:
+    print(f"  {name:<40} 건너뜀   {why}")
 print()
-print(f"  {passed}/{len(results)} 통과")
+print(f"  통과 {passed} / 실패 {len(results) - passed} / 건너뜀 {len(skipped)}")
 print()
 print("  참고 — 조회된 후보")
 for c in candidates:

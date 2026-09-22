@@ -209,10 +209,20 @@ def main() -> int:
                 summary = summarize(text)
                 code = proc.returncode
 
-                # **통과 0 건은 성공이 아니다.** 스크립트가 서버에 못 붙거나
-                # 앞부분에서 조용히 빠져나오면 아무것도 검사하지 않고 0 을
-                # 돌려줄 수 있다. 그것을 초록으로 보고하면 CI 가 거짓말을 한다.
-                if code == 0 and summary and passed_count(summary) == 0:
+                # **아무것도 안 하고 0 을 돌려준 것은 성공이 아니다.**
+                # 스크립트가 서버에 못 붙거나 앞부분에서 조용히 빠져나오면
+                # 검사 없이 0 이 나올 수 있고, 그것을 초록으로 보고하면 CI 가
+                # 거짓말을 한다.
+                #
+                # 단, **건너뜀이 있으면 판정하지 않는다.** 외부 키가 없어 전부
+                # 건너뛴 스크립트는 정상이다. 통과와 건너뜀이 둘 다 0 일 때만
+                # 뒤집는다.
+                if (
+                    code == 0
+                    and summary
+                    and passed_count(summary) == 0
+                    and skipped_count(summary) == 0
+                ):
                     code = 3
                     summary = f"{summary}  ← 검증한 항목이 없다"
 
@@ -221,17 +231,10 @@ def main() -> int:
                 mark = " OK " if code == 0 else "FAIL"
                 print(f"[{mark}] {name}  {summary or '(집계 줄 없음)'}")
 
-                # 실패한 스크립트는 원인 줄을 보여 준다. 집계만 보고는
-                # 무엇이 깨졌는지 알 수 없다.
+                # 실패한 스크립트는 원인을 보여 준다. 집계만 보고는 무엇이
+                # 깨졌는지 알 수 없고, **CI 로그는 나중에 열어 볼 수 없다.**
                 if code != 0:
-                    fails = [
-                        l.rstrip() for l in text.splitlines()
-                        if l.startswith("[FAIL]") or "Traceback" in l
-                    ]
-                    for line in fails[:10]:
-                        print(f"         {line}")
-                    if not fails:
-                        print("\n".join(f"         {l}" for l in text.splitlines()[-15:]))
+                    print_failure_detail(text)
         finally:
             server.terminate()
             try:
@@ -249,6 +252,29 @@ def main() -> int:
     return 1 if failed else 0
 
 
+def print_failure_detail(text: str, fail_limit: int = 12, tail: int = 25) -> None:
+    """실패 원인을 읽을 수 있게 찍는다.
+
+    한 번 `Traceback` 한 줄만 찍고 끝난 적이 있다. 예외 **종류와 메시지는 그
+    아래**에 있으므로 그 한 줄로는 아무것도 알 수 없었고, CI 로그는 권한이 없어
+    나중에 열어 볼 수도 없었다. 그래서 개별 실패 줄과 **꼬리 전체**를 둘 다
+    찍는다. 조금 길어지는 것이 원인을 못 찾는 것보다 낫다.
+    """
+    lines = text.splitlines()
+
+    fails = [l.rstrip() for l in lines if l.lstrip().startswith("[FAIL]")]
+    for line in fails[:fail_limit]:
+        print(f"         {line}")
+    if len(fails) > fail_limit:
+        print(f"         ... 실패 {len(fails) - fail_limit}건 더")
+
+    body = [l.rstrip() for l in lines if l.strip()][-tail:]
+    if body:
+        print(f"         ── 마지막 {len(body)}줄 " + "─" * 30)
+        for line in body:
+            print(f"         {line}")
+
+
 def passed_count(summary: str) -> int:
     """집계 줄에서 통과 건수를 뽑는다. 못 읽으면 -1(판정 보류)."""
     # "통과 95 · 실패 0 · 건너뜀 0"
@@ -260,6 +286,12 @@ def passed_count(summary: str) -> int:
     if match:
         return int(match.group(1))
     return -1
+
+
+def skipped_count(summary: str) -> int:
+    """집계 줄에서 건너뜀 건수를 뽑는다. 항목이 없으면 0."""
+    match = re.search(r"건너뜀\s*(\d+)", summary)
+    return int(match.group(1)) if match else 0
 
 
 def _takes_base(target: Path) -> bool:
