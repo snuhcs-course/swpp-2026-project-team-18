@@ -140,14 +140,19 @@ jobs:
       # local.properties 가 없다(커밋되지 않는다). 그러면 sdk.dir 은 setup-android
       # 가 넣은 ANDROID_HOME 에서, 서버 주소는 gradle.properties 의
       # jitApiBaseUrl 에서 온다. 이 폴백이 깨지면 여기서 잡힌다.
-      - name: 단위 테스트 · 디버그 빌드
+      #
+      # lint 를 함께 돌린다. **오류만 막고 경고는 통과시킨다** — 지금 경고가
+      # 57건이고, 처음부터 노란불이 섞이면 아무도 보지 않는다. 오류 쪽은
+      # MissingPermission·WrongThread 처럼 실제 크래시가 되는 것들이라 막을
+      # 가치가 있다(실제로 3건을 이 검사로 찾아 고쳤다).
+      - name: 단위 테스트 · lint · 디버그 빌드
         run: >-
-          ./gradlew testDebugUnitTest assembleDebug --console=plain
+          ./gradlew testDebugUnitTest lintDebug assembleDebug --console=plain
           -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
 
       # 실패했을 때 어느 테스트가 깨졌는지 보려면 리포트가 필요하다. 로그만
       # 보고는 Compose·Gradle 출력에 묻힌다.
-      - name: 테스트 리포트 올리기
+      - name: 테스트·lint 리포트 올리기
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -155,5 +160,6 @@ jobs:
           path: |
             APP/app/build/reports/tests/
             APP/app/build/test-results/
+            APP/app/build/reports/lint-results-debug.html
           retention-days: 7
           if-no-files-found: ignore

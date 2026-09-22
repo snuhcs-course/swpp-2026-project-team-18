@@ -645,7 +645,7 @@ confidence_basis = models.CharField(max_length=32, blank=True, default="", db_de
 
 ```
 백엔드 pytest              432
-앱 단위 테스트             117
+앱 단위 테스트             131
 로컬 HTTP 검증 스크립트     8개 전부 통과 (항목 합계 약 257, 필드 계약 95항목 포함)
 빌드                       assembleDebug / assembleRelease 성공
 CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR 마다 돌린다
@@ -656,7 +656,7 @@ CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR �
 ```bash
 cd backend && python -m pytest                       # 432
 cd backend && python scripts/run_local_suite.py      # 8개 스크립트, 서버 기동까지 알아서 한다
-cd APP && ./gradlew testDebugUnitTest assembleDebug  # 117
+cd APP && ./gradlew testDebugUnitTest assembleDebug  # 131
 ```
 
 ### CI

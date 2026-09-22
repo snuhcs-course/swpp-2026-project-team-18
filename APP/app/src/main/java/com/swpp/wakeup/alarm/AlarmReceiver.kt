@@ -48,7 +48,17 @@ class AlarmReceiver : BroadcastReceiver() {
         AlarmNotifications.ensureChannels(context)
 
         // 1) 전체화면 인텐트 알림
-        if (canPostNotifications(context)) {
+        //
+        // 권한 확인을 **여기에 펼쳐 쓴다.** 도우미 함수로 빼면 lint 의
+        // MissingPermission 검사가 그 경계를 넘어 보지 못해 오류로 잡는다.
+        // 그 오류를 억제 주석으로 덮으면, 나중에 가드를 지워도 주석만 남아
+        // 아무도 모른다. 조건을 눈에 보이는 자리에 둔다.
+        val canPost = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (canPost) {
             runCatching {
                 NotificationManagerCompat.from(context).notify(
                     AlarmNotifications.NOTIFICATION_ALARM,
@@ -67,12 +77,6 @@ class AlarmReceiver : BroadcastReceiver() {
             )
         }.onFailure { Log.w(TAG, "액티비티 직접 시작 실패(알림 경로로 뜬다)", it) }
     }
-
-    private fun canPostNotifications(context: Context): Boolean =
-        ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.POST_NOTIFICATIONS,
-        ) == PackageManager.PERMISSION_GRANTED
 
     companion object {
         const val ACTION_FIRE = "com.swpp.wakeup.action.ALARM_FIRE"

@@ -1,9 +1,11 @@
 package com.swpp.wakeup.sensing
 
+import android.Manifest
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.Handler
@@ -12,6 +14,7 @@ import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -265,6 +268,23 @@ class TripTrackingService : Service() {
             .setWaitForAccurateLocation(highAccuracy)
             .build()
 
+        // 권한 확인을 **여기에 펼쳐 쓴다.** onStartCommand 가 이미
+        // LocationPermissions.granted 로 막지만 lint 는 메서드 경계를 넘어
+        // 보지 못한다. 억제 주석으로 덮으면 나중에 가드를 지워도 주석만 남는다.
+        //
+        // 다시 확인하는 것이 낭비도 아니다. 이 함수는 정확도 전환에서 다시
+        // 불리고, 그 사이에 사용자가 설정에서 권한을 끌 수 있다.
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!granted) {
+            Log.w(TAG, "위치 권한이 없다. 추적을 멈춘다")
+            stopSelf()
+            return
+        }
+
         runCatching {
             fused.removeLocationUpdates(callback)
             fused.requestLocationUpdates(request, callback, Looper.getMainLooper())
@@ -297,6 +317,16 @@ class TripTrackingService : Service() {
     }
 
     private fun updateNotification(title: String, text: String) {
+        // 포그라운드 서비스 알림이라 이미 떠 있지만, 갱신도 POST_NOTIFICATIONS
+        // 를 요구한다. 권한이 없으면 조용히 넘긴다 — 서비스 자체는 계속 돈다.
+        // 조건을 펼쳐 쓴 이유는 [AlarmReceiver] 와 같다(lint 가 메서드 경계를
+        // 넘어 보지 못한다).
+        val canPost = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!canPost) return
+
         runCatching {
             NotificationManagerCompat.from(this).notify(
                 AlarmNotifications.NOTIFICATION_TRIP,

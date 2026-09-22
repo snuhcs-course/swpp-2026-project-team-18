@@ -37,6 +37,18 @@ object LocalStores {
      * 등록된 알람도 함께 취소한다. 사본만 지우고 `PendingIntent` 를 두면
      * **로그아웃한 계정의 알람이 그대로 울린다** — 사본이 없으니 그 알람이
      * 무엇인지 앱도 설명할 수 없다.
+     *
+     * ## 코루틴으로 바꾸지 말 것
+     *
+     * 호출 스레드에서 끝까지 돈다. 디스크를 읽으므로 메인 스레드에서 도는 것이
+     * 이상적이지는 않지만, **비동기로 바꾸면 지워지지 않는다.** 로그아웃은
+     * 곧바로 액티비티를 끝내고, `viewModelScope` 에 올린 작업은 ViewModel 이
+     * 정리될 때 취소된다. 팀이 이미 한 번 당했고 그래서 Room 삭제는
+     * [OfflineCache.wipeDetached] 로 분리돼 있다.
+     *
+     * 여기는 SharedPreferences 파일 네 개라 그 방식까지 필요하지 않다 — 작고,
+     * 블로킹 시간이 화면 전환 한 프레임 안에 들어온다. 정말 옮겨야 한다면
+     * 화면 수명과 분리된 스코프를 써야 하고, `viewModelScope` 는 답이 아니다.
      */
     fun wipeAll(context: Context) {
         val app = context.applicationContext
