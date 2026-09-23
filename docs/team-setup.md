@@ -30,7 +30,7 @@
 
 예외가 둘 있는데, 둘 다 **관리하는 DB 가 아니라 실행 중에만 존재하는 것**이다.
 
-- `pytest` 432건 — 메모리 SQLite. pytest 는 테스트 데이터베이스를 **만들고
+- `pytest` 505건 — 메모리 SQLite. pytest 는 테스트 데이터베이스를 **만들고
   지운다.** Neon 에 대고 하면 팀 DB 인스턴스에 `test_neondb` 를 만들었다 지우게
   되고, 싱가포르 왕복(질의당 약 75ms)이라 7초짜리 테스트가 몇 분이 된다.
 - `scripts/run_local_suite.py` — 임시 폴더의 일회용 SQLite. 검증 스크립트 8개가
@@ -749,8 +749,8 @@ ServerWarmup  E  서버가 구버전입니다 (서버 0.1.0 · 앱 0.3.0). 새 �
 ### 검증 규모
 
 ```
-백엔드 pytest              432
-앱 단위 테스트             179
+백엔드 pytest              505
+앱 단위 테스트             238
 로컬 HTTP 검증 스크립트     8개 전부 통과 (항목 합계 약 257, 필드 계약 95항목 포함)
 배포 서버 전 기능           82건 통과 · 실패 0 (check_deployed.py)
 DB 기본값 검사              10건 · 위험 0 (check_db_defaults.py)
@@ -761,9 +761,9 @@ CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR �
 세 가지를 손으로 돌리는 방법이다. CI 가 돌리는 것과 같다.
 
 ```bash
-cd backend && python -m pytest                       # 432
+cd backend && python -m pytest                       # 505
 cd backend && python scripts/run_local_suite.py      # 8개 스크립트, 서버 기동까지 알아서 한다
-cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 179 + lint
+cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 238 + lint
 ```
 
 ### CI
@@ -774,7 +774,7 @@ cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 179 + lint
 
 | 잡 | 하는 일 |
 | --- | --- |
-| `백엔드 pytest` | `config.settings.test` 로 432건. 메모리 SQLite 고정이라 환경변수를 하나도 주지 않는다 |
+| `백엔드 pytest` | `config.settings.test` 로 505건. 메모리 SQLite 고정이라 환경변수를 하나도 주지 않는다 |
 | `앱-서버 계약 검사` | 서버를 실제로 띄우고 `check_*.py` 8개. pytest 가 못 잡는 라우팅 누락·직렬화 모양을 잡는다 |
 | `앱 단위 테스트 · 디버그 빌드` | JDK 25(데몬) + 21(툴체인), SDK `platforms;android-37.0` |
 
