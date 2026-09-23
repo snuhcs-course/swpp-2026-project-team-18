@@ -25,6 +25,7 @@ import com.swpp.wakeup.alarm.AlarmNotifications
 import com.swpp.wakeup.data.local.withDiskDefaults
 import com.swpp.wakeup.data.remote.TripObservationInput
 import com.swpp.wakeup.domain.model.AlarmSchedule
+import com.swpp.wakeup.domain.model.ArrivalVerdict
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -198,7 +199,9 @@ class TripTrackingService : Service() {
             is TripEvent.Arrived -> {
                 Log.i(TAG, "도착 판정: 목적지 ${event.distanceM.roundToInt()}m")
                 record(current, TripObservationInput.KIND_ARRIVE, event.fix, event.distanceM)
-                updateNotification("도착을 기록했다", arrivedText(current))
+                // 결과 알림을 **멈추기 전에** 띄운다. 이건 포그라운드 서비스
+                // 알림이 아닌 별도 알림이라 stopSelf 에 휩쓸리지 않는다.
+                postArrivalResult(current, event.fix)
                 stopSelf()
                 return
             }
@@ -316,7 +319,11 @@ class TripTrackingService : Service() {
         )
     }
 
-    private fun updateNotification(title: String, text: String) {
+    private fun updateNotification(
+        title: String,
+        text: String,
+        phase: AlarmNotifications.TripPhaseLabel? = null,
+    ) {
         // 포그라운드 서비스 알림이라 이미 떠 있지만, 갱신도 POST_NOTIFICATIONS
         // 를 요구한다. 권한이 없으면 조용히 넘긴다 — 서비스 자체는 계속 돈다.
         // 조건을 펼쳐 쓴 이유는 [AlarmReceiver] 와 같다(lint 가 메서드 경계를
@@ -335,6 +342,7 @@ class TripTrackingService : Service() {
                     title = title,
                     text = text,
                     stopIntent = stopPendingIntent(),
+                    phase = phase,
                 ),
             )
         }
@@ -344,20 +352,89 @@ class TripTrackingService : Service() {
         current: AlarmSchedule,
         fence: TripGeofence,
     ) {
-        val title = when (fence.phase) {
-            TripGeofence.Phase.BEFORE_DEPARTURE -> "출발을 기다리는 중"
-            TripGeofence.Phase.IN_TRANSIT -> "이동 중"
-            TripGeofence.Phase.ARRIVED -> "도착"
-        }
+        val phase = phaseLabel(fence.phase)
         val remaining = fence.distanceToDestinationM
+
+        // 단계마다 사용자가 알고 싶은 것이 다르다. 준비 중에는 "아직 안 나갔다"
+        // 는 사실이, 이동 중에는 남은 거리가 중요하다. 준비 중에 목적지까지의
+        // 거리를 보여 주면 집에서 그 숫자를 보며 초조해질 뿐 할 수 있는 것이 없다.
         val text = buildString {
             append(current.eventLine)
-            if (remaining != null) {
-                append(" · 목적지까지 ")
-                append(formatDistance(remaining))
+            append(" · ")
+            when (fence.phase) {
+                TripGeofence.Phase.BEFORE_DEPARTURE -> append("아직 출발 전")
+
+                TripGeofence.Phase.IN_TRANSIT ->
+                    if (remaining != null) {
+                        append("목적지까지 ")
+                        append(formatDistance(remaining))
+                    } else {
+                        append("목적지로 가는 중")
+                    }
+
+                TripGeofence.Phase.ARRIVED -> append("도착을 기록했다")
             }
         }
-        updateNotification(title, text)
+        updateNotification(phase.label, text, phase)
+    }
+
+    /**
+     * 판정기 단계를 알림 문구로 옮긴다.
+     *
+     * 출발 판별 기준점이 없으면 판정기가 처음부터 [TripGeofence.Phase.IN_TRANSIT]
+     * 로 시작한다. 그건 "출발을 알 수 없어서 건너뛴 것" 이지만 사용자에게는
+     * 그대로 "이동 중" 으로 보여 주는 것이 맞다 — 준비 중이라고 하면 출발을
+     * 기다리는 것처럼 보이는데 실제로는 아무것도 기다리지 않는다.
+     */
+    private fun phaseLabel(phase: TripGeofence.Phase): AlarmNotifications.TripPhaseLabel =
+        when (phase) {
+            TripGeofence.Phase.BEFORE_DEPARTURE -> AlarmNotifications.TripPhaseLabel.PREPARING
+            TripGeofence.Phase.IN_TRANSIT -> AlarmNotifications.TripPhaseLabel.IN_TRANSIT
+            TripGeofence.Phase.ARRIVED -> AlarmNotifications.TripPhaseLabel.ARRIVED
+        }
+
+    /**
+     * 도착 결과를 알린다. 약속 시각과 비교해 얼마나 이르거나 늦었는지 말한다.
+     *
+     * 이 알림은 사용자가 "확인" 을 누를 때까지 남는다. 예전에는 결과를
+     * 포그라운드 서비스 알림에 써 넣고 곧바로 [stopSelf] 했는데, 그러면
+     * 시스템이 그 알림을 함께 치워서 **아무도 결과를 보지 못했다.**
+     */
+    private fun postArrivalResult(current: AlarmSchedule, fix: LocationFix) {
+        val verdict = ArrivalVerdict(
+            arrivedAtMillis = fix.atMillis,
+            // 약속 시각은 일정 시작 시각이다. 계획이 추정한 도착 예정
+            // (arriveAtMillis) 이 아니다 — 근거는 [ArrivalVerdict] 에 있다.
+            appointmentMillis = current.startAtMillis,
+        )
+
+        val canPost = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!canPost) {
+            // 판정 자체는 이미 큐에 적혔다. 알림만 못 띄운다.
+            Log.w(TAG, "알림 권한이 없어 도착 결과를 띄우지 못한다: ${verdict.headline}")
+            return
+        }
+
+        val line = listOfNotNull(current.eventLine, current.placeName).joinToString(" · ")
+
+        runCatching {
+            NotificationManagerCompat.from(this).notify(
+                AlarmNotifications.NOTIFICATION_ARRIVAL,
+                AlarmNotifications.arrivalNotification(
+                    context = this,
+                    verdict = verdict,
+                    eventLine = line,
+                    confirmIntent = TripArrivalReceiver.confirmIntent(this),
+                    dismissIntent = TripArrivalReceiver.dismissIntent(this),
+                ),
+            )
+        }.onFailure { Log.e(TAG, "도착 결과 알림 실패", it) }
+
+        Log.i(TAG, "도착 결과: ${verdict.headline} (${verdict.detail()})")
     }
 
     private fun initialNotificationText(current: AlarmSchedule): String = buildString {
@@ -372,14 +449,6 @@ class TripTrackingService : Service() {
                 else -> "집을 나서는 시각을 기록함"
             }
         )
-    }
-
-    private fun arrivedText(current: AlarmSchedule): String = buildString {
-        append(current.eventLine)
-        current.arrivalLine?.let {
-            append(" · 계획 ")
-            append(it)
-        }
     }
 
     private fun formatDistance(meters: Double): String =

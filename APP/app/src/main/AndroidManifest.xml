@@ -140,6 +140,14 @@
         </receiver>
 
         <!--
+          도착 결과 알림의 "확인". 알림만 치우므로 화면을 띄우지 않는다.
+          exported=false — 우리 알림에서만 온다.
+        -->
+        <receiver
+            android:name=".sensing.TripArrivalReceiver"
+            android:exported="false" />
+
+        <!--
           출발·도착 판별. 알람을 해제하면 시작하고 도착하거나 마감 시각이
           지나면 스스로 멈춘다.
         -->
