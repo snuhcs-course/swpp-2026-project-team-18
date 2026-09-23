@@ -259,6 +259,152 @@ def walk_minutes(
 # 여기에 도보·자전거·자동차를 각각 하나씩 붙인다.
 
 
+# 도보 속도. 4.5km/h = 75m/분.
+#
+# 앞뒤 도보 시간을 직접 주지 않으므로 거리에서 환산한다. 카카오 도보 API 를
+# 다시 부르면 정확하지만 후보마다 두 번씩, 후보가 6개면 12번을 더 불러야 해서
+# 하루 1,000건 쿼터가 후보 조회 80번에 마른다.
+WALK_METERS_PER_MINUTE = 75.0
+
+
+def _step_endpoints(step: dict) -> tuple[tuple[float, float] | None, tuple[float, float] | None]:
+    """step 의 시작·끝 좌표 `(lat, lng)`.
+
+    `path` 는 `{"points": [[lng, lat], ...]}` 다. **리스트가 아니라 dict** 이고
+    좌표 순서가 경도-위도라 그대로 쓰면 지구 반대편이 된다.
+    """
+    points = ((step.get("path") or {}).get("points")) or []
+    if len(points) < 1:
+        return None, None
+
+    def to_latlng(p):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            return (float(p[1]), float(p[0]))
+        if isinstance(p, dict) and "x" in p and "y" in p:
+            return (float(p["y"]), float(p["x"]))
+        return None
+
+    return to_latlng(points[0]), to_latlng(points[-1])
+
+
+def _segments(
+    route: dict,
+    total_seconds: int,
+    start_lat: float,
+    start_lng: float,
+    end_lat: float,
+    end_lng: float,
+) -> list[dict]:
+    """이동을 눈에 보이는 구간으로 쪼갠다. 앱이 가로 막대로 그린다.
+
+    ## 왜 steps 를 그대로 쓸 수 없나
+
+    `steps` 에는 **탑승 구간과 환승 도보만** 들어 있다. 집에서 첫 정류장까지,
+    마지막 정류장에서 목적지까지의 도보가 빠져 있어서 `steps` 의 시간 합이
+    `totalTime` 보다 작다 — 실측으로 25분 경로에서 9분 30초가 비었다.
+
+    그 차이는 **앞 도보 + 차를 기다린 시간 + 뒤 도보**가 섞인 값이고 API 가
+    쪼개 주지 않는다. 그래서 이렇게 한다.
+
+      1. `path.points` 의 첫 점·끝 점으로 앞뒤 도보 **거리**를 구한다.
+      2. 거리를 도보 속도로 나눠 앞뒤 도보 시간을 잡는다.
+      3. 남은 시간은 **대기**다. 첫 탑승 구간 바로 앞에 붙인다 — 정류장에서
+         기다리는 것이 맞고, 지어낸 위치가 아니다.
+
+    합은 항상 `totalTime` 과 같게 맞춘다. 막대의 총 길이가 제목의 소요시간과
+    다르면 사용자가 둘 중 어느 것을 믿어야 할지 알 수 없다.
+
+    ## 반환 모양
+
+        [{"kind": "walk"|"bus"|"subway"|"wait", "seconds": 240,
+          "label": "도보", "vehicle": "5511", "vehicle_type": "지선"}]
+
+    `kind` 는 색을 고르는 열쇠이고 `vehicle_type` 은 버스 색을 가른다
+    (지선 녹색, 간선 파란색 …). 색은 **앱이 정한다** — 서버가 hex 를 내리면
+    다크 모드를 바꿀 때마다 서버를 배포해야 한다.
+    """
+    steps = route.get("steps") or []
+    if not steps:
+        return []
+
+    body: list[dict] = []
+    for step in steps:
+        props = step.get("properties") or {}
+        seconds = props.get("time") or 0
+        if seconds <= 0:
+            continue
+        kind = {"BUS": "bus", "SUBWAY": "subway", "WALKING": "walk"}.get(props.get("type"))
+        if kind is None:
+            continue
+
+        seg = {"kind": kind, "seconds": int(seconds), "label": ""}
+        if kind == "walk":
+            seg["label"] = "도보"
+        else:
+            vehicles = props.get("vehicles") or []
+            first = vehicles[0] if vehicles else {}
+            name = str(first.get("name") or first.get("busNo") or "").strip()
+            seg["vehicle"] = name
+            # 지하철은 "2호선" 이 곧 색이고, 버스는 "지선" 같은 종류가 색이다.
+            seg["vehicle_type"] = str(first.get("type") or "").strip()
+            seg["label"] = name or ("지하철" if kind == "subway" else "버스")
+        body.append(seg)
+
+    if not body:
+        return []
+
+    inner = sum(s["seconds"] for s in body)
+    leftover = max(0, int(total_seconds) - inner)
+
+    # 앞뒤 도보 거리 → 시간. 좌표가 없으면 0 이 되고 전부 대기로 남는다.
+    first_point, _ = _step_endpoints(steps[0])
+    _, last_point = _step_endpoints(steps[-1])
+
+    def walk_seconds(a: tuple[float, float] | None, b: tuple[float, float] | None) -> int:
+        if a is None or b is None:
+            return 0
+        meters = _haversine_meters(a[0], a[1], b[0], b[1])
+        return int(round(meters / WALK_METERS_PER_MINUTE * 60))
+
+    access = walk_seconds((start_lat, start_lng), first_point)
+    egress = walk_seconds(last_point, (end_lat, end_lng))
+
+    # 환산값이 남은 시간보다 크면 비율로 줄인다. 합이 총시간을 넘으면 막대가
+    # 제목과 어긋난다.
+    if access + egress > leftover and (access + egress) > 0:
+        scale = leftover / (access + egress)
+        access = int(access * scale)
+        egress = leftover - access
+    wait = leftover - access - egress
+
+    out: list[dict] = []
+    if access > 0:
+        out.append({"kind": "walk", "seconds": access, "label": "도보"})
+    if wait > 0:
+        out.append({"kind": "wait", "seconds": wait, "label": "대기"})
+    out.extend(body)
+    if egress > 0:
+        out.append({"kind": "walk", "seconds": egress, "label": "도보"})
+
+    return out
+
+
+def _haversine_meters(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> float:
+    """두 점 사이 거리(m).
+
+    앱의 `TripGeofence.distanceMeters` 와 같은 식이다. 수 백 m 범위의 도보
+    거리에 쓰므로 정밀도는 충분하다.
+    """
+    import math
+
+    radius = 6_371_008.8
+    p1, p2 = math.radians(a_lat), math.radians(b_lat)
+    d_lat = p2 - p1
+    d_lng = math.radians(b_lng - a_lng)
+    h = math.sin(d_lat / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(d_lng / 2) ** 2
+    return 2 * radius * math.asin(min(1.0, math.sqrt(h)))
+
+
 def _vehicle_chain(route: dict) -> tuple[list[str], int]:
     """탑승 구간별 대표 노선과 대체 노선 수.
 
@@ -350,6 +496,10 @@ def _transit_candidates(
             "fare": (props.get("fare") or {}).get("value"),
             "detail": detail,
             "source": "kakao_transit",
+            # 앱이 가로 막대로 그린다. 합은 totalTime 과 같다.
+            "segments": _segments(
+                route, seconds, start_lat, start_lng, end_lat, end_lng
+            ),
         }
         item["summary"] = _summary_bits(
             minutes, item["distance_m"], item["transfers"], item["fare"]
@@ -437,6 +587,9 @@ def _single_route_candidate(
         "summary": _summary_bits(minutes, props.get("totalDistance"), 0, None),
         "source": f"kakao_{key}",
         "reason": "",
+        # 처음부터 끝까지 한 수단이다. 구간이 하나여도 내려 준다 — 앱이
+        # "구간이 있는 후보" 와 "없는 후보" 를 따로 그리지 않아도 되게.
+        "segments": [{"kind": key, "seconds": int(seconds), "label": mode}],
     }
 
 
@@ -481,6 +634,7 @@ def _car_candidate(
         "summary": _summary_bits(minutes, summary.get("distance"), 0, taxi),
         "source": "kakao_car",
         "reason": "",
+        "segments": [{"kind": "car", "seconds": int(seconds), "label": "자동차"}],
     }
 
 

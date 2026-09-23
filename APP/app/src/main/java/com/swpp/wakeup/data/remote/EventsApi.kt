@@ -213,6 +213,52 @@ data class RouteCandidateDto(
     /** "가장 빠름" / "환승 없음" / "가장 저렴". 없으면 빈 문자열 */
     val reason: String?,
     val source: String?,
+    /**
+     * 구간 목록. 앱이 가로 막대로 그린다.
+     *
+     * **타입이 nullable 인 것이 의도다.** Gson 은 Kotlin 기본값을 모른다 —
+     * `= emptyList()` 를 써도 JSON 에 `segments` 키가 없으면 이 필드는 null 로
+     * 남고, 컴파일러는 non-null 이라 믿고 널 검사를 지운다. 그러면 첫 접근에서
+     * `NullPointerException` 이 난다.
+     *
+     * 실제로 그렇게 터졌다. 배포 서버가 아직 이 필드를 내리지 않는 상태에서
+     * 경로 선택 화면이 "알 수 없는 오류(NullPointerException)" 로 죽었다.
+     * 같은 함정을 디스크 쪽에서는 [com.swpp.wakeup.data.local.DiskCompat] 이
+     * 다루는데, 네트워크 DTO 는 그 보호 밖에 있었다.
+     *
+     * 그래서 기본값 대신 **null 을 타입으로 인정한다.** 그러면 컴파일러가
+     * 쓰는 자리마다 처리를 강제한다. 구버전 서버 응답과 `steps` 가 없는
+     * 후보가 모두 이 경로로 들어온다.
+     */
+    val segments: List<RouteSegmentDto>? = null,
+)
+
+/**
+ * 이동 구간 하나.
+ *
+ * 색을 서버가 정하지 않는다. [kind] 와 [vehicleType] 만 받아서 앱이 고른다 —
+ * 다크 모드 색을 손볼 때마다 서버를 배포해야 하면 못 고친다.
+ */
+data class RouteSegmentDto(
+    /**
+     * `walk` / `wait` / `bus` / `subway` / `car` / `bicycle`
+     *
+     * nullable 인 이유는 [RouteCandidateDto.segments] 와 같다 — Gson 은 키가
+     * 없으면 non-null 선언을 무시하고 null 을 넣는다.
+     */
+    val kind: String?,
+    val seconds: Int,
+    /** "도보" / "대기" / "5511" / "2호선" */
+    val label: String?,
+    /** 노선명. "5511", "2호선". 도보·대기면 없다 */
+    val vehicle: String?,
+    /**
+     * 버스 종류. "지선" / "간선" / "광역" / "순환" / "마을".
+     *
+     * 이것이 버스 색을 가른다. 지하철은 [vehicle] 의 노선명이 색을 정하므로
+     * 비어 있다.
+     */
+    @SerializedName("vehicle_type") val vehicleType: String?,
 )
 
 data class PlaceDto(

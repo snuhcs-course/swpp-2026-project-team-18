@@ -4,9 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -23,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -30,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.RouteOption
+import com.swpp.wakeup.domain.model.RouteSegment
+import com.swpp.wakeup.domain.model.RouteSegments
 import com.swpp.wakeup.ui.common.JitPrimaryButton
 import com.swpp.wakeup.ui.common.PlacePicker
 import com.swpp.wakeup.ui.home.HomeViewModel
@@ -117,8 +122,6 @@ fun RouteChoiceScreen(
                         onClick = { onSelect(option.key) },
                     )
                 }
-
-                SourceNote()
 
                 Spacer(Modifier.height(4.dp))
 
@@ -337,47 +340,67 @@ private fun RouteCard(option: RouteOption, selected: Boolean, onClick: () -> Uni
         if (option.detailLine.isNotBlank()) {
             Text(text = option.detailLine, color = JitColor.TextSecondary, fontSize = 11.sp)
         }
+        if (option.hasSegmentBar) {
+            SegmentBar(option.segments)
+        }
     }
 }
 
 /**
- * 무엇이 실측이고 무엇이 아직 고정값인지 밝힌다.
+ * 구간 막대. "도보 4분 | 2호선 7분 | 도보 2분 | 5511 8분 | 도보 2분"
  *
- * 이동 시간만 카카오 실측이다. 준비 시간과 버퍼는 고정값인데, 세 값이 같은
- * 표에 나란히 놓이면 전부 계산된 값처럼 읽힌다.
+ * ## 무엇을 해결하는가
+ *
+ * "25분" 만 보면 그 25분의 생김새를 알 수 없다. 18분을 버스에 앉아 있는
+ * 경로와 12분을 걷는 경로는 같은 25분이지만 비 오는 날의 선택이 다르다.
+ * 카카오맵이 같은 것을 가로 막대로 보여 주고, 그게 실제로 읽기 쉽다.
+ *
+ * ## 폭과 색
+ *
+ * 폭은 [RouteSegments.weights] 가 계산한다. 합이 정확히 1.0 이라 오른쪽에
+ * 바탕색이 남지 않는다. 색은 [SegmentPalette] 가 고르고 지하철 노선색·버스
+ * 종류색을 따른다 — 사용자가 이미 아는 색이라야 막대가 한 번에 읽힌다.
+ *
+ * 좁은 칸에는 글자를 넣지 않는다. 잘린 글자는 없는 것보다 읽기 어렵다.
  */
 @Composable
-private fun SourceNote() {
-    Column(
+private fun SegmentBar(segments: RouteSegments) {
+    val weights = segments.weights()
+    if (weights.isEmpty()) return
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(JitRadius.Card))
-            .background(JitColor.Surface)
-            .padding(13.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .height(18.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(SegmentPalette.TRACK)),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Spacer(
-                Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(JitColor.Blue)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "이동 시간만 실측값",
-                color = JitColor.TextPrimary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-            )
+        segments.items.forEachIndexed { index, segment ->
+            Box(
+                modifier = Modifier
+                    .weight(weights[index])
+                    .fillMaxHeight()
+                    .background(Color(SegmentPalette.fill(segment))),
+                contentAlignment = Alignment.Center,
+            ) {
+                // 비율이 이만큼은 돼야 "12분" 이 잘리지 않는다. 화면 폭이
+                // 달라도 비율로 판단하므로 기기마다 같게 동작한다.
+                if (weights[index] >= SEGMENT_LABEL_MIN_WEIGHT) {
+                    Text(
+                        text = segment.minutesLabel,
+                        color = Color(SegmentPalette.onFill(segment)),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
-        Text(
-            text = "준비 시간과 안전 버퍼는 아직 고정값임. 관측이 쌓이면 학습값으로 바뀜",
-            color = JitColor.TextSecondary,
-            fontSize = 11.sp,
-        )
     }
 }
+
+/** 이 비율보다 좁은 칸에는 분을 쓰지 않는다. 9sp 로 "12분" 이 들어갈 최소치다. */
+private const val SEGMENT_LABEL_MIN_WEIGHT = 0.11f
 
 @Composable
 private fun LoadingBlock() {
@@ -453,9 +476,35 @@ private fun RouteChoicePreview() {
                     selectedKey = "transit:2호선>5513",
                     options = listOf(
                         RouteOption("car", "자동차", 14, "14분", "택시 예상액 · 4.3km · 7,600원", "가장 빠름"),
-                        RouteOption("transit:2호선>5513", "지하철+도보+버스", 23, "23분", "2호선 → 5513 · 5.1km · 환승 1회 · 1,550원", null),
+                        RouteOption(
+                            "transit:2호선>5513", "지하철+도보+버스", 23, "23분",
+                            "2호선 → 5513 · 5.1km · 환승 1회 · 1,550원", null,
+                            // 지하철 노선색과 버스 종류색이 같이 나오는 조합.
+                            // 프리뷰에서 색이 섞이는 모양을 보려고 이걸 골랐다.
+                            RouteSegments(
+                                listOf(
+                                    RouteSegment(RouteSegment.Kind.WALK, 240, "도보"),
+                                    RouteSegment(RouteSegment.Kind.SUBWAY, 420, "2호선", lineName = "2호선"),
+                                    RouteSegment(RouteSegment.Kind.WALK, 120, "도보"),
+                                    RouteSegment(RouteSegment.Kind.BUS, 480, "5513", busType = "지선"),
+                                    RouteSegment(RouteSegment.Kind.WALK, 120, "도보"),
+                                )
+                            ),
+                        ),
                         RouteOption("bicycle", "자전거", 24, "24분", "5.0km", null),
-                        RouteOption("transit:5516", "버스", 27, "27분", "5516 · 4.6km · 1,500원", "환승 없음"),
+                        RouteOption(
+                            "transit:5516", "버스", 27, "27분", "5516 · 4.6km · 1,500원", "환승 없음",
+                            // 대기가 보이는 경우. 버스를 기다리는 시간이 도보와
+                            // 다른 색이라야 "걸어서 6분" 과 구분된다.
+                            RouteSegments(
+                                listOf(
+                                    RouteSegment(RouteSegment.Kind.WALK, 180, "도보"),
+                                    RouteSegment(RouteSegment.Kind.WAIT, 300, "대기"),
+                                    RouteSegment(RouteSegment.Kind.BUS, 780, "5516", busType = "간선"),
+                                    RouteSegment(RouteSegment.Kind.WALK, 360, "도보"),
+                                )
+                            ),
+                        ),
                     ),
                 ),
             ),

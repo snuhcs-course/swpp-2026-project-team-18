@@ -20,6 +20,7 @@ import com.swpp.wakeup.data.remote.ProfileApi
 import com.swpp.wakeup.data.remote.ProfileDto
 import com.swpp.wakeup.data.remote.ProfileUpdateRequest
 import com.swpp.wakeup.data.remote.RouteCandidateDto
+import com.swpp.wakeup.data.remote.RouteSegmentDto
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ConfidenceView
@@ -30,6 +31,8 @@ import com.swpp.wakeup.domain.model.PrepBlockLine
 import com.swpp.wakeup.domain.model.ScheduledBlock
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.RouteOption
+import com.swpp.wakeup.domain.model.RouteSegment
+import com.swpp.wakeup.domain.model.RouteSegments
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import retrofit2.Response
 import java.io.IOException
@@ -517,7 +520,11 @@ private fun importWhenLabel(startAtMillis: Long, zone: ZoneId): String {
  * 여기서 다시 조립하면 같은 규칙이 두 곳에 생긴다. 소요시간은 카드 상단에
  * 크게 따로 쓰므로 요약에서 앞의 "N분 · " 만 떼어 쓴다.
  */
-private fun RouteCandidateDto.toOption(): RouteOption {
+// internal 인 이유는 테스트다. Gson 이 역직렬화한 DTO 를 이 함수에 그대로
+// 넣어 봐야 "키가 없을 때 터지는" 종류의 버그가 잡힌다. private 이면 테스트가
+// DTO 를 손으로 만들게 되고, 그때는 Gson 을 통과하지 않아 아무것도 검증하지
+// 못한다 — 실제로 그렇게 놓쳤다(NetworkDtoNullSafetyTest 상단 참고).
+internal fun RouteCandidateDto.toOption(): RouteOption {
     val summaryTail = (summary ?: "")
         .removePrefix("${minutes}분")
         .removePrefix(" · ")
@@ -534,7 +541,41 @@ private fun RouteCandidateDto.toOption(): RouteOption {
         minutesLabel = "${minutes}분",
         detailLine = detailLine.ifBlank { summary.orEmpty() },
         badge = reason?.takeIf { it.isNotBlank() },
+        // segments 가 null 인 경우가 정상이다 — 구버전 서버 응답과 Gson 의
+        // 기본값 무시가 겹치는 자리다. 근거는 RouteCandidateDto.segments 주석.
+        segments = RouteSegments(segments.orEmpty().mapNotNull { it.toSegment() }),
     )
+}
+
+/**
+ * 구간 DTO 를 화면용으로.
+ *
+ * 시간이 0 이하인 구간은 버린다. 폭이 0 인 칸을 그리면 색만 한 줄 끼어
+ * 들어가 경계선처럼 보인다. 모르는 `kind` 는 버리지 않고 중립색으로 그린다 —
+ * 서버가 수단을 추가했을 때 막대의 합이 소요시간과 어긋나는 것이 더 나쁘다.
+ */
+private fun RouteSegmentDto.toSegment(): RouteSegment? {
+    if (seconds <= 0) return null
+    val kind = RouteSegment.Kind.from(kind)
+    return RouteSegment(
+        kind = kind,
+        seconds = seconds,
+        label = label?.takeIf { it.isNotBlank() }
+            ?: vehicle?.takeIf { it.isNotBlank() }
+            ?: defaultLabel(kind),
+        lineName = vehicle?.trim().orEmpty(),
+        busType = vehicleType?.trim().orEmpty(),
+    )
+}
+
+private fun defaultLabel(kind: RouteSegment.Kind): String = when (kind) {
+    RouteSegment.Kind.WALK -> "도보"
+    RouteSegment.Kind.WAIT -> "대기"
+    RouteSegment.Kind.BUS -> "버스"
+    RouteSegment.Kind.SUBWAY -> "지하철"
+    RouteSegment.Kind.CAR -> "자동차"
+    RouteSegment.Kind.BICYCLE -> "자전거"
+    RouteSegment.Kind.UNKNOWN -> "이동"
 }
 
 /** 서버는 ISO 8601 로 준다. 파싱 실패한 항목은 목록에서 뺀다. */

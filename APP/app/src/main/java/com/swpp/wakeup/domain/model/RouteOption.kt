@@ -21,9 +21,24 @@ data class RouteOption(
     val detailLine: String,
     /** "가장 빠름" / "환승 없음" / "가장 저렴". 없으면 null */
     val badge: String?,
+    /**
+     * 구간 막대에 그릴 내용. 비어 있으면 막대를 그리지 않는다.
+     *
+     * 구버전 서버는 이 값을 내리지 않는다. 그때 빈 막대를 그리면 "0분 구간"
+     * 처럼 보이므로 아예 숨긴다.
+     */
+    val segments: RouteSegments = RouteSegments(emptyList()),
 ) {
     /** 자동차는 요금이 크게 다르므로 화면에서 구분해 표시한다. */
     val isCar: Boolean get() = key == "car"
+
+    /**
+     * 막대를 그릴 값어치가 있는가.
+     *
+     * 구간이 하나뿐이면 막대가 통짜 한 칸이고, 그건 제목의 "14분" 이 이미
+     * 말한 것이라 화면만 길어진다. 둘 이상일 때만 그린다.
+     */
+    val hasSegmentBar: Boolean get() = segments.items.size >= 2
 }
 
 /**
