@@ -84,6 +84,28 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 블록 관측 큐. 아침 기록이 여기로 들어가고 WorkManager 가 올린다. */
     private val blockQueue = BlockObservationQueue(application)
 
+    /**
+     * 진행 중인 아침 기록의 디스크 저장소.
+     *
+     * **[init] 보다 위에 있어야 한다.** Kotlin 은 프로퍼티와 `init` 블록을 선언
+     * 순서대로 초기화한다. 이 선언이 `init` 아래에 있으면 `init` 이 부르는
+     * `reloadMorning()` 이 아직 null 인 이 값을 읽고 **앱을 켤 때마다 죽는다.**
+     * 실제로 그렇게 깨져 있었다 — 컴파일러도 lint 도 이 순서를 잡아 주지 않는다.
+     * `HomeViewModelInitOrderTest` 가 그 순서를 강제한다.
+     */
+    private val morningStore = MorningSessionStore(application)
+
+    /**
+     * 진행 중인 아침 기록. 없으면 null.
+     *
+     * 생성 시점에 디스크를 한 번 읽는다.
+     * [com.swpp.wakeup.alarm.AlarmActivity] 가 세션을 만들고 이 화면으로 보낸다.
+     *
+     * 위 [morningStore] 와 같은 이유로 [init] 보다 위에 있어야 한다.
+     */
+    private val _morning = MutableStateFlow(morningStore.current())
+    val morning: StateFlow<MorningSession?> = _morning.asStateFlow()
+
     /** 현재 위치 조회에 쓴다. [AndroidViewModel] 이라 누수 걱정이 없다. */
     private val appContext: android.content.Context = application.applicationContext
 
@@ -313,17 +335,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // --- 아침 기록 --------------------------------------------------------
-
-    private val morningStore = MorningSessionStore(application)
-
-    /**
-     * 진행 중인 아침 기록.
-     *
-     * null 이면 기록할 것이 없다. 알람을 해제하면
-     * [com.swpp.wakeup.alarm.AlarmActivity] 가 세션을 만들고 이 화면으로 보낸다.
-     */
-    private val _morning = MutableStateFlow(morningStore.current())
-    val morning: StateFlow<MorningSession?> = _morning.asStateFlow()
+    //
+    // 저장소와 상태 선언은 이 위 `init` 블록보다 앞에 있다. `init` 이
+    // reloadMorning() 을 부르므로 여기 두면 앱을 켤 때마다 죽는다.
 
     /** 화면에 들어올 때마다 디스크에서 다시 읽는다. 알람 액티비티가 만들었을 수 있다. */
     fun reloadMorning() {
