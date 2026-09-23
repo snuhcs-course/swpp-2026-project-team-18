@@ -750,7 +750,7 @@ ServerWarmup  E  서버가 구버전입니다 (서버 0.1.0 · 앱 0.3.0). 새 �
 
 ```
 백엔드 pytest              432
-앱 단위 테스트             154
+앱 단위 테스트             158
 로컬 HTTP 검증 스크립트     8개 전부 통과 (항목 합계 약 257, 필드 계약 95항목 포함)
 배포 서버 전 기능           82건 통과 · 실패 0 (check_deployed.py)
 DB 기본값 검사              10건 · 위험 0 (check_db_defaults.py)
@@ -763,7 +763,7 @@ CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR �
 ```bash
 cd backend && python -m pytest                       # 432
 cd backend && python scripts/run_local_suite.py      # 8개 스크립트, 서버 기동까지 알아서 한다
-cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 154 + lint
+cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 158 + lint
 ```
 
 ### CI
@@ -905,5 +905,16 @@ fun write(value: T) {
 - **푸시(FCM)** — 의존성만 있고 코드가 없다. P4 범위다
 - **자연어 일정 입력** — OpenAI 연동 미착수
 - **날씨 보정** — 기상청 클라이언트는 있으나 계획에 반영하지 않는다
-- **실기기 검증** — 이 문서 작성 시점에 연결된 기기가 없어 못 했다.
-  `APP/scripts/device_*.ps1` 로 한다
+- **실기기 검증 — 일부만 했다.** SM-S921N(Android 16)에서 설치·실행까지
+  확인했다. 남은 것은 앱 완전 종료 후 로그인 유지, 비행기 모드에서
+  로그아웃되지 않는지, 알람이 잠금화면 위에 뜨는지, 앱 업데이트
+  (`MY_PACKAGE_REPLACED`) 후 알람 재등록이다. `APP/scripts/device_*.ps1` 로 한다
+
+  **이걸 건너뛰면 무엇을 놓치는지 이미 겪었다.** 단위 테스트 154개와
+  lint 오류 0, 배포 계약 82건이 전부 초록인 상태로 앱이 켜지지도 않은
+  커밋이 여러 개 올라갔다. `HomeViewModel.init` 이 자기보다 아래에 선언된
+  저장소를 읽어 시작하자마자 `NullPointerException` 이 났다. 자동 검사는
+  이 종류를 볼 수 없다 — `AndroidViewModel` 은 `Application` 이 필요해
+  단위 테스트가 생성조차 하지 않고, 초기화 순서는 타입 오류가 아니라
+  컴파일도 통과한다. 그 뒤 `HomeViewModelInitOrderTest` 로 이 순서만은
+  막아 두었지만, **한 번 실행해 보는 것을 대신하지는 못한다.**
