@@ -61,6 +61,18 @@ services:
       - key: KAKAO_REST_API_KEY
         sync: false
 
+      # 실시간 대중교통 도착정보. 값은 저장소에 넣지 않고 Render 대시보드에서
+      # 직접 넣는다. 로컬 backend/.env 는 Render 컨테이너에 올라가지 않는다.
+      # 버스는 data.go.kr 이 보여 주는 Encoding/Decoding 두 표현을 모두 둔다.
+      - key: SEOUL_BUS_API_KEY_ENCODING
+        sync: false
+
+      - key: SEOUL_BUS_API_KEY_DECODING
+        sync: false
+
+      - key: SEOUL_SUBWAY_API_KEY
+        sync: false
+
 # databases 블록을 두지 않는다.
 #
 # 여기에 Render Postgres 를 정의하면 DATABASE_URL 이 그쪽으로 자동 연결되고,
