@@ -31,6 +31,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.data.remote.PlaceSearchItem
+import com.swpp.wakeup.domain.model.RouteArrival
+import com.swpp.wakeup.domain.model.RouteCheckpoint
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.RouteOption
 import com.swpp.wakeup.domain.model.RouteSegment
@@ -285,8 +287,8 @@ private fun RouteCard(option: RouteOption, selected: Boolean, onClick: () -> Uni
             .then(
                 if (selected) {
                     Modifier.border(
-                        width = 1.dp,
-                        color = JitColor.Accent,
+                        width = 2.dp,
+                        color = JitColor.SnuNavyBorder,
                         shape = RoundedCornerShape(JitRadius.Card),
                     )
                 } else {
@@ -301,15 +303,6 @@ private fun RouteCard(option: RouteOption, selected: Boolean, onClick: () -> Uni
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (selected) {
-                Spacer(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(JitColor.Accent)
-                )
-                Spacer(Modifier.width(9.dp))
-            }
             Text(
                 text = option.minutesLabel,
                 color = JitColor.TextPrimary,
@@ -342,6 +335,11 @@ private fun RouteCard(option: RouteOption, selected: Boolean, onClick: () -> Uni
         }
         if (option.hasSegmentBar) {
             SegmentBar(option.segments)
+        }
+        // 상세 목록은 선택한 카드에만 펼친다. 모든 후보에 열면 같은 정류장이
+        // 반복돼 비교가 어려워지고 한 카드가 화면 여러 장을 차지한다.
+        if (selected && option.hasCheckpoints) {
+            RouteCheckpointList(option.checkpoints)
         }
     }
 }
@@ -401,6 +399,98 @@ private fun SegmentBar(segments: RouteSegments) {
 
 /** 이 비율보다 좁은 칸에는 분을 쓰지 않는다. 9sp 로 "12분" 이 들어갈 최소치다. */
 private const val SEGMENT_LABEL_MIN_WEIGHT = 0.11f
+
+/**
+ * 선택한 경로의 출발·승차·하차·도착과 실시간 차량 도착정보.
+ *
+ * 승차 행에는 장소와 노선만 쓴다. 바로 다음 차량과 그다음 차량은 그 아래
+ * 별도 행에 둔다. 승차 행 오른쪽에 "3분 20초 뒤" 를 쓰면 사용자가 그 지점에
+ * 3분 뒤 도착한다는 뜻으로 오해하기 때문이다.
+ */
+@Composable
+private fun RouteCheckpointList(checkpoints: List<RouteCheckpoint>) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        checkpoints.forEach { checkpoint ->
+            when (checkpoint) {
+                is RouteCheckpoint.Stop -> CheckpointStopRow(checkpoint)
+                is RouteCheckpoint.VehicleArrival -> CheckpointArrivalRow(checkpoint)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CheckpointStopRow(checkpoint: RouteCheckpoint.Stop) {
+    val segment = checkpoint.segment
+    val dotColor = segment?.let { Color(SegmentPalette.fill(it)) } ?: JitColor.TextSecondary
+    val strong = checkpoint.role == RouteCheckpoint.Stop.Role.START ||
+        checkpoint.role == RouteCheckpoint.Stop.Role.END
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Spacer(
+            Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(dotColor)
+        )
+        Text(
+            text = checkpoint.label,
+            color = JitColor.TextPrimary,
+            fontSize = 11.sp,
+            fontWeight = if (strong) FontWeight.Medium else FontWeight.Normal,
+        )
+        checkpoint.lineLabel.takeIf(String::isNotBlank)?.let { line ->
+            Text(
+                text = line,
+                color = Color(SegmentPalette.ON_VEHICLE),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(dotColor)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 차량이 승차 지점에 들어오기까지 남은 시간.
+ *
+ * [RouteCheckpoint.VehicleArrival.primary] 이면 다음 차량이라 노랑, 아니면
+ * 그다음 차량이라 회색이다. 둘을 같은 열에 세로로 놓아 순서를 한눈에 읽는다.
+ */
+@Composable
+private fun CheckpointArrivalRow(checkpoint: RouteCheckpoint.VehicleArrival) {
+    val color = if (checkpoint.primary) JitColor.ArrivalNext else JitColor.ArrivalLater
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = checkpoint.vehicleLabel,
+            color = color,
+            fontSize = 10.sp,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = checkpoint.arrival.displayText,
+            color = color,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+        )
+    }
+}
 
 @Composable
 private fun LoadingBlock() {
@@ -484,9 +574,31 @@ private fun RouteChoicePreview() {
                             RouteSegments(
                                 listOf(
                                     RouteSegment(RouteSegment.Kind.WALK, 240, "도보"),
-                                    RouteSegment(RouteSegment.Kind.SUBWAY, 420, "2호선", lineName = "2호선"),
+                                    RouteSegment(
+                                        RouteSegment.Kind.SUBWAY,
+                                        420,
+                                        "2호선",
+                                        lineName = "2호선",
+                                        region = "metro_seoul",
+                                        stops = listOf("신림", "봉천", "서울대입구(관악구청)"),
+                                        arrivals = listOf(
+                                            RouteArrival(200, "3분 20초 뒤 도착"),
+                                            RouteArrival(580, "9분 40초 뒤 도착"),
+                                        ),
+                                    ),
                                     RouteSegment(RouteSegment.Kind.WALK, 120, "도보"),
-                                    RouteSegment(RouteSegment.Kind.BUS, 480, "5513", busType = "지선"),
+                                    RouteSegment(
+                                        RouteSegment.Kind.BUS,
+                                        480,
+                                        "5513",
+                                        busType = "지선",
+                                        region = "metro_seoul",
+                                        stops = listOf("봉천", "관악구청"),
+                                        arrivals = listOf(
+                                            RouteArrival(70, "1분 10초 뒤 도착", crowding = "여유"),
+                                            RouteArrival(810, "13분 30초 뒤 도착"),
+                                        ),
+                                    ),
                                     RouteSegment(RouteSegment.Kind.WALK, 120, "도보"),
                                 )
                             ),
@@ -500,7 +612,14 @@ private fun RouteChoicePreview() {
                                 listOf(
                                     RouteSegment(RouteSegment.Kind.WALK, 180, "도보"),
                                     RouteSegment(RouteSegment.Kind.WAIT, 300, "대기"),
-                                    RouteSegment(RouteSegment.Kind.BUS, 780, "5516", busType = "간선"),
+                                    RouteSegment(
+                                        RouteSegment.Kind.BUS,
+                                        780,
+                                        "5516",
+                                        busType = "간선",
+                                        region = "metro_seoul",
+                                        stops = listOf("제2공학관", "서울대정문"),
+                                    ),
                                     RouteSegment(RouteSegment.Kind.WALK, 360, "도보"),
                                 )
                             ),

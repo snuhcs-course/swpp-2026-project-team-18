@@ -67,6 +67,11 @@ class NetworkDtoNullSafetyTest {
         assertNull(dto.label)
         assertNull(dto.vehicle)
         assertNull(dto.vehicleType)
+        assertNull(dto.region)
+        assertNull(dto.stops)
+        assertNull(dto.guidance)
+        assertNull(dto.arrivals)
+        assertNull(dto.headwayMinutes)
     }
 
     @Test
@@ -75,7 +80,14 @@ class NetworkDtoNullSafetyTest {
             {"key":"transit:5511","mode":"버스","minutes":25,"fare":1500,
              "segments":[
                {"kind":"walk","seconds":240,"label":"도보"},
-               {"kind":"bus","seconds":912,"label":"5511","vehicle":"5511","vehicle_type":"지선"}
+               {"kind":"bus","seconds":912,"label":"5511","vehicle":"5511",
+                "vehicle_type":"지선","region":"metro_seoul",
+                "stops":["제2공학관","관악구청"],"guidance":"5511 (제2공학관 > 관악구청)",
+                "headway_minutes":12,
+                "arrivals":[
+                  {"seconds":536,"message":"8분 56초 뒤 도착","source":"seoul_bus","crowding":"여유"},
+                  {"seconds":930,"message":"15분 30초 뒤 도착","source":"seoul_bus"}
+                ]}
              ]}
         """.trimIndent()
 
@@ -87,6 +99,12 @@ class NetworkDtoNullSafetyTest {
         assertTrue(segments[1].kind == "bus")
         // snake_case 를 @SerializedName 으로 잇는다. 빠뜨리면 색이 안 나온다.
         assertTrue("vehicle_type 이 매핑되지 않았다", segments[1].vehicleType == "지선")
+        assertTrue(segments[1].region == "metro_seoul")
+        assertTrue(segments[1].stops == listOf("제2공학관", "관악구청"))
+        assertTrue(segments[1].headwayMinutes == 12)
+        assertTrue(segments[1].arrivals.orEmpty().size == 2)
+        assertTrue(segments[1].arrivals.orEmpty()[0].seconds == 536)
+        assertTrue(segments[1].arrivals.orEmpty()[0].crowding == "여유")
     }
 
     @Test
@@ -128,7 +146,13 @@ class NetworkDtoNullSafetyTest {
             {"key":"transit:5511","mode":"버스","minutes":25,"fare":1500,
              "segments":[
                {"kind":"walk","seconds":240,"label":"도보"},
-               {"kind":"bus","seconds":912,"label":"5511","vehicle":"5511","vehicle_type":"지선"},
+               {"kind":"bus","seconds":912,"label":"5511","vehicle":"5511",
+                "vehicle_type":"지선","region":"metro_seoul",
+                "stops":["제2공학관","관악구청"],"headway_minutes":12,
+                "arrivals":[
+                  {"seconds":536,"message":"8분 56초 뒤 도착","source":"seoul_bus","crowding":"여유"},
+                  {"seconds":930,"message":"15분 30초 뒤 도착","source":"seoul_bus"}
+                ]},
                {"kind":"walk","seconds":330,"label":"도보"}
              ]}
         """.trimIndent()
@@ -140,6 +164,13 @@ class NetworkDtoNullSafetyTest {
         // 색을 고르는 값이 여기까지 살아 와야 한다.
         assertTrue(option.segments.items[1].busType == "지선")
         assertTrue(option.segments.items[1].lineName == "5511")
+        assertTrue(option.segments.items[1].region == "metro_seoul")
+        assertTrue(option.segments.items[1].stops == listOf("제2공학관", "관악구청"))
+        assertTrue(option.segments.items[1].headwayMinutes == 12)
+        assertTrue(option.segments.items[1].arrivals.size == 2)
+        assertTrue(option.segments.items[1].arrivals[0].seconds == 536)
+        assertTrue(option.segments.items[1].arrivals[0].crowding == "여유")
+        assertTrue(option.hasCheckpoints)
         // 비율 합은 언제나 1이다.
         assertTrue(kotlin.math.abs(option.segments.weights().sum() - 1f) < 1e-5f)
     }

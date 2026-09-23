@@ -52,6 +52,11 @@ OPENAI_API_KEY = ""
 OPENAI_MODEL = ""
 FCM_CREDENTIALS_PATH = ""
 REDIS_URL = ""
+# 실시간 도착 정보. 열린데이터광장은 일일 호출 한도가 있어서 테스트가 태우면
+# 정작 기기에서 확인할 때 막힌다.
+SEOUL_BUS_API_KEY_ENCODING = ""
+SEOUL_BUS_API_KEY_DECODING = ""
+SEOUL_SUBWAY_API_KEY = ""
 
 # ---------------------------------------------------------------------------
 # 속도

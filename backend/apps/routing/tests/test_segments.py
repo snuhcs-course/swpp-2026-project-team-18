@@ -13,10 +13,12 @@
 from __future__ import annotations
 
 from apps.routing.clients import (
+    REGION_UNKNOWN,
     WALK_METERS_PER_MINUTE,
     _haversine_meters,
     _segments,
     _step_endpoints,
+    region_for,
 )
 
 # 실측에서 쓴 좌표. 제2공학관 → 프라비다2.
@@ -238,3 +240,153 @@ def test_거리_계산이_실측과_맞는다():
 def test_도보_속도가_상식_범위다():
     # 4.5km/h = 75m/분. 이 값을 크게 바꾸면 앞뒤 도보가 비현실적이 된다.
     assert 60 <= WALK_METERS_PER_MINUTE <= 90
+
+
+# --- 지역 판단 --------------------------------------------------------------
+#
+# 카카오는 서울 1호선과 부산 1호선을 똑같이 `{"name": "1호선"}` 으로 준다.
+# 좌표로 권역을 정하지 않으면 앱이 부산 1호선(주황)을 서울 1호선(파랑)으로
+# 칠한다. 실제로 그 상태였다.
+
+
+def test_서울대는_수도권이다():
+    assert region_for(*START) == "metro_seoul"
+
+
+def test_부산_서면은_부산권이다():
+    # 서면역 근처.
+    assert region_for(35.1580, 129.0594) == "metro_busan"
+
+
+def test_수도권과_부산권이_섞이지_않는다():
+    seoul = region_for(37.5665, 126.9780)      # 서울시청
+    busan = region_for(35.1796, 129.0756)      # 부산시청
+    assert seoul == "metro_seoul"
+    assert busan == "metro_busan"
+    assert seoul != busan
+
+
+def test_수도권_상자가_천안과_춘천까지_덮는다():
+    # 수도권 전철 1호선은 천안·신창까지, 경춘선은 춘천까지 간다.
+    assert region_for(36.8151, 127.1139) == "metro_seoul"   # 천안
+    assert region_for(37.8813, 127.7298) == "metro_seoul"   # 춘천
+
+
+def test_다른_광역시도_구분된다():
+    assert region_for(35.8714, 128.6014) == "metro_daegu"     # 대구
+    assert region_for(36.3504, 127.3845) == "metro_daejeon"   # 대전
+    assert region_for(35.1595, 126.8526) == "metro_gwangju"   # 광주
+
+
+def test_권역_상자가_서로_겹치지_않는다():
+    # 한 좌표가 두 권역에 들면 판정이 순서에 의존하게 된다.
+    from apps.routing.clients import _REGION_BOXES
+
+    for i, a in enumerate(_REGION_BOXES):
+        for b in _REGION_BOXES[i + 1:]:
+            lat_overlap = a[1] >= b[2] and b[1] >= a[2]
+            lng_overlap = a[3] >= b[4] and b[3] >= a[4]
+            assert not (lat_overlap and lng_overlap), f"{a[0]} 과 {b[0]} 이 겹친다"
+
+
+def test_도시철도가_없는_곳은_모른다고_한다():
+    # 지어내지 않는다. 앱이 중립색으로 그린다.
+    assert region_for(33.4996, 126.5312) == REGION_UNKNOWN   # 제주
+    assert region_for(37.4563, 130.9000) == REGION_UNKNOWN   # 울릉도 방면
+    assert region_for(0.0, 0.0) == REGION_UNKNOWN
+
+
+def test_구간에_지역이_담긴다():
+    route = {"steps": [subway_step(600, "2호선")]}
+    sub = [p for p in seg(route, 900) if p["kind"] == "subway"][0]
+
+    assert sub["region"] == "metro_seoul"
+
+
+def test_부산_좌표로_만든_구간은_부산권이다():
+    route = {"steps": [subway_step(600, "1호선")]}
+    parts = _segments(route, 900, 35.1580, 129.0594, 35.0975, 129.0356)
+    sub = [p for p in parts if p["kind"] == "subway"][0]
+
+    assert sub["region"] == "metro_busan"
+    # 이름은 서울 1호선과 같다. 지역이 유일한 구분 근거다.
+    assert sub["vehicle"] == "1호선"
+
+
+def test_도보_구간에는_지역이_없다():
+    # 도보는 색이 회색으로 고정이라 지역이 필요 없다.
+    route = {"steps": [bus_step(420), walk_step(263), bus_step(316)]}
+    walks = [p for p in seg(route, 1986) if p["kind"] == "walk"]
+
+    assert all("region" not in p for p in walks)
+
+
+# --- 정류장 목록 ------------------------------------------------------------
+
+
+def test_정류장_이름이_순서대로_담긴다():
+    route = {
+        "steps": [
+            {
+                "properties": {
+                    "type": "SUBWAY", "time": 1080,
+                    "vehicles": [{"name": "2호선", "type": "일반"}],
+                    "stops": [{"name": "신림"}, {"name": "봉천"}, {"name": "강남"}],
+                },
+                "path": {"points": [[126.95, 37.48], [127.02, 37.49]]},
+            }
+        ]
+    }
+    sub = [p for p in seg(route, 1200) if p["kind"] == "subway"][0]
+
+    # 첫 항목이 승차, 마지막이 하차다. 앱이 그 규칙으로 체크포인트를 만든다.
+    assert sub["stops"] == ["신림", "봉천", "강남"]
+
+
+def test_정류장이_없으면_빈_목록이다():
+    route = {"steps": [bus_step(600)]}
+    bus = [p for p in seg(route, 600) if p["kind"] == "bus"][0]
+
+    assert bus["stops"] == []
+
+
+def test_빈_이름은_걸러낸다():
+    route = {
+        "steps": [
+            {
+                "properties": {
+                    "type": "BUS", "time": 600,
+                    "vehicles": [{"name": "5511", "type": "지선"}],
+                    "stops": [{"name": "제2공학관"}, {"name": ""}, {}, {"name": "관악구청"}],
+                }
+            }
+        ]
+    }
+    bus = [p for p in seg(route, 600) if p["kind"] == "bus"][0]
+
+    assert bus["stops"] == ["제2공학관", "관악구청"]
+
+
+def test_안내문이_담긴다():
+    route = {
+        "steps": [
+            {
+                "properties": {
+                    "type": "SUBWAY", "time": 1080,
+                    "vehicles": [{"name": "2호선", "type": "일반"}],
+                    "guidance": "2호선 (신림 > 강남)",
+                }
+            }
+        ]
+    }
+    sub = [p for p in seg(route, 1200) if p["kind"] == "subway"][0]
+
+    assert sub["guidance"] == "2호선 (신림 > 강남)"
+
+
+def test_안내문이_없으면_키도_없다():
+    # 빈 문자열을 넣으면 앱이 "안내문이 있다" 고 판단해 빈 줄을 그린다.
+    route = {"steps": [bus_step(600)]}
+    bus = [p for p in seg(route, 600) if p["kind"] == "bus"][0]
+
+    assert "guidance" not in bus

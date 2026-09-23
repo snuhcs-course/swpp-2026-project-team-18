@@ -266,6 +266,49 @@ def walk_minutes(
 # 하루 1,000건 쿼터가 후보 조회 80번에 마른다.
 WALK_METERS_PER_MINUTE = 75.0
 
+# ---------------------------------------------------------------------------
+# 지역 판단
+# ---------------------------------------------------------------------------
+#
+# **왜 필요한가.** 카카오는 노선 이름만 준다 — 서울 2호선이
+# `{"name": "2호선", "type": "일반"}` 이고 **부산 1호선도 `{"name": "1호선"}`** 이다
+# (scripts 밖의 jit-tools/probe_subway.py 로 2026-09-23 실측). 이름만으로는
+# 두 도시의 1호선을 구분할 수 없어서, 그대로 두면 앱이 부산 1호선(주황)을
+# 서울 1호선(파랑)으로 칠한다.
+#
+# 응답에 지역 필드가 없으므로 **좌표로 판단한다.** 도시철도는 몇 개 광역권에만
+# 있으니 권역 상자로 충분하다. 상자를 서로 겹치지 않게 잡았고, 어느 상자에도
+# 들지 않으면 [REGION_UNKNOWN] 이다 — 그때 앱은 노선색을 쓰지 않고 중립색으로
+# 그린다. **틀린 색으로 확신을 주는 것보다 중립이 낫다.**
+#
+# 상자는 (위도 최소, 위도 최대, 경도 최소, 경도 최대).
+REGION_UNKNOWN = "unknown"
+
+_REGION_BOXES = (
+    # 수도권 전철. 천안·아산(36.8)에서 연천(38.1), 인천(126.4)에서 춘천(127.8)까지
+    # 뻗어 있어 상자가 크다.
+    ("metro_seoul", 36.70, 38.30, 126.00, 127.90),
+    # 부산·김해·양산.
+    ("metro_busan", 34.90, 35.45, 128.70, 129.40),
+    # 대구.
+    ("metro_daegu", 35.60, 36.10, 128.30, 128.80),
+    # 대전.
+    ("metro_daejeon", 36.20, 36.50, 127.20, 127.60),
+    # 광주.
+    ("metro_gwangju", 35.05, 35.30, 126.60, 127.00),
+)
+
+
+def region_for(lat: float, lng: float) -> str:
+    """좌표가 속한 도시철도 권역. 모르면 [REGION_UNKNOWN].
+
+    상자 밖이면 지어내지 않는다. 앱이 중립색으로 그린다.
+    """
+    for name, lat_min, lat_max, lng_min, lng_max in _REGION_BOXES:
+        if lat_min <= lat <= lat_max and lng_min <= lng <= lng_max:
+            return name
+    return REGION_UNKNOWN
+
 
 def _step_endpoints(step: dict) -> tuple[tuple[float, float] | None, tuple[float, float] | None]:
     """step 의 시작·끝 좌표 `(lat, lng)`.
@@ -327,6 +370,10 @@ def _segments(
     if not steps:
         return []
 
+    # 출발 좌표로 권역을 정한다. 도시철도 경로가 권역을 넘는 경우는 없다 —
+    # 수도권과 부산을 지하철로 잇는 노선이 없다.
+    region = region_for(start_lat, start_lng)
+
     body: list[dict] = []
     for step in steps:
         props = step.get("properties") or {}
@@ -338,6 +385,26 @@ def _segments(
             continue
 
         seg = {"kind": kind, "seconds": int(seconds), "label": ""}
+
+        # 실시간 버스 도착정보는 ARS 정류소 번호가 필요하다. 카카오는 번호를
+        # 주지 않지만 path.points[0] 이 승차점 좌표라, 이 좌표로 200m 안의
+        # 서울 정류소를 찾을 수 있다. 지하철은 역 이름으로 바로 조회되지만
+        # 같은 모양을 유지하려고 좌표도 함께 둔다.
+        boarding, alighting = _step_endpoints(step)
+        if boarding is not None:
+            seg["boarding_lat"], seg["boarding_lng"] = boarding
+        if alighting is not None:
+            seg["alighting_lat"], seg["alighting_lng"] = alighting
+
+        # 정류장·역 이름을 순서대로 담는다. 앱이 이걸로 체크포인트 목록을 그린다.
+        # 첫 항목이 승차 지점, 마지막이 하차 지점이다. 중간은 지나치는 곳이라
+        # 개수만 쓴다(전부 그리면 카드가 화면을 넘는다).
+        stops = [
+            str((st or {}).get("name") or "").strip()
+            for st in (props.get("stops") or [])
+        ]
+        seg["stops"] = [s for s in stops if s]
+
         if kind == "walk":
             seg["label"] = "도보"
         else:
@@ -348,6 +415,13 @@ def _segments(
             # 지하철은 "2호선" 이 곧 색이고, 버스는 "지선" 같은 종류가 색이다.
             seg["vehicle_type"] = str(first.get("type") or "").strip()
             seg["label"] = name or ("지하철" if kind == "subway" else "버스")
+            # "2호선 (신림 > 강남)" 형태. 사람이 읽는 한 줄이라 그대로 넘긴다.
+            guidance = props.get("guidance")
+            if guidance:
+                seg["guidance"] = str(guidance).strip()
+            # **노선 색을 고르는 데 필요하다.** 이름만으로는 서울 1호선과
+            # 부산 1호선을 구분할 수 없다. 근거는 [region_for] 주석에 있다.
+            seg["region"] = region
         body.append(seg)
 
     if not body:
@@ -703,6 +777,12 @@ def route_candidates(
         if not cheapest["reason"]:
             cheapest["reason"] = "가장 저렴"
 
+    # 실시간 정보는 경로 자체와 수명이 다르다. 최종 목록을 고른 뒤에만 붙여야
+    # 카카오가 준 15개 후보 전부에 버스·지하철 API 를 호출하지 않는다.
+    # 키가 없거나 외부 API 가 실패해도 함수가 후보를 그대로 둔다.
+    from apps.routing.realtime import enrich_candidates
+
+    enrich_candidates(candidates)
     return candidates, transit_degraded and not transit
 
 

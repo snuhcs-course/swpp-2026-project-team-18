@@ -22,6 +22,16 @@ data class RouteSegment(
     val lineName: String = "",
     /** 버스 종류. 버스 색을 고르는 열쇠다. 버스가 아니면 빈 문자열 */
     val busType: String = "",
+    /** 도시철도 권역. 같은 "1호선" 을 서울·부산에서 다른 색으로 칠한다. */
+    val region: String = "",
+    /** 첫 항목이 승차역/정류장, 마지막이 하차역/정류장이다. */
+    val stops: List<String> = emptyList(),
+    /** 카카오가 준 수단 안내. 예: "2호선 (신림 > 강남)" */
+    val guidance: String = "",
+    /** 실시간 다음 차량과 그다음 차량. 최대 두 건이다. */
+    val arrivals: List<RouteArrival> = emptyList(),
+    /** 버스 배차간격. 실시간 도착이 없을 때 계획 정보로 쓸 수 있다. */
+    val headwayMinutes: Int? = null,
 ) {
 
     enum class Kind {
@@ -74,6 +84,40 @@ data class RouteSegment(
      * 막대 폭은 [seconds] 로 계산하므로 이 반올림이 폭을 왜곡하지 않는다.
      */
     val minutes: Int get() = maxOf(1, Math.round(seconds / 60.0).toInt())
+}
+
+/**
+ * 역·정류장에 들어오는 차량 하나.
+ *
+ * [seconds] 는 사용자가 승차지점까지 가는 시간이 아니라 **차량이 그 지점에
+ * 도착하기까지 남은 시간**이다. 둘을 섞으면 사용자가 3분 뒤에 출발하라는
+ * 뜻으로 오해한다.
+ */
+data class RouteArrival(
+    val seconds: Int,
+    val message: String,
+    val source: String = "",
+    val crowding: String = "",
+) {
+    /** "3분 20초 뒤 도착 · 여유" */
+    val displayText: String
+        get() = listOf(message.ifBlank { formatSeconds(seconds) }, crowding)
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+
+    companion object {
+        fun formatSeconds(rawSeconds: Int): String {
+            val safe = rawSeconds.coerceAtLeast(0)
+            if (safe == 0) return "곧 도착"
+            val minutes = safe / 60
+            val seconds = safe % 60
+            return when {
+                minutes > 0 && seconds > 0 -> "${minutes}분 ${seconds}초 뒤 도착"
+                minutes > 0 -> "${minutes}분 뒤 도착"
+                else -> "${seconds}초 뒤 도착"
+            }
+        }
+    }
 }
 
 /**

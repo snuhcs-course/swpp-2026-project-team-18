@@ -38,6 +38,19 @@ object JitColor {
     /** 정보·이동 */
     val Blue = Color(0xFF6B9EFA)
 
+    /**
+     * 서울대 대표 남색 #003380 을 어두운 카드 위에서 읽히게 밝힌 테두리색.
+     * 원색은 Surface(#1B2232)와 대비가 너무 낮아 선택 여부가 보이지 않는다.
+     * Figma 77:20 과 같은 값이다.
+     */
+    val SnuNavyBorder = Color(0xFF3E6FD1)
+
+    /** 다음 차량 도착정보. 즉시 봐야 하는 값이라 따뜻한 밝은 노랑이다. */
+    val ArrivalNext = Color(0xFFFFD9A0)
+
+    /** 그다음 차량 도착정보. 첫 번째보다 시각적 우선순위를 낮춘다. */
+    val ArrivalLater = Color(0xFF6B7793)
+
     /** 경고 */
     val Amber = Color(0xFFFBBF4A)
 

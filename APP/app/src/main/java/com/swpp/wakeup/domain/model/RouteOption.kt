@@ -39,6 +39,10 @@ data class RouteOption(
      * 말한 것이라 화면만 길어진다. 둘 이상일 때만 그린다.
      */
     val hasSegmentBar: Boolean get() = segments.items.size >= 2
+
+    /** 출발·승차·하차·도착을 펼쳐 보여 줄 수 있는가. */
+    val checkpoints: List<RouteCheckpoint> get() = segments.checkpoints()
+    val hasCheckpoints: Boolean get() = checkpoints.isNotEmpty()
 }
 
 /**

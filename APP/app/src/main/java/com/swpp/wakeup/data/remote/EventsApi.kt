@@ -259,6 +259,33 @@ data class RouteSegmentDto(
      * 비어 있다.
      */
     @SerializedName("vehicle_type") val vehicleType: String?,
+    /**
+     * 도시철도 권역. `metro_seoul` / `metro_busan` / `metro_daegu` …
+     *
+     * 카카오는 서울 1호선과 부산 1호선을 둘 다 "1호선" 으로만 준다. 이 값이
+     * 없으면 부산 1호선(주황)을 서울 1호선(파랑)으로 칠하게 된다.
+     */
+    val region: String?,
+    /** 승차역부터 하차역까지 순서대로. 첫 항목이 승차, 마지막이 하차다. */
+    val stops: List<String>?,
+    /** "2호선 (신림 > 강남)" */
+    val guidance: String?,
+    /** 다음 차량, 그다음 차량. 실시간 API가 실패하면 null/빈 목록이다. */
+    val arrivals: List<RouteArrivalDto>?,
+    /** 버스의 평상시 배차간격. 지하철·미제공이면 null. */
+    @SerializedName("headway_minutes") val headwayMinutes: Int?,
+)
+
+/** 실시간 차량 도착 하나. */
+data class RouteArrivalDto(
+    /** 정류장·역 도착까지 남은 초. */
+    val seconds: Int?,
+    /** "3분 20초 뒤 도착" */
+    val message: String?,
+    /** `seoul_subway` / `seoul_bus` */
+    val source: String?,
+    /** 버스만 "여유" / "보통" / "혼잡". 미제공이면 null. */
+    val crowding: String?,
 )
 
 data class PlaceDto(

@@ -83,6 +83,11 @@ class TestTestSettingsProtectTheSharedDatabase:
             "KMA_API_KEY",
             "OPENAI_API_KEY",
             "FCM_CREDENTIALS_PATH",
+            # 실시간 도착 정보. 열린데이터광장은 일일 호출 한도가 있어서
+            # 테스트가 태우면 정작 기기에서 확인할 때 막힌다.
+            "SEOUL_BUS_API_KEY_ENCODING",
+            "SEOUL_BUS_API_KEY_DECODING",
+            "SEOUL_SUBWAY_API_KEY",
         ],
     )
     def test_external_keys_are_blank(self, settings, key):

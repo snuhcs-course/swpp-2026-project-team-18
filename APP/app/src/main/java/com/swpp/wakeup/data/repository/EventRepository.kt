@@ -19,6 +19,7 @@ import com.swpp.wakeup.data.remote.PrepBlockDto
 import com.swpp.wakeup.data.remote.ProfileApi
 import com.swpp.wakeup.data.remote.ProfileDto
 import com.swpp.wakeup.data.remote.ProfileUpdateRequest
+import com.swpp.wakeup.data.remote.RouteArrivalDto
 import com.swpp.wakeup.data.remote.RouteCandidateDto
 import com.swpp.wakeup.data.remote.RouteSegmentDto
 import com.swpp.wakeup.domain.model.AlarmPlanView
@@ -29,6 +30,7 @@ import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.PlanRow
 import com.swpp.wakeup.domain.model.PrepBlockLine
 import com.swpp.wakeup.domain.model.ScheduledBlock
+import com.swpp.wakeup.domain.model.RouteArrival
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.RouteOption
 import com.swpp.wakeup.domain.model.RouteSegment
@@ -565,6 +567,27 @@ private fun RouteSegmentDto.toSegment(): RouteSegment? {
             ?: defaultLabel(kind),
         lineName = vehicle?.trim().orEmpty(),
         busType = vehicleType?.trim().orEmpty(),
+        region = region?.trim().orEmpty(),
+        // Gson 은 `= emptyList()` 기본값을 무시한다. 네트워크 DTO 의 목록은
+        // null 을 정상으로 받고 여기서만 빈 목록으로 바꾼다.
+        stops = stops.orEmpty().map(String::trim).filter(String::isNotEmpty),
+        guidance = guidance?.trim().orEmpty(),
+        arrivals = arrivals.orEmpty().mapNotNull { it.toArrival() }.take(2),
+        headwayMinutes = headwayMinutes?.takeIf { it > 0 },
+    )
+}
+
+/** 실시간 도착 DTO. 초와 문구 중 하나라도 쓸 수 있어야 남긴다. */
+private fun RouteArrivalDto.toArrival(): RouteArrival? {
+    val safeSeconds = seconds?.takeIf { it >= 0 }
+    val safeMessage = message?.trim().orEmpty()
+    if (safeSeconds == null && safeMessage.isEmpty()) return null
+
+    return RouteArrival(
+        seconds = safeSeconds ?: 0,
+        message = safeMessage,
+        source = source?.trim().orEmpty(),
+        crowding = crowding?.trim().orEmpty(),
     )
 }
 
