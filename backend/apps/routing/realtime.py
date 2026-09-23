@@ -43,6 +43,17 @@ from django.core.cache import cache
 logger = logging.getLogger(__name__)
 
 SUBWAY_BASE_URL = "http://swopenapi.seoul.go.kr/api/subway"
+
+# 버스는 data.go.kr 이 **서비스 단위**로 승인한다. 아래 두 호출
+# (`stationinfo/getStationByPos`, `stationinfo/getStationByUid`)은 모두
+# **정류소정보조회 서비스**에 속한다. 그 서비스를 활용신청하지 않으면 키가
+# 정상이고 승인이 났어도 401 `등록되지 않은 서비스키` 가 돌아온다 — 메시지가
+# "키가 없다" 처럼 읽혀 전파 지연과 구분되지 않는다. 실제로 그렇게 몇 시간을
+# 썼다. 엔드포인트별 판별은 jit-tools/probe_bus_services.py 가 한다.
+#
+# `버스도착정보조회` 만으로는 대체가 안 된다. `arrive/getArrInfoByRouteAll` 이
+# 필요한 필드를 다 주지만 입력이 `busRouteId` 이고, 노선명에서 그 값을 얻는
+# `busRouteInfo/getBusRouteList` 는 또 다른 서비스(노선정보조회)다.
 BUS_BASE_URL = "http://ws.bus.go.kr/api/rest"
 REQUEST_TIMEOUT_SECONDS = 4
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024

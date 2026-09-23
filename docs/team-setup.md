@@ -414,9 +414,56 @@ docker run -p 8000:8000 \
 | `DATABASE_URL` | O | Postgres |
 | `DJANGO_ALLOWED_HOSTS` | O | 배포 도메인, 쉼표 구분 |
 | `KAKAO_REST_API_KEY` | 사실상 O | 없으면 경로 조회가 전부 실패한다 |
+| `SEOUL_SUBWAY_API_KEY` | | 지하철 실시간 도착. 없으면 도착정보만 빠지고 경로는 나온다 |
+| `SEOUL_BUS_API_KEY_ENCODING` | | 버스 실시간 도착. 아래 절을 볼 것 |
+| `SEOUL_BUS_API_KEY_DECODING` | | 같은 키의 다른 표현. 한쪽만 통할 때가 있다 |
 | `DJANGO_SECURE_SSL_REDIRECT` | | TLS 없이 내부망에 띄울 때 `0` |
 | `WEB_CONCURRENCY` | | gunicorn 워커 수, 기본 2 |
 | `DJANGO_CORS_ORIGINS` | | 웹 대시보드를 붙일 때 |
+
+실시간 키 세 개는 `render.yaml` 에 `sync: false` 로만 적혀 있다. 값은 저장소에
+넣지 않고 Render 대시보드에서 직접 넣는다. **로컬 `backend/.env` 는 Render
+컨테이너에 올라가지 않는다** — 로컬에서는 도착정보가 붙고 배포 서버에서는 안
+붙는 일이 실제로 있었다.
+
+설정됐는지는 `/api/health` 가 알려 준다. 키 값도 길이도 담지 않는다.
+
+```bash
+curl.exe -s https://justintime-api.onrender.com/api/health
+# {"ok":true,"version":"0.4.0","realtime":{"subway":true,"bus":true}}
+```
+
+### data.go.kr 401 은 "키가 틀렸다" 가 아니다
+
+버스 도착정보에서 겪은 것이다. 승인이 났고 활용기간도 유효한데 계속
+`유효하지 않은 서비스키입니다: 등록되지 않은 서비스키` 가 돌아왔다. 전파
+지연으로 보고 기다렸지만 원인이 아니었다.
+
+**data.go.kr 은 서비스 단위로 승인한다.** 승인받은 서비스와 다른 서비스를
+부르면 키가 정상이어도 401 이다. 메시지가 "키가 없다" 처럼 읽혀서 전파 지연과
+구분되지 않는다.
+
+같은 키로 엔드포인트별로 찔러 보면 즉시 갈린다.
+
+| 엔드포인트 | 소속 서비스 | 결과 |
+| --- | --- | --- |
+| `arrive/getArrInfoByRouteAll` | 버스도착정보조회 | 200 |
+| `arrive/getLowArrInfoByStId` | 버스도착정보조회 | 200 |
+| `stationinfo/getStationByUid` | 정류소정보조회 | **401** |
+| `stationinfo/getStationByPos` | 정류소정보조회 | **401** |
+| `busRouteInfo/getBusRouteList` | 노선정보조회 | **401** |
+
+우리 구현은 `getStationByPos`(좌표 → 정류소)와 `getStationByUid`(그 정류소의
+전체 노선 도착정보)를 쓴다. 둘 다 **정류소정보조회 서비스**다. 그래서
+`버스도착정보조회` 만 승인된 상태로는 동작하지 않는다.
+
+`getArrInfoByRouteAll` 로 우회할 수는 있다. 노선 하나의 전체 정류소를
+`arsId`·`stNm`·`arrmsg`·`exps` 까지 준다. 하지만 입력이 `busRouteId` 이고,
+노선명(카카오가 주는 `5511`)에서 그 값을 얻으려면 `getBusRouteList`(노선정보
+조회)가 필요해 역시 막힌다. 응답도 노선당 200KB 를 넘는다.
+
+**결론: 정류소정보조회 서비스를 추가로 활용신청한다.** 그러면 코드를 고치지
+않는다. 진단은 `jit-tools/probe_bus_services.py` 가 엔드포인트별로 찍어 준다.
 
 ### 직접 운영하는 서버에 띄우는 경우
 
