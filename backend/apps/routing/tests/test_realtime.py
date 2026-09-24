@@ -172,6 +172,21 @@ def test_역_이름에서_괄호와_역을_없앤다():
 
 
 # --- 버스 -------------------------------------------------------------------
+#
+# 아래 픽스처의 필드 이름은 **실제 getStationByUid / getStationByPos 응답에서
+# 그대로 옮긴 것**이다. 지어내면 안 된다.
+#
+# 한동안 키가 401 이라 이 코드가 실데이터로 돌아본 적이 없었고, 그 사이 픽스처가
+# `exps1`·`brerde_Div1`·(getStationByPos 의) `stNm` 처럼 다른 오퍼레이션
+# (getArrInfoByRouteAll)의 이름으로 쓰여 있었다. 테스트는 전부 통과했지만 승인이
+# 난 뒤에도 도착정보가 하나도 붙지 않았다. 필드 이름을 실측으로 고정한다.
+#
+#   getStationByPos  정류소 이름 = stationNm
+#   getStationByUid  정류소 이름 = stNm · 노선 = rtNm/busRouteAbrv
+#                    초 ETA = traTime1/2 · 문구 = arrmsg1/2
+#                    혼잡도 = congestion1/2 (3 여유 / 4 보통 / 5 혼잡)
+#                    배차간격(분) = term
+#   arrmsgSec1/2 는 이름과 달리 초가 아니라 arrmsg 와 같은 문구다.
 
 
 def test_버스는_다음과_그다음_도착초와_혼잡도를_읽는다(monkeypatch):
@@ -182,15 +197,17 @@ def test_버스는_다음과_그다음_도착초와_혼잡도를_읽는다(monke
         lambda ars: [
             {
                 "busRouteAbrv": "5513",
-                "exps1": "99", "exps2": "777",
+                "traTime1": "99", "traTime2": "777",
             },
             {
                 "busRouteAbrv": "5511",
-                "exps1": "536", "exps2": "930",
+                "traTime1": "536", "traTime2": "930",
                 "arrmsg1": "8분56초후[3번째 전]",
                 "arrmsg2": "15분30초후[7번째 전]",
-                "brerde_Div1": "4", "brdrde_Num1": "3",
-                "brerde_Div2": "4", "brdrde_Num2": "5",
+                "arrmsgSec1": "8분56초후[3번째 전]",
+                "arrmsgSec2": "15분30초후[7번째 전]",
+                "congestion1": "3",
+                "congestion2": "5",
                 "term": "12",
             },
         ],
@@ -213,7 +230,7 @@ def test_버스_초가_비면_arrmsg를_쓴다(monkeypatch):
         realtime,
         "_bus_station_rows",
         lambda ars: [{
-            "rtNm": "5511", "exps1": "", "exps2": "",
+            "rtNm": "5511", "traTime1": "", "traTime2": "",
             "arrmsg1": "1분10초후[1번째 전]", "arrmsg2": "13분30초후[6번째 전]",
         }],
     )
@@ -223,12 +240,75 @@ def test_버스_초가_비면_arrmsg를_쓴다(monkeypatch):
     assert [a["seconds"] for a in result["arrivals"]] == [70, 810]
 
 
+def test_traTime이_0이면_문구로_되돌린다(monkeypatch):
+    """실측에서 '곧 도착' 은 traTime 이 5 초였지만 0 으로 오는 차도 있다."""
+    monkeypatch.setattr(realtime, "_bus_station_ars", lambda *args: "21275")
+    monkeypatch.setattr(
+        realtime,
+        "_bus_station_rows",
+        lambda ars: [{
+            "rtNm": "5511", "traTime1": "0", "traTime2": "0",
+            "arrmsg1": "곧 도착", "arrmsg2": "3분후[2번째 전]",
+        }],
+    )
+
+    result = realtime.bus_arrivals(bus_segment())
+
+    assert [a["seconds"] for a in result["arrivals"]] == [0, 180]
+
+
+def test_운행종료는_도착으로_세지_않는다(monkeypatch):
+    """실측: 새벽 노선은 arrmsg 가 '운행종료' 이고 term 도 0 이다."""
+    monkeypatch.setattr(realtime, "_bus_station_ars", lambda *args: "21275")
+    monkeypatch.setattr(
+        realtime,
+        "_bus_station_rows",
+        lambda ars: [{
+            "rtNm": "5511", "traTime1": "0", "traTime2": "0",
+            "arrmsg1": "운행종료", "arrmsg2": "운행종료", "term": "0",
+        }],
+    )
+
+    assert realtime.bus_arrivals(bus_segment()) == {}
+
+
+def test_출발대기도_도착으로_세지_않는다(monkeypatch):
+    monkeypatch.setattr(realtime, "_bus_station_ars", lambda *args: "21275")
+    monkeypatch.setattr(
+        realtime,
+        "_bus_station_rows",
+        lambda ars: [{
+            "rtNm": "5511", "traTime1": "0",
+            "arrmsg1": "출발대기", "arrmsg2": "출발대기",
+        }],
+    )
+
+    assert realtime.bus_arrivals(bus_segment()) == {}
+
+
+def test_혼잡도가_0이면_담지_않는다(monkeypatch):
+    """congestion 은 0 과 빈 값이 '정보 없음'이다."""
+    monkeypatch.setattr(realtime, "_bus_station_ars", lambda *args: "21275")
+    monkeypatch.setattr(
+        realtime,
+        "_bus_station_rows",
+        lambda ars: [{
+            "rtNm": "5511", "traTime1": "120", "traTime2": "600",
+            "congestion1": "0", "congestion2": "",
+        }],
+    )
+
+    result = realtime.bus_arrivals(bus_segment())
+
+    assert [a["crowding"] for a in result["arrivals"]] == [None, None]
+
+
 def test_버스_노선이_다르면_도착정보를_붙이지_않는다(monkeypatch):
     monkeypatch.setattr(realtime, "_bus_station_ars", lambda *args: "21275")
     monkeypatch.setattr(
         realtime,
         "_bus_station_rows",
-        lambda ars: [{"busRouteAbrv": "5513", "exps1": "60"}],
+        lambda ars: [{"busRouteAbrv": "5513", "traTime1": "60"}],
     )
 
     assert realtime.bus_arrivals(bus_segment(vehicle="5511")) == {}
@@ -245,12 +325,13 @@ def test_버스는_서울_밖에서_서울_API를_부르지_않는다(monkeypatc
 
 
 def test_버스_정류소는_이름이_맞는_가장_가까운_것을_고른다(monkeypatch):
+    """getStationByPos 의 정류소 이름 필드는 stationNm 이다(stNm 이 아니다)."""
     root = ET.fromstring(
         """
         <ServiceResult><msgHeader><headerCd>0</headerCd></msgHeader><msgBody>
-          <itemList><arsId>99999</arsId><stNm>관악구청</stNm><dist>10</dist></itemList>
-          <itemList><arsId>21276</arsId><stNm>제2공학관</stNm><dist>80</dist></itemList>
-          <itemList><arsId>21275</arsId><stNm>제2공학관</stNm><dist>20</dist></itemList>
+          <itemList><arsId>99999</arsId><stationNm>관악구청</stationNm><dist>10</dist></itemList>
+          <itemList><arsId>21276</arsId><stationNm>제2공학관</stationNm><dist>80</dist></itemList>
+          <itemList><arsId>21275</arsId><stationNm>제2공학관</stationNm><dist>20</dist></itemList>
         </msgBody></ServiceResult>
         """
     )
@@ -263,13 +344,85 @@ def test_버스_정류소_이름이_안_맞으면_가까워도_고르지_않는�
     root = ET.fromstring(
         """
         <ServiceResult><msgHeader><headerCd>0</headerCd></msgHeader><msgBody>
-          <itemList><arsId>99999</arsId><stNm>관악구청</stNm><dist>1</dist></itemList>
+          <itemList><arsId>99999</arsId><stationNm>관악구청</stationNm><dist>1</dist></itemList>
         </msgBody></ServiceResult>
         """
     )
     monkeypatch.setattr(realtime, "_bus_xml", lambda *args, **kwargs: root)
 
     assert realtime._bus_station_ars("제2공학관", 37.44, 126.95) is None
+
+
+def test_실제_getStationByPos_응답에서_ARS를_뽑는다(monkeypatch):
+    """실측 응답을 그대로 넣는다. 필드 이름이 바뀌면 여기서 먼저 깨진다.
+
+    2026-09-23 신림역 좌표(37.484267, 126.929745) radius=200 응답의 일부다.
+    같은 이름의 정류소가 여러 개 있어 dist 로 갈라야 한다.
+    """
+    root = ET.fromstring(
+        """
+        <ServiceResult><msgHeader><headerCd>0</headerCd>
+          <headerMsg>정상적으로 처리되었습니다.</headerMsg></msgHeader><msgBody>
+          <itemList><stationId>120900192</stationId><stationNm>신림역4번출구</stationNm>
+            <arsId>21916</arsId><dist>82</dist>
+            <gpsX>126.92886</gpsX><gpsY>37.484025</gpsY></itemList>
+          <itemList><stationId>120000421</stationId><stationNm>신림사거리.신림역</stationNm>
+            <arsId>21350</arsId><dist>130</dist>
+            <gpsX>126.9282759755</gpsX><gpsY>37.4841991011</gpsY></itemList>
+          <itemList><stationId>120000018</stationId><stationNm>신림사거리.신림역</stationNm>
+            <arsId>21117</arsId><dist>156</dist>
+            <gpsX>126.9280626243</gpsX><gpsY>37.483817804</gpsY></itemList>
+          <itemList><stationId>120000048</stationId><stationNm>신림동별빛거리입구</stationNm>
+            <arsId>21149</arsId><dist>175</dist>
+            <gpsX>126.9296319572</gpsX><gpsY>37.4858478867</gpsY></itemList>
+        </msgBody></ServiceResult>
+        """
+    )
+    monkeypatch.setattr(realtime, "_bus_xml", lambda *args, **kwargs: root)
+
+    assert realtime._bus_station_ars("신림사거리.신림역", 37.484267, 126.929745) == "21350"
+    assert realtime._bus_station_ars("신림동별빛거리입구", 37.484267, 126.929745) == "21149"
+
+
+def test_실제_getStationByUid_응답에서_도착정보를_뽑는다(monkeypatch):
+    """실측 응답을 그대로 넣는다. arsId 21350 의 643 번이다.
+
+    2026-09-23 측정값: arrmsg1='2분후[1번째 전]' 인데 traTime1=188 이다.
+    문구는 분 단위로 내림하므로 초 단위는 traTime 을 써야 한다.
+    """
+    root = ET.fromstring(
+        """
+        <ServiceResult><msgHeader><headerCd>0</headerCd></msgHeader><msgBody>
+          <itemList><stId>120000421</stId><stNm>신림사거리.신림역</stNm><arsId>21350</arsId>
+            <rtNm>500</rtNm><busRouteAbrv>500</busRouteAbrv>
+            <arrmsg1>2분후[1번째 전]</arrmsg1><arrmsg2>18분후[11번째 전]</arrmsg2>
+            <arrmsgSec1>2분후[1번째 전]</arrmsgSec1><arrmsgSec2>18분후[11번째 전]</arrmsgSec2>
+            <traTime1>177</traTime1><traTime2>1094</traTime2>
+            <congestion1>3</congestion1><congestion2>4</congestion2>
+            <term>9</term></itemList>
+          <itemList><stId>120000421</stId><stNm>신림사거리.신림역</stNm><arsId>21350</arsId>
+            <rtNm>643</rtNm><busRouteAbrv>643</busRouteAbrv>
+            <arrmsg1>2분후[1번째 전]</arrmsg1><arrmsg2>9분후[5번째 전]</arrmsg2>
+            <traTime1>188</traTime1><traTime2>584</traTime2>
+            <congestion1>4</congestion1><congestion2>3</congestion2>
+            <term>10</term></itemList>
+        </msgBody></ServiceResult>
+        """
+    )
+    monkeypatch.setattr(realtime, "_bus_station_ars", lambda *args: "21350")
+    monkeypatch.setattr(realtime, "_bus_xml", lambda *args, **kwargs: root)
+
+    result = realtime.bus_arrivals(
+        bus_segment(vehicle="643", stops=["신림사거리.신림역", "진흥아파트"])
+    )
+
+    assert [a["seconds"] for a in result["arrivals"]] == [188, 584]
+    assert [a["message"] for a in result["arrivals"]] == [
+        "3분 8초 뒤 도착",
+        "9분 44초 뒤 도착",
+    ]
+    assert [a["crowding"] for a in result["arrivals"]] == ["보통", "여유"]
+    assert result["headway_minutes"] == 10
 
 
 def test_버스_키는_Encoding_다음_Decoding을_쓴다(settings):

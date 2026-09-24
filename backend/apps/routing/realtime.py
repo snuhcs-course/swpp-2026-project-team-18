@@ -54,6 +54,15 @@ SUBWAY_BASE_URL = "http://swopenapi.seoul.go.kr/api/subway"
 # `버스도착정보조회` 만으로는 대체가 안 된다. `arrive/getArrInfoByRouteAll` 이
 # 필요한 필드를 다 주지만 입력이 `busRouteId` 이고, 노선명에서 그 값을 얻는
 # `busRouteInfo/getBusRouteList` 는 또 다른 서비스(노선정보조회)다.
+#
+# **필드 이름을 이 오퍼레이션 기준으로 읽어야 한다.** 두 API 가 같은 뜻을 다른
+# 이름으로 준다. 401 인 동안 실데이터로 돌려 보지 못해 아래 세 곳이
+# getArrInfoByRouteAll 의 이름으로 쓰여 있었고, 가짜 픽스처를 쓴 테스트는 전부
+# 통과했지만 기능은 동작하지 않았다.
+#
+#   정류소 이름   getStationByPos=stationNm   getStationByUid=stNm
+#   초 ETA        getStationByUid=traTime1/2  (exps1/2 는 여기 없다)
+#   혼잡도        getStationByUid=congestion1/2 (3 여유/4 보통/5 혼잡, 0 없음)
 BUS_BASE_URL = "http://ws.bus.go.kr/api/rest"
 REQUEST_TIMEOUT_SECONDS = 4
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -368,7 +377,9 @@ def _bus_station_ars(stop_name: str, lat: float, lng: float) -> str | None:
     candidates = []
     for item in _xml_items(root):
         ars_id = (item.get("arsId") or "").strip()
-        name = (item.get("stNm") or "").strip()
+        # 같은 서비스인데 오퍼레이션마다 정류소 이름 필드가 다르다.
+        # getStationByPos 는 stationNm, getStationByUid 는 stNm 이다.
+        name = (item.get("stationNm") or item.get("stNm") or "").strip()
         actual = _token(name)
         if not ars_id or ars_id == "0" or not actual:
             continue
@@ -410,11 +421,13 @@ def _bus_route_matches(item: dict, route_name: str) -> bool:
 
 
 def _bus_crowding(item: dict, suffix: str) -> str | None:
-    # brerde_Div=4 일 때 brdrde_Num 이 혼잡도다: 3 여유 / 4 보통 / 5 혼잡.
-    if str(item.get(f"brerde_Div{suffix}") or "") != "4":
-        return None
+    """``congestion`` 은 3 여유 / 4 보통 / 5 혼잡. 0 과 빈 값은 '정보 없음'이다.
+
+    ``getArrInfoByRouteAll`` 은 같은 뜻을 ``brerde_Div``+``brdrde_Num`` 으로
+    주지만 우리가 부르는 ``getStationByUid`` 는 ``congestion`` 하나로 준다.
+    """
     return {"3": "여유", "4": "보통", "5": "혼잡"}.get(
-        str(item.get(f"brdrde_Num{suffix}") or "")
+        str(item.get(f"congestion{suffix}") or "").strip()
     )
 
 
@@ -442,8 +455,13 @@ def bus_arrivals(segment: dict) -> dict:
 
     arrivals = []
     for suffix in ("1", "2"):
-        seconds = _safe_int(item.get(f"exps{suffix}"))
-        if seconds is None or seconds < 0:
+        # 초 단위 ETA 는 traTime 이다. arrmsgSec 는 이름과 달리 초가 아니라
+        # arrmsg 와 같은 사람용 문구다(실측 확인).
+        seconds = _safe_int(item.get(f"traTime{suffix}"))
+        if seconds is None or seconds <= 0:
+            # traTime 이 0 이면 아직 산출되지 않은 것이다. 문구로 되돌리면
+            # '곧 도착' 은 0 초가 되고 '운행종료'·'출발대기' 는 None 이라
+            # 그대로 빠진다 — 없는 차를 만들어 내지 않는다.
             seconds = _seconds_from_message(item.get(f"arrmsg{suffix}"))
         if seconds is None:
             continue
