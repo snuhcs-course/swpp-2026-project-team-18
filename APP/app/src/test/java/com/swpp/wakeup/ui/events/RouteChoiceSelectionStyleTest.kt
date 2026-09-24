@@ -52,7 +52,56 @@ class RouteChoiceSelectionStyleTest {
     fun `차량 도착정보는 승차 행이 아니라 별도 행이다`() {
         assertTrue(source.contains("is RouteCheckpoint.VehicleArrival -> CheckpointArrivalRow"))
         assertTrue(source.contains("text = checkpoint.vehicleLabel"))
-        assertTrue(source.contains("text = checkpoint.arrival.displayText"))
+        assertTrue(source.contains("text = checkpoint.arrival.displayTextAt(now())"))
+    }
+
+    @Test
+    fun `도착정보는 화면에 머무는 동안 계속 줄어든다`() {
+        assertTrue(
+            "1초 티커가 없으면 숫자가 받은 순간에 멈춘다",
+            source.contains("delay(1_000L)"),
+        )
+        assertTrue(
+            "벽시계를 쓰면 시각 보정에 카운트다운이 늘어난다",
+            source.contains("SystemClock.elapsedRealtime()"),
+        )
+        assertTrue(
+            "화면이 가려져도 티커가 돌면 배터리를 태운다",
+            source.contains("repeatOnLifecycle(Lifecycle.State.STARTED)"),
+        )
+        assertTrue(
+            "고정된 문구를 쓰면 티커가 돌아도 숫자가 바뀌지 않는다",
+            source.contains("displayTextAt(now())"),
+        )
+    }
+
+    @Test
+    fun `티커는 값이 아니라 함수로 내려보낸다`() {
+        assertTrue(
+            "Long 을 내려보내면 1초마다 후보 카드 전체가 다시 그려진다",
+            source.contains("now: () -> Long"),
+        )
+        val start = source.indexOf("private fun RouteCard")
+        val end = source.indexOf("private fun SegmentBar", start)
+        val card = source.substring(start, end)
+        assertFalse(
+            "카드 본문에서 now() 를 읽으면 카드가 매초 다시 그려진다",
+            card.contains("now()"),
+        )
+    }
+
+    @Test
+    fun `구간 막대 라벨은 글리프를 수직 중앙에 세운다`() {
+        val start = source.indexOf("private fun SegmentBar")
+        assertTrue("SegmentBar 를 찾지 못했다", start >= 0)
+        val bar = source.substring(start).take(1400)
+
+        assertTrue("칸 안에서 가운데 정렬이 빠졌다", bar.contains("Alignment.Center"))
+        assertTrue(
+            "폰트 여백 때문에 글리프가 아래로 3dp 밀린다. 측정 근거는 " +
+                "jit-tools/measure_bar.py",
+            bar.contains("JitTextStyle.TightCentered"),
+        )
     }
 
     private fun readSource(relative: String): String {

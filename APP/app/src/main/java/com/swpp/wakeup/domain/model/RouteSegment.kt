@@ -98,12 +98,51 @@ data class RouteArrival(
     val message: String,
     val source: String = "",
     val crowding: String = "",
+    /**
+     * 이 값을 받은 시점의 **단조 시계**(ms). 화면에 머무는 동안 남은 시간을
+     * 줄이려면 기준 시점이 필요하다.
+     *
+     * 벽시계가 아니라 단조 시계를 쓴다. 사용자가 시간대를 바꾸거나 자동 시각
+     * 보정이 끼어들면 벽시계는 뒤로 갈 수 있고, 그러면 카운트다운이 늘어난다.
+     *
+     * 0 이면 나이를 모르는 것으로 보고 줄이지 않는다(프리뷰·테스트).
+     */
+    val fetchedAtElapsedMs: Long = 0L,
 ) {
-    /** "3분 20초 뒤 도착 · 여유" */
+    /** "3분 20초 뒤 도착 · 여유". 받은 그 순간의 값이다. */
     val displayText: String
         get() = listOf(message.ifBlank { formatSeconds(seconds) }, crowding)
             .filter { it.isNotBlank() }
             .joinToString(" · ")
+
+    /**
+     * 기준 시점에서 흐른 만큼 줄어든 남은 초. 0 아래로는 내려가지 않는다.
+     *
+     * 음수를 그대로 쓰면 "-3분 뒤 도착" 이 되고, 사용자는 그것이 이미 지나간
+     * 차인지 데이터가 깨진 것인지 구분할 수 없다. 0 에서 멈추고 "곧 도착" 으로
+     * 두는 편이 낫다 — 실제로 그 시점에는 차가 들어오고 있다.
+     */
+    fun remainingSeconds(nowElapsedMs: Long): Int {
+        if (fetchedAtElapsedMs <= 0L) return seconds
+        val agedSeconds = ((nowElapsedMs - fetchedAtElapsedMs) / 1_000L).coerceAtLeast(0L)
+        return (seconds - agedSeconds).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    /**
+     * 흐른 시간을 반영한 문구.
+     *
+     * 서버 [message] 를 쓰지 않고 남은 초에서 다시 만든다. 서버 문구는 받은
+     * 순간에 고정된 값이라 1초 뒤에는 틀린다. 서버와 앱이 같은 형식을 쓰므로
+     * 흐른 시간이 0 일 때의 결과는 [displayText] 와 같다.
+     *
+     * 기준 시점이 없으면(0) 줄일 수 없으니 [displayText] 를 그대로 준다.
+     */
+    fun displayTextAt(nowElapsedMs: Long): String {
+        if (fetchedAtElapsedMs <= 0L) return displayText
+        return listOf(formatSeconds(remainingSeconds(nowElapsedMs)), crowding)
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+    }
 
     companion object {
         fun formatSeconds(rawSeconds: Int): String {

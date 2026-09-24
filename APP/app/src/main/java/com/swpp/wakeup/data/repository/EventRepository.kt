@@ -1,5 +1,6 @@
 package com.swpp.wakeup.data.repository
 
+import android.os.SystemClock
 import android.util.Log
 import com.swpp.wakeup.BuildConfig
 import com.swpp.wakeup.calendar.CalendarEvent
@@ -237,7 +238,10 @@ class EventRepository(
         )
         val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
 
-        val options = body.results.map { it.toOption() }
+        // 도착정보가 화면에서 줄어들려면 '언제 받은 값인지' 가 필요하다.
+        // 응답을 푼 직후에 한 번만 읽어 모든 후보가 같은 기준을 갖게 한다.
+        val fetchedAt = SystemClock.elapsedRealtime()
+        val options = body.results.map { it.toOption(fetchedAt) }
         if (options.isEmpty()) {
             return@guard Result.Failure("경로를 찾지 못했다. 장소를 다시 확인한다.")
         }
@@ -526,7 +530,7 @@ private fun importWhenLabel(startAtMillis: Long, zone: ZoneId): String {
 // 넣어 봐야 "키가 없을 때 터지는" 종류의 버그가 잡힌다. private 이면 테스트가
 // DTO 를 손으로 만들게 되고, 그때는 Gson 을 통과하지 않아 아무것도 검증하지
 // 못한다 — 실제로 그렇게 놓쳤다(NetworkDtoNullSafetyTest 상단 참고).
-internal fun RouteCandidateDto.toOption(): RouteOption {
+internal fun RouteCandidateDto.toOption(fetchedAtElapsedMs: Long = 0L): RouteOption {
     val summaryTail = (summary ?: "")
         .removePrefix("${minutes}분")
         .removePrefix(" · ")
@@ -545,7 +549,9 @@ internal fun RouteCandidateDto.toOption(): RouteOption {
         badge = reason?.takeIf { it.isNotBlank() },
         // segments 가 null 인 경우가 정상이다 — 구버전 서버 응답과 Gson 의
         // 기본값 무시가 겹치는 자리다. 근거는 RouteCandidateDto.segments 주석.
-        segments = RouteSegments(segments.orEmpty().mapNotNull { it.toSegment() }),
+        segments = RouteSegments(
+            segments.orEmpty().mapNotNull { it.toSegment(fetchedAtElapsedMs) }
+        ),
     )
 }
 
@@ -556,7 +562,7 @@ internal fun RouteCandidateDto.toOption(): RouteOption {
  * 들어가 경계선처럼 보인다. 모르는 `kind` 는 버리지 않고 중립색으로 그린다 —
  * 서버가 수단을 추가했을 때 막대의 합이 소요시간과 어긋나는 것이 더 나쁘다.
  */
-private fun RouteSegmentDto.toSegment(): RouteSegment? {
+private fun RouteSegmentDto.toSegment(fetchedAtElapsedMs: Long = 0L): RouteSegment? {
     if (seconds <= 0) return null
     val kind = RouteSegment.Kind.from(kind)
     return RouteSegment(
@@ -572,13 +578,20 @@ private fun RouteSegmentDto.toSegment(): RouteSegment? {
         // null 을 정상으로 받고 여기서만 빈 목록으로 바꾼다.
         stops = stops.orEmpty().map(String::trim).filter(String::isNotEmpty),
         guidance = guidance?.trim().orEmpty(),
-        arrivals = arrivals.orEmpty().mapNotNull { it.toArrival() }.take(2),
+        arrivals = arrivals.orEmpty().mapNotNull { it.toArrival(fetchedAtElapsedMs) }.take(2),
         headwayMinutes = headwayMinutes?.takeIf { it > 0 },
     )
 }
 
-/** 실시간 도착 DTO. 초와 문구 중 하나라도 쓸 수 있어야 남긴다. */
-private fun RouteArrivalDto.toArrival(): RouteArrival? {
+/**
+ * 실시간 도착 DTO. 초와 문구 중 하나라도 쓸 수 있어야 남긴다.
+ *
+ * [fetchedAtElapsedMs] 는 화면에서 남은 시간을 줄이는 기준이다. 여기서
+ * `SystemClock` 을 직접 읽지 않는다 — 읽으면 단위 테스트가 Android 프레임워크
+ * 없이 이 매핑을 검증할 수 없게 되고, 같은 응답의 도착정보들이 서로 다른
+ * 기준을 갖게 된다.
+ */
+private fun RouteArrivalDto.toArrival(fetchedAtElapsedMs: Long = 0L): RouteArrival? {
     val safeSeconds = seconds?.takeIf { it >= 0 }
     val safeMessage = message?.trim().orEmpty()
     if (safeSeconds == null && safeMessage.isEmpty()) return null
@@ -588,6 +601,7 @@ private fun RouteArrivalDto.toArrival(): RouteArrival? {
         message = safeMessage,
         source = source?.trim().orEmpty(),
         crowding = crowding?.trim().orEmpty(),
+        fetchedAtElapsedMs = fetchedAtElapsedMs,
     )
 }
 

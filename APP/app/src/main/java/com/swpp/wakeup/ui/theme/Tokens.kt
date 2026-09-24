@@ -1,6 +1,9 @@
 package com.swpp.wakeup.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.dp
 
 /**
@@ -61,6 +64,33 @@ object JitColor {
     val Kakao = Color(0xFFFEE500)
     val KakaoSymbol = Color(0xFF3D210D)
     val GoogleSymbol = Color(0xFF4285F5)
+}
+
+/** 글자 배치 토큰. 색처럼 화면 코드에서 직접 만들지 않는다. */
+object JitTextStyle {
+
+    /**
+     * 작은 라벨을 좁은 색 상자 안에서 **눈에 보이는 대로** 중앙에 놓는다.
+     *
+     * Compose 의 기본 `Text` 는 폰트 메트릭에서 온 여백을 줄 상자에 넣는다.
+     * 그 여백은 위쪽이 더 커서, 부모에 `Alignment.Center` 를 줘도 글리프가
+     * 아래로 내려간다. 실기기에서 18dp 구간 막대 안의 9sp 라벨이 중앙보다
+     * **3.2dp 아래**였다(`jit-tools/measure_bar.py` 로 픽셀 측정).
+     *
+     * Figma 는 텍스트 프레임을 수직 중앙으로 놓으므로(77:20 의 segbar 는
+     * 높이 18 에 텍스트 11 이 y=3.5), 폰트 패딩을 끄고 줄 높이를 글리프에
+     * 맞춰 잘라야 디자인과 같은 결과가 된다.
+     *
+     * 단락이 아니라 **한 줄 라벨**에만 쓴다. 여러 줄 본문에 쓰면 줄 간격이
+     * 좁아져 읽기 어려워진다.
+     */
+    val TightCentered = TextStyle(
+        platformStyle = PlatformTextStyle(includeFontPadding = false),
+        lineHeightStyle = LineHeightStyle(
+            alignment = LineHeightStyle.Alignment.Center,
+            trim = LineHeightStyle.Trim.Both,
+        ),
+    )
 }
 
 /** 모서리 반경. Figma 에서 쓰인 값만 둔다. */

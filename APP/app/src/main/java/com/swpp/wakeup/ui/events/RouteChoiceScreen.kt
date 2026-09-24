@@ -1,5 +1,6 @@
 package com.swpp.wakeup.ui.events
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,6 +34,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.domain.model.RouteArrival
 import com.swpp.wakeup.domain.model.RouteCheckpoint
@@ -43,7 +50,9 @@ import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
 import com.swpp.wakeup.ui.theme.JitSpace
+import com.swpp.wakeup.ui.theme.JitTextStyle
 import com.swpp.wakeup.ui.theme.JitTheme
+import kotlinx.coroutines.delay
 
 /**
  * 경로 선택. Figma "⑬ 경로 선택" (node 77:2).
@@ -117,11 +126,13 @@ fun RouteChoiceScreen(
             state.error != null -> ErrorBlock(message = state.error, onRetry = onRetry)
 
             choice != null -> {
+                val now = rememberElapsedTicker()
                 choice.options.forEach { option ->
                     RouteCard(
                         option = option,
                         selected = option.key == choice.selectedKey,
                         onClick = { onSelect(option.key) },
+                        now = now,
                     )
                 }
 
@@ -278,7 +289,12 @@ private fun OriginPicker(
 }
 
 @Composable
-private fun RouteCard(option: RouteOption, selected: Boolean, onClick: () -> Unit) {
+private fun RouteCard(
+    option: RouteOption,
+    selected: Boolean,
+    onClick: () -> Unit,
+    now: () -> Long = { 0L },
+) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -339,9 +355,39 @@ private fun RouteCard(option: RouteOption, selected: Boolean, onClick: () -> Uni
         // 상세 목록은 선택한 카드에만 펼친다. 모든 후보에 열면 같은 정류장이
         // 반복돼 비교가 어려워지고 한 카드가 화면 여러 장을 차지한다.
         if (selected && option.hasCheckpoints) {
-            RouteCheckpointList(option.checkpoints)
+            RouteCheckpointList(option.checkpoints, now)
         }
     }
+}
+
+/**
+ * 1초마다 갱신되는 단조 시계를 읽는 함수를 돌려준다.
+ *
+ * ## 왜 값이 아니라 함수인가
+ *
+ * `Long` 을 파라미터로 내려보내면 1초마다 후보 카드 전체가 다시 그려진다.
+ * 함수로 내려보내면 그 함수를 **호출하는 컴포저블만** 구독하므로, 실제로
+ * 숫자가 바뀌는 도착정보 행만 다시 그려진다.
+ *
+ * ## 왜 화면에 머무는 동안만인가
+ *
+ * `repeatOnLifecycle(STARTED)` 로 묶어 화면이 가려지면 멈춘다. 남은 시간은
+ * 기준 시점에서 매번 다시 계산하므로, 멈춘 동안 흐른 시간도 돌아올 때 한 번에
+ * 반영된다 — 따로 보정할 것이 없다.
+ */
+@Composable
+private fun rememberElapsedTicker(): () -> Long {
+    val now = remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    val owner = LocalLifecycleOwner.current
+    LaunchedEffect(owner) {
+        owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                now.longValue = SystemClock.elapsedRealtime()
+                delay(1_000L)
+            }
+        }
+    }
+    return remember { { now.longValue } }
 }
 
 /**
@@ -390,6 +436,9 @@ private fun SegmentBar(segments: RouteSegments) {
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
+                        // Box 의 Alignment.Center 만으로는 부족하다. 기본 Text 는
+                        // 폰트 여백을 줄 상자에 넣어 글리프를 아래로 밀어낸다.
+                        style = JitTextStyle.TightCentered,
                     )
                 }
             }
@@ -408,7 +457,10 @@ private const val SEGMENT_LABEL_MIN_WEIGHT = 0.11f
  * 3분 뒤 도착한다는 뜻으로 오해하기 때문이다.
  */
 @Composable
-private fun RouteCheckpointList(checkpoints: List<RouteCheckpoint>) {
+private fun RouteCheckpointList(
+    checkpoints: List<RouteCheckpoint>,
+    now: () -> Long = { 0L },
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -416,7 +468,7 @@ private fun RouteCheckpointList(checkpoints: List<RouteCheckpoint>) {
         checkpoints.forEach { checkpoint ->
             when (checkpoint) {
                 is RouteCheckpoint.Stop -> CheckpointStopRow(checkpoint)
-                is RouteCheckpoint.VehicleArrival -> CheckpointArrivalRow(checkpoint)
+                is RouteCheckpoint.VehicleArrival -> CheckpointArrivalRow(checkpoint, now)
             }
         }
     }
@@ -468,7 +520,10 @@ private fun CheckpointStopRow(checkpoint: RouteCheckpoint.Stop) {
  * 그다음 차량이라 회색이다. 둘을 같은 열에 세로로 놓아 순서를 한눈에 읽는다.
  */
 @Composable
-private fun CheckpointArrivalRow(checkpoint: RouteCheckpoint.VehicleArrival) {
+private fun CheckpointArrivalRow(
+    checkpoint: RouteCheckpoint.VehicleArrival,
+    now: () -> Long = { 0L },
+) {
     val color = if (checkpoint.primary) JitColor.ArrivalNext else JitColor.ArrivalLater
     Row(
         modifier = Modifier
@@ -482,8 +537,9 @@ private fun CheckpointArrivalRow(checkpoint: RouteCheckpoint.VehicleArrival) {
             fontSize = 10.sp,
         )
         Spacer(Modifier.weight(1f))
+        // now() 를 여기서 읽는다. 이 행만 1초마다 다시 그려지고 카드는 그대로다.
         Text(
-            text = checkpoint.arrival.displayText,
+            text = checkpoint.arrival.displayTextAt(now()),
             color = color,
             fontSize = 10.sp,
             fontWeight = FontWeight.Medium,
