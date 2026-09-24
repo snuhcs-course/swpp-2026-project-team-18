@@ -50,6 +50,7 @@ import com.swpp.wakeup.ui.alarm.RiskChoiceScreen
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.ui.events.AddEventScreen
 import com.swpp.wakeup.ui.events.HomeSetupScreen
+import com.swpp.wakeup.ui.events.PrepOnboardingScreen
 import com.swpp.wakeup.ui.events.RouteChoiceScreen
 import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
@@ -147,6 +148,7 @@ private fun MainHost(
     val plan by viewModel.plan.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
+    val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
     val routineState by viewModel.routine.collectAsStateWithLifecycle()
     val importState by viewModel.calendarImport.collectAsStateWithLifecycle()
@@ -230,6 +232,18 @@ private fun MainHost(
             viewModel.goBack()
             viewModel.resetHomeSetup()
             snackbarHostState.showSnackbar("집 위치를 저장했습니다")
+        }
+    }
+    LaunchedEffect(prepOnboardingState.done) {
+        if (prepOnboardingState.done) {
+            // 건너뛴 경우에는 저장한 값이 없으므로 확인 문구를 띄우지 않는다.
+            // "저장했습니다" 를 띄우면 저장되지 않은 것을 저장했다고 말한다.
+            val saved = prepOnboardingState.parsed
+            viewModel.goBack()
+            viewModel.resetPrepOnboarding()
+            if (saved != null) {
+                snackbarHostState.showSnackbar("평소 준비 시간을 ${saved}분으로 저장했습니다")
+            }
         }
     }
     LaunchedEffect(importState.done) {
@@ -344,6 +358,15 @@ private fun MainHost(
                     onOriginSearch = viewModel::searchOriginPlaces,
                     onOriginSelect = viewModel::onOriginSelected,
                     onUseCurrentLocation = viewModel::useCurrentLocationAsOrigin,
+                )
+
+                AppRoute.PrepOnboarding -> PrepOnboardingScreen(
+                    state = prepOnboardingState,
+                    onMinutesChange = viewModel::onPrepOnboardingChange,
+                    onStep = viewModel::onPrepOnboardingStep,
+                    onSubmit = viewModel::submitPrepOnboarding,
+                    onSkip = viewModel::skipPrepOnboarding,
+                    modifier = Modifier.padding(innerPadding),
                 )
 
                 AppRoute.HomeSetup -> HomeSetupScreen(

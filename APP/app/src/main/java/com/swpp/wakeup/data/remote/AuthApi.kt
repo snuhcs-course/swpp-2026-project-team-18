@@ -62,11 +62,19 @@ data class UserDto(
 /**
  * 회원가입과 로그인이 같은 모양을 돌려준다.
  * 회원가입만 `user_id` 를 추가로 담지만 `user.id` 와 같은 값이라 쓰지 않는다.
+ *
+ * **전부 nullable 이다.** Gson 은 Kotlin 의 non-null 선언을 검사하지 않으므로,
+ * 응답에 필드가 없으면 `String` 으로 선언해 둬도 null 이 들어온다. 그러면
+ * 토큰을 null 로 저장한 채 "성공" 으로 진행하고, 첫 인증 요청이 401 을 받아
+ * 세션 만료로 로그인 화면으로 튕긴다 — 사용자에게는 "가입했는데 다시 로그인
+ * 화면" 으로 보인다. 같은 부류를 `RouteSegmentDto` 에서 이미 겪었다.
+ *
+ * 비어 있는지는 [com.swpp.wakeup.data.repository.AuthRepository] 가 판단한다.
  */
 data class AuthResponse(
-    val access: String,
-    val refresh: String,
-    val user: UserDto,
+    val access: String? = null,
+    val refresh: String? = null,
+    val user: UserDto? = null,
 )
 
 data class RefreshResponse(

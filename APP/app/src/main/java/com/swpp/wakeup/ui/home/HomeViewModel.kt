@@ -176,6 +176,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _plan = MutableStateFlow<AlarmPlanView?>(null)
     val plan: StateFlow<AlarmPlanView?> = _plan.asStateFlow()
 
+    /**
+     * 이번 실행에서 준비 시간 온보딩을 이미 띄웠는가.
+     *
+     * [refresh] 는 화면을 되돌아올 때마다 불린다. 이 플래그가 없으면 값을
+     * 저장하기 전까지 매번 화면을 다시 밀어 넣어, 사용자가 뒤로 나갈 수 없다.
+     *
+     * **`init` 보다 위에 선언한다.** `init` → [refresh] 가 이 값을 읽으므로,
+     * 아래에 두면 초기화 순서상 아직 false 로도 세팅되지 않은 값을 읽는다.
+     * `HomeViewModelInitOrderTest` 가 이 규칙을 고정한다.
+     */
+    private var prepOnboardingAsked = false
+
     init {
         refresh()
         // 알람 액티비티가 세션을 만들어 두었을 수 있다. 홈 카드가 보이려면
@@ -207,6 +219,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             offlineAgeLabel = result.data.ageLabel,
                         )
                     }
+                    maybeAskPrepOnboarding(result.data)
                     syncAlarms(result.data.schedules, fromCache = result.data.fromCache)
                 }
 
@@ -1322,6 +1335,95 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- 준비 시간 온보딩 (Figma ⑭) ---------------------------------------
+
+    /**
+     * 가입 직후 평소 준비 시간을 받는 화면의 상태.
+     *
+     * **[minutes] 를 비워 둔 채 시작한다.** "30" 을 미리 채우면 대부분이 그대로
+     * 저장하고 넘어가서 묻는 의미가 없어진다. 지금까지 전원이 30분이던 이유가
+     * 정확히 그것이다. 빠른 선택 버튼으로 손은 덜게 하되, 값은 반드시 사용자가
+     * 고른 것이어야 한다.
+     */
+    data class PrepOnboardingState(
+        val minutes: String = "",
+        val submitting: Boolean = false,
+        val error: String? = null,
+        val done: Boolean = false,
+    ) {
+        /** 범위를 벗어난 값은 없는 것으로 본다. 5분 미만·4시간 초과는 입력 실수다. */
+        val parsed: Int? get() = minutes.toIntOrNull()?.takeIf { it in PREP_MIN..PREP_MAX }
+        val canSubmit: Boolean get() = !submitting && parsed != null
+    }
+
+    private val _prepOnboarding = MutableStateFlow(PrepOnboardingState())
+    val prepOnboarding: StateFlow<PrepOnboardingState> = _prepOnboarding.asStateFlow()
+
+    fun resetPrepOnboarding() {
+        _prepOnboarding.value = PrepOnboardingState()
+    }
+
+    fun onPrepOnboardingChange(v: String) =
+        _prepOnboarding.update { it.copy(minutes = v.filter(Char::isDigit).take(3), error = null) }
+
+    /**
+     * ± 버튼. 값이 비어 있으면 [PREP_SEED] 에서 시작한다.
+     *
+     * 비었을 때 아무 일도 안 하게 두면 버튼이 고장난 것처럼 보인다. 그렇다고
+     * 처음부터 채워 두면 그 값이 기준점이 되어 버려서, 누르는 순간에만 기준을
+     * 만든다.
+     */
+    fun onPrepOnboardingStep(delta: Int) = _prepOnboarding.update {
+        val base = it.minutes.toIntOrNull() ?: PREP_SEED
+        it.copy(minutes = (base + delta).coerceIn(PREP_MIN, PREP_MAX).toString(), error = null)
+    }
+
+    fun submitPrepOnboarding() {
+        val minutes = _prepOnboarding.value.parsed ?: return
+        _prepOnboarding.update { it.copy(submitting = true, error = null) }
+        viewModelScope.launch {
+            when (val result = repository.setOnboardingPrep(minutes)) {
+                is EventRepository.Result.Success -> {
+                    _prepOnboarding.update { it.copy(submitting = false, done = true) }
+                    // 준비 시간이 바뀌면 서버가 알람을 다시 계산한다. 홈의 시각을
+                    // 갱신하지 않으면 방금 답한 값이 반영되지 않은 화면이 남는다.
+                    refresh()
+                }
+
+                is EventRepository.Result.Failure ->
+                    _prepOnboarding.update { it.copy(submitting = false, error = result.message) }
+            }
+        }
+    }
+
+    /**
+     * "나중에 입력".
+     *
+     * 저장하지 않고 닫는다. 네트워크가 죽은 상태에서 이 화면이 앱의 입구를
+     * 막아 버리면 안 된다. 다음에 앱을 열면 다시 묻는다 — 프로필이 여전히
+     * null 이기 때문이고, 별도 플래그를 두지 않는 이유다.
+     */
+    fun skipPrepOnboarding() {
+        _prepOnboarding.update { it.copy(done = true) }
+    }
+
+    /**
+     * 프로필에 준비 시간이 없으면 온보딩 화면을 한 번 밀어 넣는다.
+     *
+     * 가입 직후만이 아니라 **답하지 않은 동안** 띄운다. 가입 여부를 인텐트
+     * 플래그로 넘기면 앱을 껐다 켠 사용자는 영원히 묻지 않게 되고, 그러면
+     * 다시 전원이 30분으로 돌아간다. 서버 상태를 근거로 삼으면 그 구멍이 없다.
+     */
+    private fun maybeAskPrepOnboarding(data: EventRepository.HomeData) {
+        if (data.onboardingPrepMin != null) return
+        if (prepOnboardingAsked) return
+        // 오프라인 사본으로는 판단하지 않는다. 캐시에 준비 시간이 없을 뿐인데
+        // 물어보면, 이미 답한 사용자에게 같은 질문을 다시 하게 된다.
+        if (data.fromCache) return
+        prepOnboardingAsked = true
+        _nav.update { it.copy(stack = it.stack + AppRoute.PrepOnboarding, forward = true) }
+    }
+
     // --- 집 위치 설정 -----------------------------------------------------
 
     data class HomeSetupState(
@@ -1393,6 +1495,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val TAG = "HomeViewModel"
+
+        /** 준비 시간으로 받아들이는 범위(분). 밖의 값은 입력 실수로 본다. */
+        const val PREP_MIN = 5
+        const val PREP_MAX = 240
+
+        /** ± 버튼을 빈 칸에서 처음 눌렀을 때의 기준점(분). */
+        const val PREP_SEED = 30
 
         /**
          * 블록 **정의**를 고쳤을 때의 안내.

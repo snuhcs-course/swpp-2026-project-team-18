@@ -80,6 +80,14 @@ class EventRepository(
         val totalCount: Int,
         val hasHome: Boolean,
         val homeLabel: String?,
+        /**
+         * 사용자가 답한 평소 준비 시간(분). **null 이면 아직 답하지 않은 것이다.**
+         *
+         * 서버 기본값을 두지 않고 null 로 남긴다. 30 을 넣어 두면 "답한 30분" 과
+         * "안 물어봐서 30분" 이 구분되지 않아, 온보딩을 보여 줄지 판단할 근거가
+         * 사라진다. 추정기는 null 일 때만 30 으로 떨어진다.
+         */
+        val onboardingPrepMin: Int?,
         /** 알람이 계산되지 않은 일정 수. 원인 안내에 쓴다 */
         val unplannedCount: Int,
         /**
@@ -177,6 +185,7 @@ class EventRepository(
             totalCount = sorted.size,
             hasHome = profile.hasHome,
             homeLabel = profile.homeLabel?.takeIf { it.isNotBlank() },
+            onboardingPrepMin = profile.onboardingPrepMin?.takeIf { it > 0 },
             unplannedCount = sorted.count { it.alarmAt == null },
             schedules = events.mapNotNull { it.toSchedule(zone, profile) },
             fromCache = fromCache,
@@ -309,6 +318,23 @@ class EventRepository(
             homeLabel = label,
             onboardingPrepMin = prepMinutes,
         )
+        unwrap(profileApi.update(body))?.let { Result.Success(it) }
+            ?: Result.Failure(MESSAGE_UNKNOWN)
+    }
+
+    /**
+     * 준비 시간만 저장한다. 집 좌표는 건드리지 않는다.
+     *
+     * [setHome] 을 재사용할 수 없다. 그쪽은 좌표를 **항상** 함께 보내므로,
+     * 가입 직후(집을 아직 모르는 상태)에 쓰면 좌표를 덮어쓰거나 보낼 값이
+     * 없어진다. 서버는 부분 수정을 허용하고 좌표 짝 검증도 인스턴스 현재 값을
+     * 합쳐서 하므로 이 필드 하나만 보내도 통과한다(실측 확인).
+     *
+     * 서버는 이 값이 바뀌면 알람을 다시 계산한다. 준비 시간이 알람 시각의
+     * 시작점이라 그래야 화면과 실제가 어긋나지 않는다.
+     */
+    suspend fun setOnboardingPrep(minutes: Int): Result<ProfileDto> = guard {
+        val body = ProfileUpdateRequest(onboardingPrepMin = minutes)
         unwrap(profileApi.update(body))?.let { Result.Success(it) }
             ?: Result.Failure(MESSAGE_UNKNOWN)
     }

@@ -67,20 +67,37 @@ class AuthRepository(
         return try {
             val response = block()
             val body = response.body()
-            if (response.isSuccessful && body != null) {
-                // 토큰을 쓰기 전에 앞 사용자의 흔적을 지운다. 순서가 반대면
-                // 새 사용자의 첫 캐시와 경쟁한다.
-                onBeforeAuthenticated()
-                tokenStore.save(
-                    access = body.access,
-                    refresh = body.refresh,
-                    email = body.user.email,
-                    nickname = body.user.nickname,
-                )
-                AuthResult.Success(body.user)
-            } else {
-                val serverMessage = ApiClient.parseErrorMessage(response.errorBody()?.string())
-                AuthResult.Failure(serverMessage ?: defaultMessage(response.code()))
+            val access = body?.access?.trim().orEmpty()
+            val refresh = body?.refresh?.trim().orEmpty()
+            val user = body?.user
+            when {
+                !response.isSuccessful || body == null -> {
+                    val serverMessage = ApiClient.parseErrorMessage(response.errorBody()?.string())
+                    AuthResult.Failure(serverMessage ?: defaultMessage(response.code()))
+                }
+
+                // 2xx 인데 토큰이 없으면 **성공으로 취급하지 않는다.**
+                //
+                // 저장해 봐도 `TokenStore.isLoggedIn` 이 false 라서, 화면만
+                // 넘어가고 첫 인증 요청이 401 을 받아 세션 만료로 로그인
+                // 화면으로 되돌아온다. 사용자에게는 "가입했는데 다시 로그인
+                // 화면" 으로 보이고, 원인은 어디에도 남지 않는다. 여기서
+                // 끊어야 그 경로가 생기지 않는다.
+                access.isEmpty() || refresh.isEmpty() || user == null ->
+                    AuthResult.Failure(MESSAGE_NO_TOKEN)
+
+                else -> {
+                    // 토큰을 쓰기 전에 앞 사용자의 흔적을 지운다. 순서가 반대면
+                    // 새 사용자의 첫 캐시와 경쟁한다.
+                    onBeforeAuthenticated()
+                    tokenStore.save(
+                        access = access,
+                        refresh = refresh,
+                        email = user.email,
+                        nickname = user.nickname,
+                    )
+                    AuthResult.Success(user)
+                }
             }
         } catch (e: IOException) {
             // 서버가 꺼져 있거나 에뮬레이터가 호스트에 못 닿는 경우가 대부분이다.
@@ -98,8 +115,11 @@ class AuthRepository(
         else -> MESSAGE_UNKNOWN
     }
 
-    private companion object {
+    internal companion object {
         const val MESSAGE_NETWORK = "서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."
         const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
+
+        /** 2xx 인데 토큰이 비어 있을 때. 서버 배포 버전이 낮으면 이렇게 온다. */
+        const val MESSAGE_NO_TOKEN = "서버가 토큰을 주지 않았다. 서버 버전을 확인한다."
     }
 }
