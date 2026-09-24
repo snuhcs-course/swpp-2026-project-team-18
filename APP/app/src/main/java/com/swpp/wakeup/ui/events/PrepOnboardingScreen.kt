@@ -11,16 +11,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -83,8 +80,10 @@ fun PrepOnboardingScreen(
         // 한쪽만 상태를 정리해서, 다음에 이 화면을 열 때 앞서 적던 값이 남는다.
         ScreenHeader(title = "준비 시간", onBack = onSkip, enabled = !state.submitting)
 
+        // 줄바꿈을 직접 넣는다. 맡겨 두면 "걸리 / 나요?" 처럼 낱말 중간에서
+        // 끊긴다 — 한글은 낱말 경계를 자동으로 지켜 주지 않는다.
         Text(
-            text = "평소 준비에 얼마나 걸림?",
+            text = "평소 준비하는데\n얼마나 걸리나요?",
             color = JitColor.TextPrimary,
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
@@ -100,18 +99,6 @@ fun PrepOnboardingScreen(
             state = state,
             onMinutesChange = onMinutesChange,
             onStep = onStep,
-        )
-
-        NoticeCard(
-            dot = JitColor.Accent,
-            title = "이 값에서 거꾸로 계산함",
-            body = "알람은 이 시간을 빼서 정함. 며칠 쓰면 실제 기록이 쌓여 이 값을 대체함",
-        )
-
-        NoticeCard(
-            dot = JitColor.Blue,
-            title = "나중에 항목으로 쪼갤 수 있음",
-            body = "샤워·아침식사로 나누면 늦었을 때 무엇을 줄일지 고를 수 있음",
         )
 
         state.error?.let { message ->
@@ -193,11 +180,11 @@ private fun PrepInputCard(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
         ) {
             // 자주 쓰는 값. 선택 상태를 두지 않는다 — 값은 자유 입력이고
             // 이것은 지름길일 뿐이다.
-            listOf(20, 30, 45, 60).forEach { preset ->
+            listOf(15, 30, 45, 60).forEach { preset ->
                 Text(
                     text = "${preset}분",
                     color = JitColor.TextSecondary,
@@ -235,35 +222,6 @@ private fun StepButton(label: String, enabled: Boolean, onClick: () -> Unit) {
             fontWeight = FontWeight.Medium,
             style = JitTextStyle.TightCentered,
         )
-    }
-}
-
-@Composable
-private fun NoticeCard(dot: Color, title: String, body: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(JitRadius.Hint))
-            .background(JitColor.Surface2)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Spacer(
-                Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(dot)
-            )
-            Spacer(Modifier.width(13.dp))
-            Text(
-                text = title,
-                color = JitColor.TextPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-        Text(text = body, color = JitColor.TextSecondary, fontSize = 11.sp)
     }
 }
 
