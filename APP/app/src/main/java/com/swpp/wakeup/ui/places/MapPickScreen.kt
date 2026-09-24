@@ -12,12 +12,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -43,6 +46,15 @@ import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
 import kotlin.math.roundToInt
+
+/**
+ * 하단 시트 목록의 최대 높이.
+ *
+ * 이 값이 시트 전체 높이를 사실상 결정하고, 그만큼이 지도에서 빠진다. 헤더·버튼·
+ * 여백을 더하면 시트는 약 340dp 가 되므로, 가장 작은 흔한 화면(약 640dp)에서도
+ * 지도가 250dp 이상 남는다. 키우면 지도가 그만큼 줄어든다.
+ */
+private val SHEET_LIST_MAX_HEIGHT = 210.dp
 
 /**
  * 지도에서 장소 고르기 (Figma ⑰).
@@ -162,9 +174,11 @@ fun MapPickScreen(
                 )
             }
 
-            // 고른 장소는 항상 지도 중앙에 온다. 카카오가 그린 마커는 눌러도
-            // 어느 장소인지 알 수 없으므로, 가운데 표식으로 "이것" 을 가리킨다.
-            if (state.selected != null) {
+            // 카카오가 그린 마커는 눌러도 어느 장소인지 알 수 없으므로, 가운데
+            // 표식으로 "이것을 골랐다" 를 가리킨다. 단 **실제로 중앙에 있을
+            // 때만** 그린다 — 끌기·줌·재검색은 중심을 그대로 두고 선택만 바꾸므로,
+            // 그때도 그리면 빈 자리를 가리키며 거짓을 말한다.
+            if (state.selectedAtCenter) {
                 CenterPin(Modifier.align(Alignment.Center))
             }
 
@@ -381,6 +395,18 @@ private fun MapSheet(
     onConfirm: () -> Unit,
     onOpenPlaceUrl: ((String) -> Unit)?,
 ) {
+    // **이 시트에는 높이 상한이 반드시 있어야 한다.**
+    //
+    // 위 지도는 `weight(1f)` 로 "남은 공간" 을 받는다. Compose 에서 가중치 없는
+    // 형제가 먼저 측정되므로, 이 시트가 원하는 만큼 커지면 남는 공간이 0 이 되고
+    // **지도가 소리 없이 사라진다.** 실기기에서 정확히 그렇게 됐다 — 5곳을 다
+    // 나열해 시트가 650dp 를 차지하자 지도 영역이 0 이 되어 목록만 보였다.
+    // 에러도 로그도 없다. 피그마 비율(지도 505 / 시트 186)이 지켜지지 않은 것도
+    // 같은 원인이다.
+    //
+    // 목록만 상한을 두고 스크롤을 준다. 버튼은 스크롤 밖에 둬서 몇 곳이 나와도
+    // 항상 보인다 — 스크롤 안에 넣으면 목록이 길 때 "이 장소로 선택" 이 밀려
+    // 내려가 누를 수 없다.
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -407,15 +433,22 @@ private fun MapSheet(
             fontWeight = FontWeight.Bold,
         )
 
-        state.markers.forEachIndexed { index, place ->
-            if (index > 0) HorizontalDivider(color = JitColor.Bg)
-            MapSheetRow(
-                place = place,
-                picked = place === state.selected ||
-                    (place.kakaoPlaceId != null && place.kakaoPlaceId == state.selected?.kakaoPlaceId),
-                onClick = { onSelect(place) },
-                onOpenPlaceUrl = onOpenPlaceUrl,
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = SHEET_LIST_MAX_HEIGHT)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            state.markers.forEachIndexed { index, place ->
+                if (index > 0) HorizontalDivider(color = JitColor.Bg)
+                MapSheetRow(
+                    place = place,
+                    picked = place === state.selected ||
+                        (place.kakaoPlaceId != null && place.kakaoPlaceId == state.selected?.kakaoPlaceId),
+                    onClick = { onSelect(place) },
+                    onOpenPlaceUrl = onOpenPlaceUrl,
+                )
+            }
         }
 
         JitPrimaryButton(

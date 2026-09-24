@@ -503,6 +503,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openAddEvent() {
+        // 장소 검색이 있는 화면은 들어올 때 좌표를 미리 잡는다. 이것을 빼먹으면
+        // 검색이 좌표 없이 나가고, 거리·거리순 정렬이 사라지고 결과가 전국에서
+        // 온다. 실기기에서 "GS25" 를 검색했더니 전북 익산·남양주가 상위에 왔다.
+        primeCurrentLocation()
         _nav.update { it.copy(stack = it.stack + AppRoute.AddEvent, forward = true) }
     }
 
@@ -512,6 +516,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openHomeSetup() {
+        primeCurrentLocation()
         _nav.update { it.copy(stack = it.stack + AppRoute.HomeSetup, forward = true) }
     }
 
@@ -1165,6 +1170,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun openRouteChoice() {
         val place = _add.value.selectedPlace ?: return
+        // 출발지 검색도 거리를 쓴다. 아래 흐름이 현재 위치를 따로 구하지만
+        // 그것이 실패해도 검색은 좌표를 갖도록 여기서 한 번 더 선점한다.
+        primeCurrentLocation()
         _nav.update { it.copy(stack = it.stack + AppRoute.RouteChoice, forward = true) }
 
         val cached = _routeChoice.value?.choice
@@ -1265,6 +1273,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val canZoomIn: Boolean get() = level > StaticMapScale.MIN_LEVEL
         val canZoomOut: Boolean get() = level < StaticMapScale.MAX_LEVEL
+
+        /**
+         * 고른 장소가 지금 지도 중앙에 있는가.
+         *
+         * 중앙 표식은 "이것을 골랐다" 는 뜻이므로 이 값이 참일 때만 그려야 한다.
+         * [onMapPlaceSelected] 는 중심을 그 장소로 옮기지만, **끌기·줌·영역
+         * 재검색은 중심을 그대로 둔 채 선택만 바꾼다.** 그 상태에서 표식을 계속
+         * 그리면 빈 자리를 가리키며 그곳을 골랐다고 말한다. 실기기에서 재검색
+         * 직후 주황 표식이 아무 가게도 없는 지점에 놓여 있었다.
+         */
+        val selectedAtCenter: Boolean
+            get() {
+                val place = selected ?: return false
+                // 같은 값에서 복사되므로 보통은 정확히 같다. 부동소수 잡음만
+                // 견디면 되고, 1e-6도는 약 0.1m 라 다른 장소와 헷갈리지 않는다.
+                return kotlin.math.abs(place.lat - center.lat) < 1e-6 &&
+                    kotlin.math.abs(place.lng - center.lng) < 1e-6
+            }
     }
 
     /** 지도에서 고른 장소를 어디로 되돌릴지. */
@@ -1905,6 +1931,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // `HomeViewModelInitOrderTest` 에 있다.
         if (pending.contains(AppRoute.HomeSetup)) {
             _homeSetup.value = HomeSetupState(onboarding = true)
+            // 이 경로는 openHomeSetup() 을 거치지 않고 스택에 직접 넣는다.
+            // 좌표 선점도 여기서 따로 해야 온보딩 검색에 거리가 붙는다.
+            primeCurrentLocation()
         }
         _nav.update { it.copy(stack = it.stack + pending, forward = true) }
     }

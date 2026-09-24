@@ -9,14 +9,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -122,7 +119,13 @@ fun PlacePicker(
 
         // 검색했는데 아무것도 없을 때만 말한다. 검색 전에 띄우면 사용자가
         // 이미 실패한 것으로 읽는다.
-        if (state.searched && state.results.isEmpty() && !state.searching && state.error == null) {
+        //
+        // **이미 고른 것이 있으면 말하지 않는다.** 지도에서 골라 돌아오면 목록은
+        // 비는데 선택은 있다. 그때도 띄우면 방금 고른 장소 바로 아래에 "검색
+        // 결과가 없음" 이 붙어 서로 모순된다 — 실기기에서 그렇게 나왔다.
+        if (selected == null &&
+            state.searched && state.results.isEmpty() && !state.searching && state.error == null
+        ) {
             Text(
                 text = "검색 결과가 없음. 상호나 지번을 넣어 볼 것",
                 color = JitColor.TextSecondary,
@@ -246,18 +249,19 @@ private fun ResultList(
     onLoadMore: (() -> Unit)?,
     onOpenPlaceUrl: ((String) -> Unit)?,
 ) {
+    // **자체 스크롤을 두지 않는다.** 이 컴포저블을 쓰는 세 화면이 모두 바깥에서
+    // `verticalScroll` 을 걸고 있어서, 여기에 또 스크롤과 높이 상한을 주면
+    // 스크롤이 겹친다. 실기기에서 그 결과가 드러났다 — 목록이 긴 폼의 맨 아래에
+    // 320dp 창으로 갇혀 **한 건도 온전히 안 보였고**, 그 좁은 창 안에서 다시
+    // 스크롤해야 했다. 세 건만 보이던 처음 문제보다 오히려 나빠졌다.
+    //
+    // 상한을 없애면 목록이 페이지의 일부가 되어 페이지 스크롤로 전부 읽힌다.
+    // 검색창 바로 아래 "45건 중 15건" 이 남아 있어 결과가 왔다는 신호는 그대로다.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            // 화면의 절반 정도만 쓴다. 결과가 45건이면 목록이 화면을 다 먹어
-            // 검색창과 다음 단계 버튼이 밀려 나간다.
-            //
-            // **스크롤이 핵심이다.** 예전에는 상한만 있고 스크롤이 없어서 넘친
-            // 결과가 그냥 잘렸다 — 그래서 늘 세 건만 보였다.
-            .heightIn(max = 320.dp)
             .clip(RoundedCornerShape(JitRadius.Card))
-            .background(JitColor.Surface)
-            .verticalScroll(rememberScrollState()),
+            .background(JitColor.Surface),
     ) {
         state.results.forEachIndexed { index, place ->
             if (index > 0) HorizontalDivider(color = JitColor.Bg)

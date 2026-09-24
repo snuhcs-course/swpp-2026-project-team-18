@@ -818,7 +818,7 @@ ServerWarmup  E  서버가 구버전입니다 (서버 0.1.0 · 앱 0.3.0). 새 �
 
 ```
 백엔드 pytest              591
-앱 단위 테스트             303
+앱 단위 테스트             311
 로컬 HTTP 검증 스크립트     8개 전부 통과 (항목 합계 265, 필드 계약 95항목 포함)
 배포 서버 전 기능           82건 통과 · 실패 0 (check_deployed.py)
 DB 기본값 검사              10건 · 위험 0 (check_db_defaults.py)
@@ -831,7 +831,7 @@ CI                         .github/workflows/ci.yml — 위 셋을 푸시·PR �
 ```bash
 cd backend && python -m pytest                       # 591
 cd backend && python scripts/run_local_suite.py      # 8개 스크립트, 서버 기동까지 알아서 한다
-cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 303 + lint
+cd APP && ./gradlew testDebugUnitTest lintDebug assembleDebug  # 311 + lint
 ```
 
 ### CI
