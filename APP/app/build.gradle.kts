@@ -84,7 +84,7 @@ android {
         applicationId = "com.swpp.wakeup"
         minSdk = 34
         targetSdk = 37
-        versionCode = 4
+        versionCode = 5
         // 서버 APP_VERSION 과 같은 자리수를 쓴다. 실기기에서 "어느 빌드인가" 를
         // 서버 버전과 나란히 읽을 수 있어야 원인을 좁힐 수 있다.
         //   0.1.0  P1 — 고정 규칙 알람
@@ -92,7 +92,9 @@ android {
         //   0.3.0  프로토타입 완성 — 근거 카드, 오프라인 캐시, 배경 동기화,
         //          캘린더 가져오기, 주간 리포트
         //   0.4.0  경로 구간·체크포인트와 버스·지하철 실시간 도착정보
-        versionName = "0.4.0"
+        //   0.5.0  장소 검색·지도, 알람 결정 화면 개편 — 계산 방법 세그먼트 바,
+        //          경로 거리 기준 진행률, 경로 지도
+        versionName = "0.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

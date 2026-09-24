@@ -430,7 +430,7 @@ docker run -p 8000:8000 \
 
 ```bash
 curl.exe -s https://justintime-api.onrender.com/api/health
-# {"ok":true,"version":"0.4.0","realtime":{"subway":true,"bus":true}}
+# {"ok":true,"version":"0.5.0","realtime":{"subway":true,"bus":true}}
 ```
 
 ### data.go.kr 401 은 "키가 틀렸다" 가 아니다
