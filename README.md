@@ -198,9 +198,9 @@ Three suites, all runnable locally. CI runs the same three on every push and pul
 request ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ```bash
-cd backend && python -m pytest                       # 432 unit tests
+cd backend && python -m pytest                       # 585 unit tests
 cd backend && python scripts/run_local_suite.py      # 8 HTTP suites against a live server
-cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 154 tests + lint + build
+cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 301 tests + lint + build
 ```
 
 The middle one is the unusual part. `scripts/check_*.py` drive a **running** Django
@@ -237,7 +237,8 @@ GET   PATCH  DELETE  /api/events/{id}
 POST  /api/events/{id}/recompute      recalculate the alarm only
 GET   /api/events/tags                the six event categories
 
-GET   /api/places/search?q=           Kakao place search (proxied)
+GET   /api/places/search?q=           Kakao place search (proxied, paged, sortable)
+GET   /api/places/staticmap           Kakao static map tile (proxied, cached)
 GET   /api/routes/candidates          route candidates
 
 POST  /api/observations/batch         upload detected departures / arrivals
@@ -251,6 +252,14 @@ resends them; a retry must not create a second row.
 **The app never calls Kakao directly.** An API key shipped in an APK can be extracted,
 so the server proxies those calls.
 
+`/api/places/search` reports `reachable_count` rather than Kakao's `total_count`.
+Kakao answers "카페" with 142,759 matches but only serves 45 of them, so the larger
+number next to a list that ends at 45 reads as a bug. Ratings and photos are not in
+the response at all, so each result carries `place_url` instead of an invented score.
+`/api/places/staticmap` returns a rendered PNG and caches it for an hour — the free
+quota is 1,000 requests a day and panning a map would burn that in minutes. Failures
+are not cached, or a map would stay blank for an hour after Kakao recovered.
+
 ### Verification
 
 Every script makes real HTTP calls. Run them with the server up.
@@ -258,8 +267,8 @@ Every script makes real HTTP calls. Run them with the server up.
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe scripts\check_auth_api.py          # auth, 18 cases
-.\.venv\Scripts\python.exe scripts\check_events_api.py        # events, 20 cases
-.\.venv\Scripts\python.exe scripts\check_route_api.py         # routes, 30 cases
+.\.venv\Scripts\python.exe scripts\check_events_api.py        # events, 28 cases
+.\.venv\Scripts\python.exe scripts\check_route_api.py         # routes, 33 cases
 .\.venv\Scripts\python.exe scripts\check_observations_api.py  # observations, 29 cases
 .\.venv\Scripts\python.exe scripts\db_status.py               # database summary
 ```
