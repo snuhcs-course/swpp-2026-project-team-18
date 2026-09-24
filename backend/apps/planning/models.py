@@ -161,9 +161,12 @@ class AlarmPlan(models.Model):
         ]
 
     def __str__(self):
+        # 일정 제목을 쓴다. id 만 보여 주면 관리 화면에서 어느 일정의 계획인지
+        # 확인하려고 매번 다른 표를 열어야 한다.
+        label = self.event.title if self.event_id else "(일정 없음)"
         if self.status != self.Status.OK:
-            return f"{self.event_id} — {self.get_status_display()}"
-        return f"{self.event_id} — 알람 {self.alarm_at:%m-%d %H:%M}"
+            return f"{label} — {self.get_status_display()}"
+        return f"{label} — 알람 {self.alarm_at:%m-%d %H:%M}"
 
     @property
     def total_minutes(self) -> int | None:

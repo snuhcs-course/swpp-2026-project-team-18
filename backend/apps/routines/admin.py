@@ -23,10 +23,14 @@ class RoutineBlockAdmin(admin.ModelAdmin):
         "order",
     )
     list_filter = ("parallelizable", "included_by_default", "drop_cost")
-    search_fields = ("name", "user__email")
+    search_fields = ("name", "user__email", "user__nickname")
     # 사용자와 선행 블록은 행이 많아질 수 있으므로 드롭다운을 쓰지 않는다.
     raw_id_fields = ("user", "precondition")
     ordering = ("user", "order")
+    list_editable = ("default_min_minutes", "default_max_minutes", "order")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("user", "precondition")
 
 
 @admin.register(EventBlockSelection)
@@ -35,6 +39,10 @@ class EventBlockSelectionAdmin(admin.ModelAdmin):
     list_filter = ("checked",)
     raw_id_fields = ("event", "block")
     search_fields = ("event__title", "block__name")
+    list_editable = ("checked",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("event", "block")
 
 
 @admin.register(BlockObservation)
@@ -49,7 +57,10 @@ class BlockObservationAdmin(admin.ModelAdmin):
         "server_received_at",
     )
     list_filter = ("was_parallel", "observed_on")
-    search_fields = ("block__name", "user__email", "client_uuid")
+    search_fields = ("block__name", "user__email", "user__nickname", "client_uuid")
     raw_id_fields = ("user", "block", "event")
     date_hierarchy = "observed_on"
     ordering = ("-observed_on",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("user", "block", "event")

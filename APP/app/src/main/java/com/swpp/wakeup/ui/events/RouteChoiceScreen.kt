@@ -76,6 +76,8 @@ fun RouteChoiceScreen(
     onRetry: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 저장된 집. 출발지를 집으로 한 번에 넣는 데 쓴다 */
+    homePlace: com.swpp.wakeup.data.remote.PlaceSearchItem? = null,
     onOriginEditToggle: (Boolean) -> Unit = {},
     onOriginQueryChange: (String) -> Unit = {},
     onOriginSearch: () -> Unit = {},
@@ -113,6 +115,7 @@ fun RouteChoiceScreen(
 
         OriginPicker(
             state = state,
+            homePlace = homePlace,
             onEditToggle = onOriginEditToggle,
             onQueryChange = onOriginQueryChange,
             onSearch = onOriginSearch,
@@ -165,6 +168,7 @@ fun RouteChoiceScreen(
 @Composable
 private fun OriginPicker(
     state: HomeViewModel.RouteState?,
+    homePlace: PlaceSearchItem?,
     onEditToggle: (Boolean) -> Unit,
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
@@ -242,6 +246,7 @@ private fun OriginPicker(
                 onQueryChange = onQueryChange,
                 onSearch = onSearch,
                 onSelect = onSelect,
+                homePlace = homePlace,
             )
 
             else -> {
@@ -274,16 +279,33 @@ private fun OriginPicker(
         }
 
         if (!state.locating) {
-            Text(
-                text = "현재 위치로 다시 잡기",
-                color = JitColor.Accent,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onUseCurrentLocation)
-                    .padding(vertical = 3.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 집은 출발지로 가장 잦은 값이다. 검색을 펼치지 않고 바로
+                // 넣을 수 있어야 가입할 때 받아 둔 주소가 실제로 쓰인다.
+                if (homePlace != null) {
+                    Text(
+                        text = "집에서 출발",
+                        color = JitColor.Accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onSelect(homePlace) }
+                            .padding(vertical = 3.dp, horizontal = 2.dp),
+                    )
+                    Spacer(Modifier.width(14.dp))
+                }
+                Text(
+                    text = "현재 위치로 다시 잡기",
+                    color = JitColor.Accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onUseCurrentLocation)
+                        .padding(vertical = 3.dp, horizontal = 2.dp),
+                )
+            }
         }
     }
 }

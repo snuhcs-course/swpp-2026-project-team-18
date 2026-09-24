@@ -19,6 +19,10 @@ class ModelArtifactAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "payload")
     ordering = ("-created_at",)
 
-    @admin.display(description="범위")
+    def get_queryset(self, request):
+        # scope 가 행마다 user.email 을 읽는다. 없으면 행 수만큼 더 조회한다.
+        return super().get_queryset(request).select_related("user")
+
+    @admin.display(description="범위", ordering="user__email")
     def scope(self, obj):
         return "전역" if obj.user_id is None else obj.user.email

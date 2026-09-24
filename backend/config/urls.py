@@ -10,6 +10,15 @@ from django.urls import include, path
 from apps.accounts.views_profile import ProfileView
 from apps.common.health import health
 
+# 관리 화면 머리글.
+#
+# 기본값은 "Django administration" 이다. 이 프로젝트에는 배포 서버와 로컬이
+# 함께 있고 둘 다 같은 화면으로 보여서, 어느 DB 를 보고 있는지 구분되지 않는다.
+# 실제로 로컬에서 고친 값을 배포본에서 찾은 적이 있다.
+admin.site.site_header = "JustInTime 관리"
+admin.site.site_title = "JustInTime"
+admin.site.index_title = "앱 데이터"
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     # 인증 없이 접근. 클라이언트 연결 진단용.

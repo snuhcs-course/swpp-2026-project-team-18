@@ -201,7 +201,7 @@ class EventBlockSelection(models.Model):
 
     def __str__(self):
         mark = "포함" if self.checked else "제외"
-        return f"{self.event_id} / {self.block_id} {mark}"
+        return f"{self.event.title} / {self.block.name} {mark}"
 
     def clean(self):
         """일정과 블록이 같은 사용자의 것인지 확인한다.
@@ -289,4 +289,4 @@ class BlockObservation(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.block_id} {self.observed_on} {self.duration_minutes}분"
+        return f"{self.block.name} {self.observed_on} {self.duration_minutes}분"

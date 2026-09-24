@@ -71,7 +71,7 @@ class TripTrackingService : Service() {
 
     private val deadlineRunnable = Runnable {
         Log.i(TAG, "마감 시각이 지나 추적을 멈춘다")
-        stopSelf()
+        finishAtDeadline()
     }
 
     private val callback = object : LocationCallback() {
@@ -177,7 +177,7 @@ class TripTrackingService : Service() {
         val fence = geofence ?: return
 
         if (System.currentTimeMillis() > current.trackingDeadlineMillis) {
-            stopSelf()
+            finishAtDeadline()
             return
         }
 
@@ -197,8 +197,18 @@ class TripTrackingService : Service() {
             }
 
             is TripEvent.Arrived -> {
-                Log.i(TAG, "도착 판정: 목적지 ${event.distanceM.roundToInt()}m")
-                record(current, TripObservationInput.KIND_ARRIVE, event.fix, event.distanceM)
+                Log.i(
+                    TAG,
+                    "도착 판정: 목적지 ${event.distanceM.roundToInt()}m " +
+                        "체류 ${event.dwellMillis / 1000}초",
+                )
+                record(
+                    current,
+                    TripObservationInput.KIND_ARRIVE,
+                    event.fix,
+                    event.distanceM,
+                    dwellMillis = event.dwellMillis,
+                )
                 // 결과 알림을 **멈추기 전에** 띄운다. 이건 포그라운드 서비스
                 // 알림이 아닌 별도 알림이라 stopSelf 에 휩쓸리지 않는다.
                 postArrivalResult(current, event.fix)
@@ -228,6 +238,7 @@ class TripTrackingService : Service() {
         kind: String,
         fix: LocationFix,
         distanceM: Double,
+        dwellMillis: Long? = null,
     ) {
         val observation = TripObservationInput(
             event = current.eventId,
@@ -239,11 +250,45 @@ class TripTrackingService : Service() {
             lng = fix.lng,
             accuracyM = fix.accuracyM.toDouble(),
             distanceM = distanceM,
+            // 도착에만 있다. 출발은 "반경을 벗어남" 이라 머문 시간이 없다.
+            dwellSeconds = dwellMillis?.let { (it / 1000).toInt() },
             // 판정 시점에 만든다. 재전송할 때 새로 만들면 멱등성이 깨진다.
             clientUuid = UUID.randomUUID().toString(),
         )
         queue.enqueue(observation)
         scope.launch { queue.flush() }
+    }
+
+    /**
+     * 마감 시각에 추적을 끝낸다.
+     *
+     * 목적지 반경 안에서 체류 시간을 채우는 중이었다면 **그 상태로 확정한다.**
+     * 마감에 걸려 버리면 실제로 관측한 도착이 사라지는데, 그건 체류 조건을
+     * 넣기 전에는 기록됐던 도착이다. 판정 근거의 세기는 관측에 함께 올리는
+     * 체류 시간이 말해 준다 — 근거는 [TripGeofence.finalizeArrival] 에 있다.
+     */
+    private fun finishAtDeadline() {
+        val current = schedule
+        val fence = geofence
+        if (current != null && fence != null) {
+            val event = fence.finalizeArrival()
+            if (event != null) {
+                Log.i(
+                    TAG,
+                    "마감 직전 도착 확정: 목적지 ${event.distanceM.roundToInt()}m " +
+                        "체류 ${event.dwellMillis / 1000}초 (기준 미달)",
+                )
+                record(
+                    current,
+                    TripObservationInput.KIND_ARRIVE,
+                    event.fix,
+                    event.distanceM,
+                    dwellMillis = event.dwellMillis,
+                )
+                postArrivalResult(current, event.fix)
+            }
+        }
+        stopSelf()
     }
 
     // --- 위치 요청 ---------------------------------------------------------
@@ -364,13 +409,25 @@ class TripTrackingService : Service() {
             when (fence.phase) {
                 TripGeofence.Phase.BEFORE_DEPARTURE -> append("아직 출발 전")
 
-                TripGeofence.Phase.IN_TRANSIT ->
-                    if (remaining != null) {
-                        append("목적지까지 ")
-                        append(formatDistance(remaining))
-                    } else {
-                        append("목적지로 가는 중")
+                // 목적지 반경 안에 있으면 남은 거리(수십 m)는 알려 줄 것이
+                // 없다. 대신 확인이 얼마나 진행됐는지를 보여 준다 — 서 있는
+                // 동안 화면이 그대로면 앱이 멈춘 것처럼 보인다.
+                TripGeofence.Phase.IN_TRANSIT -> {
+                    val dwelled = fence.dwellElapsedMillis
+                    when {
+                        fence.awaitingDwell && dwelled != null -> {
+                            append("도착 확인 중 ")
+                            append(formatDwell(dwelled))
+                        }
+
+                        remaining != null -> {
+                            append("목적지까지 ")
+                            append(formatDistance(remaining))
+                        }
+
+                        else -> append("목적지로 가는 중")
                     }
+                }
 
                 TripGeofence.Phase.ARRIVED -> append("도착을 기록했다")
             }
@@ -454,6 +511,21 @@ class TripTrackingService : Service() {
     private fun formatDistance(meters: Double): String =
         if (meters >= 1000) "%.1fkm".format(meters / 1000)
         else "${meters.roundToInt()}m"
+
+    /**
+     * 체류 확인에 남은 시간.
+     *
+     * 지난 시간이 아니라 **남은 시간**을 쓴다. "40초 지남" 은 얼마나 더 서
+     * 있어야 하는지 알려 주지 않는다. 알림 한 줄에 들어가야 하므로 분모까지
+     * 붙이지 않는다.
+     */
+    private fun formatDwell(elapsedMillis: Long): String {
+        val left = ((TripGeofence.DEFAULT_DWELL_MILLIS - elapsedMillis) / 1000)
+            .coerceAtLeast(0)
+        if (left == 0L) return "곧 확정"
+        if (left < 60) return "${left}초 남음"
+        return "${left / 60}분 ${left % 60}초 남음"
+    }
 
     private fun stopPendingIntent(): PendingIntent = PendingIntent.getService(
         this,

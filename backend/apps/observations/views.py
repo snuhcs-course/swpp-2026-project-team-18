@@ -24,6 +24,11 @@ from .serializers import (
 )
 
 
+# 멱등 키를 이루는 필드. `defaults` 에 넣으면 안 된다 — `get_or_create` 가
+# 조회 조건으로 이미 쓰고 있다.
+_IDENTITY_FIELDS = frozenset({"client_uuid"})
+
+
 class _UserScopedMixin:
     """사용자 소유 관측만 다룬다."""
 
@@ -60,21 +65,19 @@ class ObservationBatchView(APIView):
 
         with transaction.atomic():
             for item in items:
+                # 검증을 통과한 값을 **그대로** 넘긴다. 예전에는 필드를 손으로
+                # 나열했는데, 시리얼라이저에 필드를 더하고 여기를 잊으면
+                # 그 값이 조용히 버려진다. 400 도 아니고 null 로 저장된다 —
+                # `dwell_seconds` 를 넣을 때 실제로 그랬다.
+                defaults = {
+                    k: v for k, v in item.items() if k not in _IDENTITY_FIELDS
+                }
+                defaults.setdefault("detector", TripObservation.Detector.GPS)
+
                 obs, was_created = TripObservation.objects.get_or_create(
                     user=request.user,
                     client_uuid=item["client_uuid"],
-                    defaults={
-                        "event": item["event"],
-                        "kind": item["kind"],
-                        "detector": item.get(
-                            "detector", TripObservation.Detector.GPS
-                        ),
-                        "observed_at": item["observed_at"],
-                        "lat": item["lat"],
-                        "lng": item["lng"],
-                        "accuracy_m": item["accuracy_m"],
-                        "distance_m": item["distance_m"],
-                    },
+                    defaults=defaults,
                 )
                 if was_created:
                     created.append(obs)

@@ -1,6 +1,7 @@
-﻿from django.apps import AppConfig
+from django.apps import AppConfig
 
 
 class RoutingConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "apps.routing"
+    verbose_name = "경로 보정"

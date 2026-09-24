@@ -27,6 +27,11 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
+# 도착으로 인정하는 체류 시간(초). 앱 `TripGeofence.DEFAULT_DWELL_MILLIS` 와
+# 같은 값이어야 한다. 서버는 이 값으로 판정하지 않고, 앱이 보낸 체류 시간이
+# 기준을 채웠는지만 되읽는다([TripObservation.dwell_confirmed]).
+DWELL_CONFIRM_SECONDS = 120
+
 
 class TripObservation(models.Model):
     """한 일정의 이동에서 관측한 사건 하나(출발 또는 도착)."""
@@ -69,6 +74,19 @@ class TripObservation(models.Model):
     accuracy_m = models.FloatField("위치 정확도(m)")
     # 판정 시점의 기준점까지 거리(m). 출발은 집, 도착은 목적지 기준이다.
     distance_m = models.FloatField("기준점까지 거리(m)")
+
+    # 목적지 반경 안에서 머문 시간(초). 도착에만 있다.
+    #
+    # **판정 근거의 세기다.** 앱은 반경 진입 + 2분 체류로 도착을 본다. 그런데
+    # 추적 마감(일정 시작 후 한 시간)에 걸리면 2분을 못 채운 채 확정한다 —
+    # 버리면 실제로 관측한 도착이 사라지기 때문이다. 이 값이 없으면 둘을
+    # 구분할 수 없고, "지나가는 버스" 와 "도착" 이 같은 행으로 학습에 들어간다.
+    #
+    # null 을 허용하는 이유는 두 가지다. 출발 관측에는 머문 시간이 없고,
+    # 이 필드가 생기기 전에 올라온 관측도 그대로 남아야 한다.
+    dwell_seconds = models.PositiveIntegerField(
+        "체류 시간(초)", null=True, blank=True
+    )
 
     # 앱이 만드는 멱등 키. 재전송해도 행이 늘지 않는다.
     client_uuid = models.CharField("클라이언트 UUID", max_length=40)
@@ -120,6 +138,18 @@ class TripObservation(models.Model):
         if plan is None:
             return None
         return plan.depart_by if self.kind == self.Kind.DEPART else plan.arrive_at
+
+    @property
+    def dwell_confirmed(self) -> bool | None:
+        """체류 기준을 채운 도착인지. 출발이거나 값이 없으면 None.
+
+        앱 `TripGeofence.DEFAULT_DWELL_MILLIS` 와 같은 기준을 본다. 여기서
+        다시 판정하지 않고 앱이 보낸 시간만 재해석한다 — 서버에는 반경 안
+        궤적이 없어서 판정할 재료가 없다.
+        """
+        if self.kind != self.Kind.ARRIVE or self.dwell_seconds is None:
+            return None
+        return self.dwell_seconds >= DWELL_CONFIRM_SECONDS
 
     @property
     def delay_minutes(self) -> int | None:

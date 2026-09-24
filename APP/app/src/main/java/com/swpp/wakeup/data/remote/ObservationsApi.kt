@@ -61,6 +61,14 @@ data class TripObservationInput(
     @SerializedName("accuracy_m") val accuracyM: Double,
     /** 기준점까지 거리(m). 출발은 집, 도착은 목적지 기준 */
     @SerializedName("distance_m") val distanceM: Double,
+    /**
+     * 목적지 반경 안에서 머문 시간(초). 도착에만 있고 출발은 null.
+     *
+     * 판정 근거의 세기다. 기준 체류(2분)를 넘겨 판정한 것과 추적 마감에 밀려
+     * 도중에 확정한 것을 이 값으로 구분한다. 나중에 "2분을 채운 관측만" 골라
+     * 학습에 쓸 수 있다.
+     */
+    @SerializedName("dwell_seconds") val dwellSeconds: Int? = null,
     /** 멱등 키. 앱이 만들고 재전송해도 같은 값을 쓴다 */
     @SerializedName("client_uuid") val clientUuid: String,
 ) {
@@ -91,6 +99,8 @@ data class TripObservationDto(
     val lng: Double,
     @SerializedName("accuracy_m") val accuracyM: Double?,
     @SerializedName("distance_m") val distanceM: Double?,
+    /** 반경 안에서 머문 시간(초). 도착이 아니거나 옛 관측이면 null */
+    @SerializedName("dwell_seconds") val dwellSeconds: Int?,
     /** 계획된 시각. 계획이 없으면 null */
     @SerializedName("planned_at") val plannedAt: String?,
     /** 계획보다 늦은 분. 이르면 음수. 계획이 없으면 null */

@@ -22,12 +22,10 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -58,6 +56,7 @@ import com.swpp.wakeup.ui.morning.MorningProgressScreen
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
+import com.swpp.wakeup.ui.settings.SettingsScreen
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
 import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.ui.routines.RoutineEditorScreen
@@ -157,7 +156,8 @@ private fun MainHost(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    var showAccountDialog by remember { mutableStateOf(false) }
+
+    /** 개발 빌드의 서버 확인 결과. 설정 화면이 읽는다 */
     var serverStatus by remember { mutableStateOf<String?>(null) }
 
     // 세션이 끝나면 로그인 화면으로 되돌린다.
@@ -229,9 +229,12 @@ private fun MainHost(
     }
     LaunchedEffect(homeSetupState.done) {
         if (homeSetupState.done) {
+            // 건너뛴 경우에는 저장한 것이 없다. 준비 시간 온보딩과 같은 이유로
+            // 확인 문구를 띄우지 않는다 — 저장되지 않은 것을 저장했다고 말한다.
+            val saved = homeSetupState.saved
             viewModel.goBack()
             viewModel.resetHomeSetup()
-            snackbarHostState.showSnackbar("집 위치를 저장했습니다")
+            if (saved) snackbarHostState.showSnackbar("집 주소를 저장했습니다")
         }
     }
     LaunchedEffect(prepOnboardingState.done) {
@@ -296,7 +299,7 @@ private fun MainHost(
                 AppRoute.Home -> HomeScreen(
                     state = state,
                     avatarInitials = viewModel.avatarInitials(),
-                    onAvatarClick = { showAccountDialog = true },
+                    onAvatarClick = viewModel::openSettings,
                     onEventClick = { viewModel.openAlarmDecision(it.id) },
                     onAddEventClick = {
                         viewModel.resetAdd()
@@ -333,6 +336,7 @@ private fun MainHost(
                 AppRoute.AddEvent -> AddEventScreen(
                     state = addState,
                     hasHome = state.hasHome,
+                    homePlace = state.homePlace,
                     onTitleChange = viewModel::onAddTitleChange,
                     onDateChange = viewModel::onAddDateChange,
                     onTimeChange = viewModel::onAddTimeChange,
@@ -353,6 +357,7 @@ private fun MainHost(
                     onRetry = viewModel::retryRouteChoice,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
+                    homePlace = state.homePlace,
                     onOriginEditToggle = viewModel::onOriginEditToggle,
                     onOriginQueryChange = viewModel::onOriginQueryChange,
                     onOriginSearch = viewModel::searchOriginPlaces,
@@ -374,10 +379,54 @@ private fun MainHost(
                     onQueryChange = viewModel::onHomeQueryChange,
                     onSearch = viewModel::searchHomePlaces,
                     onSelect = viewModel::onHomePlaceSelected,
-                    onPrepChange = viewModel::onHomePrepChange,
                     onSubmit = viewModel::submitHomeSetup,
+                    onSkip = viewModel::skipHomeSetup,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
+                )
+
+                AppRoute.Settings -> SettingsScreen(
+                    state = state,
+                    avatarInitials = viewModel.avatarInitials(),
+                    locationGranted = LocationPermissions.granted(context),
+                    onChangeHome = {
+                        viewModel.resetHomeSetup()
+                        viewModel.openHomeSetup()
+                    },
+                    onChangePrep = {
+                        viewModel.resetPrepOnboarding()
+                        viewModel.openPrepOnboarding()
+                    },
+                    onLogout = {
+                        viewModel.logout()
+                        onLoggedOut()
+                    },
+                    onBack = viewModel::goBack,
+                    modifier = Modifier.padding(innerPadding),
+                    // 빌드에 박힌 값이 아니라 실제로 쓰는 주소를 보여준다.
+                    // 에뮬레이터면 10.0.2.2 로 바뀌어 있다.
+                    devInfo = if (BuildConfig.DEV_TOOLS) {
+                        buildString {
+                            append("서버 = ${ApiClient.baseUrl}")
+                            serverStatus?.let { append("\n$it") }
+                        }
+                    } else {
+                        null
+                    },
+                    onDevCheck = if (BuildConfig.DEV_TOOLS) {
+                        {
+                            scope.launch {
+                                serverStatus = try {
+                                    val res = ApiClient.health.health()
+                                    "서버 연결 성공  ok=${res.ok}  version=${res.version ?: "-"}"
+                                } catch (e: Exception) {
+                                    "서버 연결 실패  ${e.javaClass.simpleName}"
+                                }
+                            }
+                        }
+                    } else {
+                        null
+                    },
                 )
 
                 // 정의 편집과 일정별 체크가 같은 화면을 쓴다. 상태의 eventId 로
@@ -424,70 +473,6 @@ private fun MainHost(
         }
     }
 
-    if (showAccountDialog) {
-        AlertDialog(
-            onDismissRequest = { showAccountDialog = false },
-            containerColor = JitColor.Surface,
-            title = { Text(state.nickname, color = JitColor.TextPrimary) },
-            text = {
-                Text(
-                    buildString {
-                        append("일정 ${state.totalCount}개")
-                        state.homeLabel?.let { append("\n집: $it") }
-                        if (!state.hasHome) append("\n집 위치 미설정")
-
-                        // 알람이 실제로 기기에 걸렸는지 확인할 창구.
-                        // 서버가 시각을 아는 것과 기기가 울리는 것은 다른 문제다.
-                        append("\n\n알람 ${state.registeredAlarms}개 등록됨")
-                        state.nextRegisteredLabel?.let { append(" · 다음 $it") }
-                        if (!LocationPermissions.granted(context)) {
-                            append("\n위치 권한 없음 — 출발·도착이 기록되지 않음")
-                        }
-                        if (state.pendingObservations > 0) {
-                            append("\n올리지 못한 이동 기록 ${state.pendingObservations}건")
-                        }
-
-                        if (BuildConfig.DEV_TOOLS) {
-                            // 빌드에 박힌 값이 아니라 실제로 쓰는 주소를 보여준다.
-                            // 에뮬레이터면 10.0.2.2 로 바뀌어 있다.
-                            append("\n\n서버 = ${ApiClient.baseUrl}")
-                            serverStatus?.let { append("\n$it") }
-                        }
-                    },
-                    color = JitColor.TextSecondary,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.logout()
-                    showAccountDialog = false
-                    onLoggedOut()
-                }) {
-                    Text("로그아웃", color = JitColor.Red)
-                }
-            },
-            dismissButton = {
-                if (BuildConfig.DEV_TOOLS) {
-                    TextButton(onClick = {
-                        scope.launch {
-                            serverStatus = try {
-                                val res = ApiClient.health.health()
-                                "서버 연결 성공  ok=${res.ok}  version=${res.version ?: "-"}"
-                            } catch (e: Exception) {
-                                "서버 연결 실패  ${e.javaClass.simpleName}"
-                            }
-                        }
-                    }) {
-                        Text("서버 확인", color = JitColor.TextSecondary)
-                    }
-                } else {
-                    TextButton(onClick = { showAccountDialog = false }) {
-                        Text("닫기", color = JitColor.TextSecondary)
-                    }
-                }
-            },
-        )
-    }
 }
 
 /**

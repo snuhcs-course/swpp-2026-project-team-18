@@ -121,6 +121,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /** 집 위치 미설정이면 알람을 계산할 수 없다. 안내를 띄운다 */
         val hasHome: Boolean = true,
         val homeLabel: String? = null,
+        /**
+         * 저장된 집을 장소 하나로 본 것. 설정하지 않았으면 null.
+         *
+         * 좌표를 따로 들고 다니지 않는 이유는 쓰는 쪽이 전부 [PlaceSearchItem]
+         * 을 요구하기 때문이다 — 출발지·도착지의 "집" 버튼이 그대로 넘긴다.
+         * `kakaoPlaceId` 는 없다. 카카오가 준 장소가 아니라 사용자가 고른
+         * 좌표라서 그 자리에 넣을 값이 없다.
+         */
+        val homePlace: PlaceSearchItem? = null,
         val unplannedCount: Int = 0,
 
         /**
@@ -188,6 +197,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     private var prepOnboardingAsked = false
 
+    /**
+     * 집 주소 온보딩을 이 세션에서 이미 띄웠는지.
+     *
+     * [prepOnboardingAsked] 와 같은 이유로 `init` 위에 둔다 — 아래에 두면
+     * `init` 의 `refresh()` 가 초기화보다 먼저 읽어 false 가 다시 덮인다.
+     */
+    private var homeOnboardingAsked = false
+
     init {
         refresh()
         // 알람 액티비티가 세션을 만들어 두었을 수 있다. 홈 카드가 보이려면
@@ -214,12 +231,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             totalCount = result.data.totalCount,
                             hasHome = result.data.hasHome,
                             homeLabel = result.data.homeLabel,
+                            homePlace = result.data.toHomePlace(),
                             unplannedCount = result.data.unplannedCount,
                             offline = result.data.fromCache,
                             offlineAgeLabel = result.data.ageLabel,
                         )
                     }
-                    maybeAskPrepOnboarding(result.data)
+                    maybeAskOnboarding(result.data)
                     syncAlarms(result.data.schedules, fromCache = result.data.fromCache)
                 }
 
@@ -341,6 +359,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openAddEvent() {
         _nav.update { it.copy(stack = it.stack + AppRoute.AddEvent, forward = true) }
+    }
+
+    /** 설정 화면. 가입할 때 정한 집 주소·준비 시간을 여기서 고친다 */
+    fun openSettings() {
+        _nav.update { it.copy(stack = it.stack + AppRoute.Settings, forward = true) }
     }
 
     fun openHomeSetup() {
@@ -1359,6 +1382,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _prepOnboarding = MutableStateFlow(PrepOnboardingState())
     val prepOnboarding: StateFlow<PrepOnboardingState> = _prepOnboarding.asStateFlow()
 
+    /**
+     * 준비 시간 화면을 직접 연다. 설정에서 다시 고칠 때 쓴다.
+     *
+     * 온보딩 경로([maybeAskOnboarding])와 달리 한 번만 띄우는 제한이 없다.
+     * 사용자가 고치겠다고 들어온 것이라 막을 이유가 없다.
+     */
+    fun openPrepOnboarding() {
+        _nav.update { it.copy(stack = it.stack + AppRoute.PrepOnboarding, forward = true) }
+    }
+
     fun resetPrepOnboarding() {
         _prepOnboarding.value = PrepOnboardingState()
     }
@@ -1408,20 +1441,67 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 프로필에 준비 시간이 없으면 온보딩 화면을 한 번 밀어 넣는다.
+     * 아직 받지 못한 온보딩 화면을 밀어 넣는다. 집 주소 → 준비 시간 순이다.
      *
      * 가입 직후만이 아니라 **답하지 않은 동안** 띄운다. 가입 여부를 인텐트
      * 플래그로 넘기면 앱을 껐다 켠 사용자는 영원히 묻지 않게 되고, 그러면
      * 다시 전원이 30분으로 돌아간다. 서버 상태를 근거로 삼으면 그 구멍이 없다.
+     *
+     * **밀어 넣는 순서가 보이는 순서의 역이다.** [NavState.current] 는
+     * `stack.last()` 라서 나중에 넣은 것이 먼저 보인다. 집 주소를 먼저 보여
+     * 주려면 준비 시간을 먼저 넣어야 하고, 그러면 뒤로 가기가 그 순서를
+     * 되짚어 집 주소 → 준비 시간 → 홈이 된다.
+     *
+     * 집을 먼저 묻는 이유는 준비 시간이 "문을 나서기까지" 를 묻는 값이어서다.
+     * 어디서 나서는지를 모르는 채로 물으면 답할 기준이 없다.
      */
-    private fun maybeAskPrepOnboarding(data: EventRepository.HomeData) {
-        if (data.onboardingPrepMin != null) return
-        if (prepOnboardingAsked) return
-        // 오프라인 사본으로는 판단하지 않는다. 캐시에 준비 시간이 없을 뿐인데
+    private fun maybeAskOnboarding(data: EventRepository.HomeData) {
+        // 오프라인 사본으로는 판단하지 않는다. 캐시에 값이 없을 뿐인데
         // 물어보면, 이미 답한 사용자에게 같은 질문을 다시 하게 된다.
         if (data.fromCache) return
-        prepOnboardingAsked = true
-        _nav.update { it.copy(stack = it.stack + AppRoute.PrepOnboarding, forward = true) }
+
+        val pending = buildList {
+            if (data.onboardingPrepMin == null && !prepOnboardingAsked) {
+                prepOnboardingAsked = true
+                add(AppRoute.PrepOnboarding)
+            }
+            if (!data.hasHome && !homeOnboardingAsked) {
+                homeOnboardingAsked = true
+                add(AppRoute.HomeSetup)
+            }
+        }
+        if (pending.isEmpty()) return
+
+        // 온보딩으로 여는 것이라 화면 문구가 달라진다. 밀어 넣기 전에 정한다.
+        //
+        // `_homeSetup` 선언이 이 함수보다 아래에 있어도 괜찮다. 이 함수는
+        // `refresh()` 가 띄운 코루틴 안에서만 불리고, 코루틴 본문은 생성자가
+        // 끝난 뒤에 돈다. **동기 호출로 바꾸면 그때 깨진다** — 근거는
+        // `HomeViewModelInitOrderTest` 에 있다.
+        if (pending.contains(AppRoute.HomeSetup)) {
+            _homeSetup.value = HomeSetupState(onboarding = true)
+        }
+        _nav.update { it.copy(stack = it.stack + pending, forward = true) }
+    }
+
+    /**
+     * 저장된 집을 장소 하나로 만든다. 좌표가 없으면 null.
+     *
+     * 좌표 둘 중 하나만 있는 상태는 서버 제약(`accounts_profile_home_pair`)이
+     * 막지만, 여기서도 둘 다 확인한다 — 한쪽만 들어온 값으로 경로를 계산하면
+     * 엉뚱한 곳에서 출발한 것이 된다.
+     */
+    private fun EventRepository.HomeData.toHomePlace(): PlaceSearchItem? {
+        val lat = homeLat ?: return null
+        val lng = homeLng ?: return null
+        return PlaceSearchItem(
+            kakaoPlaceId = null,
+            name = homeLabel?.takeIf { it.isNotBlank() } ?: "집",
+            address = null,
+            lat = lat,
+            lng = lng,
+            category = null,
+        )
     }
 
     // --- 집 위치 설정 -----------------------------------------------------
@@ -1431,10 +1511,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val searching: Boolean = false,
         val results: List<PlaceSearchItem> = emptyList(),
         val selected: PlaceSearchItem? = null,
-        val prepMinutes: String = "30",
+        /**
+         * 가입 직후 온보딩으로 열렸는가.
+         *
+         * 문구와 건너뛰기 여부가 달라진다. 설정에서 들어온 경우에는 이미 집이
+         * 있으므로 "나중에 입력" 이 뜻을 갖지 않는다 — 헤더의 뒤로가기가
+         * 그 역할을 한다.
+         */
+        val onboarding: Boolean = false,
         val submitting: Boolean = false,
         val error: String? = null,
         val done: Boolean = false,
+        /**
+         * 닫힌 이유가 저장인가.
+         *
+         * 건너뛰기도 [done] 을 세우므로 이것 없이는 구분할 수 없다. 구분하지
+         * 않으면 건너뛴 사용자에게 "저장했습니다" 를 띄운다.
+         */
+        val saved: Boolean = false,
     ) {
         val canSubmit: Boolean get() = !submitting && selected != null
     }
@@ -1450,8 +1544,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun onHomePlaceSelected(item: PlaceSearchItem?) =
         _homeSetup.update { it.copy(selected = item, results = emptyList(), query = item?.name ?: "") }
 
-    fun onHomePrepChange(v: String) =
-        _homeSetup.update { it.copy(prepMinutes = v.filter(Char::isDigit).take(3)) }
+    /**
+     * 집 주소를 저장하지 않고 닫는다.
+     *
+     * 온보딩에서만 쓴다. 네트워크가 죽은 상태에서 이 화면이 앱의 입구를 막아
+     * 버리면 안 된다 — [skipPrepOnboarding] 과 같은 이유다. 다음에 앱을 열면
+     * 프로필에 여전히 집이 없으므로 다시 묻는다.
+     */
+    fun skipHomeSetup() {
+        _homeSetup.update { it.copy(done = true, saved = false) }
+    }
 
     fun searchHomePlaces() {
         val q = _homeSetup.value.query.trim()
@@ -1474,15 +1576,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         _homeSetup.update { it.copy(submitting = true, error = null) }
         viewModelScope.launch {
+            // 준비 시간은 보내지 않는다. 함께 보내면 준비 시간 온보딩이
+            // "이미 답했다" 고 판단해 뜨지 않는다 — 근거는 [EventRepository.setHome].
             val result = repository.setHome(
                 label = place.name,
                 lat = place.lat,
                 lng = place.lng,
-                prepMinutes = current.prepMinutes.toIntOrNull(),
             )
             when (result) {
                 is EventRepository.Result.Success -> {
-                    _homeSetup.update { it.copy(submitting = false, done = true) }
+                    _homeSetup.update { it.copy(submitting = false, done = true, saved = true) }
                     // 집 위치가 정해지면 서버가 기존 일정 알람을 다시 계산한다.
                     refresh()
                 }

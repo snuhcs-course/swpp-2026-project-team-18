@@ -13,8 +13,12 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.events.models import Event, Place
-from apps.observations.models import TripObservation
-from apps.observations.serializers import MAX_ACCURACY_M
+from apps.observations.models import DWELL_CONFIRM_SECONDS, TripObservation
+from apps.observations.serializers import (
+    MAX_ACCURACY_M,
+    MAX_DWELL_SECONDS,
+    TripObservationWriteSerializer,
+)
 from apps.planning.models import AlarmPlan
 
 KST = timezone(timedelta(hours=9))
@@ -287,3 +291,123 @@ class TestListFiltering:
             f"{LIST_URL}?from=2026-10-05T08:30:00%2B09:00"
         )
         assert [o["client_uuid"] for o in res.data["results"]] == ["a1"]
+
+
+class TestDwellSeconds:
+    """체류 시간.
+
+    앱은 목적지 반경 진입 + 2분 체류로 도착을 본다. 그런데 추적 마감에 걸리면
+    2분을 못 채운 채 확정한다 — 버리면 실제로 관측한 도착이 사라지기 때문이다.
+    그래서 **둘이 같은 행으로 저장되면 안 된다.** 지나가던 차와 도착한 사람을
+    구분하는 유일한 근거가 이 값이다.
+    """
+
+    def test_arrival_stores_dwell(self, client, event):
+        res = client.post(
+            BATCH_URL,
+            obs_body(event, "d1", kind="arrive", dwell_seconds=145),
+            format="json",
+        )
+        assert res.status_code == 201
+        assert TripObservation.objects.get(client_uuid="d1").dwell_seconds == 145
+
+    def test_dwell_is_optional(self, client, event):
+        """이 필드가 생기기 전 큐에 쌓인 관측도 올라와야 한다."""
+        res = client.post(
+            BATCH_URL, obs_body(event, "d2", kind="arrive"), format="json"
+        )
+        assert res.status_code == 201
+        assert TripObservation.objects.get(client_uuid="d2").dwell_seconds is None
+
+    def test_depart_cannot_carry_dwell(self, client, event):
+        """출발은 "반경을 벗어남" 이라 머문 시간이 없다. 앱의 배선 오류다."""
+        res = client.post(
+            BATCH_URL,
+            obs_body(event, "d3", kind="depart", dwell_seconds=130),
+            format="json",
+        )
+        assert res.status_code == 400
+        assert not TripObservation.objects.filter(client_uuid="d3").exists()
+
+    def test_negative_dwell_is_rejected(self, client, event):
+        res = client.post(
+            BATCH_URL,
+            obs_body(event, "d4", kind="arrive", dwell_seconds=-5),
+            format="json",
+        )
+        assert res.status_code == 400
+
+    def test_absurd_dwell_is_rejected(self, client, event):
+        """추적은 일정 시작 후 한 시간에 끝난다. 그보다 긴 체류는 나올 수 없다.
+
+        쓰레기 값 하나가 "체류 2분 이상" 학습 필터를 통과해 버린다.
+        """
+        res = client.post(
+            BATCH_URL,
+            obs_body(event, "d5", kind="arrive", dwell_seconds=MAX_DWELL_SECONDS + 1),
+            format="json",
+        )
+        assert res.status_code == 400
+
+    def test_confirmed_flag_reads_the_threshold(self, client, event):
+        cases = [
+            ("c1", DWELL_CONFIRM_SECONDS - 1, False),
+            ("c2", DWELL_CONFIRM_SECONDS, True),
+            ("c3", DWELL_CONFIRM_SECONDS + 60, True),
+        ]
+        for uid, dwell, expected in cases:
+            client.post(
+                BATCH_URL,
+                obs_body(event, uid, kind="arrive", dwell_seconds=dwell),
+                format="json",
+            )
+            obs = TripObservation.objects.get(client_uuid=uid)
+            assert obs.dwell_confirmed is expected, f"{uid} 체류 {dwell}초"
+
+    def test_confirmed_flag_is_none_without_dwell(self, client, event):
+        """판정할 재료가 없으면 참도 거짓도 아니다."""
+        client.post(BATCH_URL, obs_body(event, "c4", kind="arrive"), format="json")
+        assert TripObservation.objects.get(client_uuid="c4").dwell_confirmed is None
+
+        client.post(BATCH_URL, obs_body(event, "c5", kind="depart"), format="json")
+        assert TripObservation.objects.get(client_uuid="c5").dwell_confirmed is None
+
+    def test_list_exposes_dwell(self, client, event):
+        client.post(
+            BATCH_URL,
+            obs_body(event, "c6", kind="arrive", dwell_seconds=130),
+            format="json",
+        )
+        row = client.get(f"{LIST_URL}?event={event.pk}").data["results"][0]
+        assert row["dwell_seconds"] == 130
+        assert row["dwell_confirmed"] is True
+
+
+class TestWriteContract:
+    def test_every_writable_field_reaches_the_row(self, client, event):
+        """본문에 담아 보낸 값이 하나도 빠지지 않고 행에 닿는지.
+
+        **왜 이런 검사가 필요한가.** 업로드 뷰는 `get_or_create(defaults=...)`
+        로 행을 만든다. 예전에는 그 `defaults` 에 필드를 손으로 나열했는데,
+        시리얼라이저에 `dwell_seconds` 를 더하고 뷰를 잊었더니 400 도 나지
+        않고 **null 로 저장됐다.** 값 하나를 검사하는 테스트로는 다음에 추가할
+        필드를 잡지 못하므로, 쓰기 필드 전체를 훑는다.
+        """
+        body = obs_body(event, "w1", kind="arrive", dwell_seconds=150)
+        assert client.post(BATCH_URL, body, format="json").status_code == 201
+
+        sent = body["observations"][0]
+        obs = TripObservation.objects.get(client_uuid="w1")
+
+        dropped = []
+        for field in TripObservationWriteSerializer.Meta.fields:
+            if field not in sent:
+                continue
+            # 문자열 ↔ datetime 변환은 이 검사가 볼 것이 아니다.
+            if field == "observed_at":
+                continue
+            stored = obs.event_id if field == "event" else getattr(obs, field)
+            if stored != sent[field]:
+                dropped.append((field, sent[field], stored))
+
+        assert not dropped, f"본문 값이 행에 닿지 않았다: {dropped}"

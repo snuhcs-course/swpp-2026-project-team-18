@@ -94,6 +94,13 @@ private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 fun AddEventScreen(
     state: HomeViewModel.AddState,
     hasHome: Boolean,
+    /**
+     * 저장된 집. 장소 검색 옆의 "집" 버튼에 쓴다. null 이면 버튼이 뜨지 않는다.
+     *
+     * 기본값을 두지 않는다. 두면 호출부가 빠뜨려도 컴파일되고, 집 버튼이
+     * 조용히 사라진 것을 아무도 모른다.
+     */
+    homePlace: com.swpp.wakeup.data.remote.PlaceSearchItem?,
     onTitleChange: (String) -> Unit,
     onDateChange: (LocalDate) -> Unit,
     onTimeChange: (Int, Int) -> Unit,
@@ -154,6 +161,8 @@ fun AddEventScreen(
             onSearch = onSearch,
             onSelect = onPlaceSelect,
             enabled = !state.submitting,
+            // 목적지가 집인 경우도 있다 — 퇴근·귀가 일정이 그렇다.
+            homePlace = homePlace,
         )
 
         TagDropdown(state.tagKey, onTagChange, enabled = !state.submitting)
@@ -207,10 +216,15 @@ fun AddEventScreen(
 }
 
 /**
- * 집 위치 설정.
+ * 집 주소 설정 (Figma ⑭).
  *
- * 알람 계산의 출발지다. 설정하면 서버가 기존 일정의 알람을 한꺼번에 다시
+ * 알람 계산의 출발지다. 저장하면 서버가 기존 일정의 알람을 한꺼번에 다시
  * 계산한다(`PATCH /api/profile` → `recompute_for_user`).
+ *
+ * **준비 시간을 여기서 받지 않는다.** 예전에는 같은 화면에서 둘을 함께
+ * 받았는데, 그러면 가입 직후 이 화면이 `onboarding_prep_min` 을 채워 버려서
+ * 준비 시간을 묻는 화면(Figma ⑮)이 뜨지 않았다. 지금은 집만 받고 준비 시간은
+ * 다음 화면이 묻는다.
  */
 @Composable
 fun HomeSetupScreen(
@@ -218,8 +232,8 @@ fun HomeSetupScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit,
-    onPrepChange: (String) -> Unit,
     onSubmit: () -> Unit,
+    onSkip: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -236,16 +250,16 @@ fun HomeSetupScreen(
             ),
         verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
     ) {
-        ScreenHeader(title = "집 위치 설정", onBack = onBack, enabled = !state.submitting)
+        ScreenHeader(title = "집 주소", onBack = onBack, enabled = !state.submitting)
 
         Text(
-            text = "어디서 출발하는가?",
+            text = "집이 어디인가요?",
             color = JitColor.TextPrimary,
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "이동 시간을 구하려면 출발지가 필요함",
+            text = "집에서 나서는 시각을 이 위치로 계산함",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
@@ -262,25 +276,10 @@ fun HomeSetupScreen(
             enabled = !state.submitting,
         )
 
-        JitTextField(
-            label = "준비 시간 (분)",
-            value = state.prepMinutes,
-            onValueChange = onPrepChange,
-            keyboardType = KeyboardType.Number,
-            imeAction = ImeAction.Done,
-            enabled = !state.submitting,
-        )
-
         NoticeCard(
             dot = JitColor.Blue,
             title = "저장하는 정보",
-            body = "선택한 장소의 좌표와 이름만 저장함. 실시간 위치는 추적하지 않음",
-        )
-
-        NoticeCard(
-            dot = JitColor.TextSecondary,
-            title = "준비 시간은 시작값임",
-            body = "지금은 사용자가 답한 값을 그대로 씀. 관측이 쌓이면 학습값으로 대체됨",
+            body = "고른 지점의 좌표와 이름만 저장함. 이동 중 실시간 위치는 서버에 보내지 않음",
         )
 
         state.error?.let {
@@ -290,11 +289,29 @@ fun HomeSetupScreen(
         Spacer(Modifier.height(4.dp))
 
         JitPrimaryButton(
-            label = "저장하고 알람 다시 계산",
+            label = "이 주소로 저장",
             onClick = onSubmit,
             enabled = state.canSubmit,
             loading = state.submitting,
         )
+
+        // 온보딩에서만 건너뛸 수 있다. 네트워크가 죽었을 때 이 화면이 앱의
+        // 입구를 막으면 안 된다. 설정에서 들어온 경우에는 이미 집이 있으므로
+        // 건너뛸 것이 없고, 헤더의 뒤로가기가 그 역할을 한다.
+        if (state.onboarding) {
+            Text(
+                text = "나중에 입력",
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(JitRadius.Hint))
+                    .clickable(enabled = !state.submitting, onClick = onSkip)
+                    .padding(vertical = 8.dp),
+            )
+        }
     }
 }
 

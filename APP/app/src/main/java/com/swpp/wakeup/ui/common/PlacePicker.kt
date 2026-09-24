@@ -49,6 +49,14 @@ fun PlacePicker(
     onSelect: (PlaceSearchItem?) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    /**
+     * 저장된 집. null 이 아니면 검색 옆에 "집" 버튼이 붙는다.
+     *
+     * 집은 출발지·도착지로 가장 자주 쓰이는데 매번 검색해서 고르게 하면
+     * 가입할 때 받아 둔 주소가 쓰이지 않는다. 눌러도 검색과 같은 자리로
+     * 들어가므로 고른 뒤 "변경" 으로 되돌릴 수 있다.
+     */
+    homePlace: PlaceSearchItem? = null,
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(9.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -61,6 +69,15 @@ fun PlacePicker(
                 enabled = enabled && !searching,
                 modifier = Modifier.weight(1f),
             )
+            // 이미 고른 장소가 있으면 숨긴다. 그 상태에서 집을 누르면 방금 고른
+            // 것이 조용히 덮여서, 무엇이 선택됐는지 알 수 없다.
+            if (homePlace != null && selected == null) {
+                Spacer(Modifier.width(9.dp))
+                HomeButton(
+                    onClick = { onSelect(homePlace) },
+                    enabled = enabled && !searching,
+                )
+            }
             Spacer(Modifier.width(9.dp))
             SearchButton(onClick = onSearch, loading = searching, enabled = enabled)
         }
@@ -127,6 +144,32 @@ fun PlacePicker(
                 }
             }
         }
+    }
+}
+
+/**
+ * 저장된 집을 한 번에 고르는 버튼.
+ *
+ * 검색 버튼과 같은 크기·모양이고 글자색만 다르다. 강조색을 주지 않은 이유는
+ * 검색이 이 줄의 주된 동작이어서다 — 둘 다 강조하면 어느 쪽이 기본인지
+ * 읽히지 않는다.
+ */
+@Composable
+private fun HomeButton(onClick: () -> Unit, enabled: Boolean) {
+    androidx.compose.foundation.layout.Box(
+        modifier = Modifier
+            .size(46.dp)
+            .clip(RoundedCornerShape(JitRadius.Button))
+            .background(JitColor.Surface2)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = "집",
+            color = JitColor.TextPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 

@@ -81,6 +81,15 @@ class EventRepository(
         val hasHome: Boolean,
         val homeLabel: String?,
         /**
+         * 집 좌표. 둘 다 있거나 둘 다 없다(서버 제약 `accounts_profile_home_pair`).
+         *
+         * 화면에 숫자로 보여 줄 값이 아니다. 출발지·도착지의 "집" 버튼이
+         * [PlaceSearchItem] 을 만들려면 좌표가 필요해서 올린다 — 예전에는
+         * 좌표가 저장소 안쪽(`toSchedule`)에만 있어서 UI 가 집을 고를 수 없었다.
+         */
+        val homeLat: Double?,
+        val homeLng: Double?,
+        /**
          * 사용자가 답한 평소 준비 시간(분). **null 이면 아직 답하지 않은 것이다.**
          *
          * 서버 기본값을 두지 않고 null 로 남긴다. 30 을 넣어 두면 "답한 30분" 과
@@ -185,6 +194,8 @@ class EventRepository(
             totalCount = sorted.size,
             hasHome = profile.hasHome,
             homeLabel = profile.homeLabel?.takeIf { it.isNotBlank() },
+            homeLat = profile.homeLat,
+            homeLng = profile.homeLng,
             onboardingPrepMin = profile.onboardingPrepMin?.takeIf { it > 0 },
             unplannedCount = sorted.count { it.alarmAt == null },
             schedules = events.mapNotNull { it.toSchedule(zone, profile) },
@@ -306,11 +317,22 @@ class EventRepository(
         unwrap(api.tags())?.let { Result.Success(it) } ?: Result.Failure(MESSAGE_UNKNOWN)
     }
 
+    /**
+     * 집 위치를 저장한다.
+     *
+     * [prepMinutes] 는 기본이 null 이고, null 이면 **보내지 않는다**(Gson 이
+     * null 필드를 뺀다). 준비 시간은 [setOnboardingPrep] 과 온보딩 화면이
+     * 따로 담당하므로 이 경로는 좌표만 건드린다.
+     *
+     * 함께 보내면 곤란한 이유가 있다. 가입 직후 집을 먼저 받는데 그때 준비
+     * 시간을 같이 보내면 `onboarding_prep_min` 이 채워지고, 그러면 준비 시간
+     * 온보딩이 "이미 답한 것" 으로 판단해 뜨지 않는다.
+     */
     suspend fun setHome(
         label: String,
         lat: Double,
         lng: Double,
-        prepMinutes: Int?,
+        prepMinutes: Int? = null,
     ): Result<ProfileDto> = guard {
         val body = ProfileUpdateRequest(
             homeLat = lat,

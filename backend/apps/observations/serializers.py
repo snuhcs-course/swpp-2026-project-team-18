@@ -16,6 +16,10 @@ from .models import TripObservation
 # 보내지만 서버도 막는다 — 클라이언트를 신뢰하면 학습이 오염된다.
 MAX_ACCURACY_M = 50.0
 
+# 받을 수 있는 최대 체류 시간(초). 추적은 일정 시작 후 한 시간에 끝나므로
+# 그보다 긴 체류는 나올 수 없다. 두 배로 여유를 둔다.
+MAX_DWELL_SECONDS = 7200
+
 
 class TripObservationSerializer(serializers.ModelSerializer):
     """응답. 계획 대비 지연을 함께 내려 앱이 다시 계산하지 않게 한다."""
@@ -23,6 +27,7 @@ class TripObservationSerializer(serializers.ModelSerializer):
     kind_label = serializers.CharField(source="get_kind_display", read_only=True)
     planned_at = serializers.DateTimeField(read_only=True)
     delay_minutes = serializers.IntegerField(read_only=True)
+    dwell_confirmed = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = TripObservation
@@ -37,6 +42,8 @@ class TripObservationSerializer(serializers.ModelSerializer):
             "lng",
             "accuracy_m",
             "distance_m",
+            "dwell_seconds",
+            "dwell_confirmed",
             "planned_at",
             "delay_minutes",
             "client_uuid",
@@ -63,6 +70,7 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
             "lng",
             "accuracy_m",
             "distance_m",
+            "dwell_seconds",
             "client_uuid",
         )
 
@@ -92,6 +100,35 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("거리는 음수일 수 없다.")
         return value
+
+    def validate_dwell_seconds(self, value):
+        """체류 시간 상한.
+
+        추적은 일정 시작 후 한 시간에 끝나므로 그보다 긴 체류는 나올 수 없다.
+        여유를 두고 상한을 두는 이유는 이 값이 학습 필터로 쓰이기 때문이다 —
+        쓰레기 값 하나가 "체류 2분 이상" 필터를 통과해 버린다.
+        """
+        if value is None:
+            return value
+        if value > MAX_DWELL_SECONDS:
+            raise serializers.ValidationError(
+                f"체류 {value}초는 추적 가능한 시간을 넘는다. "
+                f"{MAX_DWELL_SECONDS}초 이하만 받는다."
+            )
+        return value
+
+    def validate(self, attrs):
+        """출발 관측에는 체류 시간이 없다.
+
+        조용히 지우지 않고 막는다. 출발에 체류 시간이 붙어 오는 것은 앱의
+        배선 오류이고, 지워 버리면 그 오류가 드러나지 않는다.
+        """
+        kind = attrs.get("kind")
+        if kind == TripObservation.Kind.DEPART and attrs.get("dwell_seconds") is not None:
+            raise serializers.ValidationError(
+                {"dwell_seconds": "출발 관측에는 체류 시간이 없다."}
+            )
+        return attrs
 
     def validate_lat(self, value: float) -> float:
         if not -90 <= value <= 90:
