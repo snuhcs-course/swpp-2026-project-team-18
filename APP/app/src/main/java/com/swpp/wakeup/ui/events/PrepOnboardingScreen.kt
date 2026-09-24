@@ -79,12 +79,9 @@ fun PrepOnboardingScreen(
             ),
         verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
     ) {
-        Text(
-            text = "준비 시간",
-            color = JitColor.TextSecondary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        // 뒤로 가기는 "나중에 입력" 과 같은 동작이다. 두 경로가 다르게 끝나면
+        // 한쪽만 상태를 정리해서, 다음에 이 화면을 열 때 앞서 적던 값이 남는다.
+        ScreenHeader(title = "준비 시간", onBack = onSkip, enabled = !state.submitting)
 
         Text(
             text = "평소 준비에 얼마나 걸림?",
