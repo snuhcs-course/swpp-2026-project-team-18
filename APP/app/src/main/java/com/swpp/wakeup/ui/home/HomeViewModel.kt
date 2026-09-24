@@ -36,8 +36,13 @@ import com.swpp.wakeup.domain.model.MorningSession
 import com.swpp.wakeup.domain.model.RoutineEditorState
 import com.swpp.wakeup.sensing.BlockObservationQueue
 import com.swpp.wakeup.sensing.CurrentLocation
+import com.swpp.wakeup.domain.model.PlanRow
+import com.swpp.wakeup.domain.model.RouteMapProjection
 import com.swpp.wakeup.domain.model.StaticMapScale
+import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.sensing.GeoPoint
+import com.swpp.wakeup.sensing.TripGeofence
+import com.swpp.wakeup.sensing.TripLiveState
 import com.swpp.wakeup.sensing.TripObservationQueue
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.UpcomingEvent
@@ -329,6 +334,36 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 알람 결정 화면이 보고 있는 계획. */
     private val _plan = MutableStateFlow<AlarmPlanView?>(null)
     val plan: StateFlow<AlarmPlanView?> = _plan.asStateFlow()
+
+    /**
+     * 알람 결정 화면의 경로 지도 상태.
+     *
+     * [MapPickState] 와 따로 둔다. 장소를 고르는 지도는 중심을 사용자가 옮기고
+     * 결과 마커를 바꾸지만, 이 지도는 **정해진 경로 하나**를 보여 주는 것이고
+     * 되돌아갈 기준(경로 전체)이 있다. 한 상태로 합치면 두 화면이 서로의
+     * 중심·마커를 덮어쓴다.
+     */
+    data class RouteMapState(
+        val eventId: Long,
+        val path: List<GeoPoint>,
+        val center: GeoPoint,
+        val level: Int,
+        val summary: String? = null,
+        val image: Bitmap? = null,
+        val imageLoading: Boolean = false,
+        val imageError: String? = null,
+        /** 손가락을 떼기 전까지 끈 거리(px) */
+        val pendingShift: Offset = Offset.Zero,
+    ) {
+        val canZoomIn: Boolean get() = level > StaticMapScale.MIN_LEVEL
+        val canZoomOut: Boolean get() = level < StaticMapScale.MAX_LEVEL
+    }
+
+    private val _routeMap = MutableStateFlow<RouteMapState?>(null)
+    val routeMap: StateFlow<RouteMapState?> = _routeMap.asStateFlow()
+
+    /** 추적 중인 여정의 실시간 위치. 서비스가 [TripLiveState] 로 내보낸다 */
+    val tripLive: StateFlow<TripLiveState.Snapshot?> = TripLiveState.snapshot
 
     /**
      * 이번 실행에서 준비 시간 온보딩을 이미 띄웠는가.
@@ -1494,6 +1529,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 방금 받은 지도의 조건. 같은 조건이면 다시 받지 않는다 */
     private var lastMapSignature: String? = null
 
+    /** 경로 지도의 마지막 요청 조합. 같으면 다시 받지 않는다 */
+    private var lastRouteMapSignature: String? = null
+
     private fun placeSearchOf(target: MapTarget): PlaceSearch = when (target) {
         MapTarget.DESTINATION -> _add.value.place
         MapTarget.HOME -> _homeSetup.value.place
@@ -1662,13 +1700,145 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadPlan(eventId: Long) {
         _plan.value = null
+        // 다른 일정의 지도가 남아 있으면 안 된다. 계획을 받기 전에 비운다.
+        _routeMap.value = null
+        primeCurrentLocation()
         viewModelScope.launch {
             when (val result = repository.loadPlan(eventId)) {
-                is EventRepository.Result.Success -> _plan.value = result.data
+                is EventRepository.Result.Success -> {
+                    _plan.value = result.data
+                    initRouteMap(result.data)
+                }
+
                 is EventRepository.Result.Failure ->
                     _state.update { it.copy(error = result.message) }
             }
         }
+    }
+
+    // --- 알람 결정 화면의 경로 지도 ----------------------------------------
+
+    /** 경로 좌표가 있으면 지도를 경로 전체가 보이는 상태로 시작한다. */
+    private fun initRouteMap(plan: AlarmPlanView) {
+        if (!plan.hasRoutePath) return
+        val fit = RouteMapProjection.fit(
+            path = plan.routePath,
+            requestUnits = ROUTE_MAP_FIT_WIDTH,
+            requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
+        ) ?: return
+        _routeMap.value = RouteMapState(
+            eventId = plan.eventId,
+            path = plan.routePath,
+            center = fit.first,
+            level = fit.second,
+            summary = listOfNotNull(
+                plan.routeDetail?.takeIf { it.isNotBlank() },
+                plan.routeDistanceM?.let { "%.1fkm".format(it / 1000.0) },
+                plan.breakdown
+                    .firstOrNull { it.kind == PlanRow.Kind.TRAVEL }
+                    ?.let { "${it.minutes}분" },
+            ).joinToString(" · ").takeIf { it.isNotBlank() },
+        )
+    }
+
+    /** 경로 전체가 보이는 상태로 되돌린다. */
+    fun fitRouteMap() {
+        val state = _routeMap.value ?: return
+        val fit = RouteMapProjection.fit(
+            path = state.path,
+            requestUnits = ROUTE_MAP_FIT_WIDTH,
+            requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
+        ) ?: return
+        _routeMap.update {
+            it?.copy(center = fit.first, level = fit.second, pendingShift = Offset.Zero)
+        }
+    }
+
+    fun onRouteMapZoom(delta: Int) {
+        _routeMap.update {
+            val next = (it ?: return@update it).level
+                .plus(delta)
+                .coerceIn(StaticMapScale.MIN_LEVEL, StaticMapScale.MAX_LEVEL)
+            it.copy(level = next)
+        }
+    }
+
+    fun onRouteMapDrag(delta: Offset) {
+        _routeMap.update { it?.copy(pendingShift = it.pendingShift + delta) }
+    }
+
+    /** 손가락을 뗐다. 밀린 만큼 중심을 옮기고 이미지를 다시 받는다. */
+    fun onRouteMapDragEnd(metersPerPixel: Double) {
+        val state = _routeMap.value ?: return
+        val shift = state.pendingShift
+        if (shift == Offset.Zero) return
+
+        // 이미지를 오른쪽으로 끌면 지도는 서쪽으로 간다. 부호가 반대다.
+        val dLat = (shift.y * metersPerPixel) / StaticMapScale.METERS_PER_DEGREE
+        val dLng = (-shift.x * metersPerPixel) /
+            (StaticMapScale.METERS_PER_DEGREE * cos(Math.toRadians(state.center.lat)))
+
+        _routeMap.update {
+            it?.copy(
+                center = GeoPoint(
+                    lat = (it.center.lat + dLat).coerceIn(-89.0, 89.0),
+                    lng = it.center.lng + dLng,
+                ),
+                pendingShift = Offset.Zero,
+            )
+        }
+    }
+
+    /** 화면 크기를 알았으니 지도 이미지를 받는다. 같은 조합이면 다시 받지 않는다. */
+    fun loadRouteMapImage(widthDp: Int, heightDp: Int) {
+        val state = _routeMap.value ?: return
+        if (widthDp <= 0 || heightDp <= 0) return
+
+        val signature = "${state.eventId},${state.center.lat},${state.center.lng}," +
+            "${state.level},$widthDp,$heightDp"
+        if (signature == lastRouteMapSignature && state.image != null) return
+        lastRouteMapSignature = signature
+
+        _routeMap.update { it?.copy(imageLoading = true, imageError = null) }
+        viewModelScope.launch {
+            // 마커는 보내지 않는다. 출발·도착 표식을 앱이 경로선과 같은 좌표계로
+            // 그리므로, 카카오가 그린 마커와 겹치면 두 번 표시된다.
+            val result = repository.staticMap(
+                center = state.center,
+                level = state.level,
+                widthDp = widthDp,
+                heightDp = heightDp,
+                markers = emptyList(),
+            )
+            _routeMap.update { current ->
+                current ?: return@update current
+                when (result) {
+                    is EventRepository.Result.Success ->
+                        current.copy(image = result.data, imageLoading = false, imageError = null)
+
+                    is EventRepository.Result.Failure ->
+                        current.copy(imageLoading = false, imageError = result.message)
+                }
+            }
+        }
+    }
+
+    /**
+     * 지금 어느 단계인가.
+     *
+     * 추적 중이면 판정기의 단계를 쓰고, 아니면 알람 시각과 현재 시각을 비교해
+     * "알람 전" 과 "준비 중" 을 가른다. 판정기는 둘을 구분하지 않는다 —
+     * 판정에는 같지만(둘 다 집에 있다) 사용자에게는 전혀 다른 상태다.
+     */
+    fun stageOf(plan: AlarmPlanView, nowMillis: Long = System.currentTimeMillis()): TripStage {
+        TripLiveState.pointFor(plan.eventId)?.let { live ->
+            return when (live.phase) {
+                TripGeofence.Phase.BEFORE_DEPARTURE -> TripStage.PREPARING
+                TripGeofence.Phase.IN_TRANSIT -> TripStage.IN_TRANSIT
+                TripGeofence.Phase.ARRIVED -> TripStage.ARRIVED
+            }
+        }
+        return if (plan.alarmPassed) TripStage.PREPARING else TripStage.BEFORE_ALARM
     }
 
     // --- 일정 추가 --------------------------------------------------------
@@ -2068,6 +2238,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * 아프리카 앞바다가 뜨고 사용자는 앱이 고장난 것으로 읽는다.
          */
         val SEOUL_CENTER = GeoPoint(37.5665, 126.9780)
+
+        /**
+         * 경로 전체 보기를 계산할 때 가정하는 지도 크기(요청 단위).
+         *
+         * 실제 화면 크기는 [loadRouteMapImage] 가 알려 주지만, 줌을 고르는
+         * 시점에는 아직 모른다. 피그마 ④-a 의 360x260 을 쓴다 — 화면이 조금
+         * 넓으면 여백이 늘어날 뿐 경로가 잘리지는 않는다.
+         */
+        const val ROUTE_MAP_FIT_WIDTH = 360
+        const val ROUTE_MAP_FIT_HEIGHT = 260
 
         /** 준비 시간으로 받아들이는 범위(분). 밖의 값은 입력 실수로 본다. */
         const val PREP_MIN = 5

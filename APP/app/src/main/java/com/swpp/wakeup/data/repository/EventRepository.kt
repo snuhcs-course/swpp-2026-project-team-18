@@ -956,8 +956,12 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         else -> "${days}일 뒤"
     }
 
-    val remaining = alarmLocal?.let {
-        val minutes = Duration.between(OffsetDateTime.now(zone), it).toMinutes()
+    // 알람까지 남은 분. 음수면 이미 지났다. 표시 문구와 단계 판정이 **같은
+    // 값**에서 나와야 둘이 어긋나지 않는다.
+    val minutesToAlarm = alarmLocal?.let {
+        Duration.between(OffsetDateTime.now(zone), it).toMinutes()
+    }
+    val remaining = minutesToAlarm?.let { minutes ->
         if (minutes <= 0) "지난 알람" else "${minutes / 60}시간 ${minutes % 60}분 남음"
     }
 
@@ -986,8 +990,26 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         // false 일 때만 알린다. null(고른 적 없음)과 true(그대로 쓰임)는
         // 사용자가 알 필요가 없다.
         routeFellBack = plan.routeChoiceHonored == false,
+        // 알람 시각을 아는 곳은 여기뿐이다(화면에는 표시 문자열만 간다).
+        // 시각이 없으면 아직 계산되지 않은 것이므로 "지나지 않았다" 로 둔다.
+        alarmPassed = (minutesToAlarm ?: 1L) <= 0L,
+        routeDetail = plan.routeDetail?.takeIf { it.isNotBlank() },
+        routePath = plan.routePath.toGeoPoints(),
+        routeDistanceM = plan.routeDistanceM,
     )
 }
+
+/**
+ * `[[lat, lng], ...]` 를 좌표 목록으로.
+ *
+ * 서버가 보낸 배열의 모양을 믿지 않는다. 길이가 2 미만인 항목이나 숫자가
+ * 아닌 값이 섞이면 **그 점만 버리고** 나머지로 경로를 그린다 — 한 점 때문에
+ * 지도와 진행률이 통째로 사라지는 것보다 낫다.
+ */
+private fun List<List<Double>>?.toGeoPoints(): List<GeoPoint> =
+    this.orEmpty().mapNotNull { pair ->
+        if (pair.size >= 2) GeoPoint(lat = pair[0], lng = pair[1]) else null
+    }
 
 /**
  * 알람 등록·이동 추적에 쓸 형태로 바꾼다.

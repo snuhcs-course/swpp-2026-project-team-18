@@ -135,6 +135,34 @@ class AlarmPlan(models.Model):
         "경로 상세", max_length=120, blank=True, default="", db_default=""
     )
 
+    # 경로 폴리라인. `[[lat, lng], ...]` 이고 최대 600점이다.
+    #
+    # **두 가지에 쓴다.** 지도에 경로선을 그리고, 진행률의 분모가 된다. 카카오
+    # 정적 지도에는 선을 그리는 파라미터가 없어서(실측: path·polyline·line·paths·
+    # route 전부 무시되고 같은 이미지가 온다) 앱이 이 좌표를 화면에 투영해
+    # 직접 그린다.
+    #
+    # 여기 보관하는 이유는 호출량이다. 알람을 계산할 때 이미 카카오를 부르므로
+    # 그때 함께 받아 두면 추가 호출이 없다. 화면을 열 때마다 다시 받으면 경로
+    # API 를 그만큼 더 태운다.
+    route_path = models.JSONField(
+        "경로 좌표",
+        default=list,
+        blank=True,
+        # prep_breakdown 과 같은 이유. 이 컬럼을 모르는 구버전 코드의 INSERT 가
+        # 쓰기만 500 을 내는 것을 막는다.
+        db_default=Value("[]", output_field=models.JSONField()),
+    )
+
+    # `route_path` 를 따라간 누적 길이(m).
+    #
+    # 카카오의 `totalDistance` 를 그대로 쓰지 않는다. 점을 솎아 냈으면 보관한
+    # 좌표의 실제 길이가 그보다 짧고, 진행률은 **보관한 좌표** 기준이어야
+    # 목적지에 닿았을 때 100% 가 된다.
+    route_distance_m = models.PositiveIntegerField(
+        "경로 길이(m)", null=True, blank=True
+    )
+
     computed_at = models.DateTimeField("계산 시각", auto_now=True)
 
     class Meta:

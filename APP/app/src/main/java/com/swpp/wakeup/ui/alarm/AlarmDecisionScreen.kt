@@ -7,7 +7,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.geometry.Offset
+import com.swpp.wakeup.domain.model.RouteProgress
+import com.swpp.wakeup.domain.model.TripStage
+import com.swpp.wakeup.sensing.GeoPoint
+import com.swpp.wakeup.ui.home.HomeViewModel
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -68,6 +74,21 @@ fun AlarmDecisionScreen(
     onRecompute: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 지금 어느 단계인가. 추적 중이면 판정기 값, 아니면 알람 시각 기준 */
+    stage: TripStage = TripStage.BEFORE_ALARM,
+    /** 경로 거리 기준 진행률. null 이면 측정하지 않는 상태다 */
+    progress: RouteProgress? = null,
+    /** "3분 전 갱신" */
+    freshness: String? = null,
+    /** 경로 지도 상태. null 이면 경로 좌표가 없어 지도를 그릴 수 없다 */
+    routeMap: HomeViewModel.RouteMapState? = null,
+    /** 추적 중인 현재 위치. 지도에 점으로 찍는다 */
+    here: GeoPoint? = null,
+    onRouteMapViewport: (widthDp: Int, heightDp: Int) -> Unit = { _, _ -> },
+    onRouteMapZoom: (Int) -> Unit = {},
+    onRouteMapFit: () -> Unit = {},
+    onRouteMapDrag: (Offset) -> Unit = {},
+    onRouteMapDragEnd: (Double) -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -126,6 +147,24 @@ fun AlarmDecisionScreen(
         if (plan.isComputed) {
             RecommendedAlarmCard(plan)
             BreakdownCard(plan)
+
+            // 계산 근거 바로 아래에 "지금 어디쯤" 을 둔다. 같은 여정을 계획과
+            // 실제 두 면에서 보여 주는 것이고, 순서가 바뀌면 진행률이 어느
+            // 계획에 대한 것인지 연결이 끊긴다.
+            TripProgressCard(stage = stage, progress = progress, freshness = freshness)
+
+            routeMap?.let { map ->
+                RouteMapCard(
+                    state = map,
+                    progress = progress,
+                    here = here,
+                    onViewport = onRouteMapViewport,
+                    onZoom = onRouteMapZoom,
+                    onFitRoute = onRouteMapFit,
+                    onDrag = onRouteMapDrag,
+                    onDragEnd = onRouteMapDragEnd,
+                )
+            }
         } else {
             NotComputedCard(plan)
         }
@@ -190,7 +229,10 @@ private fun RecommendedAlarmCard(plan: AlarmPlanView) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("추천 알람", color = JitColor.TextSecondary, fontSize = 11.sp)
+            // "추천" 이 아니라 "적용" 이다. 이 화면에 온 시점에서 이 시각이
+            // 이미 이 일정의 알람이고, 추천이라고 적으면 아직 고를 것이 남은
+            // 것처럼 읽힌다.
+            Text("적용 알람", color = JitColor.TextSecondary, fontSize = 11.sp)
             plan.remaining?.let {
                 Text(it, color = JitColor.TextSecondary, fontSize = 11.sp)
             }
@@ -214,6 +256,20 @@ private fun RecommendedAlarmCard(plan: AlarmPlanView) {
         }
 
         ProbabilityRow(plan)
+
+        // 어느 경로를 기준으로 계산했는지. 알람 시각만 보면 "왜 이 시각인가" 의
+        // 절반(이동 시간)이 어디서 왔는지 알 수 없다.
+        val basis = listOfNotNull(
+            plan.routeDetail?.takeIf { it.isNotBlank() },
+            plan.routeDistanceM?.let { "%.1fkm".format(it / 1000.0) },
+        )
+        if (basis.isNotEmpty()) {
+            Text(
+                text = basis.joinToString(" · ") + " 기준",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+            )
+        }
         plan.arrivalLine?.let {
             Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
         }
@@ -276,10 +332,15 @@ private fun ProbabilityRow(plan: AlarmPlanView) {
 @Composable
 private fun BreakdownCard(plan: AlarmPlanView) {
     JitCard(padding = 14.dp, gap = 9.dp) {
-        Text("이렇게 계산했음", color = JitColor.TextSecondary, fontSize = 11.sp)
+        Text("계산 방법", color = JitColor.TextSecondary, fontSize = 11.sp)
+
+        // 항목별로 막대를 따로 그리면 길이가 **각자의 최대값 기준**이라 셋을
+        // 서로 비교할 수 없다. 하나의 바를 비율대로 쪼개면 "이동이 준비의 1.5배"
+        // 가 눈으로 읽히고, 바 전체가 합계라는 것도 같은 그림에서 드러난다.
+        BreakdownBar(plan.breakdown)
 
         plan.breakdown.forEach { row ->
-            BreakdownRow(row, plan.maxRowMinutes)
+            BreakdownRow(row)
             // 블록 내역을 준비 시간 **바로 아래**에 들여 쓴다. 별도 카드로
             // 빼면 어느 줄을 쪼갠 것인지 연결이 끊긴다.
             if (row.kind == PlanRow.Kind.PREP && plan.prepBlocks.isNotEmpty()) {
@@ -426,16 +487,49 @@ private fun PrepBlockList(blocks: List<PrepBlockLine>) {
     }
 }
 
-@Composable
-private fun BreakdownRow(row: PlanRow, maxMinutes: Int) {
-    val color = when (row.kind) {
-        PlanRow.Kind.PREP -> JitColor.Accent
-        PlanRow.Kind.TRAVEL -> JitColor.Blue
-        PlanRow.Kind.BUFFER -> JitColor.Track
-    }
-    // 막대 길이를 최대값 기준 상대 비율로 그린다. 최대 폭은 58dp.
-    val barWidth = (58f * row.minutes / maxMinutes).coerceAtLeast(8f)
+/** 계산 항목의 색. 바 조각과 범례 점이 **같은 색**이어야 서로 이어진다. */
+private fun planRowColor(kind: PlanRow.Kind) = when (kind) {
+    PlanRow.Kind.PREP -> JitColor.Accent
+    PlanRow.Kind.TRAVEL -> JitColor.Blue
+    PlanRow.Kind.BUFFER -> JitColor.Track
+}
 
+/**
+ * 합계를 항목 비율대로 쪼갠 가로 바 하나.
+ *
+ * 분 수에 비례해 `weight` 를 준다. 0분 항목은 넣지 않는다 — 폭 0 인 조각은
+ * 보이지 않으면서 모서리 자르기만 어긋나게 만든다.
+ */
+@Composable
+private fun BreakdownBar(rows: List<PlanRow>) {
+    val shown = rows.filter { it.minutes > 0 }
+    if (shown.isEmpty()) return
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(10.dp)
+            .clip(RoundedCornerShape(5.dp)),
+    ) {
+        shown.forEach { row ->
+            Box(
+                Modifier
+                    .weight(row.minutes.toFloat())
+                    .fillMaxHeight()
+                    .background(planRowColor(row.kind))
+            )
+        }
+    }
+}
+
+/**
+ * 항목 한 줄. 색 점으로 위 바의 어느 조각인지 잇는다.
+ *
+ * 예전에는 줄마다 막대를 따로 그렸다. 길이가 **그 화면의 최대값 기준**이라
+ * 항목 간 비교가 되지 않았고, 합계가 어디에도 그림으로 나타나지 않았다.
+ */
+@Composable
+private fun BreakdownRow(row: PlanRow) {
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -445,10 +539,9 @@ private fun BreakdownRow(row: PlanRow, maxMinutes: Int) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
-                        .width(barWidth.dp)
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(color)
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(planRowColor(row.kind))
                 )
                 Spacer(Modifier.width(9.dp))
                 Text(row.label, color = JitColor.TextPrimary, fontSize = 12.sp)

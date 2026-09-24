@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import ssl
 import urllib.error
 import urllib.parse
@@ -569,6 +570,115 @@ def _step_endpoints(step: dict) -> tuple[tuple[float, float] | None, tuple[float
     return to_latlng(points[0]), to_latlng(points[-1])
 
 
+# 위도 1도의 길이(m). 경도는 위도에 따라 cos 배로 줄어든다.
+#
+# 앱의 `StaticMapScale.METERS_PER_DEGREE` 와 **같은 값이어야 한다.** 서버가
+# 계산한 경로 길이와 앱이 화면에 투영하는 좌표가 다른 상수를 쓰면 진행률과
+# 지도 위 위치가 서로 어긋난다.
+METERS_PER_DEGREE = 111320.0
+
+# 경로 폴리라인에 보관할 점 수 상한.
+#
+# 실측: 신림역→강남역 2호선이 301점(약 33m 간격)이다. 앱은 이 점들로 경로선을
+# 그리고 "이동한 거리 / 전체 거리" 로 진행률을 계산한다. 33m 간격이면 충분하고,
+# 노선이 길어도 여기서 멈춘다 — 상한이 없으면 긴 버스 노선 하나가 행을 수십 KB로
+# 불린다.
+MAX_PATH_POINTS = 600
+
+
+def _pairs_to_latlng(points: list) -> list[list[float]]:
+    """``[[lng, lat], ...]`` 를 ``[[lat, lng], ...]`` 로.
+
+    좌표 순서가 경도-위도다. 그대로 쓰면 지구 반대편이 된다.
+    """
+    out: list[list[float]] = []
+    for p in points or []:
+        try:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                out.append([float(p[1]), float(p[0])])
+            elif isinstance(p, dict) and "x" in p and "y" in p:
+                out.append([float(p["y"]), float(p["x"])])
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _steps_path(steps: list) -> list[list[float]]:
+    """``steps[].path.points`` 를 이어 붙인다. 대중교통·도보·자전거가 같은 모양이다."""
+    out: list[list[float]] = []
+    for step in steps or []:
+        out.extend(_pairs_to_latlng(((step.get("path") or {}).get("points")) or []))
+    return out
+
+
+def transit_route_path(route: dict) -> list[list[float]]:
+    """대중교통 경로 하나의 폴리라인. ``routes[].steps[].path.points``."""
+    return _decimate(_steps_path(route.get("steps") or []))
+
+
+def legs_route_path(data: dict) -> list[list[float]]:
+    """도보·자전거. **``legs`` 단계가 하나 더 있다**(실측).
+
+    대중교통과 달리 ``route.legs[].steps[].path.points`` 다. 같은 모양으로 보고
+    ``steps`` 를 바로 찾으면 빈 배열이 나오고, 경로선이 조용히 사라진다.
+    """
+    out: list[list[float]] = []
+    for leg in ((data.get("route") or {}).get("legs")) or []:
+        out.extend(_steps_path(leg.get("steps") or []))
+    return _decimate(out)
+
+
+def car_route_path(data: dict) -> list[list[float]]:
+    """자동차. ``routes[].sections[].roads[].vertexes`` 는 **평평한 배열**이다(실측).
+
+    쌍이 아니라 ``[lng, lat, lng, lat, ...]`` 로 오므로 둘씩 끊어 읽어야 한다.
+    쌍으로 착각해 그대로 넣으면 좌표 절반이 경도 자리에 들어간다.
+    """
+    out: list[list[float]] = []
+    for route in data.get("routes") or []:
+        for section in route.get("sections") or []:
+            for road in section.get("roads") or []:
+                flat = road.get("vertexes") or []
+                for i in range(0, len(flat) - 1, 2):
+                    try:
+                        out.append([float(flat[i + 1]), float(flat[i])])
+                    except (TypeError, ValueError):
+                        continue
+    return _decimate(out)
+
+
+def _decimate(points: list[list[float]], cap: int = MAX_PATH_POINTS) -> list[list[float]]:
+    """점이 너무 많으면 고르게 솎아 낸다. 처음과 끝은 반드시 남긴다.
+
+    끝점을 잃으면 경로선이 목적지 앞에서 끊기고, 진행률의 분모도 짧아진다.
+    """
+    if len(points) <= cap:
+        return points
+    stride = len(points) / (cap - 1)
+    kept = [points[int(i * stride)] for i in range(cap - 1)]
+    kept.append(points[-1])
+    return kept
+
+
+def path_length_m(points: list[list[float]]) -> int:
+    """폴리라인의 실제 길이(m). 진행률의 분모다.
+
+    직선거리가 아니라 **경로를 따라간 누적 거리**다. 둘을 섞으면 지하철이
+    돌아가는 구간에서 진행률이 100%를 넘거나 거꾸로 줄어든다.
+
+    검증: 신림역→강남역 2호선에서 이 식이 9.98km, 카카오 ``totalDistance`` 가
+    10,040m 로 0.6% 차이였다.
+    """
+    total = 0.0
+    for i in range(1, len(points)):
+        (lat1, lng1), (lat2, lng2) = points[i - 1], points[i]
+        cos = math.cos(math.radians((lat1 + lat2) / 2))
+        dy = (lat2 - lat1) * METERS_PER_DEGREE
+        dx = (lng2 - lng1) * METERS_PER_DEGREE * cos
+        total += math.hypot(dx, dy)
+    return round(total)
+
+
 def _segments(
     route: dict,
     total_seconds: int,
@@ -765,9 +875,19 @@ def _summary_bits(minutes, distance_m, transfers, fare) -> str:
 
 
 def _transit_candidates(
-    start_lat: float, start_lng: float, end_lat: float, end_lng: float
+    start_lat: float,
+    start_lng: float,
+    end_lat: float,
+    end_lng: float,
+    with_path: bool = False,
 ) -> tuple[list[dict], bool]:
-    """대중교통 후보. 중복을 합치고 축별 대표만 남긴다."""
+    """대중교통 후보. 중복을 합치고 축별 대표만 남긴다.
+
+    ``with_path`` 는 경로 폴리라인을 함께 담는다. **기본값이 False 인 것이
+    중요하다.** 후보는 최대 15개이고 하나가 300점을 넘으므로, 목록 응답에 전부
+    실으면 사용자가 경로를 고르기만 해도 수십 KB를 내려받는다. 지도에 그릴
+    경로는 **고른 하나**뿐이라 `resolve_route` 에서만 켠다.
+    """
     qs = urllib.parse.urlencode(
         {
             "start_x": f"{start_lng}",
@@ -814,6 +934,13 @@ def _transit_candidates(
                 route, seconds, start_lat, start_lng, end_lat, end_lng
             ),
         }
+        if with_path:
+            path = transit_route_path(route)
+            item["path"] = path
+            # 카카오가 준 totalDistance 를 그대로 쓰지 않는다. 진행률의 분모는
+            # **우리가 보관한 점들의 길이**여야 한다. 점을 솎아 냈으면 그만큼
+            # 짧아지고, 그 차이를 무시하면 목적지에 닿아도 100%가 안 된다.
+            item["path_distance_m"] = path_length_m(path)
         item["summary"] = _summary_bits(
             minutes, item["distance_m"], item["transfers"], item["fare"]
         )
@@ -866,6 +993,7 @@ def _single_route_candidate(
     start_lng: float,
     end_lat: float,
     end_lng: float,
+    with_path: bool = False,
 ) -> dict | None:
     """도보·자전거처럼 `route` 단수 + `properties` 구조인 응답을 후보 하나로."""
     qs = urllib.parse.urlencode(
@@ -888,7 +1016,7 @@ def _single_route_candidate(
         return None
 
     minutes = max(1, round(seconds / 60))
-    return {
+    item = {
         "key": key,
         "kind": key,
         "mode": mode,
@@ -904,10 +1032,19 @@ def _single_route_candidate(
         # "구간이 있는 후보" 와 "없는 후보" 를 따로 그리지 않아도 되게.
         "segments": [{"kind": key, "seconds": int(seconds), "label": mode}],
     }
+    if with_path:
+        path = legs_route_path(data)
+        item["path"] = path
+        item["path_distance_m"] = path_length_m(path)
+    return item
 
 
 def _car_candidate(
-    start_lat: float, start_lng: float, end_lat: float, end_lng: float
+    start_lat: float,
+    start_lng: float,
+    end_lat: float,
+    end_lng: float,
+    with_path: bool = False,
 ) -> dict | None:
     """자동차. 모빌리티 API 는 호스트·파라미터 이름이 다르다(origin/destination).
 
@@ -935,7 +1072,7 @@ def _car_candidate(
 
     minutes = max(1, round(seconds / 60))
     taxi = (summary.get("fare") or {}).get("taxi")
-    return {
+    item = {
         "key": "car",
         "kind": "car",
         "mode": "자동차",
@@ -949,6 +1086,11 @@ def _car_candidate(
         "reason": "",
         "segments": [{"kind": "car", "seconds": int(seconds), "label": "자동차"}],
     }
+    if with_path:
+        path = car_route_path(data)
+        item["path"] = path
+        item["path_distance_m"] = path_length_m(path)
+    return item
 
 
 def route_candidates(
@@ -1040,25 +1182,33 @@ def resolve_route(
 
     선택한 경로가 더 이상 없으면 `(None, True)` 를 돌려준다. 호출자가
     [best_route] 로 되돌릴지 판단한다.
+
+    **여기서만 경로 폴리라인을 함께 받는다**(`path`, `path_distance_m`). 지도에
+    그릴 경로와 진행률의 분모는 고른 경로 하나뿐이고, 이 함수는 알람을 계산할
+    때 이미 호출되므로 카카오 호출이 늘지 않는다.
     """
     if route_key == "walk":
         item = _single_route_candidate(
-            WALK_URL, "walk", "도보", start_lat, start_lng, end_lat, end_lng
+            WALK_URL, "walk", "도보", start_lat, start_lng, end_lat, end_lng,
+            with_path=True,
         )
         return (item, False) if item else (None, True)
 
     if route_key == "bicycle":
         item = _single_route_candidate(
-            BICYCLE_URL, "bicycle", "자전거", start_lat, start_lng, end_lat, end_lng
+            BICYCLE_URL, "bicycle", "자전거", start_lat, start_lng, end_lat, end_lng,
+            with_path=True,
         )
         return (item, False) if item else (None, True)
 
     if route_key == "car":
-        item = _car_candidate(start_lat, start_lng, end_lat, end_lng)
+        item = _car_candidate(start_lat, start_lng, end_lat, end_lng, with_path=True)
         return (item, False) if item else (None, True)
 
     if route_key.startswith("transit:"):
-        items, degraded = _transit_candidates(start_lat, start_lng, end_lat, end_lng)
+        items, degraded = _transit_candidates(
+            start_lat, start_lng, end_lat, end_lng, with_path=True
+        )
         if degraded:
             return None, True
         for item in items:
@@ -1085,16 +1235,21 @@ def best_route(
 
     반환 형태는 [route_candidates] 의 항목과 같다(`key` 포함). 선택 경로와 기본
     경로가 같은 모양이어야 저장·표시 코드가 갈라지지 않는다.
+
+    [resolve_route] 와 마찬가지로 폴리라인을 함께 받는다. **대부분의 사용자는
+    경로를 직접 고르지 않으므로** 이쪽이 실제로 더 자주 쓰인다. 여기서 빠뜨리면
+    경로를 고른 소수에게만 지도와 진행률이 보인다.
     """
     walk = _single_route_candidate(
-        WALK_URL, "walk", "도보", start_lat, start_lng, end_lat, end_lng
+        WALK_URL, "walk", "도보", start_lat, start_lng, end_lat, end_lng,
+        with_path=True,
     )
 
     if walk and (walk.get("distance_m") or 0) <= WALK_ONLY_METERS:
         return walk, False
 
     transit, transit_degraded = _transit_candidates(
-        start_lat, start_lng, end_lat, end_lng
+        start_lat, start_lng, end_lat, end_lng, with_path=True
     )
 
     pool = list(transit)

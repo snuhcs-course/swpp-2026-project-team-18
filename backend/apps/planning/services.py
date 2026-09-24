@@ -120,6 +120,10 @@ def compute_and_store(event: Event) -> AlarmPlan:
         "route_summary": "",
         "route_key": "",
         "route_detail": "",
+        # 경로를 못 구한 상태에서도 명시적으로 비운다. 이전 계산의 폴리라인이
+        # 남아 있으면 지도가 **지금 계획과 다른 경로**를 그린다.
+        "route_path": [],
+        "route_distance_m": None,
     }
 
     # 1) 장소가 없으면 이동 시간을 구할 수 없다.
@@ -228,6 +232,10 @@ def compute_and_store(event: Event) -> AlarmPlan:
             "route_summary": (route.get("summary") or f"{math_.travel_minutes}분")[:200],
             "route_key": (route.get("key") or "")[:120],
             "route_detail": (route.get("detail") or "")[:120],
+            # 지도에 그릴 경로선과 진행률의 분모. 좌표를 못 받았으면 빈 배열이고
+            # 앱은 지도 자리에 안내만 띄운다 — 알람 계산은 그대로 성립한다.
+            "route_path": route.get("path") or [],
+            "route_distance_m": route.get("path_distance_m"),
         }
     )
     return _upsert(event, defaults)

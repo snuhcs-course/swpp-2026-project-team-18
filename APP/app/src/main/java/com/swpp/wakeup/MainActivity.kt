@@ -43,7 +43,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.domain.model.RouteProgress
+import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
+import com.swpp.wakeup.ui.alarm.freshnessLabel
 import com.swpp.wakeup.ui.calendar.CalendarImportScreen
 import com.swpp.wakeup.ui.alarm.RiskChoiceScreen
 import com.swpp.wakeup.ui.auth.LoginActivity
@@ -147,6 +150,9 @@ private fun MainHost(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val nav by viewModel.nav.collectAsStateWithLifecycle()
     val plan by viewModel.plan.collectAsStateWithLifecycle()
+    val routeMap by viewModel.routeMap.collectAsStateWithLifecycle()
+    // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
+    val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
@@ -336,15 +342,33 @@ private fun MainHost(
                     modifier = Modifier.padding(innerPadding),
                 )
 
-                is AppRoute.AlarmDecision -> AlarmDecisionScreen(
-                    plan = plan,
-                    onBack = viewModel::goBack,
-                    onChangeRisk = { viewModel.openRiskChoice(route.eventId) },
-                    onEditBlocks = { viewModel.openEventBlocks(route.eventId) },
-                    onRecompute = { viewModel.recomputePlan(route.eventId) },
-                    onDelete = { viewModel.deleteEvent(route.eventId) },
-                    modifier = Modifier.padding(innerPadding),
-                )
+                is AppRoute.AlarmDecision -> {
+                    // 진행률은 계획(경로)과 추적 위치가 **둘 다** 있어야 낼 수
+                    // 있다. 하나라도 없으면 null 로 두고 화면이 이유를 말한다.
+                    val live = tripLive?.takeIf { it.eventId == route.eventId }
+                    val progress = plan
+                        ?.takeIf { it.hasRoutePath }
+                        ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
+                    AlarmDecisionScreen(
+                        plan = plan,
+                        onBack = viewModel::goBack,
+                        onChangeRisk = { viewModel.openRiskChoice(route.eventId) },
+                        onEditBlocks = { viewModel.openEventBlocks(route.eventId) },
+                        onRecompute = { viewModel.recomputePlan(route.eventId) },
+                        onDelete = { viewModel.deleteEvent(route.eventId) },
+                        modifier = Modifier.padding(innerPadding),
+                        stage = plan?.let { viewModel.stageOf(it) } ?: TripStage.BEFORE_ALARM,
+                        progress = progress,
+                        freshness = live?.let { freshnessLabel(it.atMillis) },
+                        routeMap = routeMap?.takeIf { it.eventId == route.eventId },
+                        here = live?.point,
+                        onRouteMapViewport = viewModel::loadRouteMapImage,
+                        onRouteMapZoom = viewModel::onRouteMapZoom,
+                        onRouteMapFit = viewModel::fitRouteMap,
+                        onRouteMapDrag = viewModel::onRouteMapDrag,
+                        onRouteMapDragEnd = viewModel::onRouteMapDragEnd,
+                    )
+                }
 
                 is AppRoute.RiskChoice -> RiskChoiceScreen(
                     plan = plan,

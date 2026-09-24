@@ -198,9 +198,9 @@ Three suites, all runnable locally. CI runs the same three on every push and pul
 request ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ```bash
-cd backend && python -m pytest                       # 591 unit tests
+cd backend && python -m pytest                       # 606 unit tests
 cd backend && python scripts/run_local_suite.py      # 8 HTTP suites against a live server
-cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 311 tests + lint + build
+cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 340 tests + lint + build
 ```
 
 The middle one is the unusual part. `scripts/check_*.py` drive a **running** Django

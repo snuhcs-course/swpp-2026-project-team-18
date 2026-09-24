@@ -402,6 +402,19 @@ data class AlarmPlanDto(
     /** "2호선 → 5513" */
     @SerializedName("route_detail") val routeDetail: String?,
     /**
+     * 경로 폴리라인. `[[lat, lng], ...]` 이고 최대 600점이다.
+     *
+     * 지도에 경로선을 그리고, 이동한 거리 비율로 진행률을 계산한다. 카카오
+     * 정적 지도에는 선을 그리는 파라미터가 없어서(실측) 앱이 이 좌표를 화면에
+     * 투영해 직접 그린다.
+     *
+     * 좌표를 못 받았으면 `null` 이거나 빈 배열이다. 그때는 지도와 진행률을
+     * 그리지 않고 안내만 띄운다 — 알람 계산 자체는 그대로 성립한다.
+     */
+    @SerializedName("route_path") val routePath: List<List<Double>>?,
+    /** `routePath` 를 따라간 길이(m). 좌표가 없으면 null */
+    @SerializedName("route_distance_m") val routeDistanceM: Int?,
+    /**
      * 고른 경로가 그대로 쓰였는지.
      * - `null` — 고른 적이 없다(서버가 최단 경로를 씀)
      * - `true` — 고른 경로로 계산했다

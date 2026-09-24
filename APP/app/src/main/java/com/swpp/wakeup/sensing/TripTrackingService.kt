@@ -164,6 +164,10 @@ class TripTrackingService : Service() {
             }
         }
         scope.cancel()
+        // **화면에 내보낸 위치를 반드시 지운다.** 남겨 두면 알람 결정 화면이
+        // 몇 시간 전 좌표를 현재 위치처럼 그리고, 사용자는 그 진행률로 여유가
+        // 있다고 판단한다. 도착·마감·사용자 중지 모두 여기를 지나간다.
+        TripLiveState.clear()
         Log.i(TAG, "추적 종료 (대기 관측 ${pending}건)")
         super.onDestroy()
     }
@@ -190,28 +194,60 @@ class TripTrackingService : Service() {
         )
 
         val phaseBefore = fence.phase
-        when (val event = fence.offer(fix)) {
+        val decision = fence.offer(fix)
+
+        // 판정 결과와 무관하게 **매 위치를** 화면에 내보낸다. 판정이 난 순간만
+        // 보내면 출발과 도착 사이에 진행률이 멈춰 있고, 그 사이가 사용자가
+        // 가장 많이 들여다보는 구간이다.
+        TripLiveState.publish(
+            TripLiveState.Snapshot(
+                eventId = current.eventId,
+                point = GeoPoint(fix.lat, fix.lng),
+                accuracyM = fix.accuracyM,
+                atMillis = fix.atMillis,
+                phase = fence.phase,
+                awaitingDwell = fence.awaitingDwell,
+            )
+        )
+
+        when (decision) {
             is TripEvent.Departed -> {
-                Log.i(TAG, "출발 판정: 집에서 ${event.distanceM.roundToInt()}m")
-                record(current, TripObservationInput.KIND_DEPART, event.fix, event.distanceM)
+                Log.i(TAG, "출발 판정: 집에서 ${decision.distanceM.roundToInt()}m")
+                record(
+                    current,
+                    TripObservationInput.KIND_DEPART,
+                    decision.fix,
+                    decision.distanceM,
+                )
             }
 
             is TripEvent.Arrived -> {
                 Log.i(
                     TAG,
-                    "도착 판정: 목적지 ${event.distanceM.roundToInt()}m " +
-                        "체류 ${event.dwellMillis / 1000}초",
+                    "도착 판정: 목적지 ${decision.distanceM.roundToInt()}m " +
+                        "체류 ${decision.dwellMillis / 1000}초",
                 )
                 record(
                     current,
                     TripObservationInput.KIND_ARRIVE,
-                    event.fix,
-                    event.distanceM,
-                    dwellMillis = event.dwellMillis,
+                    decision.fix,
+                    decision.distanceM,
+                    dwellMillis = decision.dwellMillis,
+                )
+                // 도착했으면 화면도 그것을 알아야 한다. 이 갱신을 빼면 목록은
+                // "이동 중" 에 멈춰 있고, 사용자는 도착이 기록됐는지 알 수 없다.
+                TripLiveState.publish(
+                    TripLiveState.Snapshot(
+                        eventId = current.eventId,
+                        point = GeoPoint(decision.fix.lat, decision.fix.lng),
+                        accuracyM = decision.fix.accuracyM,
+                        atMillis = decision.fix.atMillis,
+                        phase = TripGeofence.Phase.ARRIVED,
+                    )
                 )
                 // 결과 알림을 **멈추기 전에** 띄운다. 이건 포그라운드 서비스
                 // 알림이 아닌 별도 알림이라 stopSelf 에 휩쓸리지 않는다.
-                postArrivalResult(current, event.fix)
+                postArrivalResult(current, decision.fix)
                 stopSelf()
                 return
             }

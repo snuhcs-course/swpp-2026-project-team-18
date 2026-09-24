@@ -60,6 +60,11 @@ class AlarmPlanSerializer(serializers.Serializer):
     route_summary = serializers.CharField()
     route_key = serializers.CharField()
     route_detail = serializers.CharField()
+    # 경로 폴리라인 `[[lat, lng], ...]`. 앱이 지도에 경로선을 그리고, 이동한
+    # 거리 비율로 진행률을 계산한다. 좌표를 못 받았으면 빈 배열이다.
+    route_path = serializers.JSONField()
+    # `route_path` 를 따라간 길이(m). 진행률의 분모다. 좌표가 없으면 null.
+    route_distance_m = serializers.IntegerField(allow_null=True)
     # 블록별 내역. 근거 카드가 "샤워 14분 · 옷 5분" 을 그린다.
     # 블록이 없으면 빈 배열이다.
     prep_breakdown = serializers.JSONField()

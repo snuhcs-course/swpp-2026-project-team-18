@@ -1,5 +1,7 @@
 package com.swpp.wakeup.domain.model
 
+import com.swpp.wakeup.sensing.GeoPoint
+
 /**
  * 알람 결정 화면(Figma ④)이 필요한 값.
  *
@@ -70,8 +72,39 @@ data class AlarmPlanView(
      * 경로로 계산하면 사용자는 자기가 고른 경로대로라고 믿는다.
      */
     val routeFellBack: Boolean = false,
+    /**
+     * 알람 시각이 지났는가.
+     *
+     * "알람 전" 과 "준비 중" 을 가르는 유일한 근거다. [remaining] 문구("지난
+     * 알람")로 판별하면 표시 문자열을 바꿀 때마다 단계 판정이 깨진다.
+     */
+    val alarmPassed: Boolean = false,
+    /**
+     * 사람이 읽는 경로 설명. "2호선 → 5513".
+     *
+     * 알람 카드가 "무엇을 기준으로 이 시각인가" 를 밝히는 데 쓴다. 서버는
+     * 예전부터 `route_detail` 로 주고 있었지만 화면이 받지 않고 있었다.
+     */
+    val routeDetail: String? = null,
+    /**
+     * 경로 폴리라인. 비어 있으면 지도와 진행률을 그릴 수 없다.
+     *
+     * 서버가 알람을 계산할 때 함께 받아 보관한 좌표다. 화면을 열 때마다 경로
+     * API 를 다시 부르지 않으므로 호출량이 늘지 않는다.
+     */
+    val routePath: List<GeoPoint> = emptyList(),
+    /**
+     * 서버가 계산한 경로 길이(m). 표시용이다.
+     *
+     * 진행률의 분모는 앱이 [routePath] 로 다시 센 값을 쓴다. 분자와 분모가 같은
+     * 계산에서 나와야 목적지에 닿았을 때 정확히 100% 가 된다.
+     */
+    val routeDistanceM: Int? = null,
 ) {
     val isComputed: Boolean get() = status == "ok" && alarmAt != null
+
+    /** 지도와 진행률을 그릴 수 있는가. 좌표가 둘 미만이면 선이 되지 않는다 */
+    val hasRoutePath: Boolean get() = routePath.size >= 2
 
     /** 막대 길이를 상대 비율로 그리기 위한 최대값. */
     val maxRowMinutes: Int
