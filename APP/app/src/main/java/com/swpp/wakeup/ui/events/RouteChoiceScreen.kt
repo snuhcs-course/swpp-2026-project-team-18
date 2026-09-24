@@ -82,6 +82,10 @@ fun RouteChoiceScreen(
     onOriginQueryChange: (String) -> Unit = {},
     onOriginSearch: () -> Unit = {},
     onOriginSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit = {},
+    onOriginLoadMore: () -> Unit = {},
+    onOriginSortChange: (String) -> Unit = {},
+    onOriginOpenMap: (() -> Unit)? = null,
+    onOpenPlaceUrl: ((String) -> Unit)? = null,
     onUseCurrentLocation: () -> Unit = {},
 ) {
     Column(
@@ -116,6 +120,10 @@ fun RouteChoiceScreen(
         OriginPicker(
             state = state,
             homePlace = homePlace,
+            onLoadMore = onOriginLoadMore,
+            onSortChange = onOriginSortChange,
+            onOpenMap = onOriginOpenMap,
+            onOpenPlaceUrl = onOpenPlaceUrl,
             onEditToggle = onOriginEditToggle,
             onQueryChange = onOriginQueryChange,
             onSearch = onOriginSearch,
@@ -169,6 +177,10 @@ fun RouteChoiceScreen(
 private fun OriginPicker(
     state: HomeViewModel.RouteState?,
     homePlace: PlaceSearchItem?,
+    onLoadMore: () -> Unit,
+    onSortChange: (String) -> Unit,
+    onOpenMap: (() -> Unit)?,
+    onOpenPlaceUrl: ((String) -> Unit)?,
     onEditToggle: (Boolean) -> Unit,
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
@@ -239,13 +251,15 @@ private fun OriginPicker(
 
             state.originEditing -> PlacePicker(
                 label = "출발지 검색",
-                query = state.originQuery,
-                results = state.originResults,
-                searching = state.originSearching,
+                state = state.originPlace,
                 selected = null,
                 onQueryChange = onQueryChange,
                 onSearch = onSearch,
                 onSelect = onSelect,
+                onLoadMore = onLoadMore,
+                onSortChange = onSortChange,
+                onOpenMap = onOpenMap,
+                onOpenPlaceUrl = onOpenPlaceUrl,
                 homePlace = homePlace,
             )
 

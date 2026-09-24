@@ -1,5 +1,7 @@
 package com.swpp.wakeup.data.repository
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.SystemClock
 import android.util.Log
 import com.swpp.wakeup.BuildConfig
@@ -16,6 +18,7 @@ import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.EventsApi
 import com.swpp.wakeup.data.remote.PlaceInput
 import com.swpp.wakeup.data.remote.PlaceSearchItem
+import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.PrepBlockDto
 import com.swpp.wakeup.data.remote.ProfileApi
 import com.swpp.wakeup.data.remote.ProfileDto
@@ -36,7 +39,9 @@ import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.RouteOption
 import com.swpp.wakeup.domain.model.RouteSegment
 import com.swpp.wakeup.domain.model.RouteSegments
+import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.domain.model.UpcomingEvent
+import com.swpp.wakeup.sensing.GeoPoint
 import retrofit2.Response
 import java.io.IOException
 import java.time.Duration
@@ -287,6 +292,61 @@ class EventRepository(
      * null 이 담긴다 — 화면은 "현재 위치를 쓸 수 없음" 으로 안내하고 사용자가
      * 직접 검색하게 둔다.
      */
+    /**
+     * 정적 지도 이미지.
+     *
+     * **최근 몇 장을 메모리에 들고 있는다.** 지도를 옮겼다 되돌리는 동작이
+     * 잦은데 그때마다 네트워크를 타면 화면이 끊긴다. 서버도 한 시간 캐시하므로
+     * 여기서 놓쳐도 카카오 호출로 이어지지는 않지만, 왕복은 여전히 느리다.
+     *
+     * 넉넉히 담지 않는다. 720x1000 ARGB 한 장이 약 2.9MB 라서 열 장이면
+     * 30MB 다 — 알람 앱이 그만큼 들고 있을 이유가 없다.
+     */
+    suspend fun staticMap(
+        center: GeoPoint,
+        level: Int,
+        widthDp: Int,
+        heightDp: Int,
+        markers: List<GeoPoint>,
+    ): Result<Bitmap> {
+        val markerParam = markers
+            .take(StaticMapScale.MARKER_LIMIT)
+            .joinToString(";") { "%.6f,%.6f".format(it.lat, it.lng) }
+            .takeIf { it.isNotBlank() }
+
+        val key = "%.6f,%.6f,%d,%d,%d,%s".format(
+            center.lat, center.lng, level, widthDp, heightDp, markerParam.orEmpty()
+        )
+        mapCache[key]?.let { return Result.Success(it) }
+
+        return guard {
+            val response = api.staticMap(
+                lat = center.lat,
+                lng = center.lng,
+                level = level,
+                width = widthDp,
+                height = heightDp,
+                markers = markerParam,
+            )
+            val body = response.body()
+            if (!response.isSuccessful || body == null) {
+                return@guard Result.Failure(errorMessage(response))
+            }
+
+            val bytes = body.use { it.bytes() }
+            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                ?: return@guard Result.Failure("지도 이미지를 읽지 못했다.")
+
+            synchronized(mapCache) {
+                if (mapCache.size >= MAP_CACHE_MAX) {
+                    mapCache.remove(mapCache.keys.first())
+                }
+                mapCache[key] = bitmap
+            }
+            Result.Success(bitmap)
+        }
+    }
+
     suspend fun reversePlace(lat: Double, lng: Double): Result<PlaceSearchItem?> = guard {
         val response = api.reversePlace(lat, lng)
         val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
@@ -308,9 +368,30 @@ class EventRepository(
         }
     }
 
-    suspend fun searchPlaces(query: String): Result<List<PlaceSearchItem>> = guard {
-        unwrap(api.searchPlaces(query))?.let { Result.Success(it.results) }
-            ?: Result.Failure(MESSAGE_UNKNOWN)
+    /**
+     * 장소 검색 한 페이지.
+     *
+     * [near] 를 주면 결과에 거리가 붙는다. 현재 위치를 알면 항상 보낸다 —
+     * 같은 이름의 지점이 여러 개일 때 거리가 유일한 구분 근거다.
+     *
+     * [rect] 는 지도 영역 재검색이다(`minLng,minLat,maxLng,maxLat`).
+     */
+    suspend fun searchPlaces(
+        query: String,
+        near: GeoPoint? = null,
+        page: Int = 1,
+        sort: String = PlaceSearchResponse.SORT_ACCURACY,
+        rect: String? = null,
+    ): Result<PlaceSearchResponse> = guard {
+        val response = api.searchPlaces(
+            query = query,
+            lat = near?.lat,
+            lng = near?.lng,
+            page = page,
+            sort = sort,
+            rect = rect,
+        )
+        unwrap(response)?.let { Result.Success(it) } ?: Result.Failure(errorMessage(response))
     }
 
     suspend fun tags(): Result<List<EventTagDto>> = guard {
@@ -541,6 +622,22 @@ class EventRepository(
         const val TAG = "EventRepository"
         const val MESSAGE_NETWORK = "서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."
         const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
+
+        /**
+         * 메모리에 들고 있을 지도 장수.
+         *
+         * 720x1000 ARGB 한 장이 약 2.9MB 다. 네 장이면 12MB 로, 옮겼다 되돌리는
+         * 동작을 덮으면서도 알람 앱이 들고 있을 만한 크기다.
+         */
+        const val MAP_CACHE_MAX = 4
+
+        /**
+         * 삽입 순서를 지키는 맵. 가장 오래된 것을 먼저 버린다.
+         *
+         * 인스턴스가 아니라 동반 객체에 둔다 — 저장소는 화면마다 새로 만들어질
+         * 수 있고, 그때마다 지도를 다시 받으면 캐시가 없는 것과 같다.
+         */
+        val mapCache = linkedMapOf<String, Bitmap>()
     }
 }
 

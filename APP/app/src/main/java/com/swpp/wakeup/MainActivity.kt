@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -55,6 +56,7 @@ import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.morning.MorningProgressScreen
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.ui.nav.AppRoute
+import com.swpp.wakeup.ui.places.MapPickScreen
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
 import com.swpp.wakeup.ui.settings.SettingsScreen
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
@@ -149,6 +151,7 @@ private fun MainHost(
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
+    val mapPickState by viewModel.mapPick.collectAsStateWithLifecycle()
     val routineState by viewModel.routine.collectAsStateWithLifecycle()
     val importState by viewModel.calendarImport.collectAsStateWithLifecycle()
     val reportState by viewModel.report.collectAsStateWithLifecycle()
@@ -159,6 +162,22 @@ private fun MainHost(
 
     /** 개발 빌드의 서버 확인 결과. 설정 화면이 읽는다 */
     var serverStatus by remember { mutableStateOf<String?>(null) }
+
+    /**
+     * 카카오맵 장소 페이지를 연다.
+     *
+     * **평점·사진·영업시간이 있는 유일한 곳이다.** 카카오 로컬 API 응답에는 그
+     * 값들이 없어서 우리 화면에 별을 그릴 수 없다. 지어내는 대신 원본으로 보낸다.
+     */
+    val activityContext = LocalContext.current
+    val openPlaceUrl: (String) -> Unit = remember(activityContext) {
+        { url ->
+            // 브라우저가 없는 기기도 있다. 열지 못해도 앱이 죽어서는 안 된다.
+            runCatching {
+                activityContext.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+            }
+        }
+    }
 
     // 세션이 끝나면 로그인 화면으로 되돌린다.
     //
@@ -344,6 +363,12 @@ private fun MainHost(
                     onQueryChange = viewModel::onAddQueryChange,
                     onSearch = viewModel::searchPlaces,
                     onPlaceSelect = viewModel::onAddPlaceSelected,
+                    onLoadMore = viewModel::loadMoreAddPlaces,
+                    onSortChange = viewModel::onAddSortChange,
+                    onOpenMap = {
+                        viewModel.openMapPick(HomeViewModel.MapTarget.DESTINATION)
+                    },
+                    onOpenPlaceUrl = openPlaceUrl,
                     onPickRoute = viewModel::openRouteChoice,
                     onSubmit = viewModel::submitAdd,
                     onBack = viewModel::goBack,
@@ -362,8 +387,35 @@ private fun MainHost(
                     onOriginQueryChange = viewModel::onOriginQueryChange,
                     onOriginSearch = viewModel::searchOriginPlaces,
                     onOriginSelect = viewModel::onOriginSelected,
+                    onOriginLoadMore = viewModel::loadMoreOriginPlaces,
+                    onOriginSortChange = viewModel::onOriginSortChange,
+                    onOriginOpenMap = {
+                        viewModel.openMapPick(HomeViewModel.MapTarget.ORIGIN)
+                    },
+                    onOpenPlaceUrl = openPlaceUrl,
                     onUseCurrentLocation = viewModel::useCurrentLocationAsOrigin,
                 )
+
+                AppRoute.MapPick -> mapPickState?.let { map ->
+                    MapPickScreen(
+                        state = map,
+                        onViewport = viewModel::loadMapImage,
+                        onDrag = viewModel::onMapDrag,
+                        onDragEnd = viewModel::onMapDragEnd,
+                        onZoom = viewModel::onMapZoom,
+                        onRecenter = viewModel::onMapRecenter,
+                        onResearch = viewModel::researchMapArea,
+                        onSelect = viewModel::onMapPlaceSelected,
+                        onConfirm = viewModel::confirmMapPick,
+                        onBack = {
+                            viewModel.closeMapPick()
+                            viewModel.goBack()
+                        },
+                        currentPoint = viewModel.currentPoint,
+                        onOpenPlaceUrl = openPlaceUrl,
+                        modifier = Modifier.padding(innerPadding),
+                    )
+                }
 
                 AppRoute.PrepOnboarding -> PrepOnboardingScreen(
                     state = prepOnboardingState,
@@ -379,6 +431,10 @@ private fun MainHost(
                     onQueryChange = viewModel::onHomeQueryChange,
                     onSearch = viewModel::searchHomePlaces,
                     onSelect = viewModel::onHomePlaceSelected,
+                    onLoadMore = viewModel::loadMoreHomePlaces,
+                    onSortChange = viewModel::onHomeSortChange,
+                    onOpenMap = { viewModel.openMapPick(HomeViewModel.MapTarget.HOME) },
+                    onOpenPlaceUrl = openPlaceUrl,
                     onSubmit = viewModel::submitHomeSetup,
                     onSkip = viewModel::skipHomeSetup,
                     onBack = viewModel::goBack,

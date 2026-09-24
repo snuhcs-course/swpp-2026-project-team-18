@@ -13,8 +13,11 @@ import com.swpp.wakeup.data.local.MorningSessionStore
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.data.local.TokenStore
+import android.graphics.Bitmap
+import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.data.remote.BlockObservationInput
 import com.swpp.wakeup.data.remote.PlaceSearchItem
+import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.ServerVersion
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.repository.EventRepository
@@ -33,6 +36,8 @@ import com.swpp.wakeup.domain.model.MorningSession
 import com.swpp.wakeup.domain.model.RoutineEditorState
 import com.swpp.wakeup.sensing.BlockObservationQueue
 import com.swpp.wakeup.sensing.CurrentLocation
+import com.swpp.wakeup.domain.model.StaticMapScale
+import com.swpp.wakeup.sensing.GeoPoint
 import com.swpp.wakeup.sensing.TripObservationQueue
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.UpcomingEvent
@@ -47,6 +52,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import kotlin.math.cos
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -180,6 +186,145 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _nav = MutableStateFlow(NavState())
     val nav: StateFlow<NavState> = _nav.asStateFlow()
+
+    // --- 장소 검색 --------------------------------------------------------
+    //
+    // 일정 추가(목적지)·집 주소·경로 선택(출발지)·지도 화면이 **같은 상태와 같은
+    // 엔진**을 쓴다. 예전에는 세 곳이 각자 query/results/searching 을 들고
+    // 있었고, 그래서 결과가 세 개만 보이던 문제도 한 곳만 고쳐서는 낫지
+    // 않았다. 페이지·정렬·거리를 세 번 구현할 이유가 없다.
+
+    /** 장소 검색 한 화면의 상태. */
+    data class PlaceSearch(
+        val query: String = "",
+        val searching: Boolean = false,
+        /** 다음 페이지를 받는 중. 첫 검색과 구분해야 스피너 자리가 다르다 */
+        val loadingMore: Boolean = false,
+        val results: List<PlaceSearchItem> = emptyList(),
+        val page: Int = 1,
+        val isEnd: Boolean = true,
+        val totalCount: Int = 0,
+        val reachableCount: Int = 0,
+        val sort: String = PlaceSearchResponse.SORT_ACCURACY,
+        val error: String? = null,
+        /** 한 번이라도 검색했는가. "결과 없음" 을 검색 전에 띄우지 않으려고 본다 */
+        val searched: Boolean = false,
+        /**
+         * 거리를 받았는가.
+         *
+         * 위치 권한이 없거나 아직 좌표를 못 구하면 거리가 비어 온다. 그때
+         * 거리 정렬 칩을 눌러도 정확도순으로 떨어지므로 칩을 감춘다.
+         */
+        val hasDistances: Boolean = false,
+    ) {
+        val canLoadMore: Boolean get() = !isEnd && !searching && !loadingMore
+
+        /**
+         * "45건 중 12건" 같은 문구. 검색 전이면 null.
+         *
+         * **`totalCount` 를 쓰지 않는다.** 카카오는 "카페" 에 14만을 주는데
+         * 받아 볼 수 있는 것은 45건이다. 큰 숫자를 적어 두면 목록이 45건에서
+         * 끝나는 것이 고장으로 보인다.
+         */
+        val countLabel: String?
+            get() {
+                if (!searched) return null
+                if (results.isEmpty()) return null
+                val reachable = reachableCount.takeIf { it > 0 } ?: results.size
+                return if (results.size >= reachable) "${results.size}건"
+                else "${reachable}건 중 ${results.size}건"
+            }
+
+        /** 검색어를 바꾸면 페이지와 결과를 버린다. 섞이면 엉뚱한 목록이 된다 */
+        fun withQuery(next: String) = copy(query = next)
+    }
+
+    /**
+     * 검색을 돌려 상태를 갱신한다.
+     *
+     * 상태를 읽고 쓰는 방법만 받는다. 호출부가 어느 화면인지 이 함수는 알
+     * 필요가 없다 — 그래서 네 화면이 같은 코드를 쓴다.
+     *
+     * [page] 가 1보다 크면 결과를 **이어 붙인다.** 갈아 끼우면 "더 보기" 가
+     * 목록을 위로 되돌린다.
+     */
+    private fun runPlaceSearch(
+        get: () -> PlaceSearch,
+        set: (PlaceSearch) -> Unit,
+        page: Int = 1,
+        sort: String? = null,
+        rect: String? = null,
+        near: GeoPoint? = null,
+    ) {
+        val current = get()
+        val query = current.query.trim()
+        if (query.isBlank()) return
+
+        val wantedSort = sort ?: current.sort
+        val origin = near ?: lastKnownPoint
+
+        set(
+            current.copy(
+                searching = page == 1,
+                loadingMore = page > 1,
+                error = null,
+                sort = wantedSort,
+            )
+        )
+
+        viewModelScope.launch {
+            val result = repository.searchPlaces(
+                query = query,
+                near = origin,
+                page = page,
+                sort = wantedSort,
+                rect = rect,
+            )
+            val before = get()
+            when (result) {
+                is EventRepository.Result.Success -> {
+                    val body = result.data
+                    val merged =
+                        if (page > 1) before.results + body.results else body.results
+                    set(
+                        before.copy(
+                            searching = false,
+                            loadingMore = false,
+                            results = merged,
+                            page = body.page,
+                            isEnd = body.isEnd,
+                            totalCount = body.totalCount,
+                            reachableCount = body.reachableCount,
+                            // 서버가 실제로 적용한 정렬을 따른다. 좌표가 없으면
+                            // 거리순 요청이 정확도순으로 내려온다.
+                            sort = body.sort,
+                            hasDistances = merged.any { it.distanceM != null },
+                            searched = true,
+                            error = null,
+                        )
+                    )
+                }
+
+                is EventRepository.Result.Failure -> set(
+                    before.copy(
+                        searching = false,
+                        loadingMore = false,
+                        searched = true,
+                        error = result.message,
+                    )
+                )
+            }
+        }
+    }
+
+    /**
+     * 마지막으로 확인한 현재 위치. 검색에 거리를 붙이는 데 쓴다.
+     *
+     * 검색할 때마다 GPS 를 켜서 기다리지 않는다 — 그러면 검색 버튼을 누르고
+     * 몇 초를 기다리게 된다. 경로 화면이 위치를 잡을 때 여기에 적어 두고,
+     * 그 값이 있으면 검색에 얹는다. 없으면 거리 없이 검색한다.
+     */
+    private var lastKnownPoint: GeoPoint? = null
 
     /** 알람 결정 화면이 보고 있는 계획. */
     private val _plan = MutableStateFlow<AlarmPlanView?>(null)
@@ -592,8 +737,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             targets.forEach { candidate ->
                 val query = candidate.source.location ?: return@forEach
                 markResolving(candidate.externalId, true)
-                val found = when (val r = repository.searchPlaces(query)) {
-                    is EventRepository.Result.Success -> r.data.firstOrNull()
+                val found = when (val r = repository.searchPlaces(query, near = lastKnownPoint)) {
+                    is EventRepository.Result.Success -> r.data.results.firstOrNull()
                     is EventRepository.Result.Failure -> null
                 }
                 _calendarImport.update { state ->
@@ -998,10 +1143,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /** 출발지 기본값을 못 채운 이유 */
         val originNotice: String? = null,
 
-        /** 출발지 검색 상태. 목적지 검색과 독립이다 */
-        val originQuery: String = "",
-        val originSearching: Boolean = false,
-        val originResults: List<PlaceSearchItem> = emptyList(),
+        /** 출발지 검색 상태. 목적지 검색과 독립이지만 같은 구현을 쓴다 */
+        val originPlace: PlaceSearch = PlaceSearch(),
         /** 출발지 검색창을 펼친 상태인지 */
         val originEditing: Boolean = false,
     )
@@ -1053,10 +1196,288 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     private suspend fun detectCurrentPlace(): PlaceSearchItem? {
         val fix = CurrentLocation.get(appContext) ?: return null
+        // 좌표는 역지오코딩이 실패해도 쓸 데가 있다 — 장소 검색에 거리를 붙이고
+        // 지도의 "내 위치" 를 찍는다. 주소를 못 얻었다고 버리지 않는다.
+        lastKnownPoint = GeoPoint(fix.latitude, fix.longitude)
         return when (val r = repository.reversePlace(fix.latitude, fix.longitude)) {
             is EventRepository.Result.Success -> r.data
             is EventRepository.Result.Failure -> null
         }
+    }
+
+    /**
+     * 현재 위치를 미리 한 번 잡아 둔다.
+     *
+     * 장소 검색에 거리를 붙이려면 좌표가 필요한데, 검색 버튼을 누른 뒤 GPS 를
+     * 기다리면 결과가 몇 초 늦는다. 검색 화면에 들어올 때 미리 받아 두고
+     * 실패하면 거리 없이 검색한다 — 거리는 있으면 좋은 것이고 없으면 검색을
+     * 막을 이유가 없다.
+     */
+    fun primeCurrentLocation() {
+        if (lastKnownPoint != null) return
+        viewModelScope.launch {
+            val fix = CurrentLocation.get(appContext) ?: return@launch
+            lastKnownPoint = GeoPoint(fix.latitude, fix.longitude)
+        }
+    }
+
+    /** 지도·거리 표시에 쓸 현재 위치. 아직 못 잡았으면 null */
+    val currentPoint: GeoPoint? get() = lastKnownPoint
+
+    // --- 지도에서 고르기 ---------------------------------------------------
+
+    /**
+     * 지도 화면 상태.
+     *
+     * **지도 SDK 를 쓰지 않는다.** 서버가 카카오 정적 지도 이미지를 만들어
+     * 주므로 앱은 그 이미지를 그릴 뿐이다. 네이티브 앱 키를 APK 에 넣고 서명
+     * 키 해시를 등록하는 절차가 전부 없어진다.
+     *
+     * 그 대신 지도를 끌 때 이미지를 다시 받아야 한다. [pendingShift] 는 손가락을
+     * 떼기 전까지의 이동량이고, 떼는 순간 중심을 옮겨 새 이미지를 받는다 —
+     * 끄는 동안 매번 받으면 하루 호출 한도를 태운다.
+     */
+    data class MapPickState(
+        /** 어느 검색을 위한 지도인지. 고른 결과를 되돌려 줄 곳이다 */
+        val target: MapTarget = MapTarget.DESTINATION,
+        val center: GeoPoint = SEOUL_CENTER,
+        val level: Int = StaticMapScale.DEFAULT_LEVEL,
+        /** 지도에 찍을 결과. 카카오가 한 번에 다섯 개까지만 그린다 */
+        val markers: List<PlaceSearchItem> = emptyList(),
+        val selected: PlaceSearchItem? = null,
+        /** 영역 재검색 중 */
+        val searching: Boolean = false,
+        val error: String? = null,
+        /** 손가락을 떼기 전까지 끈 거리(px). 이미지를 그만큼 밀어 보여 준다 */
+        val pendingShift: Offset = Offset.Zero,
+        /** 지도를 옮긴 뒤 아직 재검색하지 않았다 */
+        val moved: Boolean = false,
+        /** 지금 그릴 지도 이미지. 아직 못 받았으면 null */
+        val image: Bitmap? = null,
+        val imageLoading: Boolean = false,
+        /**
+         * 지도를 못 받은 이유.
+         *
+         * 이것 때문에 화면을 막지 않는다. 아래 목록으로 계속 고를 수 있으므로
+         * 지도 자리에만 문구를 띄운다.
+         */
+        val imageError: String? = null,
+    ) {
+        val canZoomIn: Boolean get() = level > StaticMapScale.MIN_LEVEL
+        val canZoomOut: Boolean get() = level < StaticMapScale.MAX_LEVEL
+    }
+
+    /** 지도에서 고른 장소를 어디로 되돌릴지. */
+    enum class MapTarget { DESTINATION, HOME, ORIGIN }
+
+    private val _mapPick = MutableStateFlow<MapPickState?>(null)
+    val mapPick: StateFlow<MapPickState?> = _mapPick.asStateFlow()
+
+    /**
+     * 지도 화면을 연다.
+     *
+     * 중심은 **첫 결과**다. 현재 위치를 중심으로 두면 검색 결과가 화면 밖에
+     * 있을 수 있고, 그러면 지도를 열자마자 아무 핀도 보이지 않는다. 결과가
+     * 없으면 현재 위치, 그것도 없으면 서울 중심으로 떨어진다.
+     */
+    fun openMapPick(target: MapTarget) {
+        val place = placeSearchOf(target)
+        val results = place.results
+        val center = results.firstOrNull()?.let { GeoPoint(it.lat, it.lng) }
+            ?: lastKnownPoint
+            ?: SEOUL_CENTER
+
+        _mapPick.value = MapPickState(
+            target = target,
+            center = center,
+            markers = results.take(StaticMapScale.MARKER_LIMIT),
+            selected = results.firstOrNull(),
+        )
+        _nav.update { it.copy(stack = it.stack + AppRoute.MapPick, forward = true) }
+    }
+
+    fun closeMapPick() {
+        _mapPick.value = null
+    }
+
+    /** 지도에서 핀 하나를 고른다. 지도를 그 자리로 옮긴다. */
+    fun onMapPlaceSelected(item: PlaceSearchItem) {
+        _mapPick.update {
+            it?.copy(selected = item, center = GeoPoint(item.lat, item.lng), moved = false)
+        }
+    }
+
+    /** 끄는 중. 이미지를 밀어 보여 주기만 하고 아직 받지 않는다. */
+    fun onMapDrag(delta: Offset) {
+        _mapPick.update { it?.copy(pendingShift = it.pendingShift + delta) }
+    }
+
+    /**
+     * 손가락을 뗐다. 밀린 만큼 중심을 옮기고 이미지를 다시 받는다.
+     *
+     * 픽셀을 좌표로 바꾸는 데 실측 축척을 쓴다. 위도는 남북이라 그대로 나누고,
+     * 경도는 위도에 따라 1도의 길이가 줄어들므로 cos 로 보정한다.
+     */
+    fun onMapDragEnd(metersPerPixel: Double) {
+        val state = _mapPick.value ?: return
+        val shift = state.pendingShift
+        if (shift == Offset.Zero) return
+
+        // 이미지를 오른쪽으로 끌면 지도는 서쪽으로 간다. 부호가 반대다.
+        val dLat = (shift.y * metersPerPixel) / StaticMapScale.METERS_PER_DEGREE
+        val dLng = (-shift.x * metersPerPixel) /
+            (StaticMapScale.METERS_PER_DEGREE * cos(Math.toRadians(state.center.lat)))
+
+        _mapPick.update {
+            it?.copy(
+                center = GeoPoint(
+                    lat = (it.center.lat + dLat).coerceIn(-89.0, 89.0),
+                    lng = it.center.lng + dLng,
+                ),
+                pendingShift = Offset.Zero,
+                moved = true,
+            )
+        }
+    }
+
+    fun onMapZoom(delta: Int) {
+        _mapPick.update {
+            val next = (it ?: return@update it)
+                .level
+                .plus(delta)
+                .coerceIn(StaticMapScale.MIN_LEVEL, StaticMapScale.MAX_LEVEL)
+            it.copy(level = next, moved = true)
+        }
+    }
+
+    /** 지도를 내 위치로 되돌린다. */
+    fun onMapRecenter() {
+        val here = lastKnownPoint
+        if (here == null) {
+            _mapPick.update { it?.copy(error = "현재 위치를 확인할 수 없음") }
+            primeCurrentLocation()
+            return
+        }
+        _mapPick.update {
+            it?.copy(center = here, moved = true, error = null, pendingShift = Offset.Zero)
+        }
+    }
+
+    /**
+     * 지금 보이는 영역을 다시 검색한다.
+     *
+     * 화면에 담긴 범위를 `rect` 로 만들어 보낸다. 순서는
+     * `minLng,minLat,maxLng,maxLat` 이고, 틀리면 서버가 무시한다.
+     */
+    fun researchMapArea(viewWidthPx: Int, viewHeightPx: Int, metersPerPixel: Double) {
+        val state = _mapPick.value ?: return
+        val target = state.target
+        val query = placeSearchOf(target).query.trim()
+        if (query.isBlank()) return
+
+        val halfLatDeg =
+            (viewHeightPx / 2.0 * metersPerPixel) / StaticMapScale.METERS_PER_DEGREE
+        val halfLngDeg = (viewWidthPx / 2.0 * metersPerPixel) /
+            (StaticMapScale.METERS_PER_DEGREE * cos(Math.toRadians(state.center.lat)))
+
+        val rect = listOf(
+            state.center.lng - halfLngDeg,
+            state.center.lat - halfLatDeg,
+            state.center.lng + halfLngDeg,
+            state.center.lat + halfLatDeg,
+        ).joinToString(",") { "%.6f".format(it) }
+
+        _mapPick.update { it?.copy(searching = true, error = null) }
+        runPlaceSearch(
+            get = { placeSearchOf(target) },
+            set = { next ->
+                setPlaceSearch(target, next)
+                _mapPick.update { current ->
+                    current?.copy(
+                        searching = next.searching,
+                        error = next.error,
+                        markers = next.results.take(StaticMapScale.MARKER_LIMIT),
+                        // 영역을 다시 검색했으면 고른 것도 새 목록 기준으로 둔다.
+                        selected = next.results.firstOrNull() ?: current.selected,
+                        moved = false,
+                    )
+                }
+            },
+            page = 1,
+            rect = rect,
+            // 지도 중심에서 가까운 것부터 보는 것이 지도의 뜻에 맞는다.
+            sort = PlaceSearchResponse.SORT_DISTANCE,
+            near = state.center,
+        )
+    }
+
+    /** 지도에서 고른 것을 원래 검색으로 되돌리고 닫는다. */
+    fun confirmMapPick() {
+        val state = _mapPick.value ?: return
+        val picked = state.selected ?: return
+        when (state.target) {
+            MapTarget.DESTINATION -> onAddPlaceSelected(picked)
+            MapTarget.HOME -> onHomePlaceSelected(picked)
+            MapTarget.ORIGIN -> onOriginSelected(picked)
+        }
+        _mapPick.value = null
+        goBack()
+    }
+
+    /**
+     * 화면 크기를 알았으니 지도 이미지를 받는다.
+     *
+     * 중심·줌·마커·크기가 같으면 다시 받지 않는다. 화면이 재구성될 때마다
+     * 부르면 같은 이미지를 반복해서 요청한다.
+     */
+    fun loadMapImage(widthDp: Int, heightDp: Int) {
+        val state = _mapPick.value ?: return
+        if (widthDp <= 0 || heightDp <= 0) return
+
+        val signature = "${state.center.lat},${state.center.lng},${state.level}," +
+            "$widthDp,$heightDp,${state.markers.joinToString { it.kakaoPlaceId ?: it.name }}"
+        if (signature == lastMapSignature && state.image != null) return
+        lastMapSignature = signature
+
+        _mapPick.update { it?.copy(imageLoading = true, imageError = null) }
+        viewModelScope.launch {
+            val result = repository.staticMap(
+                center = state.center,
+                level = state.level,
+                widthDp = widthDp,
+                heightDp = heightDp,
+                markers = state.markers.map { GeoPoint(it.lat, it.lng) },
+            )
+            _mapPick.update { current ->
+                current ?: return@update current
+                when (result) {
+                    is EventRepository.Result.Success ->
+                        current.copy(
+                            image = result.data,
+                            imageLoading = false,
+                            imageError = null,
+                        )
+
+                    is EventRepository.Result.Failure ->
+                        current.copy(imageLoading = false, imageError = result.message)
+                }
+            }
+        }
+    }
+
+    /** 방금 받은 지도의 조건. 같은 조건이면 다시 받지 않는다 */
+    private var lastMapSignature: String? = null
+
+    private fun placeSearchOf(target: MapTarget): PlaceSearch = when (target) {
+        MapTarget.DESTINATION -> _add.value.place
+        MapTarget.HOME -> _homeSetup.value.place
+        MapTarget.ORIGIN -> _routeChoice.value?.originPlace ?: PlaceSearch()
+    }
+
+    private fun setPlaceSearch(target: MapTarget, next: PlaceSearch) = when (target) {
+        MapTarget.DESTINATION -> _add.update { it.copy(place = next) }
+        MapTarget.HOME -> _homeSetup.update { it.copy(place = next) }
+        MapTarget.ORIGIN -> _routeChoice.update { (it ?: RouteState()).copy(originPlace = next) }
     }
 
     /** 후보 조회 한 곳. 최초 진입·재시도·출발지 변경이 모두 이걸 쓴다. */
@@ -1105,32 +1526,38 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _routeChoice.update { current ->
             (current ?: RouteState()).copy(
                 originEditing = editing,
-                originQuery = if (editing) current?.originQuery.orEmpty() else "",
-                originResults = if (editing) current?.originResults.orEmpty() else emptyList(),
+                // 접으면 검색을 버린다. 남겨 두면 다시 펼쳤을 때 예전 검색어와
+                // 결과가 그대로 있어 방금 고친 출발지와 어긋나 보인다.
+                originPlace = if (editing) {
+                    current?.originPlace ?: PlaceSearch()
+                } else {
+                    PlaceSearch()
+                },
             )
         }
     }
 
-    fun onOriginQueryChange(v: String) {
-        _routeChoice.update { (it ?: RouteState()).copy(originQuery = v) }
+    fun onOriginQueryChange(v: String) = _routeChoice.update {
+        (it ?: RouteState()).let { s -> s.copy(originPlace = s.originPlace.withQuery(v)) }
     }
 
-    fun searchOriginPlaces() {
-        val q = _routeChoice.value?.originQuery?.trim().orEmpty()
-        if (q.isBlank()) return
-        _routeChoice.update { (it ?: RouteState()).copy(originSearching = true) }
-        viewModelScope.launch {
-            when (val result = repository.searchPlaces(q)) {
-                is EventRepository.Result.Success -> _routeChoice.update {
-                    (it ?: RouteState()).copy(originSearching = false, originResults = result.data)
-                }
+    fun searchOriginPlaces() = searchOriginPlaces(page = 1)
 
-                is EventRepository.Result.Failure -> _routeChoice.update {
-                    (it ?: RouteState()).copy(originSearching = false, error = result.message)
-                }
-            }
-        }
+    fun loadMoreOriginPlaces() {
+        val place = _routeChoice.value?.originPlace ?: return
+        if (place.canLoadMore) searchOriginPlaces(page = place.page + 1)
     }
+
+    fun onOriginSortChange(sort: String) = searchOriginPlaces(page = 1, sort = sort)
+
+    private fun searchOriginPlaces(page: Int, sort: String? = null) = runPlaceSearch(
+        get = { _routeChoice.value?.originPlace ?: PlaceSearch() },
+        set = { next ->
+            _routeChoice.update { (it ?: RouteState()).copy(originPlace = next) }
+        },
+        page = page,
+        sort = sort,
+    )
 
     /**
      * 출발지를 바꾼다. 후보를 다시 받아야 한다.
@@ -1144,8 +1571,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             (current ?: RouteState()).copy(
                 origin = item,
                 originEditing = false,
-                originQuery = "",
-                originResults = emptyList(),
+                originPlace = PlaceSearch(),
                 originNotice = null,
             )
         }
@@ -1228,9 +1654,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val minute: Int = 0,
         /** null 이면 "기타" — 서버에서 태그를 비우고 프로필 기본 τ 를 쓴다 */
         val tagKey: String? = "class",
-        val query: String = "",
-        val searching: Boolean = false,
-        val results: List<PlaceSearchItem> = emptyList(),
+        /** 목적지 검색. 집 주소·출발지와 같은 상태를 쓴다 */
+        val place: PlaceSearch = PlaceSearch(),
         val selectedPlace: PlaceSearchItem? = null,
 
         /** ⑬ 경로 선택에서 고른 값. 비어 있으면 서버가 최단 경로를 쓴다 */
@@ -1270,7 +1695,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun onAddDateChange(v: LocalDate) = _add.update { it.copy(date = v) }
     fun onAddTimeChange(h: Int, m: Int) = _add.update { it.copy(hour = h, minute = m) }
     fun onAddTagChange(key: String?) = _add.update { it.copy(tagKey = key) }
-    fun onAddQueryChange(v: String) = _add.update { it.copy(query = v) }
+    fun onAddQueryChange(v: String) =
+        _add.update { it.copy(place = it.place.withQuery(v)) }
 
     /**
      * 장소가 바뀌면 고른 경로를 버린다.
@@ -1282,8 +1708,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _add.update {
             it.copy(
                 selectedPlace = item,
-                results = emptyList(),
-                query = item?.name ?: "",
+                place = it.place.copy(results = emptyList(), query = item?.name ?: ""),
                 routeKey = null,
                 routeLabel = null,
                 // 출발지도 함께 버린다. 경로를 다시 고를 때 현재 위치를 새로
@@ -1295,20 +1720,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _routeChoice.value = null
     }
 
-    fun searchPlaces() {
-        val q = _add.value.query.trim()
-        if (q.isBlank()) return
-        _add.update { it.copy(searching = true, error = null) }
-        viewModelScope.launch {
-            when (val result = repository.searchPlaces(q)) {
-                is EventRepository.Result.Success ->
-                    _add.update { it.copy(searching = false, results = result.data) }
+    fun searchPlaces() = searchAddPlaces(page = 1)
 
-                is EventRepository.Result.Failure ->
-                    _add.update { it.copy(searching = false, error = result.message) }
-            }
-        }
+    fun loadMoreAddPlaces() {
+        if (_add.value.place.canLoadMore) searchAddPlaces(page = _add.value.place.page + 1)
     }
+
+    fun onAddSortChange(sort: String) = searchAddPlaces(page = 1, sort = sort)
+
+    private fun searchAddPlaces(page: Int, sort: String? = null) = runPlaceSearch(
+        get = { _add.value.place },
+        set = { next -> _add.update { it.copy(place = next) } },
+        page = page,
+        sort = sort,
+    )
 
     fun submitAdd() {
         val current = _add.value
@@ -1507,9 +1932,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // --- 집 위치 설정 -----------------------------------------------------
 
     data class HomeSetupState(
-        val query: String = "",
-        val searching: Boolean = false,
-        val results: List<PlaceSearchItem> = emptyList(),
+        val place: PlaceSearch = PlaceSearch(),
         val selected: PlaceSearchItem? = null,
         /**
          * 가입 직후 온보딩으로 열렸는가.
@@ -1540,9 +1963,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _homeSetup.value = HomeSetupState()
     }
 
-    fun onHomeQueryChange(v: String) = _homeSetup.update { it.copy(query = v) }
-    fun onHomePlaceSelected(item: PlaceSearchItem?) =
-        _homeSetup.update { it.copy(selected = item, results = emptyList(), query = item?.name ?: "") }
+    fun onHomeQueryChange(v: String) =
+        _homeSetup.update { it.copy(place = it.place.withQuery(v)) }
+
+    fun onHomePlaceSelected(item: PlaceSearchItem?) = _homeSetup.update {
+        it.copy(
+            selected = item,
+            place = it.place.copy(results = emptyList(), query = item?.name ?: ""),
+        )
+    }
 
     /**
      * 집 주소를 저장하지 않고 닫는다.
@@ -1556,19 +1985,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun searchHomePlaces() {
-        val q = _homeSetup.value.query.trim()
-        if (q.isBlank()) return
-        _homeSetup.update { it.copy(searching = true, error = null) }
-        viewModelScope.launch {
-            when (val result = repository.searchPlaces(q)) {
-                is EventRepository.Result.Success ->
-                    _homeSetup.update { it.copy(searching = false, results = result.data) }
+        searchHomePlaces(page = 1)
+    }
 
-                is EventRepository.Result.Failure ->
-                    _homeSetup.update { it.copy(searching = false, error = result.message) }
-            }
+    fun loadMoreHomePlaces() {
+        if (_homeSetup.value.place.canLoadMore) {
+            searchHomePlaces(page = _homeSetup.value.place.page + 1)
         }
     }
+
+    fun onHomeSortChange(sort: String) = searchHomePlaces(page = 1, sort = sort)
+
+    private fun searchHomePlaces(page: Int, sort: String? = null) = runPlaceSearch(
+        get = { _homeSetup.value.place },
+        set = { next -> _homeSetup.update { it.copy(place = next) } },
+        page = page,
+        sort = sort,
+    )
 
     fun submitHomeSetup() {
         val current = _homeSetup.value
@@ -1598,6 +2031,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val TAG = "HomeViewModel"
+
+        /**
+         * 지도를 열 때 기준점이 하나도 없을 때의 중심(서울시청).
+         *
+         * 검색 결과도 없고 현재 위치도 못 잡은 상태다. 좌표 0,0 으로 두면
+         * 아프리카 앞바다가 뜨고 사용자는 앱이 고장난 것으로 읽는다.
+         */
+        val SEOUL_CENTER = GeoPoint(37.5665, 126.9780)
 
         /** 준비 시간으로 받아들이는 범위(분). 밖의 값은 입력 실수로 본다. */
         const val PREP_MIN = 5

@@ -1,6 +1,7 @@
 package com.swpp.wakeup.data.remote
 
 import com.google.gson.annotations.SerializedName
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -70,8 +71,28 @@ interface EventsApi {
     @GET("api/events/tags")
     suspend fun tags(): Response<List<EventTagDto>>
 
+    /**
+     * 장소 검색.
+     *
+     * [lat]·[lng] 를 주면 결과에 **거리가 붙는다.** 카카오는 기준 좌표를 함께
+     * 받았을 때만 거리를 채운다. "레드포스PC" 가 셋이나 나올 때 어느 것을
+     * 고를지는 거리로 갈린다.
+     *
+     * 한 페이지는 15건이고 [page] 3에서 끝난다(총 45건). 그 이상은 카카오가
+     * 내려 주지 않는다.
+     *
+     * [rect] 는 지도 영역 재검색이다. `minLng,minLat,maxLng,maxLat` 순서이고
+     * 순서를 틀리면 서버가 무시한다.
+     */
     @GET("api/places/search")
-    suspend fun searchPlaces(@Query("q") query: String): Response<PlaceSearchResponse>
+    suspend fun searchPlaces(
+        @Query("q") query: String,
+        @Query("lat") lat: Double? = null,
+        @Query("lng") lng: Double? = null,
+        @Query("page") page: Int = 1,
+        @Query("sort") sort: String? = null,
+        @Query("rect") rect: String? = null,
+    ): Response<PlaceSearchResponse>
 
     /**
      * 좌표 → 주소. 경로 선택 화면이 출발지 기본값으로 현재 위치를 넣을 때 쓴다.
@@ -80,6 +101,29 @@ interface EventsApi {
      * 어디인지 모른다. 카카오 호출은 서버가 대신한다 — 앱에 카카오 키를 넣지
      * 않는다([searchPlaces] 와 같은 이유).
      */
+    /**
+     * 정적 지도 이미지.
+     *
+     * **지도 SDK 를 쓰지 않는 이유.** 카카오지도 안드로이드 SDK 는 네이티브 앱
+     * 키를 APK 에 넣고 서명 키 해시를 등록해야 한다. 이 경로는 서버가 가진
+     * 키로 같은 지도를 만들어 주므로 그 절차가 전부 사라진다.
+     *
+     * [markers] 는 `lat,lng` 를 세미콜론으로 이은 목록이다. 카카오가 한 번에
+     * 다섯 개까지만 그린다.
+     *
+     * 응답은 PNG 바이트다. 서버가 한 시간 캐시하므로 같은 화면을 다시 그려도
+     * 카카오 호출은 늘지 않는다.
+     */
+    @GET("api/places/staticmap")
+    suspend fun staticMap(
+        @Query("lat") lat: Double,
+        @Query("lng") lng: Double,
+        @Query("lv") level: Int,
+        @Query("w") width: Int,
+        @Query("h") height: Int,
+        @Query("markers") markers: String? = null,
+    ): Response<ResponseBody>
+
     @GET("api/places/reverse")
     suspend fun reversePlace(
         @Query("lat") lat: Double,
@@ -456,10 +500,42 @@ data class CalendarImportResponse(
     val results: List<EventDto> = emptyList(),
 )
 
+/**
+ * 장소 검색 한 페이지.
+ *
+ * 전부 기본값을 둔다. Gson 은 응답에 없는 필드를 그냥 두므로, 서버가 옛
+ * 버전이면(키가 없으면) 기본값으로 떨어져야 한다 — non-null 로 선언하고
+ * 기본값을 안 주면 null 이 박혀 다음 접근에서 죽는다.
+ */
 data class PlaceSearchResponse(
-    val results: List<PlaceSearchItem>,
+    val results: List<PlaceSearchItem> = emptyList(),
+    val page: Int = 1,
+    /**
+     * 카카오가 말하는 전체 건수.
+     *
+     * **화면에 이 숫자를 그대로 쓰면 안 된다.** "카페" 는 14만이 오는데 실제로
+     * 받아 볼 수 있는 것은 [reachableCount] 까지다. 목록이 45건에서 끝나는데
+     * 옆에 14만이 적히면 사용자는 앱이 고장난 것으로 읽는다.
+     */
+    @SerializedName("total_count") val totalCount: Int = 0,
+    /** 실제로 받아 볼 수 있는 건수. 카카오는 45건까지만 페이지로 준다 */
+    @SerializedName("reachable_count") val reachableCount: Int = 0,
+    /** 다음 페이지가 없다. "더 보기" 를 그릴지 판단하는 값 */
+    @SerializedName("is_end") val isEnd: Boolean = true,
+    /**
+     * 실제로 적용된 정렬.
+     *
+     * 거리순을 요청해도 기준 좌표가 없으면 서버가 정확도순으로 내린다. 화면이
+     * 고른 것과 다를 수 있으므로 응답을 따른다.
+     */
+    val sort: String = SORT_ACCURACY,
     val degraded: Boolean = false,
-)
+) {
+    companion object {
+        const val SORT_ACCURACY = "accuracy"
+        const val SORT_DISTANCE = "distance"
+    }
+}
 
 /**
  * 좌표 → 주소 결과.
@@ -479,8 +555,42 @@ data class PlaceSearchItem(
     val address: String?,
     val lat: Double,
     val lng: Double,
+    /** 업종 전체 경로. 예 "가정,생활 > 여가시설 > 게임방,PC방" */
     val category: String?,
-)
+    /**
+     * 업종 한 마디. 목록의 칩에 쓴다. 예 "게임방,PC방"
+     *
+     * 전체 경로는 이름과 한 줄에 들어가지 못한다. 서버가 짧은 쪽을 만들어
+     * 준다 — 카카오의 `category_group_name` 이 자주 비어서 전체 경로의
+     * 마지막 조각으로 보완한 값이다.
+     */
+    @SerializedName("category_group") val categoryGroup: String? = null,
+    /**
+     * 기준 좌표에서의 거리(m). 좌표를 보내지 않았으면 null.
+     *
+     * 같은 이름의 지점이 여러 개일 때 이것으로 고른다. "레드포스PC" 가 셋이면
+     * 이름만으로는 구분할 수 없다.
+     */
+    @SerializedName("distance_m") val distanceM: Int? = null,
+    /** 지번 주소. 도로명으로 못 찾는 곳이 있어 함께 받는다 */
+    @SerializedName("jibun_address") val jibunAddress: String? = null,
+    val phone: String? = null,
+    /**
+     * 카카오맵 장소 페이지.
+     *
+     * **평점·사진·영업시간이 있는 유일한 곳이다.** 카카오 로컬 API 응답에는
+     * 그 값들이 아예 없다(응답 필드 12개를 확인했다). 별을 지어내는 대신
+     * 이 링크로 보낸다.
+     */
+    @SerializedName("place_url") val placeUrl: String? = null,
+) {
+    /** 목록에 쓸 거리 문구. 거리를 모르면 null */
+    val distanceLabel: String?
+        get() {
+            val m = distanceM ?: return null
+            return if (m < 1000) "${m}m" else "%.1fkm".format(m / 1000.0)
+        }
+}
 
 data class ProfileDto(
     @SerializedName("home_lat") val homeLat: Double?,

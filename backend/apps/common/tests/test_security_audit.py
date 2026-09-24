@@ -65,6 +65,9 @@ SKIP_PREFIXES = ("/admin/", "/static/")
 THROTTLED_PATHS = {
     "/api/places/search": "카카오 로컬 (일 1,000건)",
     "/api/places/reverse": "카카오 좌표→주소",
+    # 지도를 움직일 때마다 이미지를 새로 받는다. 스로틀과 서버 캐시가 함께
+    # 막아야 하루 한도를 태우지 않는다.
+    "/api/places/staticmap": "카카오 정적 지도 (일 1,000건)",
     "/api/routes/candidates": "카카오 경로",
     "/api/observations/batch": "쓰기 폭주 방지",
     "/api/routines/observations/batch": "쓰기 폭주 방지",

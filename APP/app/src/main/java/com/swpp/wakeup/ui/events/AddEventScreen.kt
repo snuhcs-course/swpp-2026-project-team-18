@@ -108,6 +108,10 @@ fun AddEventScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onPlaceSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit,
+    onLoadMore: () -> Unit,
+    onSortChange: (String) -> Unit,
+    onOpenMap: () -> Unit,
+    onOpenPlaceUrl: (String) -> Unit,
     onPickRoute: () -> Unit,
     onSubmit: () -> Unit,
     onBack: () -> Unit,
@@ -153,14 +157,16 @@ fun AddEventScreen(
 
         PlacePicker(
             label = "장소 검색",
-            query = state.query,
-            results = state.results,
-            searching = state.searching,
+            state = state.place,
             selected = state.selectedPlace,
             onQueryChange = onQueryChange,
             onSearch = onSearch,
             onSelect = onPlaceSelect,
             enabled = !state.submitting,
+            onLoadMore = onLoadMore,
+            onSortChange = onSortChange,
+            onOpenMap = onOpenMap,
+            onOpenPlaceUrl = onOpenPlaceUrl,
             // 목적지가 집인 경우도 있다 — 퇴근·귀가 일정이 그렇다.
             homePlace = homePlace,
         )
@@ -232,6 +238,10 @@ fun HomeSetupScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit,
+    onLoadMore: () -> Unit,
+    onSortChange: (String) -> Unit,
+    onOpenMap: () -> Unit,
+    onOpenPlaceUrl: (String) -> Unit,
     onSubmit: () -> Unit,
     onSkip: () -> Unit,
     onBack: () -> Unit,
@@ -266,14 +276,16 @@ fun HomeSetupScreen(
 
         PlacePicker(
             label = "집 주변 검색",
-            query = state.query,
-            results = state.results,
-            searching = state.searching,
+            state = state.place,
             selected = state.selected,
             onQueryChange = onQueryChange,
             onSearch = onSearch,
             onSelect = onSelect,
             enabled = !state.submitting,
+            onLoadMore = onLoadMore,
+            onSortChange = onSortChange,
+            onOpenMap = onOpenMap,
+            onOpenPlaceUrl = onOpenPlaceUrl,
         )
 
         NoticeCard(

@@ -37,6 +37,50 @@ CAR_URL = "https://apis-navi.kakaomobility.com/v1/directions"
 # 도보만으로 갈 만한 거리 기준. 이보다 짧으면 대중교통이 오히려 느리다.
 WALK_ONLY_METERS = 1200
 
+# --- 장소 검색 한계 (실측: jit-tools/probe_local2.py) -----------------------
+#
+# 카카오 로컬 키워드 검색은 한 번에 15건, 45페이지까지만 받는다. 그보다 크게
+# 보내면 400 이다. 그런데 `pageable_count` 는 항상 45 로 와서, 실제로 받아 볼
+# 수 있는 것은 **45건**이다(3페이지에서 is_end=true).
+#
+# `total_count` 는 이와 다르다 — "카페" 는 142,759 가 온다. 화면에 그 숫자를
+# 쓰면 45건에서 끝나는 목록 옆에 14만이 적혀 거짓말이 된다.
+MAX_PAGE_SIZE = 15
+MAX_PAGE = 45
+
+SORT_ACCURACY = "accuracy"
+SORT_DISTANCE = "distance"
+
+# --- 정적 지도 (실측: jit-tools/calibrate_staticmap.py) ---------------------
+STATIC_MAP_URL = "https://dapi.kakao.com/v2/maps/staticmap"
+
+# 정적 지도 요청 한계.
+STATIC_MAP_MAX_W = 2048
+STATIC_MAP_MAX_H = 1024
+STATIC_MAP_MAX_MARKERS = 5
+STATIC_MAP_MIN_LEVEL = 1
+STATIC_MAP_MAX_LEVEL = 15
+
+# 줌 레벨 하나가 담는 거리(요청 size 한 단위당 미터).
+#
+# **응답에 축척이 없어서 직접 재야 했다.** 같은 이미지에 마커 두 개를 알려진
+# 위도 차로 찍고 픽셀 간격을 재는 방식으로 측정했다(두 이미지를 비교하는
+# 방법은 안 된다 — 팔레트 PNG 라서 마커가 하나 늘면 지도 전체 색이 흔들린다).
+#
+# 측정값: lv1~4 = 1.00, lv7 = 8.03, lv10 = 64.15. lv4 아래는 더 확대되지 않고,
+# lv4 부터는 한 레벨이 정확히 두 배다.
+#
+# `scale` 은 해상도만 바꾸고 범위는 건드리지 않는다(실측 확인). 그래서 이 값은
+# **요청 size 기준**이다.
+STATIC_MAP_BASE_LEVEL = 4
+STATIC_MAP_BASE_METERS_PER_UNIT = 1.0
+
+
+def meters_per_unit(level: int) -> float:
+    """줌 레벨 하나가 요청 size 한 단위에 담는 거리(m)."""
+    step = max(level, STATIC_MAP_BASE_LEVEL) - STATIC_MAP_BASE_LEVEL
+    return STATIC_MAP_BASE_METERS_PER_UNIT * (2.0**step)
+
 # 도보를 후보로 제시할 상한. 이보다 멀면 목록만 어지럽힌다.
 WALK_CANDIDATE_MAX_MINUTES = 40
 
@@ -67,36 +111,231 @@ def _get(url: str) -> tuple[dict | None, bool]:
         return None, True
 
 
-def search_places(query: str, size: int = 10) -> tuple[list[dict], bool]:
-    """장소 검색. 일정 추가 화면의 장소 선택에 쓴다.
+def short_category(document: dict) -> str:
+    """업종 한 마디. 화면의 칩에 넣는다.
 
-    반환 항목은 클라이언트가 그대로 저장할 수 있는 형태로 정규화한다.
+    `category_group_name` 을 먼저 쓴다. 다만 **이 값은 자주 빈다** — 카카오가
+    그룹 코드를 부여한 업종(카페·편의점·지하철역 등)만 채워지고, PC방처럼
+    그룹이 없는 업종은 빈 문자열이다(실측 확인).
+
+    비면 `category_name` 의 마지막 조각을 쓴다. 이 값은 항상 있다.
+    "가정,생활 > 여가시설 > 게임방,PC방" → "게임방,PC방"
+
+    전체 경로를 그대로 칩에 넣지 않는 이유는 길이다. 한 줄에 이름과 함께
+    들어가야 하므로 마지막 조각이 가장 쓸모 있다.
     """
+    group = (document.get("category_group_name") or "").strip()
+    if group:
+        return group
+    full = (document.get("category_name") or "").strip()
+    if not full:
+        return ""
+    return full.split(">")[-1].strip()
+
+
+def _place_item(d: dict) -> dict | None:
+    """카카오 문서 하나를 앱이 쓰는 모양으로 바꾼다. 좌표가 없으면 None."""
+    try:
+        lat, lng = float(d["y"]), float(d["x"])
+    except (KeyError, TypeError, ValueError):
+        # 좌표가 없는 항목은 장소로 쓸 수 없다.
+        return None
+
+    # 거리는 x/y 를 함께 보냈을 때만 온다. 없으면 빈 문자열이다.
+    raw_distance = (d.get("distance") or "").strip()
+    try:
+        distance_m = int(raw_distance) if raw_distance else None
+    except ValueError:
+        distance_m = None
+
+    return {
+        "kakao_place_id": d.get("id"),
+        "name": d.get("place_name") or "",
+        # 도로명이 없는 지역이 있어 지번으로 폴백한다.
+        "address": d.get("road_address_name") or d.get("address_name") or "",
+        # 지번 주소도 따로 내려 준다. 도로명만으로 못 찾는 곳이 있다.
+        "jibun_address": d.get("address_name") or "",
+        "lat": lat,
+        "lng": lng,
+        "category": d.get("category_name") or "",
+        "category_group": short_category(d),
+        "distance_m": distance_m,
+        "phone": d.get("phone") or "",
+        # 카카오맵 장소 페이지. **평점·사진·영업시간이 있는 유일한 곳이다.**
+        # 로컬 API 응답에는 그 값들이 없어서(실측: 필드 12개에 없음) 화면에
+        # 별을 그릴 수 없다. 지어내지 않고 이 링크로 보낸다.
+        "place_url": d.get("place_url") or "",
+    }
+
+
+def search_places(
+    query: str,
+    size: int = 15,
+    page: int = 1,
+    lat: float | None = None,
+    lng: float | None = None,
+    sort: str = SORT_ACCURACY,
+    rect: str | None = None,
+) -> tuple[dict, bool]:
+    """장소 검색. 일정 추가·집 주소·출발지 선택이 모두 이 경로를 쓴다.
+
+    **[lat]·[lng] 를 주면 결과에 거리가 붙는다.** 카카오는 기준 좌표를 함께
+    받았을 때만 `distance` 를 채운다. 사용자가 "여기서 얼마나 먼가" 를 볼 수
+    있어야 어느 장소인지 고를 수 있으므로 가능하면 항상 보낸다.
+
+    [rect] 는 지도 영역 재검색이다. `minLng,minLat,maxLng,maxLat` 순서이고,
+    **순서를 틀리면 카카오가 에러 없이 0건을 준다.** 그래서 여기서 검사한다.
+
+    반환은 항목 목록과 페이징 상태를 함께 담은 dict 다. 앱이 "더 보기" 를
+    그릴지 판단하려면 [is_end] 가 필요하다.
+    """
+    empty = {
+        "results": [],
+        "page": 1,
+        "total_count": 0,
+        "reachable_count": 0,
+        "is_end": True,
+        "sort": SORT_ACCURACY,
+    }
     if not query.strip():
-        return [], False
+        return empty, False
 
-    qs = urllib.parse.urlencode({"query": query.strip(), "size": max(1, min(size, 15))})
-    data, degraded = _get(f"{LOCAL_SEARCH_URL}?{qs}")
+    size = max(1, min(int(size), MAX_PAGE_SIZE))
+    page = max(1, min(int(page), MAX_PAGE))
+
+    params: dict[str, object] = {"query": query.strip(), "size": size, "page": page}
+
+    has_origin = lat is not None and lng is not None
+    if has_origin:
+        # 카카오는 경도를 x, 위도를 y 로 받는다. 바꿔 보내면 결과가 엉뚱해진다.
+        params["x"] = f"{lng}"
+        params["y"] = f"{lat}"
+
+    # 거리순 정렬은 기준 좌표가 필수다. 없이 보내면 400 이 온다(실측).
+    # 요청을 거부하지 않고 정확도순으로 내린다 — 위치 권한이 없는 사용자에게
+    # 검색 자체를 막을 이유가 없다. 대신 무엇이 적용됐는지 응답에 적는다.
+    applied_sort = SORT_ACCURACY
+    if sort == SORT_DISTANCE and has_origin:
+        params["sort"] = SORT_DISTANCE
+        applied_sort = SORT_DISTANCE
+
+    if rect:
+        valid = _valid_rect(rect)
+        if valid is None:
+            logger.warning("rect 형식이 올바르지 않아 무시한다: %r", rect)
+        else:
+            params["rect"] = valid
+
+    data, degraded = _get(f"{LOCAL_SEARCH_URL}?{urllib.parse.urlencode(params)}")
     if degraded or not data:
-        return [], True
+        return empty, True
 
-    places = []
-    for d in data.get("documents", []):
-        try:
-            places.append(
-                {
-                    "kakao_place_id": d.get("id"),
-                    "name": d.get("place_name") or "",
-                    "address": d.get("road_address_name") or d.get("address_name") or "",
-                    "lat": float(d["y"]),
-                    "lng": float(d["x"]),
-                    "category": d.get("category_name") or "",
-                }
-            )
-        except (KeyError, TypeError, ValueError):
-            # 좌표가 없는 항목은 장소로 쓸 수 없다. 조용히 건너뛴다.
-            continue
-    return places, False
+    places = [item for d in data.get("documents", []) if (item := _place_item(d))]
+    meta = data.get("meta") or {}
+
+    return (
+        {
+            "results": places,
+            "page": page,
+            # 카카오가 말하는 전체 건수. "카페" 는 14만이 나온다.
+            "total_count": int(meta.get("total_count") or 0),
+            # **실제로 받아 볼 수 있는 건수.** total_count 와 다르다 — 카카오는
+            # 45건까지만 페이지로 내려 준다. 화면에 total_count 를 그대로 쓰면
+            # 45건에서 멈추는 목록 옆에 14만이 적혀 거짓말이 된다.
+            "reachable_count": int(meta.get("pageable_count") or 0),
+            "is_end": bool(meta.get("is_end", True)),
+            "sort": applied_sort,
+        },
+        False,
+    )
+
+
+def _valid_rect(rect: str) -> str | None:
+    """`minLng,minLat,maxLng,maxLat` 인지 확인하고 정규화한다.
+
+    **순서가 틀리면 카카오는 에러 대신 0건을 준다.** 위경도를 뒤바꿔 보내면
+    "검색 결과가 없다" 로 보여서 원인을 찾기 어렵다. 그래서 범위로 걸러낸다.
+    """
+    parts = [p.strip() for p in rect.split(",")]
+    if len(parts) != 4:
+        return None
+    try:
+        min_lng, min_lat, max_lng, max_lat = (float(p) for p in parts)
+    except ValueError:
+        return None
+
+    if not (-180 <= min_lng <= 180 and -180 <= max_lng <= 180):
+        return None
+    if not (-90 <= min_lat <= 90 and -90 <= max_lat <= 90):
+        return None
+    if min_lng >= max_lng or min_lat >= max_lat:
+        return None
+
+    return f"{min_lng},{min_lat},{max_lng},{max_lat}"
+
+
+def static_map(
+    lat: float,
+    lng: float,
+    level: int,
+    width: int,
+    height: int,
+    markers: list[tuple[float, float]] | None = None,
+    scale: int = 2,
+) -> tuple[bytes | None, str, bool]:
+    """정적 지도 이미지. (바이트, content-type, degraded)
+
+    **앱에 지도 SDK 를 넣지 않는 이유.** 카카오지도 안드로이드 SDK 는 네이티브
+    앱 키를 APK 에 넣고 서명 키 해시를 등록해야 한다. 이 REST API 는 서버가
+    가진 키로 같은 지도를 그려 주므로 그 절차가 전부 사라진다. 다른 카카오
+    호출과 같은 규정(back-spec.md 5.3)이기도 하다.
+
+    마커는 **다섯 개까지**다. 그리고 `markers` 파라미터를 **반복해서** 보내야
+    한다 — 한 값 안에서 `&` 로 이어 붙이면 쿼리 구분자로 먹혀 첫 마커만
+    그려진다(실측). `|` 로 잇는 것은 400 이다.
+
+    응답에 카카오 CI 로고가 박히고 제거할 수 없다. 위치만 고를 수 있다.
+    """
+    width = max(1, min(int(width), STATIC_MAP_MAX_W))
+    height = max(1, min(int(height), STATIC_MAP_MAX_H))
+    level = max(STATIC_MAP_MIN_LEVEL, min(int(level), STATIC_MAP_MAX_LEVEL))
+    scale = 2 if int(scale) != 1 else 1
+
+    parts = [
+        f"size={width}x{height}",
+        f"scale={scale}",
+        f"lv={level}",
+        "format=png",
+        # 로고는 지울 수 없다. 하단 시트가 가리지 않는 쪽에 둔다.
+        "logo_pos=BOTTOM_LEFT",
+        f"center={lng},{lat}",
+    ]
+    for m_lat, m_lng in (markers or [])[:STATIC_MAP_MAX_MARKERS]:
+        parts.append(f"markers=location:{m_lng},{m_lat}")
+
+    key = settings.KAKAO_REST_API_KEY
+    if not key:
+        logger.warning("KAKAO_REST_API_KEY 가 비어 있다. 정적 지도를 건너뛴다.")
+        return None, "", True
+
+    req = urllib.request.Request(f"{STATIC_MAP_URL}?{'&'.join(parts)}")
+    req.add_header("Authorization", f"KakaoAK {key}")
+    try:
+        with urllib.request.urlopen(
+            req, timeout=TIMEOUT_SECONDS * 2, context=ssl.create_default_context()
+        ) as resp:
+            content_type = resp.headers.get("Content-Type", "image/png")
+            if not content_type.startswith("image/"):
+                logger.warning("정적 지도가 이미지가 아니다: %s", content_type)
+                return None, "", True
+            return resp.read(), content_type, False
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", "replace")[:200]
+        logger.warning("정적 지도 실패 status=%s body=%s", e.code, body)
+        return None, "", True
+    except Exception as e:
+        logger.warning("정적 지도 예외 %s: %s", type(e).__name__, e)
+        return None, "", True
 
 
 def coord_to_address(lat: float, lng: float) -> tuple[dict | None, bool]:

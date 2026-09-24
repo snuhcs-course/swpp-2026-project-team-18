@@ -42,6 +42,18 @@ sealed interface AppRoute {
     data object HomeSetup : AppRoute
 
     /**
+     * Figma ⑰ 지도에서 고르기.
+     *
+     * 목적지·집 주소·출발지 검색이 모두 여기로 들어온다. 어느 검색을 위한
+     * 것인지는 `HomeViewModel.MapPickState.target` 이 들고 있다 — 경로에
+     * 담으면 같은 화면이 세 개로 갈라진다.
+     *
+     * **지도 SDK 를 쓰지 않는다.** 서버가 카카오 정적 지도 이미지를 만들어
+     * 주므로 네이티브 앱 키를 APK 에 넣고 서명 키 해시를 등록할 필요가 없다.
+     */
+    data object MapPick : AppRoute
+
+    /**
      * Figma ⑯ 설정.
      *
      * 가입할 때 한 번 정한 값(집 주소·준비 시간)을 고칠 수 있는 유일한 곳이다.

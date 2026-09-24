@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
+import hashlib
+
+from django.core.cache import cache
 from django.db import transaction
+from django.http import HttpResponse
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
@@ -341,10 +345,18 @@ def _resolve_origin(request, profile) -> tuple[dict | None, Response | None]:
 
 
 class PlaceSearchView(APIView):
-    """GET /api/places/search?q= — 카카오 로컬 검색 프록시.
+    """GET /api/places/search — 카카오 로컬 검색 프록시.
 
     클라이언트가 카카오를 직접 부르지 않는다. API 키를 앱에 넣으면 APK 를
     뜯어 꺼낼 수 있다. back-spec.md 5.3 의 프록시 규정이다.
+
+    파라미터
+      `q`         검색어 (필수)
+      `lat`,`lng` 기준 좌표. **주면 결과에 거리가 붙는다.** 카카오는 기준
+                  좌표를 함께 받았을 때만 `distance` 를 채운다
+      `page`      1부터. 한 페이지 15건, 3페이지에서 끝난다(총 45건)
+      `sort`      `accuracy`(기본) / `distance`. 거리순은 좌표가 있어야 한다
+      `rect`      지도 영역 재검색. `minLng,minLat,maxLng,maxLat`
     """
 
     throttle_classes = [ScopedRateThrottle]
@@ -353,10 +365,154 @@ class PlaceSearchView(APIView):
     def get(self, request):
         query = (request.query_params.get("q") or "").strip()
         if not query:
-            return Response({"results": []})
+            return Response(
+                {
+                    "results": [],
+                    "page": 1,
+                    "total_count": 0,
+                    "reachable_count": 0,
+                    "is_end": True,
+                    "sort": clients.SORT_ACCURACY,
+                    "degraded": False,
+                }
+            )
 
-        places, degraded = clients.search_places(query)
-        return Response({"results": places, "degraded": degraded})
+        lat, lng = _optional_coordinate(request, "lat", "lng")
+        page = _positive_int(request.query_params.get("page"), default=1)
+        sort = request.query_params.get("sort") or clients.SORT_ACCURACY
+        rect = (request.query_params.get("rect") or "").strip() or None
+
+        payload, degraded = clients.search_places(
+            query,
+            page=page,
+            lat=lat,
+            lng=lng,
+            sort=sort,
+            rect=rect,
+        )
+        return Response({**payload, "degraded": degraded})
+
+
+class PlaceStaticMapView(APIView):
+    """GET /api/places/staticmap — 정적 지도 이미지 프록시.
+
+    **앱이 지도 SDK 없이 실제 지도를 그리는 방법이다.** 카카오지도 안드로이드
+    SDK 를 쓰면 네이티브 앱 키를 APK 에 넣고 서명 키 해시를 등록해야 하는데,
+    이 경로는 서버가 가진 REST 키로 같은 지도를 만들어 준다.
+
+    파라미터
+      `lat`,`lng` 지도 중심 (필수)
+      `lv`        줌 레벨 1~15. 4가 요청 단위당 1m 이고 한 레벨마다 두 배
+      `w`,`h`     이미지 크기. 지리적 범위는 이 값과 `lv` 로만 정해진다
+      `markers`   `lat,lng` 를 세미콜론으로 이은 목록. 최대 5개
+      `scale`     1 또는 2(기본). 해상도만 바뀌고 범위는 그대로다
+
+    **이미지를 캐시한다.** 지도를 움직일 때마다 새로 부르면 하루 한도를
+    금방 태운다. 같은 중심·줌·크기·마커 조합은 한 번만 카카오에 묻는다.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "route"
+
+    # 지도 타일은 자주 바뀌지 않는다. 한 시간이면 같은 화면을 여러 번 그려도
+    # 카카오 호출은 한 번이다.
+    CACHE_SECONDS = 60 * 60
+
+    def get(self, request):
+        lat, lng = _optional_coordinate(request, "lat", "lng")
+        if lat is None or lng is None:
+            return _error_response(
+                "invalid_coordinate", "lat 과 lng 가 필요하다."
+            )
+
+        level = _positive_int(request.query_params.get("lv"), default=5)
+        width = _positive_int(request.query_params.get("w"), default=360)
+        height = _positive_int(request.query_params.get("h"), default=500)
+        scale = _positive_int(request.query_params.get("scale"), default=2)
+        markers = _parse_markers(request.query_params.get("markers"))
+
+        cache_key = "staticmap:" + hashlib.sha1(
+            f"{lat:.6f},{lng:.6f},{level},{width},{height},{scale},"
+            f"{';'.join(f'{a:.6f},{b:.6f}' for a, b in markers)}".encode()
+        ).hexdigest()
+
+        cached = cache.get(cache_key)
+        if cached is not None:
+            body, content_type = cached
+            return _image_response(body, content_type, hit=True)
+
+        body, content_type, degraded = clients.static_map(
+            lat=lat, lng=lng, level=level,
+            width=width, height=height,
+            markers=markers, scale=scale,
+        )
+        if degraded or not body:
+            # 지도를 못 그렸다고 화면을 막지 않는다. 앱은 목록으로 계속 쓴다.
+            return _error_response(
+                "map_unavailable",
+                "지도를 불러오지 못했다. 목록으로 계속 고를 수 있다.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        cache.set(cache_key, (body, content_type), self.CACHE_SECONDS)
+        return _image_response(body, content_type, hit=False)
+
+
+def _image_response(body: bytes, content_type: str, hit: bool) -> HttpResponse:
+    response = HttpResponse(body, content_type=content_type)
+    response["Cache-Control"] = f"private, max-age={PlaceStaticMapView.CACHE_SECONDS}"
+    # 캐시가 듣고 있는지 확인할 창구. 쿼터를 태우는 원인을 찾을 때 필요하다.
+    response["X-Jit-Map-Cache"] = "hit" if hit else "miss"
+    return response
+
+
+def _error_response(code: str, message: str, http_status: int = status.HTTP_400_BAD_REQUEST):
+    return Response(
+        {"error": {"code": code, "message": message, "details": {}}},
+        status=http_status,
+    )
+
+
+def _optional_coordinate(request, lat_key: str, lng_key: str):
+    """좌표 두 개를 읽는다. 하나라도 없거나 범위를 벗어나면 (None, None).
+
+    한쪽만 살려 두지 않는다 — 위도만 있는 좌표로는 아무것도 할 수 없고,
+    그대로 카카오에 보내면 엉뚱한 결과가 온다.
+    """
+    try:
+        lat = float(request.query_params[lat_key])
+        lng = float(request.query_params[lng_key])
+    except (KeyError, TypeError, ValueError):
+        return None, None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None, None
+    return lat, lng
+
+
+def _positive_int(raw, default: int) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _parse_markers(raw: str | None) -> list[tuple[float, float]]:
+    """`lat,lng;lat,lng` 를 좌표 목록으로. 잘못된 항목은 버린다."""
+    if not raw:
+        return []
+    out: list[tuple[float, float]] = []
+    for chunk in raw.split(";"):
+        parts = chunk.split(",")
+        if len(parts) != 2:
+            continue
+        try:
+            lat, lng = float(parts[0]), float(parts[1])
+        except ValueError:
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            out.append((lat, lng))
+    return out[: clients.STATIC_MAP_MAX_MARKERS]
 
 
 class PlaceReverseView(APIView):

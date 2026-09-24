@@ -10,6 +10,7 @@ from .views import (
     EventTagListView,
     PlaceReverseView,
     PlaceSearchView,
+    PlaceStaticMapView,
     RouteCandidateView,
 )
 
@@ -24,6 +25,8 @@ urlpatterns = [
     path("events/<int:pk>", EventDetailView.as_view(), name="detail"),
     path("events/<int:pk>/recompute", EventRecomputeView.as_view(), name="recompute"),
     path("places/search", PlaceSearchView.as_view(), name="place_search"),
+    # 정적 지도 이미지. 앱이 지도 SDK 없이 실제 지도를 그리는 경로다.
+    path("places/staticmap", PlaceStaticMapView.as_view(), name="place_staticmap"),
     path("places/reverse", PlaceReverseView.as_view(), name="place_reverse"),
     path("routes/candidates", RouteCandidateView.as_view(), name="route_candidates"),
 ]

@@ -69,6 +69,30 @@ def call(method, path, body=None, token=None):
         return -1, {"_exc": f"{type(e).__name__}: {e}"}
 
 
+def call_raw(method, path, token=None):
+    """JSON 이 아닌 응답. (status, bytes, content-type, 캐시 여부)
+
+    정적 지도는 이미지 바이트로 온다. `call` 은 JSON 으로 파싱하려다 실패한다.
+    캐시 헤더를 함께 돌려주는 이유는 지도를 움직일 때 카카오를 다시 부르는지
+    확인해야 하기 때문이다 — 하루 한도가 1,000건이다.
+    """
+    req = urllib.request.Request(BASE + path, method=method)
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return (
+                r.status,
+                r.read(),
+                r.headers.get("Content-Type", ""),
+                r.headers.get("X-Jit-Map-Cache", ""),
+            )
+    except urllib.error.HTTPError as e:
+        return e.code, e.read(), e.headers.get("Content-Type", ""), ""
+    except Exception as e:
+        return -1, str(e).encode(), "", ""
+
+
 def check(name, cond, note):
     results.append((name, bool(cond), note))
     print(f"{'[ OK ]' if cond else '[FAIL]'} {name}\n       {note}\n")
@@ -136,6 +160,55 @@ if HAS_KAKAO:
     first_place = places[0] if places else None
     check("장소 검색 프록시", st == 200 and first_place is not None,
           f"status={st} 개수={len(places)} 첫결과={first_place.get('name') if first_place else None}")
+
+    # 페이징 상태가 함께 와야 앱이 "더 보기" 를 그릴지 판단할 수 있다.
+    check("검색 응답에 페이징 상태", all(k in (body or {}) for k in ("page", "is_end", "reachable_count")),
+          f"keys={sorted((body or {}).keys())}")
+
+    # 업종은 화면의 칩에 들어간다. 카카오의 category_group_name 이 자주 비어서
+    # 서버가 전체 경로의 마지막 조각으로 보완한 값이다.
+    check("결과에 업종", bool((first_place or {}).get("category_group")),
+          f"category_group={(first_place or {}).get('category_group')!r}")
+
+    # 평점·사진은 로컬 API 응답에 없다. 이 링크가 그것을 보여 주는 유일한 곳이다.
+    check("결과에 카카오맵 링크", str((first_place or {}).get("place_url", "")).startswith("http"),
+          f"place_url={(first_place or {}).get('place_url')!r}")
+
+    # 좌표를 주면 거리가 붙는다. 같은 이름의 지점이 여러 개일 때 고르는 근거다.
+    st2, body2 = call("GET", "/api/places/search?" + urllib.parse.urlencode(
+        {"q": "카페", "lat": "37.4783", "lng": "126.9516", "sort": "distance"}), token=token_a)
+    near = (body2 or {}).get("results") or []
+    check("좌표를 주면 거리가 온다",
+          st2 == 200 and near and near[0].get("distance_m") is not None,
+          f"status={st2} 첫거리={near[0].get('distance_m') if near else None}")
+    check("거리순 정렬이 적용된다", (body2 or {}).get("sort") == "distance",
+          f"sort={(body2 or {}).get('sort')!r}")
+
+    # 좌표 없이 거리순을 요청하면 카카오가 400 을 준다. 서버가 정확도순으로
+    # 내려야 위치 권한이 없는 사용자도 검색할 수 있다.
+    st3, body3 = call("GET", "/api/places/search?" + urllib.parse.urlencode(
+        {"q": "카페", "sort": "distance"}), token=token_a)
+    check("좌표 없는 거리순은 정확도순으로 내린다",
+          st3 == 200 and (body3 or {}).get("sort") == "accuracy",
+          f"status={st3} sort={(body3 or {}).get('sort')!r}")
+
+    # 지도 화면이 쓰는 이미지. 실패하면 목록으로 계속 고를 수 있어야 한다.
+    st4, raw4, ctype4, cache4 = call_raw(
+        "GET", "/api/places/staticmap?" + urllib.parse.urlencode(
+            {"lat": "37.4783", "lng": "126.9516", "lv": "6", "w": "360", "h": "500",
+             "markers": "37.4800,126.9521;37.4830,126.9535"}),
+        token=token_a)
+    check("정적 지도 이미지", st4 == 200 and ctype4.startswith("image/") and len(raw4) > 1000,
+          f"status={st4} type={ctype4} bytes={len(raw4)}")
+
+    # 지도를 움직일 때마다 카카오를 부르면 하루 한도를 태운다.
+    st5, raw5, ctype5, cache5 = call_raw(
+        "GET", "/api/places/staticmap?" + urllib.parse.urlencode(
+            {"lat": "37.4783", "lng": "126.9516", "lv": "6", "w": "360", "h": "500",
+             "markers": "37.4800,126.9521;37.4830,126.9535"}),
+        token=token_a)
+    check("같은 지도는 캐시에서 온다", st5 == 200 and cache5 == "hit",
+          f"status={st5} 1차={cache4} 2차={cache5}")
 else:
     skip("장소 검색 프록시", kakao_skip_reason())
     # 검색을 못 해도 **장소가 붙은 일정**은 만들어야 한다. 그게 없으면 뒤따르는
