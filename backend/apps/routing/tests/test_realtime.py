@@ -85,29 +85,35 @@ def test_사람용_문구에서_초를_복구한다():
 
 def test_지하철은_노선과_방향을_모두_맞추고_두_대만_고른다(monkeypatch):
     # 2026-09-23 신림역 실측 응답 모양. 2호선·신림선과 양방향이 섞인다.
+    #
+    # ``subwayNm`` 이 ``None`` 인 것은 오타가 아니다. 2026-09-24 재실측
+    # (8개 역 80행, jit-tools/probe_subway.py)에서 이 필드는 **모든 행에서
+    # null** 이었다. 전에는 여기에 "2호선" 이 적혀 있었고, 그래서 이 테스트가
+    # 통과하는 동안에도 실제로는 한 번도 타지 않는 이름 비교 경로만 검사했다.
+    # 버스 픽스처에서 이미 같은 방식으로 당했다(아래 버스 절 주석 참고).
     rows = [
         {
-            "subwayId": "1002", "subwayNm": "2호선",
+            "subwayId": "1002", "subwayNm": None,
             "trainLineNm": "성수행 - 봉천방면", "barvlDt": "210",
             "btrainNo": "2201", "ordkey": "02002성수0",
         },
         {
-            "subwayId": "1094", "subwayNm": "신림선",
+            "subwayId": "1094", "subwayNm": None,
             "trainLineNm": "샛강행 - 당곡방면", "barvlDt": "80",
             "btrainNo": "9401",
         },
         {
-            "subwayId": "1002", "subwayNm": "2호선",
+            "subwayId": "1002", "subwayNm": None,
             "trainLineNm": "신도림행 - 신대방방면", "barvlDt": "50",
             "btrainNo": "2202",
         },
         {
-            "subwayId": "1002", "subwayNm": "2호선",
+            "subwayId": "1002", "subwayNm": None,
             "trainLineNm": "성수행 - 봉천방면", "barvlDt": "110",
             "btrainNo": "2203",
         },
         {
-            "subwayId": "1002", "subwayNm": "2호선",
+            "subwayId": "1002", "subwayNm": None,
             "trainLineNm": "성수행 - 봉천방면", "barvlDt": "500",
             "btrainNo": "2204",
         },
@@ -169,6 +175,112 @@ def test_지하철은_서울_밖에서_서울_API를_부르지_않는다(monkeyp
 def test_역_이름에서_괄호와_역을_없앤다():
     assert realtime._station_token("서울대입구(관악구청)역") == "서울대입구"
     assert realtime._station_token("신림역") == "신림"
+
+
+# --- 지하철 급행·막차 -------------------------------------------------------
+#
+# 아래 픽스처의 `btrainSttus`·`lstcarAt` 값은 2026-09-24 실측이다
+# (노량진·부천·당산, jit-tools/probe_subway.py). 문서는 `btrainSttus` 를
+# 0 특급 / 1 급행 / 2 ITX / 3 일반 **코드**로 적어 놓았지만 실제로는 "일반"·"급행"
+# 한국어 문자열이 온다. `lstcarAt` 은 "0"/"1" 이다.
+
+
+def test_지하철_급행과_막차를_표시한다(monkeypatch):
+    rows = [
+        {
+            "subwayId": "1002", "subwayNm": None,
+            "trainLineNm": "성수행 - 봉천방면 (급행)", "barvlDt": "110",
+            "btrainNo": "2201", "btrainSttus": "급행", "lstcarAt": "0",
+        },
+        {
+            "subwayId": "1002", "subwayNm": None,
+            "trainLineNm": "성수행 - 봉천방면 (막차)", "barvlDt": "210",
+            "btrainNo": "2202", "btrainSttus": "일반", "lstcarAt": "1",
+        },
+    ]
+    monkeypatch.setattr(realtime, "_subway_rows", lambda station: rows)
+
+    arrivals = realtime.subway_arrivals(subway_segment())["arrivals"]
+
+    assert [a["train_kind"] for a in arrivals] == ["급행", None]
+    assert [a["last_train"] for a in arrivals] == [False, True]
+    # 방면 문자열에 (급행)·(막차) 가 붙어도 방향 판정이 깨지지 않아야 한다.
+    assert [a["seconds"] for a in arrivals] == [110, 210]
+
+
+def test_지하철_일반_열차에는_등급을_붙이지_않는다(monkeypatch):
+    rows = [{
+        "subwayId": "1002", "subwayNm": None,
+        "trainLineNm": "성수행 - 봉천방면", "barvlDt": "110",
+        "btrainNo": "2201", "btrainSttus": "일반", "lstcarAt": "0",
+    }]
+    monkeypatch.setattr(realtime, "_subway_rows", lambda station: rows)
+
+    arrival = realtime.subway_arrivals(subway_segment())["arrivals"][0]
+
+    assert arrival["train_kind"] is None
+    assert arrival["last_train"] is False
+
+
+def test_지하철_등급_필드가_없어도_방면_접미로_급행을_잡는다(monkeypatch):
+    # btrainSttus 가 문서대로 숫자로 바뀌거나 빠져도 (급행) 접미는 남는다.
+    rows = [{
+        "subwayId": "1002", "subwayNm": None,
+        "trainLineNm": "성수행 - 봉천방면 (급행)", "barvlDt": "110",
+        "btrainNo": "2201", "btrainSttus": "1",
+    }]
+    monkeypatch.setattr(realtime, "_subway_rows", lambda station: rows)
+
+    assert realtime.subway_arrivals(subway_segment())["arrivals"][0]["train_kind"] == "급행"
+
+
+def test_지하철_모르는_등급값은_지어내지_않는다(monkeypatch):
+    # 어느 근거도 급행이라고 하지 않으면 라벨을 만들지 않는다. 숫자 코드를
+    # 추측해 매핑했다가 문서가 틀리면 사용자에게 거짓을 보여 준다.
+    rows = [{
+        "subwayId": "1002", "subwayNm": None,
+        "trainLineNm": "성수행 - 봉천방면", "barvlDt": "110",
+        "btrainNo": "2201", "btrainSttus": "0",
+    }]
+    monkeypatch.setattr(realtime, "_subway_rows", lambda station: rows)
+
+    assert realtime.subway_arrivals(subway_segment())["arrivals"][0]["train_kind"] is None
+
+
+def test_지하철_급행을_목록에서_걸러내지_않는다(monkeypatch):
+    # 정차 패턴이 응답에 없어 급행이 하차역을 지나치는지 알 수 없다. 숨기면
+    # 더 빠른 선택지를 말없이 빼앗고, 지나친다고 단정하면 거짓말이 된다.
+    rows = [
+        {
+            "subwayId": "1002", "subwayNm": None,
+            "trainLineNm": "성수행 - 봉천방면 (급행)", "barvlDt": "60",
+            "btrainNo": "2201", "btrainSttus": "급행",
+        },
+        {
+            "subwayId": "1002", "subwayNm": None,
+            "trainLineNm": "성수행 - 봉천방면", "barvlDt": "300",
+            "btrainNo": "2202", "btrainSttus": "일반",
+        },
+    ]
+    monkeypatch.setattr(realtime, "_subway_rows", lambda station: rows)
+
+    arrivals = realtime.subway_arrivals(subway_segment())["arrivals"]
+
+    assert len(arrivals) == 2
+    assert arrivals[0]["train_kind"] == "급행"
+
+
+def test_지하철_막차는_lstcarAt만_와도_참이다(monkeypatch):
+    # 방면 문자열에 (막차) 가 없는 응답도 실측에 있었다. 막차를 놓치면
+    # 사용자가 집에 못 가므로 한쪽 근거만으로도 참으로 본다.
+    rows = [{
+        "subwayId": "1002", "subwayNm": None,
+        "trainLineNm": "성수행 - 봉천방면", "barvlDt": "110",
+        "btrainNo": "2201", "lstcarAt": "1",
+    }]
+    monkeypatch.setattr(realtime, "_subway_rows", lambda station: rows)
+
+    assert realtime.subway_arrivals(subway_segment())["arrivals"][0]["last_train"] is True
 
 
 # --- 버스 -------------------------------------------------------------------

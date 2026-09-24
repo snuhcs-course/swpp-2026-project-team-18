@@ -176,6 +176,55 @@ class NetworkDtoNullSafetyTest {
     }
 
     @Test
+    fun `지하철 급행과 막차가 화면용으로 넘어온다`() {
+        // snake_case 두 개를 @SerializedName 으로 이어야 한다. 빠뜨리면 배지가
+        // 조용히 안 나온다 — 응답은 200 이고 도착 시각도 맞으니 아무도 모른다.
+        val json = """
+            {"key":"transit:2호선","mode":"지하철","minutes":23,"fare":1550,
+             "segments":[
+               {"kind":"subway","seconds":420,"label":"2호선","vehicle":"2호선",
+                "region":"metro_seoul","stops":["신림","봉천"],
+                "arrivals":[
+                  {"seconds":110,"message":"1분 50초 뒤 도착","source":"seoul_subway",
+                   "train_kind":"급행","last_train":false},
+                  {"seconds":210,"message":"3분 30초 뒤 도착","source":"seoul_subway",
+                   "train_kind":null,"last_train":true}
+                ]}
+             ]}
+        """.trimIndent()
+
+        val arrivals = gson.fromJson(json, RouteCandidateDto::class.java)
+            .toOption().segments.items[0].arrivals
+
+        assertTrue("급행이 넘어오지 않았다", arrivals[0].trainKind == "급행")
+        assertTrue(!arrivals[0].lastTrain)
+        // train_kind 가 null 이면 빈 문자열이어야 한다. null 이 새면 배지에서 터진다.
+        assertTrue("null 등급이 빈 문자열이 아니다", arrivals[1].trainKind == "")
+        assertTrue("막차가 넘어오지 않았다", arrivals[1].lastTrain)
+    }
+
+    @Test
+    fun `등급 필드가 없는 구버전 응답도 읽는다`() {
+        // 배포 서버가 아직 재배포 전일 수 있다. 그때는 배지만 없어야 하고
+        // 도착 시각은 그대로 나와야 한다.
+        val json = """
+            {"key":"transit:2호선","mode":"지하철","minutes":23,
+             "segments":[
+               {"kind":"subway","seconds":420,"label":"2호선","vehicle":"2호선",
+                "region":"metro_seoul","stops":["신림","봉천"],
+                "arrivals":[{"seconds":110,"message":"1분 50초 뒤 도착","source":"seoul_subway"}]}
+             ]}
+        """.trimIndent()
+
+        val arrival = gson.fromJson(json, RouteCandidateDto::class.java)
+            .toOption().segments.items[0].arrivals[0]
+
+        assertTrue(arrival.seconds == 110)
+        assertTrue(arrival.trainKind == "")
+        assertTrue(!arrival.lastTrain)
+    }
+
+    @Test
     fun `종류를 모르는 구간도 버리지 않는다`() {
         // 서버가 수단을 추가했을 때 막대 합이 소요시간과 어긋나면 안 된다.
         val json = """

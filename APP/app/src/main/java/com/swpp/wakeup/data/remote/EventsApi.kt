@@ -330,6 +330,16 @@ data class RouteArrivalDto(
     val source: String?,
     /** 버스만 "여유" / "보통" / "혼잡". 미제공이면 null. */
     val crowding: String?,
+    /**
+     * 지하철만 "급행" / "특급". 일반이거나 알 수 없으면 null.
+     *
+     * 급행이 사용자의 하차역을 지나치는지는 **서버도 모른다** — 서울 열린데이터
+     * 응답에 정차 패턴이 없다. 그래서 이 값은 판단 재료일 뿐이고, 이것으로
+     * 목록에서 열차를 지우면 안 된다.
+     */
+    @SerializedName("train_kind") val trainKind: String?,
+    /** 막차인가. 지하철만. */
+    @SerializedName("last_train") val lastTrain: Boolean?,
 )
 
 data class PlaceDto(

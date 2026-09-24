@@ -71,8 +71,12 @@ BUS_CACHE_SECONDS = 15
 STATION_CACHE_SECONDS = 24 * 60 * 60
 NEGATIVE_CACHE_SECONDS = 60
 
-# 서울 열린데이터광장 subwayId. subwayNm 이 정상적으로 오면 이름을 먼저
-# 비교하지만, 이름이 비는 응답에서도 노선을 섞지 않기 위한 안전망이다.
+# 서울 열린데이터광장 subwayId.
+#
+# **이것이 노선 판별의 유일한 실효 경로다.** 이름 비교를 먼저 두긴 했지만,
+# 실측(2026-09-24 노량진·당산·고속터미널·구로·부천·왕십리·죽전·서울, 80행)에서
+# `subwayNm` 은 **모든 행에서 null** 이었다. 이름이 "비는 응답" 이 예외가 아니라
+# 전부다. 이 표를 지우거나 노선을 빠뜨리면 그 노선의 도착정보가 통째로 사라진다.
 SUBWAY_IDS = {
     "1호선": "1001",
     "2호선": "1002",
@@ -220,6 +224,44 @@ def _direction_matches(row: dict, next_station: str) -> bool:
     return bool(expected and direction and expected in direction)
 
 
+# 급행·특급 이름. 문서는 `btrainSttus` 를 0 특급 / 1 급행 / 2 ITX / 3 일반 코드로
+# 적어 두었지만, 실측에서 오는 값은 **한국어 문자열** "일반"·"급행" 이다. 문서대로
+# 숫자를 기다리는 코드를 짰다면 한 건도 맞지 않으면서 에러도 나지 않았을 것이다.
+# 그래서 문서에 적힌 코드값은 쓰지 않고, 실제로 본 문자열만 통과시킨다.
+EXPRESS_LABELS = ("특급", "급행")
+
+
+def _train_kind(row: dict) -> str | None:
+    """급행·특급이면 그 이름, 일반이거나 알 수 없으면 ``None``.
+
+    **정차 패턴은 이 API 에 없다.** 그래서 급행이 사용자의 하차역을 지나치는지
+    우리는 알 수 없고, 급행을 걸러내거나 "이 열차를 타라" 고 말할 수 없다.
+    할 수 있는 정직한 일은 급행이라고 알려 주고 판단을 사용자에게 넘기는 것이다.
+
+    근거를 둘 쓴다. ``btrainSttus`` 와 ``trainLineNm`` 의 ``(급행)`` 접미가
+    실측에서 항상 함께 왔다. 하나만 와도 잡히고, 값이 문서처럼 숫자로 바뀌면
+    라벨만 조용히 사라진다 — 틀린 라벨을 붙이는 것보다 낫다.
+    """
+    status = str(row.get("btrainSttus") or "")
+    line = str(row.get("trainLineNm") or "")
+    for label in EXPRESS_LABELS:
+        if label in status or f"({label})" in line:
+            return label
+    return None
+
+
+def _is_last_train(row: dict) -> bool:
+    """막차인가.
+
+    알람 앱에서 이것을 놓치면 사용자가 집에 못 간다. 놓치는 쪽이 헛경고보다
+    나쁘므로 ``lstcarAt == "1"`` 과 ``trainLineNm`` 의 ``(막차)`` 중 **하나만
+    와도** 참으로 본다. 실측값은 ``"0"``/``"1"`` 이다.
+    """
+    if str(row.get("lstcarAt") or "").strip() == "1":
+        return True
+    return "(막차)" in str(row.get("trainLineNm") or "")
+
+
 def _seconds_from_message(message: str | None) -> int | None:
     """숫자 ETA 가 비었을 때 사람용 문구에서 초를 복구한다."""
     text = message or ""
@@ -242,6 +284,10 @@ def subway_arrivals(segment: dict) -> dict:
 
     ``stops[0]`` 은 승차역, ``stops[1]`` 은 진행 방향을 확인할 다음 역이다.
     노선과 방향을 모두 맞춘 뒤 초가 있는 열차만 가까운 순으로 두 대 고른다.
+
+    각 열차에 ``train_kind``(급행·특급, 일반이면 ``None``)와 ``last_train``
+    을 붙인다. 급행을 **걸러내지는 않는다** — 정차 패턴이 응답에 없어서 그것이
+    사용자의 하차역을 지나치는지 알 수 없다. 표시만 하고 판단은 사용자가 한다.
     """
     if segment.get("region") != "metro_seoul":
         return {}
@@ -275,6 +321,8 @@ def subway_arrivals(segment: dict) -> dict:
                 "seconds": seconds,
                 "message": format_arrival_seconds(seconds),
                 "source": "seoul_subway",
+                "train_kind": _train_kind(row),
+                "last_train": _is_last_train(row),
             }
         )
 

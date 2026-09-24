@@ -566,12 +566,22 @@ private fun CheckpointArrivalRow(
             .fillMaxWidth()
             .padding(start = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
+        // 가중치 여백이 가운데에 있으므로 이 간격은 칩 주변에서만 눈에 띈다.
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
             text = checkpoint.vehicleLabel,
             color = color,
             fontSize = 10.sp,
         )
+        // 급행은 이득일 수도 있어 알림색(Amber), 막차는 놓치면 집에 못 가서
+        // 경고색(Red). 시각 문구가 10sp 라 회색 칩으로는 묻힌다.
+        checkpoint.arrival.trainKind.takeIf(String::isNotBlank)?.let { kind ->
+            ArrivalBadge(text = kind, background = JitColor.Amber)
+        }
+        if (checkpoint.arrival.lastTrain) {
+            ArrivalBadge(text = "막차", background = JitColor.Red)
+        }
         Spacer(Modifier.weight(1f))
         // now() 를 여기서 읽는다. 이 행만 1초마다 다시 그려지고 카드는 그대로다.
         Text(
@@ -582,6 +592,27 @@ private fun CheckpointArrivalRow(
             maxLines = 1,
         )
     }
+}
+
+/**
+ * 도착 행의 작은 배지. 급행·막차처럼 **그 열차에만 해당하는 사실**을 붙인다.
+ *
+ * 바탕이 [JitColor.Amber]·[JitColor.Red] 처럼 밝은 색이라 글자는 어두운
+ * [JitColor.Bg] 를 쓴다. 흰 글씨를 얹으면 10sp 에서 대비가 모자라 읽히지 않는다.
+ */
+@Composable
+private fun ArrivalBadge(text: String, background: Color) {
+    Text(
+        text = text,
+        color = JitColor.Bg,
+        fontSize = 9.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(background)
+            .padding(horizontal = 4.dp),
+    )
 }
 
 @Composable

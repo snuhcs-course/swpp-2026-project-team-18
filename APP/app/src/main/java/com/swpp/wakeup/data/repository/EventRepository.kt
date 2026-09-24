@@ -746,6 +746,8 @@ private fun RouteArrivalDto.toArrival(fetchedAtElapsedMs: Long = 0L): RouteArriv
         message = safeMessage,
         source = source?.trim().orEmpty(),
         crowding = crowding?.trim().orEmpty(),
+        trainKind = trainKind?.trim().orEmpty(),
+        lastTrain = lastTrain == true,
         fetchedAtElapsedMs = fetchedAtElapsedMs,
     )
 }
