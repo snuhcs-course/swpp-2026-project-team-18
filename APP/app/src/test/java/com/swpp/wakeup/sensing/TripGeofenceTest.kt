@@ -500,4 +500,129 @@ class TripGeofenceTest {
         assertNull(f.finalizeArrival())
         assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
     }
+
+    // --- 움직임 감지 ------------------------------------------------------
+    //
+    // **반경만으로는 늦다.** 아파트 단지나 캠퍼스는 그 자체가 150m 를 넘어서,
+    // 집을 나서 몇 분을 걸어도 반경 안이라 "준비 중" 으로 남았다. 사용자가 보는
+    // 단계가 실제와 어긋나면 진행률과 도착 예정도 함께 어긋난다.
+    //
+    // 출발 전 위치 주기가 30초라 아래 테스트는 그 간격을 쓴다.
+
+    /** 출발 전 갱신 주기(30초)만큼 시계를 진전시킨 fix. */
+    private fun idleFix(point: GeoPoint, accuracy: Float = 10f) =
+        fix(point, accuracy, afterMillis = 30_000)
+
+    @Test
+    fun `반경 안에서 걸어도 이동으로 감지된다`() {
+        // 30초마다 33m — 도보 1.1m/s 다. 90초에 99m 로 기준 80m 를 넘는다.
+        // 전부 집 반경 150m 안이라 반경 규칙으로는 절대 안 잡힌다.
+        val f = fence()
+        assertNull(f.offer(idleFix(home)))
+        assertNull(f.offer(idleFix(north(home, 33.0))))
+        assertNull(f.offer(idleFix(north(home, 66.0))))
+        val event = f.offer(idleFix(north(home, 99.0)))
+
+        assertTrue("걷고 있는데 출발로 안 봤다", event is TripEvent.Departed)
+        assertEquals(TripGeofence.Phase.IN_TRANSIT, f.phase)
+        // 반경 안에서 판정했으므로 거리는 150m 미만이다.
+        assertTrue((event as TripEvent.Departed).distanceM < TripGeofence.DEFAULT_DEPARTURE_RADIUS_M)
+    }
+
+    @Test
+    fun `집에 앉아 있으면 산포가 쌓여도 감지되지 않는다`() {
+        // 25m 안에서 왔다 갔다 한다. 오래 있어도 기준이 앞으로 밀리므로
+        // 누적되지 않는다. 밀지 않으면 앉아 있는 사람이 "이동 중" 이 된다.
+        val f = fence()
+        repeat(40) { i ->
+            val jitter = if (i % 2 == 0) 25.0 else -25.0
+            assertNull("i=$i 에서 출발로 봤다", f.offer(idleFix(north(home, jitter))))
+        }
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+    }
+
+    @Test
+    fun `한 번 크게 튄 좌표로는 감지되지 않는다`() {
+        // 정확도 게이트가 50m 라 변위가 오차만으로 100m 까지 벌어질 수 있다.
+        // 창을 요구하지 않으면 그 한 점이 그대로 판정이 된다.
+        val f = fence()
+        assertNull(f.offer(fix(home, accuracy = 45f, afterMillis = 30_000)))
+        assertNull(f.offer(fix(north(home, 100.0), accuracy = 45f, afterMillis = 10_000)))
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+    }
+
+    @Test
+    fun `튄 좌표가 제자리로 돌아오면 기준이 다시 잡힌다`() {
+        val f = fence()
+        f.offer(idleFix(home))
+        f.offer(idleFix(north(home, 100.0)))   // 튐. 창이 모자라 판정 없음
+        f.offer(idleFix(home))                  // 돌아왔다 → 기준 재설정
+        // 여기서 다시 100m 로 가도 창이 이제부터 시작이므로 한 번에 안 잡힌다.
+        assertNull(f.offer(fix(north(home, 100.0), afterMillis = 10_000)))
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+    }
+
+    @Test
+    fun `창을 채우지 못하면 거리를 넘겨도 기다린다`() {
+        val f = fence()
+        f.offer(idleFix(home))
+        // 20초 만에 90m — 창(60초)이 모자라다.
+        assertNull(f.offer(fix(north(home, 90.0), afterMillis = 20_000)))
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+    }
+
+    @Test
+    fun `반경 이탈이 더 빠르면 그쪽으로 판정한다`() {
+        // 둘 중 먼저 오는 것을 쓴다. 차를 타면 10초 만에 200m 를 간다.
+        val f = fence()
+        f.offer(fix(home))
+        f.offer(fix(north(home, 200.0)))
+        val event = f.offer(fix(north(home, 400.0)))
+        assertTrue(event is TripEvent.Departed)
+        assertTrue((event as TripEvent.Departed).distanceM > 300.0)
+    }
+
+    @Test
+    fun `흐린 fix 는 이동 감지에도 쓰이지 않는다`() {
+        // 게이트 0 에서 걸러지므로 기준 fix 가 되지도 않는다.
+        val f = fence()
+        f.offer(idleFix(home))
+        assertNull(f.offer(fix(north(home, 500.0), accuracy = 200f, afterMillis = 30_000)))
+        assertNull(f.offer(idleFix(north(home, 20.0))))
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+    }
+
+    @Test
+    fun `이동으로 출발한 뒤에는 도착 판정으로 넘어간다`() {
+        val f = fence()
+        f.offer(idleFix(home))
+        f.offer(idleFix(north(home, 40.0)))
+        f.offer(idleFix(north(home, 90.0)))
+        assertEquals(TripGeofence.Phase.IN_TRANSIT, f.phase)
+
+        f.offer(fix(dest))
+        val arrived = f.offer(afterDwell(dest))
+        assertTrue("이동 감지로 출발한 여정이 도착을 못 잡는다", arrived is TripEvent.Arrived)
+    }
+
+    @Test
+    fun `시계가 거꾸로 가면 창을 다시 시작한다`() {
+        val f = fence()
+        f.offer(idleFix(home))
+        // 캐시된 좌표가 과거 시각으로 들어온다. 그것을 기준으로 삼으면 창이
+        // 이미 채워진 것처럼 보인다.
+        val stale = LocationFix(north(home, 120.0).lat, home.lng, 10f, clock - 600_000L)
+        assertNull(f.offer(stale))
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+    }
+
+    @Test
+    fun `이동 감지 상수가 서로 어긋나지 않는다`() {
+        // 재설정 거리가 감지 거리보다 크면 영영 감지되지 않는다.
+        assertTrue(TripGeofence.MOVING_RESET_M < TripGeofence.MOVING_DISTANCE_M)
+        // 감지 거리는 도착 반경보다 커야 한다 — 목적지 앞을 도는 것과 갈린다.
+        assertTrue(TripGeofence.MOVING_DISTANCE_M > TripGeofence.DEFAULT_ARRIVAL_RADIUS_M)
+        // 창은 출발 전 갱신 주기(30초)보다 길어야 좌표 둘 이상을 본다.
+        assertTrue(TripGeofence.MOVING_WINDOW_MILLIS >= 60_000L)
+    }
 }

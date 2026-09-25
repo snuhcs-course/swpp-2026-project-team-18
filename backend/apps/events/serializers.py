@@ -125,6 +125,10 @@ class AlarmPlanSerializer(serializers.Serializer):
           declared_point  블록을 신고했지만 범위가 한 점이다
           onboarding      블록이 없어 온보딩 응답을 썼다
           fixed           온보딩도 없어 기본값을 썼다
+          not_from_home   집에서 출발하는 일정이 아니라 준비 단계가 없다
+
+        `not_from_home` 은 0분과 다르다. 0분은 "준비를 순식간에 한다" 로 읽히고
+        이 값은 "해당되지 않는다" 다. 화면이 준비 항목을 그리지 않는 근거다.
         """
         if obj.prep_minutes is None:
             return ""

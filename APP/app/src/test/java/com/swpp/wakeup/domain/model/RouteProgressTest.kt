@@ -237,6 +237,41 @@ class RouteProgressTest {
     }
 
     @Test
+    fun `준비 단계가 없는 일정은 준비 중을 건너뛴다`() {
+        // 집에서 출발하지 않는 일정이다. 집에 있지도 않은 사람에게 "준비 중"
+        // 이라고 할 근거가 없다.
+        assertEquals(
+            TripStage.IN_TRANSIT,
+            TripStage.of(null, alarmPassed = true, eventPassed = false, prepApplies = false),
+        )
+        // 알람 전은 그대로다. 아직 시작하지 않은 여정이다.
+        assertEquals(
+            TripStage.BEFORE_ALARM,
+            TripStage.of(null, alarmPassed = false, eventPassed = false, prepApplies = false),
+        )
+        // 지난 일정도 그대로다.
+        assertEquals(
+            TripStage.PAST,
+            TripStage.of(null, alarmPassed = true, eventPassed = true, prepApplies = false),
+        )
+    }
+
+    @Test
+    fun `준비 단계가 없으면 추적기의 준비 중도 이동 중으로 읽는다`() {
+        // 추적기는 집 반경 기준으로 판정하므로 출발지가 집이 아니면 첫 좌표를
+        // "아직 집" 으로 볼 수 있다. 그것을 그대로 쓰면 없는 단계가 화면에 뜬다.
+        assertEquals(
+            TripStage.IN_TRANSIT,
+            TripStage.of(TripStage.PREPARING, alarmPassed = true, eventPassed = false, prepApplies = false),
+        )
+        // 준비 단계가 있는 일정에서는 그대로 준비 중이다.
+        assertEquals(
+            TripStage.PREPARING,
+            TripStage.of(TripStage.PREPARING, alarmPassed = true, eventPassed = false),
+        )
+    }
+
+    @Test
     fun `알람 전에 위치가 들어와도 추적이 이긴다`() {
         // 알람보다 먼저 일어나 나간 경우다. "알람 전" 이라고 말하면 이미
         // 이동하고 있는 사람에게 틀린 상태를 보여 준다.

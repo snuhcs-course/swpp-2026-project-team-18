@@ -97,7 +97,19 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
 
 
 class EventRecomputeView(_UserScopedMixin, APIView):
-    """POST /api/events/{id}/recompute — 알람 계획만 다시 계산한다."""
+    """POST /api/events/{id}/recompute — 알람 계획만 다시 계산한다.
+
+    **카카오 경로 API 를 부른다.** `compute_and_store` 가 `best_route`(최대 2회)
+    또는 `resolve_route`(1회)를 호출하므로 이 엔드포인트는 곧 하루 쿼터다.
+
+    사람이 "다시 계산" 을 누를 때만 불리던 동안에는 throttle 이 없어도 드러나지
+    않았다. 앱이 임박한 일정의 경로를 주기적으로 갱신하기 시작하면 자동 호출이
+    되므로, 버그 하나가 쿼터를 태울 수 있는 구멍이 된다. 장소 검색·경로 후보와
+    같은 `route` scope 를 쓴다.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "route"
 
     def post(self, request, pk: int):
         event = self.get_queryset().filter(pk=pk).first()

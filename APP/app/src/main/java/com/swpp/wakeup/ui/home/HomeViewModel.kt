@@ -1850,6 +1850,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         },
         alarmPassed = plan.alarmPassed,
         eventPassed = plan.eventPassed,
+        prepApplies = plan.prepApplies,
     )
 
     // --- 일정 추가 --------------------------------------------------------

@@ -69,6 +69,10 @@ THROTTLED_PATHS = {
     # 막아야 하루 한도를 태우지 않는다.
     "/api/places/staticmap": "카카오 정적 지도 (일 1,000건)",
     "/api/routes/candidates": "카카오 경로",
+    # 재계산이 `best_route`(최대 2회) 또는 `resolve_route`(1회)를 부른다.
+    # 사람이 누를 때만 불리던 동안에는 throttle 이 없어도 드러나지 않았지만,
+    # 앱이 임박한 일정의 경로를 주기적으로 갱신하면 자동 호출이 된다.
+    "/api/events/1/recompute": "카카오 경로 (주기 갱신이 자동 호출한다)",
     "/api/observations/batch": "쓰기 폭주 방지",
     "/api/routines/observations/batch": "쓰기 폭주 방지",
 }

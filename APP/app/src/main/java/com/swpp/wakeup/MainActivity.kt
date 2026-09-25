@@ -45,6 +45,7 @@ import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.domain.model.ArrivalOutlook
 import com.swpp.wakeup.domain.model.RouteProgress
+import com.swpp.wakeup.domain.model.TripEta
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
 import com.swpp.wakeup.ui.alarm.arrivalClockLabel
@@ -365,20 +366,29 @@ private fun MainHost(
                             progress?.onRoute != false
                     }?.let { p ->
                         if (stage == TripStage.ARRIVED && live != null) {
-                            ArrivalOutlook.arrived(
-                                arrivedMillis = live.atMillis,
-                                arriveAtMillis = p.arriveAtMillis,
-                                bufferMinutes = p.bufferMinutes,
-                            )
+                            ArrivalOutlook.arrived(live.atMillis, p.startAtMillis)
                         } else {
-                            ArrivalOutlook.of(
-                                departByMillis = p.departByMillis,
-                                arriveAtMillis = p.arriveAtMillis,
-                                travelMinutes = p.travelMinutes,
-                                bufferMinutes = p.bufferMinutes,
-                                ratio = progress?.takeIf { it.onRoute }?.ratio ?: 0f,
-                                nowMillis = System.currentTimeMillis(),
-                            )
+                            val now = System.currentTimeMillis()
+                            val onRoute = progress?.takeIf { it.onRoute }
+                            // 이동 중이면 관측 속도를 섞는다. 이동 시작 시각은
+                            // 서비스가 들고 있다 — 화면에서 처음 본 좌표를
+                            // 기준으로 삼으면 늦게 화면을 연 사용자가 "방금
+                            // 출발했다" 로 계산된다.
+                            val movingSince = live?.movingSinceMillis
+                            val remaining = if (onRoute != null && movingSince != null) {
+                                TripEta.remainingMinutes(
+                                    travelMinutes = p.travelMinutes,
+                                    totalM = onRoute.totalM,
+                                    traveledM = onRoute.traveledM,
+                                    movingMinutes = (now - movingSince) / 60_000.0,
+                                )
+                            } else {
+                                TripEta.plannedRemainingMinutes(
+                                    travelMinutes = p.travelMinutes,
+                                    ratio = onRoute?.ratio ?: 0f,
+                                )
+                            }
+                            ArrivalOutlook.of(p.startAtMillis, remaining, now)
                         }
                     }
                     AlarmDecisionScreen(

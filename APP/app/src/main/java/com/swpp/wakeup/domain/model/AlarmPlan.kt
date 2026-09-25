@@ -67,25 +67,26 @@ data class AlarmPlanView(
     val arrivalAt: String? = null,
 
     /**
-     * 일정대로면 집을 나서야 하는 시각(epoch ms). 계산 못 했으면 null.
+     * 약속 시각(epoch ms). 지각 판정의 **유일한 기준**이다.
      *
-     * 표시용이 아니라 **계산용**이다. 진행 바가 "예정보다 몇 분 늦는가" 를
-     * 내려면 기준 시각이 필요하다([ArrivalOutlook]). 문자열로 두면 화면에서
-     * 다시 파싱해야 하고, 그 파싱이 실패하면 색이 조용히 회색으로 떨어진다.
+     * 표시용이 아니라 계산용이다. `도착 예정`(약속 − 안전 버퍼)을 기준으로 쓰면
+     * 버퍼를 두 번 쓰게 되어, 약속보다 일찍 도착하는데도 지각으로 표시된다
+     * ([ArrivalOutlook] 의 설명).
      */
-    val departByMillis: Long? = null,
-    /** 도착 예정 시각(epoch ms). [departByMillis] 와 같은 이유로 둔다 */
-    val arriveAtMillis: Long? = null,
-    /** 이동에 걸리는 분. 남은 거리를 분으로 바꾸는 환산율이다 */
+    val startAtMillis: Long? = null,
+    /** 이동에 걸리는 계획 분. 남은 거리를 분으로 바꾸는 환산율이다 */
     val travelMinutes: Int? = null,
     /**
-     * 문 앞 안전 버퍼(분).
+     * 준비 단계가 있는 일정인가.
      *
-     * "조금 늦음" 과 "약속에 늦음" 의 경계다. 버퍼 안에서 늦는 것은 여유를
-     * 깎는 것이고, 버퍼를 넘기면 약속 시각 자체를 넘긴다. 상수 10 을 박지 않고
-     * 서버가 준 값을 쓴다 — 버퍼 정책이 바뀌면 경계도 함께 움직여야 한다.
+     * 집에서 출발하지 않는 일정(일정마다 출발지를 따로 고른 경우)은 준비 시간이
+     * **해당되지 않는다.** 계산 방법에서 준비 항목을 빼고, 진행 단계에서도
+     * "준비 중" 을 건너뛰어 알람 전 다음이 바로 이동 중이다.
+     *
+     * `prepMinutes == 0` 으로 판별하지 않는다 — 준비를 1분 미만으로 신고한
+     * 사람과 구분되지 않는다.
      */
-    val bufferMinutes: Int? = null,
+    val prepApplies: Boolean = true,
 
     /** `ok` / `no_home` / `no_place` / `route_failed` */
     val status: String,

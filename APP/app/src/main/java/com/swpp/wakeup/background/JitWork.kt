@@ -92,6 +92,40 @@ object JitWork {
                 request,
             )
         }.onFailure { Log.w(TAG, "정기 동기화 작업 등록 실패", it) }
+
+        ensureRouteRefresh(context)
+    }
+
+    /**
+     * 임박한 일정의 경로 갱신을 예약한다. 15분 주기다.
+     *
+     * [ensurePeriodicSync] 와 따로 두는 이유는 주기가 다르기 때문이다. 알람 등록
+     * 동기화는 6시간이면 충분하지만, 배차가 바뀌는 것을 따라가려면 아침에는 더
+     * 자주 봐야 한다.
+     *
+     * **15분마다 네트워크를 깨우지 않는다.** [RouteRefreshWorker] 가 먼저 기기에
+     * 등록된 알람 목록만 보고 임박한 일정이 없으면 그대로 끝낸다.
+     */
+    fun ensureRouteRefresh(context: Context) {
+        val request = PeriodicWorkRequestBuilder<RouteRefreshWorker>(
+            RouteRefreshDecision.REFRESH_PERIOD_MINUTES,
+            TimeUnit.MINUTES,
+        )
+            .setConstraints(networkRequired)
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.EXPONENTIAL,
+                BACKOFF_SECONDS,
+                TimeUnit.SECONDS,
+            )
+            .build()
+
+        runCatching {
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                RouteRefreshWorker.UNIQUE_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                request,
+            )
+        }.onFailure { Log.w(TAG, "경로 갱신 작업 등록 실패", it) }
     }
 
     /**
@@ -105,6 +139,7 @@ object JitWork {
             WorkManager.getInstance(context).apply {
                 cancelUniqueWork(ObservationUploadWorker.UNIQUE_NAME)
                 cancelUniqueWork(PlanSyncWorker.UNIQUE_NAME)
+                cancelUniqueWork(RouteRefreshWorker.UNIQUE_NAME)
             }
         }.onFailure { Log.w(TAG, "작업 취소 실패", it) }
     }

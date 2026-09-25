@@ -911,6 +911,12 @@ private fun AlarmPlanDto.toConfidence(): ConfidenceView {
             "이동 시간은 분포가 있지만 준비 시간이 고정값임" to
                 "루틴 블록에 최소~최대 범위를 넣으면 됨"
 
+        // 집에서 출발하지 않는 일정이다. 준비 시간이 고정값인 것이 아니라
+        // 아예 없으므로 "루틴 블록을 등록하라" 고 하면 안 된다.
+        AlarmPlanDto.BASIS_TRAVEL_ONLY ->
+            "준비 단계가 없는 일정이고 이동 시간은 경로 조회값 하나뿐임" to
+                "같은 경로를 몇 번 다니면 이동 변동성이 쌓임"
+
         // 확률도 근거도 없는 경우. status != ok 이면 이 카드는 그려지지 않는다.
         else -> "아직 확률을 계산할 근거가 부족함" to null
     }
@@ -940,8 +946,12 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     // 않으면 셋 다 학습된 값처럼 읽힌다.
     val prepBlocks = (plan.prepBreakdown ?: emptyList()).map { it.toLine() }
 
+    // 집에서 출발하지 않는 일정은 준비 단계가 **해당되지 않는다.** 서버가
+    // prep_source 로 알려 준다. 0분 줄을 그리면 "준비를 순식간에 한다" 로 읽힌다.
+    val prepApplies = plan.prepSource != AlarmPlanDto.PREP_NOT_FROM_HOME
+
     val rows = buildList {
-        plan.prepMinutes?.let {
+        plan.prepMinutes?.takeIf { prepApplies }?.let {
             add(PlanRow("준비 시간", it, prepNote(plan, prepBlocks.size), PlanRow.Kind.PREP))
         }
         plan.travelMinutes?.let {
@@ -994,10 +1004,9 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         totalMinutes = plan.totalMinutes,
         arrivalLine = arriveLocal?.let { "${it.format(ALARM_FORMAT)} 도착 예정" },
         arrivalAt = arriveLocal?.format(ALARM_FORMAT),
-        departByMillis = departBy?.toInstant()?.toEpochMilli(),
-        arriveAtMillis = arriveAt?.toInstant()?.toEpochMilli(),
+        startAtMillis = start.toInstant().toEpochMilli(),
         travelMinutes = plan.travelMinutes,
-        bufferMinutes = plan.bufferMinutes,
+        prepApplies = prepApplies,
         status = plan.status,
         statusLabel = plan.statusLabel,
         routeKey = plan.routeKey?.takeIf { it.isNotBlank() },

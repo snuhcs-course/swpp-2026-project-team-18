@@ -69,6 +69,15 @@ class TripTrackingService : Service() {
     private var highAccuracy = false
     private var startedUpdates = false
 
+    /**
+     * 이동이 시작된 것으로 판정한 시각. 아직 준비 중이면 null.
+     *
+     * 실시간 도착 예정의 경과 시간 기준이다. 한 번 정하면 바꾸지 않는다 —
+     * 중간에 다시 잡으면 지하철에서 멈춰 있던 시간이 계산에서 빠져 전망이
+     * 실제보다 낙관적으로 나온다.
+     */
+    private var movingSinceMillis: Long? = null
+
     private val deadlineRunnable = Runnable {
         Log.i(TAG, "마감 시각이 지나 추적을 멈춘다")
         finishAtDeadline()
@@ -196,6 +205,19 @@ class TripTrackingService : Service() {
         val phaseBefore = fence.phase
         val decision = fence.offer(fix)
 
+        // 이동이 시작된 시각을 여기서 한 번만 잡는다.
+        //
+        // **화면이 아니라 서비스가 들고 있어야 한다.** 화면에서 처음 본 좌표를
+        // 시작점으로 삼으면, 30분을 이동한 뒤에 화면을 연 사용자가 "방금
+        // 출발했다" 로 계산되어 도착 예정이 실제보다 이르게 나온다.
+        //
+        // 판정이 `Departed` 인 순간이 아니라 **단계가 IN_TRANSIT 인 첫 fix** 를
+        // 쓴다. 첫 위치부터 집 밖이면 출발 사건이 만들어지지 않지만
+        // (`departureMissed`) 그 사람도 이동 중이다.
+        if (movingSinceMillis == null && fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE) {
+            movingSinceMillis = fix.atMillis
+        }
+
         // 판정 결과와 무관하게 **매 위치를** 화면에 내보낸다. 판정이 난 순간만
         // 보내면 출발과 도착 사이에 진행률이 멈춰 있고, 그 사이가 사용자가
         // 가장 많이 들여다보는 구간이다.
@@ -207,6 +229,7 @@ class TripTrackingService : Service() {
                 atMillis = fix.atMillis,
                 phase = fence.phase,
                 awaitingDwell = fence.awaitingDwell,
+                movingSinceMillis = movingSinceMillis,
             )
         )
 
@@ -243,6 +266,7 @@ class TripTrackingService : Service() {
                         accuracyM = decision.fix.accuracyM,
                         atMillis = decision.fix.atMillis,
                         phase = TripGeofence.Phase.ARRIVED,
+                        movingSinceMillis = movingSinceMillis,
                     )
                 )
                 // 결과 알림을 **멈추기 전에** 띄운다. 이건 포그라운드 서비스

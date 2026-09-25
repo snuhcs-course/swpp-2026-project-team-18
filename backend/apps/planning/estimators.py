@@ -68,6 +68,19 @@ MONTE_CARLO_SEED = 20260915
 # 이동 보정 표본이 이만큼 모이면 경로 전용 값을 주로 믿는다.
 ROUTE_SHRINKAGE_K = 5
 
+# 준비 시간이 **해당되지 않는** 일정의 `prep_source`.
+#
+# 0분과 다르다. 0분은 "준비를 순식간에 한다" 로 읽히고, 이 값은 "집에서 출발하는
+# 일정이 아니라 준비 단계가 없다" 는 뜻이다. 화면이 준비 항목을 그리지 않는
+# 근거로 쓴다.
+PREP_SOURCE_NOT_FROM_HOME = "not_from_home"
+
+# 준비 단계가 없고 이동에도 변동성이 없을 때의 `confidence_basis`.
+#
+# `travel_variance_unknown` 을 재사용할 수 없다 — 그 값의 화면 문구는 "준비
+# 시간은 분포가 있지만" 으로 시작하는데, 여기서는 준비 시간이 아예 없다.
+BASIS_TRAVEL_ONLY = "travel_only"
+
 
 @dataclass
 class PrepEstimate:
@@ -385,7 +398,7 @@ class AlarmMath:
 
 
 def compute_alarm_math(
-    prep: PrepEstimate,
+    prep: PrepEstimate | None,
     travel: TravelEstimate,
     buffer_minutes: int,
     tau: float,
@@ -399,21 +412,45 @@ def compute_alarm_math(
 
     확률은 `P(준비 + 이동 <= 확보한 시간)` 이다. 확보한 시간은
     τ 분위수 + 버퍼이므로 확률은 τ 보다 크다 — 버퍼가 확신도를 더 사준다.
+
+    ## `prep=None` — 준비 단계가 없는 일정
+
+    집에서 출발하지 않는 일정은 준비 시간이 **해당되지 않는다**(`Event.origin_*`
+    가 있는 경우). 그때는 준비를 0 으로 만들어 넘기지 말고 아예 빼야 한다.
+
+    `PrepEstimate(distribution=Normal(0, 0))` 을 넘기면 세 가지가 조용히 깨진다.
+
+    1. `has_variance` 가 False 가 되어 `on_time_probability` 가 **항상** None 이
+       된다. 이동에 변동성이 있어도 확률을 못 낸다
+    2. `confidence_basis` 가 `prep_variance_unknown` 이 된다. "준비 변동성을
+       모른다" 가 아니라 "준비 단계가 없다" 인데 화면은 전자로 설명한다
+    3. `prep_source`·`prep_breakdown` 이 그대로 남아, 화면이 "샤워 14분" 을
+       보여주면서 준비 시간은 0분이 된다
+
+    빼고 나면 총 소요가 이동뿐이므로 **이동 변동성만으로 확률을 낼 수 있다.**
+    지금까지는 준비 분산이 없으면 확률을 못 냈으니 이쪽이 오히려 낫다.
     """
     rng = random.Random(MONTE_CARLO_SEED)
-    total_dist = dist.convolve(prep.distribution, travel.distribution, rng=rng)
+    total_dist = (
+        travel.distribution
+        if prep is None
+        else dist.convolve(prep.distribution, travel.distribution, rng=rng)
+    )
 
     q = total_dist.quantile(tau)
     budget = q + buffer_minutes
 
-    both_vary = prep.has_variance and travel.has_variance
-    if both_vary:
+    # 준비가 없으면 이동 변동성만 본다. 없는 성분의 변동성을 따지지 않는다.
+    enough_variance = travel.has_variance and (prep is None or prep.has_variance)
+    if enough_variance:
         probability = int(round(total_dist.cdf(budget) * 100))
         probability = max(0, min(100, probability))
         basis = "observed"
     else:
         probability = None
-        if not prep.has_variance and not travel.has_variance:
+        if prep is None:
+            basis = BASIS_TRAVEL_ONLY
+        elif not prep.has_variance and not travel.has_variance:
             basis = "point_estimate"
         elif not travel.has_variance:
             basis = "travel_variance_unknown"
@@ -423,17 +460,15 @@ def compute_alarm_math(
     # 분 단위로 쪼개 표시한다. 합성 분위수를 준비·이동 비율로 나눈다 —
     # 합성 후의 τ 분위수는 각 성분의 τ 분위수 합이 아니므로, 내역은 비율로
     # 안분해야 합계가 맞는다.
-    prep_mean = prep.distribution.mean
-    travel_mean = travel.distribution.mean
-    denom = prep_mean + travel_mean
-    if denom > 0:
-        prep_part = q * (prep_mean / denom)
-        travel_part = q * (travel_mean / denom)
+    if prep is None:
+        prep_min = 0
     else:
-        prep_part = travel_part = q / 2
+        prep_mean = prep.distribution.mean
+        travel_mean = travel.distribution.mean
+        denom = prep_mean + travel_mean
+        prep_part = q * (prep_mean / denom) if denom > 0 else q / 2
+        prep_min = int(round(prep_part))
 
-    prep_min = int(round(prep_part))
-    travel_min = int(round(travel_part))
     # 반올림 오차를 이동 쪽에 흡수시켜 합계가 정확히 맞게 한다.
     total_min = int(round(q)) + buffer_minutes
     travel_min = max(0, total_min - buffer_minutes - prep_min)
@@ -445,8 +480,8 @@ def compute_alarm_math(
         total_minutes=total_min,
         tau_used=tau,
         on_time_probability=probability,
-        prep_source=prep.source,
+        prep_source=PREP_SOURCE_NOT_FROM_HOME if prep is None else prep.source,
         travel_source=travel.source,
         confidence_basis=basis,
-        prep_breakdown=prep.breakdown,
+        prep_breakdown=[] if prep is None else prep.breakdown,
     )

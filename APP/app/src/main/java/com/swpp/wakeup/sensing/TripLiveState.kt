@@ -44,6 +44,18 @@ object TripLiveState {
         val phase: TripGeofence.Phase,
         /** 목적지 반경 안에서 체류를 채우는 중인가 */
         val awaitingDwell: Boolean = false,
+        /**
+         * 이동이 시작된 것으로 판정한 시각(벽시계 ms). 아직 준비 중이면 null.
+         *
+         * **실시간 도착 예정의 유일한 재료다.** 화면은 지금 위치를 경로에 투영해
+         * 이동 거리를 얻고, 이 값으로 경과 시간을 얻어 관측 속도를 낸다
+         * ([com.swpp.wakeup.domain.model.TripEta]).
+         *
+         * 서비스가 들고 있어야 하는 이유는 **화면이 닫혀 있어도 이동은 계속되기**
+         * 때문이다. 화면에서 처음 본 좌표를 시작점으로 삼으면, 30분을 이동한
+         * 뒤에 화면을 연 사용자가 "방금 출발했다" 로 계산된다.
+         */
+        val movingSinceMillis: Long? = null,
     )
 
     private val _snapshot = MutableStateFlow<Snapshot?>(null)

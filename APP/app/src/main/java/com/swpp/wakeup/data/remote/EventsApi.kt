@@ -481,12 +481,28 @@ data class AlarmPlanDto(
         const val BASIS_TRAVEL_UNKNOWN = "travel_variance_unknown"
         const val BASIS_PREP_UNKNOWN = "prep_variance_unknown"
 
+        /**
+         * 준비 단계가 없는 일정이고 이동에도 변동성이 없다.
+         *
+         * [BASIS_TRAVEL_UNKNOWN] 과 다르다. 그쪽은 "준비는 분포가 있는데 이동이
+         * 없다" 는 뜻이라 문구가 어긋난다.
+         */
+        const val BASIS_TRAVEL_ONLY = "travel_only"
+
         /** [AlarmPlanDto.prepSource] 의 값. */
         const val PREP_OBSERVED = "observed"
         const val PREP_DECLARED_RANGE = "declared_range"
         const val PREP_DECLARED_POINT = "declared_point"
         const val PREP_ONBOARDING = "onboarding"
         const val PREP_FIXED = "fixed"
+
+        /**
+         * 집에서 출발하는 일정이 아니라 준비 단계가 **해당되지 않는다.**
+         *
+         * 0분과 다르다. 0분은 "준비를 순식간에 한다" 로 읽힌다. 이 값이면 계산
+         * 방법에서 준비 항목을 빼고, 진행 단계에서도 "준비 중" 을 건너뛴다.
+         */
+        const val PREP_NOT_FROM_HOME = "not_from_home"
     }
 }
 

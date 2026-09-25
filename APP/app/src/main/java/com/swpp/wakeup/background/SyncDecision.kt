@@ -61,3 +61,77 @@ object SyncDecision {
      */
     const val PERIODIC_SYNC_HOURS = 6L
 }
+
+/**
+ * 임박한 일정의 경로를 다시 계산할지 정하는 규칙.
+ *
+ * [SyncDecision] 과 같은 이유로 순수 함수다 — 틀리면 카카오 하루 쿼터를 태우거나
+ * 이동 중에 진행률이 뒤로 물러난다. 둘 다 워커를 돌려서는 잡기 어렵다.
+ *
+ * ## 왜 필요한가
+ *
+ * 배차와 교통 상황이 바뀌면 가장 빠른 경로도 바뀐다. 알람 시각과 경로선이 그것을
+ * 따라가야 한다. 그런데 재계산은 **사용자가 버튼을 누를 때만** 일어났다
+ * ([PlanSyncWorker] 는 6시간마다 돌지만 조회와 알람 등록만 한다).
+ *
+ * ## 무엇을 막는가
+ *
+ * 재계산 한 번이 카카오 경로 API 를 1~2회 부른다. 대상과 주기를 좁히지 않으면
+ * 하루 1,000건 한도를 태운다.
+ */
+object RouteRefreshDecision {
+
+    /**
+     * 갱신 주기(분). WorkManager 최소 주기다.
+     *
+     * 배차 간격보다 짧을 필요가 없다. 임박한 일정이 없으면 네트워크를 쓰지
+     * 않으므로([shouldRefresh] 가 로컬 목록만 본다) 이 빈도가 비싸지 않다.
+     */
+    const val REFRESH_PERIOD_MINUTES = 15L
+
+    /**
+     * 알람이 이 시간 안에 있는 일정만 갱신한다.
+     *
+     * 더 먼 일정을 지금 갱신해도 출발 전에 또 바뀐다. 3시간이면 아침 준비가
+     * 시작되기 전부터 덮는다.
+     */
+    const val REFRESH_HORIZON_HOURS = 3L
+
+    /**
+     * 한 번에 갱신할 일정 수 상한.
+     *
+     * 임박한 일정이 셋 이상인 아침은 드물다. 상한이 없으면 캘린더를 대량으로
+     * 가져온 계정이 한 번에 쿼터를 태운다.
+     */
+    const val REFRESH_MAX_EVENTS = 2
+
+    /**
+     * 지금 갱신해야 하는 일정 id.
+     *
+     * **네트워크를 쓰지 않는 판단이다.** 기기에 등록해 둔 알람 목록만 본다. 임박한
+     * 일정이 없으면 워커가 아무것도 하지 않고 끝나므로 15분 주기가 비싸지 않다.
+     *
+     * @param alarmAtMillis 등록된 알람 시각 목록. id 와 짝이다
+     * @param trackingEventId 지금 추적 중인 일정. 있으면 그 일정은 갱신하지 않는다
+     */
+    fun dueEventIds(
+        alarms: List<Pair<Long, Long>>,
+        nowMillis: Long,
+        trackingEventId: Long? = null,
+    ): List<Long> {
+        val horizon = nowMillis + REFRESH_HORIZON_HOURS * 60 * 60 * 1000
+        return alarms
+            .asSequence()
+            // 이미 지난 알람은 갱신해도 의미가 없다. 그 아침은 끝났다.
+            .filter { (_, alarmAt) -> alarmAt > nowMillis && alarmAt <= horizon }
+            // **이동 중이면 건드리지 않는다.** 경로가 바뀌면 진행률의 분모가
+            // 바뀌어 바가 뒤로 물러나고, 이미 타고 있는 사람에게 다른 경로를
+            // 제안하는 것은 의미도 없다.
+            .filter { (eventId, _) -> eventId != trackingEventId }
+            .sortedBy { (_, alarmAt) -> alarmAt }
+            .map { (eventId, _) -> eventId }
+            .distinct()
+            .take(REFRESH_MAX_EVENTS)
+            .toList()
+    }
+}

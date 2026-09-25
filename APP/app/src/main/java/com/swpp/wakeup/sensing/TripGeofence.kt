@@ -53,9 +53,15 @@ sealed interface TripEvent {
  * 출발·도착 판별기.
  *
  * **규칙**
- * - 출발 — 집에서 [departureRadiusM] 이상 멀어지면 나간 것으로 본다.
+ * - 출발 — 집에서 [departureRadiusM] 이상 멀어지거나, **지속적으로 이동하는
+ *   것이 감지되면** 나간 것으로 본다. 둘 중 먼저 오는 것을 쓴다.
  * - 도착 — 목적지 [arrivalRadiusM] 안에 들어와 [dwellMillis] 이상 머무르면
  *   닿은 것으로 본다.
+ *
+ * **반경만으로는 늦다.** 아파트 단지나 캠퍼스는 그 자체가 150m 를 넘는다.
+ * 집을 나서서 몇 분을 걸어도 반경 안이라 화면은 계속 "준비 중" 이었다. 그래서
+ * 이동 감지를 함께 본다 — [movingWindowMillis] 안에 [movingDistanceM] 이상
+ * 나아가면 걷고 있는 것이다.
  *
  * 그런데 이 두 줄만으로는 동작하지 않는다. 실제 GPS 에는 네 가지 함정이 있다.
  *
@@ -89,6 +95,9 @@ class TripGeofence(
     private val maxAccuracyM: Float = MAX_ACCURACY_M,
     private val requiredStreak: Int = DEFAULT_REQUIRED_STREAK,
     private val dwellMillis: Long = DEFAULT_DWELL_MILLIS,
+    private val movingDistanceM: Double = MOVING_DISTANCE_M,
+    private val movingWindowMillis: Long = MOVING_WINDOW_MILLIS,
+    private val movingResetM: Double = MOVING_RESET_M,
 ) {
 
     enum class Phase {
@@ -149,6 +158,16 @@ class TripGeofence(
     private var departureStreak = 0
     private var arrivalStreak = 0
 
+    /**
+     * 이동을 재는 기준 fix. 여기서부터 얼마나 나아갔는지를 본다.
+     *
+     * 제자리에 있으면 계속 앞으로 밀어 준다([movingResetM] 안에 있으면 재설정).
+     * 밀지 않으면 GPS 산포가 몇십 분에 걸쳐 쌓여 앉아 있는 사람이 "이동 중" 이
+     * 된다. 반대로 조금이라도 나아갔으면 기준을 그대로 두어야 한다 — 매번
+     * 밀면 천천히 걷는 사람은 한 창에서 기준 거리를 못 넘겨 영영 감지되지 않는다.
+     */
+    private var movementAnchor: LocationFix? = null
+
     /** 목적지 반경에 들어온 첫 fix 의 시각. 반경을 벗어나면 버린다. */
     private var arrivalEnteredAtMillis: Long? = null
 
@@ -191,18 +210,64 @@ class TripGeofence(
             }
         }
 
-        if (distance <= departureRadiusM) {
+        if (distance > departureRadiusM) {
+            // 2. 연속으로 만족해야 인정한다.
+            departureStreak++
+            if (departureStreak >= requiredStreak) return depart(fix, distance)
+        } else {
             departureStreak = 0
-            return null
         }
 
-        // 2. 연속으로 만족해야 인정한다.
-        departureStreak++
-        if (departureStreak < requiredStreak) return null
+        // 5. 반경 안이라도 지속적으로 이동하고 있으면 나간 것이다.
+        //
+        // 아파트 단지·캠퍼스는 그 자체가 150m 를 넘어서, 반경만 보면 집을 나서
+        // 몇 분을 걸어도 "준비 중" 으로 남는다. 사용자가 보는 단계가 실제와
+        // 어긋나면 진행률과 도착 예정도 함께 어긋난다.
+        if (detectMovement(fix)) return depart(fix, distance)
+        return null
+    }
 
+    private fun depart(fix: LocationFix, distance: Double): TripEvent {
         phase = Phase.IN_TRANSIT
         departureStreak = 0
+        movementAnchor = null
         return TripEvent.Departed(fix, distance)
+    }
+
+    /**
+     * 지속적으로 이동하고 있는가.
+     *
+     * 두 조건을 **함께** 요구한다.
+     *
+     * - 기준 fix 에서 [movingDistanceM] 이상 나아갔다
+     * - 그 이동이 [movingWindowMillis] 이상에 걸쳐 있다
+     *
+     * **단발 변위로 판정하지 않는다.** 정확도 게이트가 [maxAccuracyM] 이라 두
+     * 좌표의 변위가 오차만으로 그 두 배까지 튈 수 있다. 집에 앉아 있는 사람이
+     * 한 번의 튐으로 "이동 중" 이 된다.
+     *
+     * 기준 fix 는 제자리에 있을 때만 앞으로 민다([movingResetM] 안). 매번 밀면
+     * 천천히 걷는 사람이 한 창에서 기준 거리를 못 넘겨 영영 감지되지 않고,
+     * 전혀 밀지 않으면 산포가 쌓여 앉아 있는 사람이 감지된다.
+     */
+    private fun detectMovement(fix: LocationFix): Boolean {
+        val anchor = movementAnchor
+        // 시각이 거꾸로 가면(시계 보정·캐시 좌표) 창을 다시 시작한다.
+        if (anchor == null || fix.atMillis < anchor.atMillis) {
+            movementAnchor = fix
+            return false
+        }
+
+        val travelled = distanceMeters(fix.point, anchor.point)
+        if (travelled <= movingResetM) {
+            // 기준에서 벗어나지 못했다. 이 정도는 "움직였다" 고 말할 수 없는
+            // 도심 GPS 오차 범위다. 기준을 여기로 옮겨 산포가 쌓이지 않게 한다.
+            movementAnchor = fix
+            return false
+        }
+
+        if (fix.atMillis - anchor.atMillis < movingWindowMillis) return false
+        return travelled >= movingDistanceM
     }
 
     private fun checkArrival(fix: LocationFix): TripEvent? {
@@ -324,6 +389,32 @@ class TripGeofence(
          * 그중 흐린 것이 섞여도 판정에는 여유가 있다.
          */
         const val DEFAULT_DWELL_MILLIS = 120_000L
+
+        /**
+         * 이동으로 인정할 최소 누적 거리.
+         *
+         * 출발 전 위치 주기가 30초(`TripTrackingService.IDLE_INTERVAL_MS`)이고
+         * 도보 속도가 약 1.1m/s 다. 60초면 66m 를 걷는다. 80m 는 "실제로 걷기
+         * 시작했다" 의 최소선이고, 실내 산포(수십 m)와 갈린다.
+         */
+        const val MOVING_DISTANCE_M = 80.0
+
+        /**
+         * 그 이동이 이 시간 이상에 걸쳐 있어야 한다.
+         *
+         * 30초 주기에서 60초는 좌표 2~3개다. 이보다 짧게 잡으면 좌표 한 번의
+         * 튐이 그대로 판정이 된다 — 정확도 게이트가 50m 이므로 변위가 오차만으로
+         * 100m 까지 벌어질 수 있다.
+         */
+        const val MOVING_WINDOW_MILLIS = 60_000L
+
+        /**
+         * 기준 fix 를 다시 잡는 거리.
+         *
+         * 이 안에 있으면 "움직였다" 고 말할 수 없다 — 도심 GPS 오차가 10~30m 다.
+         * 기준을 앞으로 밀어 산포가 몇십 분에 걸쳐 쌓이는 것을 막는다.
+         */
+        const val MOVING_RESET_M = 30.0
 
         private const val EARTH_RADIUS_M = 6_371_008.8
 

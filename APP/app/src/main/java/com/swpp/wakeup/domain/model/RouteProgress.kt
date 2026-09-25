@@ -221,13 +221,23 @@ enum class TripStage(val label: String) {
          * @param tracked 추적기가 판정한 단계. 없으면 null
          * @param alarmPassed 알람 시각이 지났는가
          * @param eventPassed 일정 시각까지 지났는가
+         * @param prepApplies 준비 단계가 있는 일정인가. 집에서 출발하지 않으면 없다
          */
-        fun of(tracked: TripStage?, alarmPassed: Boolean, eventPassed: Boolean): TripStage = when {
+        fun of(
+            tracked: TripStage?,
+            alarmPassed: Boolean,
+            eventPassed: Boolean,
+            prepApplies: Boolean = true,
+        ): TripStage = when {
+            // 준비 단계가 없는 일정에서 추적기가 "준비 중" 을 주면 이동 중으로
+            // 읽는다. 집에 있지도 않은 사람에게 준비 중이라고 할 근거가 없다.
+            tracked == PREPARING && !prepApplies -> IN_TRANSIT
             tracked != null -> tracked
             !alarmPassed -> BEFORE_ALARM
             // 일정이 끝났는데 이동 기록이 없다. 알람만 보면 계속 "준비 중" 인데,
             // 이틀 전 일정을 열어 놓고 지금 준비하고 있다고 말하는 셈이 된다.
             eventPassed -> PAST
+            !prepApplies -> IN_TRANSIT
             else -> PREPARING
         }
     }
