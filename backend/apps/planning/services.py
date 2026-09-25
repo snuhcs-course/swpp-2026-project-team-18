@@ -124,6 +124,12 @@ def compute_and_store(event: Event) -> AlarmPlan:
         # 남아 있으면 지도가 **지금 계획과 다른 경로**를 그린다.
         "route_path": [],
         "route_distance_m": None,
+        # 더 빠른 대안도 같은 이유로 비운다. 낡은 대안이 남으면 지도가 이미
+        # 사라진 노선을 "지금 더 빠름" 으로 알린다.
+        "alt_route_key": "",
+        "alt_route_label": "",
+        "alt_faster_minutes": None,
+        "alt_route_path": [],
     }
 
     # 1) 장소가 없으면 이동 시간을 구할 수 없다.
@@ -250,9 +256,37 @@ def compute_and_store(event: Event) -> AlarmPlan:
             # 앱은 지도 자리에 안내만 띄운다 — 알람 계산은 그대로 성립한다.
             "route_path": route.get("path") or [],
             "route_distance_m": route.get("path_distance_m"),
+            # 지금 더 빠른 대안. 고른 경로는 위에서 그대로 저장했고, 이건 지도에
+            # 겹쳐 보여 주기만 한다. `resolve_route` 가 대중교통을 고른 경우에만
+            # 채워 주고, 같은 경로거나 더 느리면 아예 붙이지 않는다.
+            **_alternative_fields(route),
         }
     )
     return _upsert(event, defaults)
+
+
+def _alternative_fields(route: dict) -> dict:
+    """경로 응답의 `alternative` 를 계획 필드로 옮긴다.
+
+    `resolve_route` 가 **고른 경로와 다르고 실제로 더 빠를 때만** 붙이므로
+    여기서 다시 판단하지 않는다. 없으면 빈 값을 돌려주는 것이 중요하다 —
+    `defaults` 의 초기값을 덮어써야 이전 계산의 대안이 남지 않는다.
+    """
+    alt = route.get("alternative") or {}
+    faster = alt.get("faster_minutes")
+    if not alt.get("key") or not faster or faster <= 0:
+        return {
+            "alt_route_key": "",
+            "alt_route_label": "",
+            "alt_faster_minutes": None,
+            "alt_route_path": [],
+        }
+    return {
+        "alt_route_key": alt["key"][:120],
+        "alt_route_label": (alt.get("label") or "")[:120],
+        "alt_faster_minutes": faster,
+        "alt_route_path": alt.get("path") or [],
+    }
 
 
 def _upsert(event: Event, defaults: dict) -> AlarmPlan:

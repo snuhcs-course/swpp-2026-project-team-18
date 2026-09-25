@@ -331,3 +331,84 @@ class RoutePathToleranceTest {
         assertTrue(plan("""[["가",127.0]]""").routePoints.isEmpty())
     }
 }
+
+/**
+ * 더 빠른 대안 경로의 필드도 같은 방어를 받는지.
+ *
+ * `route_path` 하나를 고친 뒤 `alt_route_path` 를 엄격하게 선언하면, 같은 사고를
+ * 같은 모양으로 다시 겪는다 — 그때도 증상은 "일정이 하나도 안 보인다" 이고
+ * 서버 로그에는 200 만 남는다. 두 필드가 **같은 파서**를 쓰는지 여기서 고정한다.
+ */
+class AltRouteToleranceTest {
+
+    private val gson = Gson()
+
+    private fun plan(altRoutePath: String): AlarmPlanDto =
+        gson.fromJson(
+            """{"status":"ok","alt_route_path":$altRoutePath}""",
+            AlarmPlanDto::class.java,
+        )
+
+    @Test
+    fun `문자열로 와도 파싱이 터지지 않는다`() {
+        val dto = plan("\"[]\"")
+        assertTrue(dto.altRoutePoints.isEmpty())
+        assertEquals("ok", dto.status)
+    }
+
+    @Test
+    fun `객체나 숫자로 와도 견딘다`() {
+        assertTrue(plan("{}").altRoutePoints.isEmpty())
+        assertTrue(plan("3").altRoutePoints.isEmpty())
+        assertTrue(plan("null").altRoutePoints.isEmpty())
+    }
+
+    @Test
+    fun `키가 아예 없어도 견딘다`() {
+        // 구버전 서버는 이 필드를 모른다. 그래도 나머지가 읽혀야 한다.
+        val dto = gson.fromJson("""{"status":"ok"}""", AlarmPlanDto::class.java)
+        assertTrue(dto.altRoutePoints.isEmpty())
+        assertEquals(null, dto.altFasterMinutes)
+        assertEquals(null, dto.altRouteLabel)
+    }
+
+    @Test
+    fun `정상 배열은 그대로 읽는다`() {
+        val points = plan("[[37.5,127.0],[37.6,127.1]]").altRoutePoints
+        assertEquals(2, points.size)
+        assertEquals(37.5, points[0][0], 1e-9)
+        assertEquals(127.1, points[1][1], 1e-9)
+    }
+
+    @Test
+    fun `모양이 틀린 점만 버리고 나머지를 살린다`() {
+        val points = plan("""[[37.5,127.0],"쓰레기",[37.6],{},[37.8,127.3]]""").altRoutePoints
+        assertEquals(2, points.size)
+        assertEquals(37.8, points[1][0], 1e-9)
+    }
+
+    @Test
+    fun `고른 경로와 대안이 서로를 깨뜨리지 않는다`() {
+        // 한쪽이 망가져도 다른 쪽은 읽혀야 한다.
+        val dto = gson.fromJson(
+            """{"status":"ok","route_path":[[37.5,127.0],[37.6,127.1]],"alt_route_path":"[]"}""",
+            AlarmPlanDto::class.java,
+        )
+        assertEquals(2, dto.routePoints.size)
+        assertTrue(dto.altRoutePoints.isEmpty())
+    }
+
+    @Test
+    fun `나머지 세 필드를 읽는다`() {
+        val dto = gson.fromJson(
+            """
+            {"status":"ok","alt_route_key":"transit:9호선>2호선",
+             "alt_route_label":"9호선 → 2호선","alt_faster_minutes":4}
+            """.trimIndent(),
+            AlarmPlanDto::class.java,
+        )
+        assertEquals("transit:9호선>2호선", dto.altRouteKey)
+        assertEquals("9호선 → 2호선", dto.altRouteLabel)
+        assertEquals(4, dto.altFasterMinutes)
+    }
+}

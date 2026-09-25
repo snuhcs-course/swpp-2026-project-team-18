@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -158,6 +159,7 @@ fun RouteMapCard(
             if (state.path.size >= 2) {
                 RouteOverlay(
                     path = state.path,
+                    altPath = if (state.hasAltPath) state.altPath else emptyList(),
                     viewport = viewport,
                     travelRatio = progress?.takeIf { it.onRoute }?.ratio ?: 0f,
                     shift = state.pendingShift,
@@ -211,6 +213,41 @@ fun RouteMapCard(
                 )
             }
         }
+
+        // 초록 점선의 뜻을 밝히는 줄. 색만으로는 부족하다 — 바로 위 진행 바가
+        // 초록을 "정시 도착" 으로 쓰고 있어서, 글씨가 없으면 같은 색이 한 화면에서
+        // 두 가지 뜻이 된다. 점선 견본을 앞에 두어 어느 선을 말하는지 잇는다.
+        if (state.hasAltPath) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DashSwatch()
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    text = state.altSummary.orEmpty(),
+                    color = JitColor.Green,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+/** 지도의 초록 점선과 같은 모양의 작은 견본. */
+@Composable
+private fun DashSwatch() {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        repeat(2) {
+            Box(
+                Modifier
+                    .width(6.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(JitColor.Green)
+            )
+        }
     }
 }
 
@@ -222,10 +259,18 @@ private fun formatKm(meters: Int): String =
  *
  * 남은 구간을 먼저 그리고 지나온 구간을 위에 겹친다. 순서를 바꾸면 겹치는
  * 지점에서 지나온 선이 아래로 깔려 끊긴 것처럼 보인다.
+ *
+ * ## 더 빠른 대안은 아래에 깔고 점선으로 그린다
+ *
+ * [altPath] 는 "지금은 이쪽이 더 빠르다" 는 **제안**이다. 고른 경로와 같은
+ * 굵기의 실선으로 그리면 두 개의 확정된 경로처럼 보여서, 사용자가 자기가 갈
+ * 길을 못 고른다. 그래서 세 가지로 낮춘다 — 맨 아래에 깔고, 한 단계 얇게,
+ * 점선으로. 겹치는 구간에서는 고른 경로의 색이 그대로 보인다.
  */
 @Composable
 private fun RouteOverlay(
     path: List<GeoPoint>,
+    altPath: List<GeoPoint>,
     viewport: RouteMapProjection.Viewport,
     travelRatio: Float,
     shift: Offset,
@@ -235,6 +280,26 @@ private fun RouteOverlay(
             .fillMaxSize()
             .offset { IntOffset(shift.x.roundToInt(), shift.y.roundToInt()) }
     ) {
+        // 고른 경로보다 먼저 그려서 아래에 깔린다.
+        if (altPath.size >= 2) {
+            val altPx = altPath.map { RouteMapProjection.toPx(it, viewport) }
+            val line = Path().apply {
+                moveTo(altPx.first().x, altPx.first().y)
+                for (i in 1..altPx.lastIndex) lineTo(altPx[i].x, altPx[i].y)
+            }
+            drawPath(
+                path = line,
+                color = JitColor.Green,
+                style = Stroke(
+                    width = 3.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    pathEffect = PathEffect.dashPathEffect(
+                        floatArrayOf(7.dp.toPx(), 5.dp.toPx())
+                    ),
+                ),
+            )
+        }
+
         val points = path.map { RouteMapProjection.toPx(it, viewport) }
         // 진행 비율을 점 인덱스로 바꾼다. 거리 비례가 아니라 점 개수 비례라
         // 점 간격이 고른 경로에서는 거의 같고, 선 색이 바뀌는 위치가 몇 픽셀

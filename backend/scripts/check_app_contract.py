@@ -386,6 +386,32 @@ def main() -> int:
     check("alarm_plan 이 있다", bool(plan), f"{str(plan)[:120]}")
     compare("알람 계획", alarm_fields, plan)
 
+    # 좌표 자리에 배열이 아닌 값이 오면 Gson 이 **응답 전체**의 파싱을 깨뜨린다.
+    # 일정 목록이 통째로 날아가고 화면은 "오프라인" 으로 떨어지는데, 서버는 200 을
+    # 주고 있어서 서버 로그에 흔적이 없다. 실기기에서 그렇게 만났다(`route_path`
+    # 의 JSON 기본값이 배열이 아니라 문자열이었다). 두 좌표 필드를 함께 본다.
+    for name in ("route_path", "alt_route_path"):
+        check(
+            f"{name} 이 배열이다",
+            isinstance(plan.get(name), list),
+            f"{name}={type(plan.get(name)).__name__} {str(plan.get(name))[:80]}",
+        )
+    check(
+        "alt_faster_minutes 는 정수이거나 null",
+        plan.get("alt_faster_minutes") is None
+        or isinstance(plan.get("alt_faster_minutes"), int),
+        f"alt_faster_minutes={plan.get('alt_faster_minutes')!r}",
+    )
+    # 대안을 알릴 때는 "무엇이" 빠른지도 함께 와야 한다. 좌표만 오면 앱이 초록
+    # 선을 뜻 없이 그리게 되고, 바로 위 진행 바의 초록(정시 도착)으로 읽힌다.
+    if plan.get("alt_route_path"):
+        check(
+            "대안 좌표가 있으면 이름과 분도 함께 온다",
+            bool(plan.get("alt_route_label")) and plan.get("alt_faster_minutes"),
+            f"label={plan.get('alt_route_label')!r} "
+            f"faster={plan.get('alt_faster_minutes')!r}",
+        )
+
     # 앱이 문구를 분기하는 값이다. 서버가 모르는 값을 주면 앱이 기본 문구로
     # 떨어지면서 "이유를 알려준다" 는 약속이 조용히 깨진다.
     app_bases = {

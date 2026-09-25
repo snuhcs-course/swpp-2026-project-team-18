@@ -2,6 +2,7 @@ package com.swpp.wakeup.domain.model
 
 import com.swpp.wakeup.sensing.GeoPoint
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -190,5 +191,95 @@ class RouteMapProjectionTest {
         // 서버(clients.STATIC_MAP_MAX_LEVEL)가 15 까지 받는다. 앱이 그보다 큰
         // 값을 보내면 서버가 400 을 준다.
         assertEquals(15, StaticMapScale.ROUTE_MAX_LEVEL)
+    }
+}
+
+/**
+ * 전체 보기가 **두 경로를 함께** 담는지.
+ *
+ * 고른 경로 위에 "지금 더 빠른 대안" 을 초록 점선으로 겹쳐 그린다. 대안은 다른
+ * 길로 돌아가므로 좌표 범위가 고른 경로보다 넓을 수 있다. 고른 경로만 기준으로
+ * 맞추면 초록 선이 화면 밖으로 나가고, 사용자는 **선이 잘렸다**고 읽는다.
+ *
+ * `fit` 의 서명을 바꾸지 않고 두 목록을 이어 붙여 넘긴다. `fit` 은 좌표의
+ * 최소·최대만 쓰므로 이어 붙이기가 정확히 맞는 방법이다. 그 사실을 여기서
+ * 고정한다 — 나중에 `fit` 이 순서나 인접성을 쓰게 바뀌면 이 단언이 깨진다.
+ */
+class RouteMapFitWithAltTest {
+
+    private val width = 360
+    private val height = 260
+
+    private fun fit(path: List<GeoPoint>) =
+        RouteMapProjection.fit(path, requestUnits = width, requestHeightUnits = height)
+
+    /** 좌표 전부가 여백 안에 들어오는가. */
+    private fun allInside(path: List<GeoPoint>, center: GeoPoint, level: Int): Boolean {
+        val viewport = RouteMapProjection.Viewport(
+            center = center,
+            level = level,
+            requestUnits = width,
+            viewPx = width,
+            viewHeightPx = height,
+        )
+        return path.all { point ->
+            val px = RouteMapProjection.toPx(point, viewport)
+            px.x >= 0f && px.x <= width && px.y >= 0f && px.y <= height
+        }
+    }
+
+    // 고른 경로는 동서로 짧게 간다.
+    private val chosen = listOf(
+        GeoPoint(37.4800, 126.9300),
+        GeoPoint(37.4820, 126.9600),
+        GeoPoint(37.4840, 126.9900),
+    )
+
+    // 대안은 북쪽으로 크게 돌아간다. 고른 경로의 범위를 한참 넘는다.
+    private val alt = listOf(
+        GeoPoint(37.4800, 126.9300),
+        GeoPoint(37.5600, 126.9500),
+        GeoPoint(37.5700, 127.0400),
+        GeoPoint(37.4840, 126.9900),
+    )
+
+    @Test
+    fun `고른 경로만 맞추면 대안이 화면을 벗어난다`() {
+        val (center, level) = fit(chosen)!!
+
+        assertTrue("고른 경로는 당연히 들어온다", allInside(chosen, center, level))
+        assertFalse(
+            "이 상태에서 초록 점선을 그리면 잘린다 — 그래서 합쳐서 맞춘다",
+            allInside(alt, center, level),
+        )
+    }
+
+    @Test
+    fun `두 경로를 합쳐 맞추면 둘 다 들어온다`() {
+        val (center, level) = fit(chosen + alt)!!
+
+        assertTrue(allInside(chosen, center, level))
+        assertTrue(allInside(alt, center, level))
+    }
+
+    @Test
+    fun `합쳐 맞추면 더 축소된다`() {
+        val onlyChosen = fit(chosen)!!.second
+        val both = fit(chosen + alt)!!.second
+
+        // 레벨이 클수록 축소다(StaticMapScale).
+        assertTrue("$onlyChosen -> $both", both > onlyChosen)
+    }
+
+    @Test
+    fun `대안이 없으면 결과가 달라지지 않는다`() {
+        // 대안이 없는 일정에서 지도가 갑자기 축소되면 안 된다.
+        assertEquals(fit(chosen), fit(chosen + emptyList()))
+    }
+
+    @Test
+    fun `대안이 고른 경로 안쪽이면 축소하지 않는다`() {
+        val inside = listOf(GeoPoint(37.4810, 126.9400), GeoPoint(37.4830, 126.9700))
+        assertEquals(fit(chosen)!!.second, fit(chosen + inside)!!.second)
     }
 }

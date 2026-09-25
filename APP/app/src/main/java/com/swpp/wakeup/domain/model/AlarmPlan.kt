@@ -145,11 +145,39 @@ data class AlarmPlanView(
      * 계산에서 나와야 목적지에 닿았을 때 정확히 100% 가 된다.
      */
     val routeDistanceM: Int? = null,
+    /**
+     * 지금 더 빠른 대안 경로의 폴리라인. 지도에 초록 점선으로 겹쳐 그린다.
+     *
+     * **고른 경로를 대신하지 않는다.** 알람 시각도 진행률도 [routePath] 로
+     * 계산한다. 사용자가 일정을 만들 때 고른 수단을 배경에서 갈아치우면 고른
+     * 이유(환승이 싫다·앉아서 갈 수 있다)를 앱이 알 수 없으므로 무너뜨린다.
+     * 더 빠른 길이 있다는 사실만 알리고, 바꿀지는 사람이 정한다.
+     */
+    val altRoutePath: List<GeoPoint> = emptyList(),
+    /** 대안 경로의 노선 이름. "9호선 → 2호선" */
+    val altRouteLabel: String? = null,
+    /**
+     * 대안이 고른 경로보다 몇 분 빠른가. 없으면 null.
+     *
+     * 서버가 카카오 원값끼리 뺀 차이다. [travelMinutes] 와 빼서 다시 계산하지
+     * 않는다 — 그쪽은 학습 보정과 τ 분위수를 거친 값이라 기준이 다르다.
+     */
+    val altFasterMinutes: Int? = null,
 ) {
     val isComputed: Boolean get() = status == "ok" && alarmAt != null
 
     /** 지도와 진행률을 그릴 수 있는가. 좌표가 둘 미만이면 선이 되지 않는다 */
     val hasRoutePath: Boolean get() = routePath.size >= 2
+
+    /**
+     * 더 빠른 대안을 지도에 그릴 수 있는가.
+     *
+     * 선이 되려면 점이 둘 이상이어야 하고, "몇 분 빠름" 을 말할 수 없으면
+     * 그리지 않는다. 초록 선만 덩그러니 있으면 사용자는 그것이 무엇인지 알 수
+     * 없고, 바로 위 진행 바의 초록(정시 도착)으로 잘못 읽을 여지가 생긴다.
+     */
+    val hasAltRoute: Boolean
+        get() = altRoutePath.size >= 2 && (altFasterMinutes ?: 0) > 0
 
     /** 막대 길이를 상대 비율로 그리기 위한 최대값. */
     val maxRowMinutes: Int

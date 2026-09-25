@@ -424,6 +424,32 @@ data class AlarmPlanDto(
     @SerializedName("route_path") val routePath: JsonElement? = null,
     /** `routePath` 를 따라간 길이(m). 좌표가 없으면 null */
     @SerializedName("route_distance_m") val routeDistanceM: Int?,
+
+    /**
+     * 지금 더 빠른 대안 경로의 key. 대안이 없으면 `null` 이거나 빈 문자열이다.
+     *
+     * **고른 경로를 바꾸는 값이 아니다.** 계산은 계속 [routeKey] 로 하고, 이건
+     * 지도에 초록 점선으로 겹쳐 보여 주기만 한다 — 바꿀지는 사람이 정한다.
+     */
+    @SerializedName("alt_route_key") val altRouteKey: String? = null,
+    /** 사람이 읽는 노선 이름. "9호선 → 2호선" */
+    @SerializedName("alt_route_label") val altRouteLabel: String? = null,
+    /**
+     * 고른 경로보다 몇 분 빠른가.
+     *
+     * 대안의 **절대 소요시간이 아니다.** [travelMinutes] 는 서버에서 학습 보정과
+     * τ 분위수를 거친 값이고 대안은 카카오 원값이어서, 두 수를 나란히 놓으면
+     * 기준이 다른 비교가 된다. 그래서 서버가 원값끼리 뺀 차이만 내려 준다.
+     * 앱에서 [travelMinutes] 로 다시 빼지 않는다.
+     */
+    @SerializedName("alt_faster_minutes") val altFasterMinutes: Int? = null,
+    /**
+     * 대안 경로의 폴리라인. [routePath] 와 같은 이유로 [JsonElement] 다.
+     *
+     * 이 자리에 배열이 아닌 값이 오면 Gson 이 응답 전체 파싱을 깨뜨린다.
+     * [altRoutePoints] 가 모양을 확인해 꺼낸다.
+     */
+    @SerializedName("alt_route_path") val altRoutePath: JsonElement? = null,
     /**
      * 고른 경로가 그대로 쓰였는지.
      * - `null` — 고른 적이 없다(서버가 최단 경로를 씀)
@@ -466,17 +492,10 @@ data class AlarmPlanDto(
      * 배열 안의 항목도 하나씩 확인한다. `[[37.5, 127.0], "쓰레기"]` 처럼 섞여
      * 와도 읽을 수 있는 점만 가져온다 — 좌표 하나가 지도를 통째로 없애지 않는다.
      */
-    val routePoints: List<List<Double>>
-        get() {
-            val array = routePath?.takeIf { it.isJsonArray }?.asJsonArray ?: return emptyList()
-            return array.mapNotNull { item ->
-                val pair = item?.takeIf { it.isJsonArray }?.asJsonArray ?: return@mapNotNull null
-                if (pair.size() != 2) return@mapNotNull null
-                val lat = pair[0].asDoubleOrNull() ?: return@mapNotNull null
-                val lng = pair[1].asDoubleOrNull() ?: return@mapNotNull null
-                listOf(lat, lng)
-            }
-        }
+    val routePoints: List<List<Double>> get() = routePath.toLatLngPairs()
+
+    /** [altRoutePath] 를 좌표 쌍 목록으로. [routePoints] 와 같은 규칙이다. */
+    val altRoutePoints: List<List<Double>> get() = altRoutePath.toLatLngPairs()
 
     companion object {
         const val STATUS_OK = "ok"
@@ -523,6 +542,26 @@ data class AlarmPlanDto(
  */
 private fun JsonElement.asDoubleOrNull(): Double? =
     runCatching { if (isJsonPrimitive) asDouble else null }.getOrNull()
+
+/**
+ * 느슨하게 받은 JSON 을 `[[lat, lng], ...]` 로. 모양이 아니면 빈 목록이다.
+ *
+ * 배열 안의 항목도 하나씩 확인한다. `[[37.5, 127.0], "쓰레기"]` 처럼 섞여 와도
+ * 읽을 수 있는 점만 가져온다 — 좌표 하나가 지도를 통째로 없애지 않는다.
+ *
+ * 고른 경로와 대안 경로가 **같은 규칙**을 쓰게 한 곳에 둔다. 한쪽만 방어하면
+ * 나중에 추가한 쪽이 응답 전체를 깨뜨리는 자리가 된다.
+ */
+private fun JsonElement?.toLatLngPairs(): List<List<Double>> {
+    val array = this?.takeIf { it.isJsonArray }?.asJsonArray ?: return emptyList()
+    return array.mapNotNull { item ->
+        val pair = item?.takeIf { it.isJsonArray }?.asJsonArray ?: return@mapNotNull null
+        if (pair.size() != 2) return@mapNotNull null
+        val lat = pair[0].asDoubleOrNull() ?: return@mapNotNull null
+        val lng = pair[1].asDoubleOrNull() ?: return@mapNotNull null
+        listOf(lat, lng)
+    }
+}
 
 /**
  * 준비 시간 블록 한 줄. 서버 `estimators.py` 의 breakdown 항목과 짝이다.

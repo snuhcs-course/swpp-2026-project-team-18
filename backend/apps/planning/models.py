@@ -169,6 +169,41 @@ class AlarmPlan(models.Model):
         "경로 길이(m)", null=True, blank=True
     )
 
+    # 지금 더 빠른 대안 경로.
+    #
+    # **고른 경로를 바꾸지 않는다.** 사용자가 일정을 만들 때 수단을 골랐으면
+    # 계산은 계속 그 수단으로 한다. 다만 다시 조회할 때 같은 응답에 더 빠른
+    # 후보가 보이면 여기 적어 두고, 앱이 지도에 초록 점선으로 겹쳐 보여 준다 —
+    # 바꿀지는 사람이 정한다. 배경에서 몰래 갈아치우면 사용자가 고른 이유(환승이
+    # 싫다, 그 노선이 앉아서 갈 수 있다)를 서버가 알 수 없으므로 무너뜨린다.
+    #
+    # **추가 호출이 없다.** `resolve_route` 가 대중교통 후보 목록을 한 번 받아
+    # 그 안에서 고른 key 를 찾으므로 최단 후보는 이미 같은 응답에 있다. 도보·
+    # 자전거·자동차는 후보 목록이 없어 비교 대상이 없고, 그때는 아래 네 필드가
+    # 모두 빈다.
+    alt_route_key = models.CharField(
+        "더 빠른 경로", max_length=120, blank=True, default="", db_default=""
+    )
+    # 사람이 읽는 노선 이름. "9호선 → 2호선"
+    alt_route_label = models.CharField(
+        "더 빠른 경로 이름", max_length=120, blank=True, default="", db_default=""
+    )
+    # 고른 경로보다 몇 분 빠른가.
+    #
+    # 절대 소요시간을 담지 않는다. `travel_minutes` 는 학습 보정과 tau 분위수가
+    # 들어간 값이고 대안은 카카오 원값이라, 둘을 나란히 놓으면 기준이 다른 두
+    # 수를 비교하게 된다. 차이만 **원값끼리** 계산해서 담는다.
+    alt_faster_minutes = models.PositiveIntegerField(
+        "더 빠른 정도(분)", null=True, blank=True
+    )
+    # 대안 경로의 폴리라인. `route_path` 와 같은 모양이다.
+    alt_route_path = models.JSONField(
+        "더 빠른 경로 좌표",
+        default=list,
+        blank=True,
+        db_default=Value([], output_field=models.JSONField()),
+    )
+
     computed_at = models.DateTimeField("계산 시각", auto_now=True)
 
     class Meta:

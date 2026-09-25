@@ -1025,6 +1025,11 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         routeDetail = plan.routeDetail?.takeIf { it.isNotBlank() },
         routePath = plan.routePoints.toGeoPoints(),
         routeDistanceM = plan.routeDistanceM,
+        // 지금 더 빠른 대안. 고른 경로는 위에서 그대로 넘겼고, 이건 지도에
+        // 겹쳐 보여 주기만 한다.
+        altRoutePath = plan.altRoutePoints.toGeoPoints(),
+        altRouteLabel = plan.altRouteLabel?.takeIf { it.isNotBlank() },
+        altFasterMinutes = plan.altFasterMinutes?.takeIf { it > 0 },
     )
 }
 

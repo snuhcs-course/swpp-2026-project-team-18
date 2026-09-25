@@ -1167,6 +1167,53 @@ def route_candidates(
     return candidates, transit_degraded and not transit
 
 
+def _transit_label(route_key: str) -> str:
+    """대중교통 key 에서 사람이 읽는 노선 이름.
+
+    `transit:9호선>2호선` → `9호선 → 2호선`.
+
+    key 는 `_transit_candidates` 가 `">".join(chain)` 으로 만든 것이고 노선
+    이름에는 `>` 가 들어가지 않으므로 이 변환은 정확한 역산이다. 후보의
+    `detail` 을 쓰지 않는 이유는 그쪽에 `"(대체 3개)"` 가 붙기 때문이다 —
+    대안을 한 줄로 알릴 때는 노선 이름만 있으면 된다.
+    """
+    prefix = "transit:"
+    if not route_key.startswith(prefix):
+        return ""
+    return route_key[len(prefix):].replace(">", " → ")
+
+
+def _with_alternative(chosen: dict, fastest: dict) -> dict:
+    """고른 경로에 "지금 더 빠른 대안" 을 붙인다.
+
+    **고른 경로를 바꾸지 않는다.** 사용자가 일정을 만들 때 고른 수단이 계산의
+    기준으로 남고, 더 빠른 쪽은 지도에 겹쳐 보여 주기만 한다. 바꿀지는 사람이
+    정한다.
+
+    **카카오 호출이 늘지 않는다.** `resolve_route` 는 대중교통 후보 목록을 한 번
+    받아 그 안에서 고른 key 를 찾으므로 최단 후보는 이미 같은 응답에 있다.
+
+    `faster_minutes` 를 여기서 계산하는 것이 중요하다. 두 값 모두 **카카오
+    원값**이라 같은 기준으로 비교된다. 호출자 쪽에서 계획에 저장된
+    `travel_minutes`(학습 보정 + tau 분위수가 들어간 값)와 대안의 원값을 빼면
+    기준이 다른 두 수를 빼는 것이 되어, 실제보다 크거나 작은 차이가 나온다.
+    """
+    if fastest["key"] == chosen["key"]:
+        return chosen
+    faster_by = chosen["minutes"] - fastest["minutes"]
+    if faster_by <= 0:
+        return chosen
+    return {
+        **chosen,
+        "alternative": {
+            "key": fastest["key"],
+            "label": _transit_label(fastest["key"]),
+            "faster_minutes": faster_by,
+            "path": fastest.get("path") or [],
+        },
+    }
+
+
 def resolve_route(
     route_key: str,
     start_lat: float,
@@ -1186,6 +1233,12 @@ def resolve_route(
     **여기서만 경로 폴리라인을 함께 받는다**(`path`, `path_distance_m`). 지도에
     그릴 경로와 진행률의 분모는 고른 경로 하나뿐이고, 이 함수는 알람을 계산할
     때 이미 호출되므로 카카오 호출이 늘지 않는다.
+
+    대중교통을 고른 경우에는 `alternative` 가 함께 올 수 있다 — 같은 응답에서
+    본 **더 빠른 후보**다([_with_alternative]). 도보·자전거·자동차는 후보 목록
+    없이 한 번만 조회하므로 비교할 대상이 없고 `alternative` 가 없다. 대안을
+    얻으려고 `best_route` 를 덧붙이면 갱신 한 번에 호출이 1회에서 3회로 늘어
+    쿼터가 세 배가 된다.
     """
     if route_key == "walk":
         item = _single_route_candidate(
@@ -1209,14 +1262,19 @@ def resolve_route(
         items, degraded = _transit_candidates(
             start_lat, start_lng, end_lat, end_lng, with_path=True
         )
-        if degraded:
+        if degraded or not items:
             return None, True
+        # 인덱스에 기대지 않고 다시 고른다. `_transit_candidates` 가 "가장 빠름" 을
+        # 맨 앞에 담지만, 그 순서가 바뀌어도 여기가 조용히 틀리지 않게 한다.
+        fastest = min(items, key=lambda c: c["minutes"])
         for item in items:
             if item["key"] == route_key:
-                return item, False
+                return _with_alternative(item, fastest), False
         # 추려낸 목록에 없을 수 있다. 그때는 가장 빠른 대중교통으로 대체한다.
+        # 대체한 것이 곧 최단이므로 붙일 대안이 없다 — 화면은 대체 사실을
+        # `route_choice_honored` 로 이미 알린다.
         logger.info("선택 경로 %s 가 사라졌다. 대중교통 최단으로 대체한다.", route_key)
-        return (items[0], False) if items else (None, True)
+        return fastest, False
 
     logger.warning("알 수 없는 route_key: %s", route_key)
     return None, True

@@ -349,12 +349,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val center: GeoPoint,
         val level: Int,
         val summary: String? = null,
+        /**
+         * 지금 더 빠른 대안 경로. 초록 점선으로 [path] 아래에 깔린다.
+         *
+         * 고른 경로가 주(主)다. 겹치는 구간에서는 고른 경로의 색이 보여야
+         * 사용자가 "내가 갈 길" 을 잃지 않는다.
+         */
+        val altPath: List<GeoPoint> = emptyList(),
+        /** "9호선 → 2호선 · 4분 빠름". 대안이 없으면 null */
+        val altSummary: String? = null,
         val image: Bitmap? = null,
         val imageLoading: Boolean = false,
         val imageError: String? = null,
         /** 손가락을 떼기 전까지 끈 거리(px) */
         val pendingShift: Offset = Offset.Zero,
     ) {
+        val hasAltPath: Boolean get() = altPath.size >= 2 && altSummary != null
+
         val canZoomIn: Boolean get() = level > StaticMapScale.MIN_LEVEL
 
         // 장소 고르기와 달리 ROUTE_MAX_LEVEL 을 쓴다. `RouteMapProjection.fit`
@@ -1724,8 +1735,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 경로 좌표가 있으면 지도를 경로 전체가 보이는 상태로 시작한다. */
     private fun initRouteMap(plan: AlarmPlanView) {
         if (!plan.hasRoutePath) return
+        val altPath = if (plan.hasAltRoute) plan.altRoutePath else emptyList()
         val fit = RouteMapProjection.fit(
-            path = plan.routePath,
+            // **두 경로를 합쳐 넘긴다.** 고른 경로만 기준으로 맞추면 초록 점선이
+            // 화면 밖으로 나가 잘린 선이 된다 — 대안은 다른 길로 돌아가므로
+            // 범위가 더 넓은 쪽이 대안일 수 있다.
+            path = plan.routePath + altPath,
             requestUnits = ROUTE_MAP_FIT_WIDTH,
             requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
         ) ?: return
@@ -1741,6 +1756,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     .firstOrNull { it.kind == PlanRow.Kind.TRAVEL }
                     ?.let { "${it.minutes}분" },
             ).joinToString(" · ").takeIf { it.isNotBlank() },
+            altPath = altPath,
+            // 초록 선이 무엇인지 글씨가 밝혀야 한다. 바로 위 진행 바가 초록을
+            // "정시 도착" 으로 쓰고 있어서, 라벨이 없으면 같은 색이 한 화면에서
+            // 두 가지 뜻이 된다.
+            altSummary = plan.altFasterMinutes
+                ?.takeIf { plan.hasAltRoute }
+                ?.let { minutes ->
+                    listOfNotNull(plan.altRouteLabel, "${minutes}분 빠름")
+                        .joinToString(" · ")
+                },
         )
     }
 
@@ -1748,7 +1773,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun fitRouteMap() {
         val state = _routeMap.value ?: return
         val fit = RouteMapProjection.fit(
-            path = state.path,
+            path = state.path + state.altPath,
             requestUnits = ROUTE_MAP_FIT_WIDTH,
             requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
         ) ?: return

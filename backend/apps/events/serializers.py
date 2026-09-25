@@ -90,6 +90,18 @@ class AlarmPlanSerializer(serializers.Serializer):
     route_path = serializers.SerializerMethodField()
     # `route_path` 를 따라간 길이(m). 진행률의 분모다. 좌표가 없으면 null.
     route_distance_m = serializers.IntegerField(allow_null=True)
+
+    # 지금 더 빠른 대안 경로. **고른 경로는 그대로 두고** 지도에 초록 점선으로
+    # 겹쳐 보여 주기만 한다. 대안이 없으면 key·label 이 빈 문자열이고
+    # `alt_faster_minutes` 가 null, `alt_route_path` 가 빈 배열이다.
+    #
+    # `alt_faster_minutes` 는 **차이**다. 대안의 절대 소요시간을 내리지 않는
+    # 이유는 `travel_minutes` 가 학습 보정과 tau 분위수를 거친 값이어서, 두
+    # 숫자를 나란히 놓으면 기준이 다른 비교가 되기 때문이다.
+    alt_route_key = serializers.CharField()
+    alt_route_label = serializers.CharField()
+    alt_faster_minutes = serializers.IntegerField(allow_null=True)
+    alt_route_path = serializers.SerializerMethodField()
     # 블록별 내역. 근거 카드가 "샤워 14분 · 옷 5분" 을 그린다.
     # 블록이 없으면 빈 배열이다.
     prep_breakdown = serializers.SerializerMethodField()
@@ -113,6 +125,9 @@ class AlarmPlanSerializer(serializers.Serializer):
 
     def get_route_path(self, obj) -> list:
         return _as_list(obj.route_path)
+
+    def get_alt_route_path(self, obj) -> list:
+        return _as_list(obj.alt_route_path)
 
     def get_prep_breakdown(self, obj) -> list:
         return _as_list(obj.prep_breakdown)
