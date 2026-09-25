@@ -371,20 +371,15 @@ class TripTrackingService : Service() {
         if (!ApiClient.isReady) return
 
         val here = GeoPoint(fix.lat, fix.lng)
-        val token = liveRouteGate.beginIfDue(
-            nowMillis = SystemClock.elapsedRealtime(),
-            here = here,
-            hasUsableRoute = TripLiveState.liveRouteFor(current.eventId) != null,
-        ) ?: return
+        val token = liveRouteGate.beginIfDue(SystemClock.elapsedRealtime()) ?: return
         val sessionGeneration = liveRouteSessionGeneration
 
         liveRouteJob = scope.launch {
             val result = repository.liveRoute(current.eventId, here)
             val route = (result as? EventRepository.Result.Success)?.data
-            val success = route != null
 
             // 다른 ACTION_START/종료 뒤 도착한 응답은 디스크와 화면에 쓰지 않는다.
-            if (!liveRouteGate.finish(token, success)) return@launch
+            if (!liveRouteGate.finish(token)) return@launch
             if (!isCurrentLiveRouteSession(current.eventId, sessionGeneration)) return@launch
 
             if (route == null) {

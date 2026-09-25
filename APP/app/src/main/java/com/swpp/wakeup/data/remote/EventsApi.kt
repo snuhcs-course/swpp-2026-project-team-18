@@ -167,7 +167,7 @@ interface EventsApi {
      * 사용자의 이동 기록이 그대로 남는다.
      *
      * 호출 간격은 [com.swpp.wakeup.domain.model.LiveRouteDecision] 이 정한다 —
-     * 시간과 움직인 거리를 모두 넘어야 부른다. 그 판단이 하루 쿼터를 정한다.
+     * 이동 중 첫 위치는 즉시, 이후에는 위치 콜백을 시계 삼아 1분마다 부른다.
      */
     @POST("api/routes/live")
     suspend fun liveRoute(@Body body: LiveRouteRequest): Response<LiveRouteResponse>

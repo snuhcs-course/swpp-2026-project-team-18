@@ -15,50 +15,25 @@ class LiveRouteDecisionTest {
         assertTrue(
             LiveRouteDecision.shouldFetch(
                 lastAtMillis = null,
-                lastPoint = null,
                 nowMillis = 1_000L,
-                here = start,
             )
         )
     }
 
     @Test
-    fun `많이 움직여도 1분 전에는 조회하지 않는다`() {
-        assertFalse(decide(afterMillis = 59_999L, northMeters = 500.0))
+    fun `위치 콜백이 자주 와도 1분 전에는 조회하지 않는다`() {
+        assertFalse(decide(afterMillis = 59_999L))
     }
 
     @Test
-    fun `1분이 지나고 충분히 움직였을 때 조회한다`() {
-        assertTrue(decide(afterMillis = 60_000L, northMeters = 200.0))
+    fun `1분이 지나면 현재 위치 이동량과 무관하게 조회한다`() {
+        assertTrue(decide(afterMillis = 60_000L))
     }
 
     @Test
-    fun `1분이 지나도 이동량이 작으면 쿼터를 쓰지 않는다`() {
-        assertFalse(decide(afterMillis = 60_000L, northMeters = 100.0))
-        assertFalse(decide(afterMillis = 4 * 60_000L, northMeters = 100.0))
-    }
-
-    @Test
-    fun `정차 중이어도 5분이면 교통 상황을 다시 확인한다`() {
-        assertTrue(
-            decide(
-                afterMillis = LiveRouteDecision.MAX_USABLE_AGE_MILLIS,
-                northMeters = 0.0,
-            )
-        )
-    }
-
-    @Test
-    fun `첫 조회가 실패했다면 정차 중에도 1분 뒤 재시도한다`() {
-        assertTrue(
-            LiveRouteDecision.shouldFetch(
-                lastAtMillis = 1_000L,
-                lastPoint = start,
-                nowMillis = 61_000L,
-                here = start,
-                hasUsableRoute = false,
-            )
-        )
+    fun `정차 중이어도 1분마다 교통 상황을 다시 확인한다`() {
+        assertTrue(decide(afterMillis = 60_000L))
+        assertTrue(decide(afterMillis = 5 * 60_000L))
     }
 
     @Test
@@ -66,9 +41,7 @@ class LiveRouteDecisionTest {
         assertTrue(
             LiveRouteDecision.shouldFetch(
                 lastAtMillis = 10_000L,
-                lastPoint = start,
                 nowMillis = 9_999L,
-                here = start,
             )
         )
     }
@@ -97,15 +70,10 @@ class LiveRouteDecisionTest {
         assertEquals("여기서부터 2호선 · 20분", route.summary)
     }
 
-    private fun decide(afterMillis: Long, northMeters: Double): Boolean =
+    private fun decide(afterMillis: Long): Boolean =
         LiveRouteDecision.shouldFetch(
             lastAtMillis = 1_000L,
-            lastPoint = start,
             nowMillis = 1_000L + afterMillis,
-            here = GeoPoint(
-                lat = start.lat + northMeters / 111_320.0,
-                lng = start.lng,
-            ),
         )
 
     private fun route(

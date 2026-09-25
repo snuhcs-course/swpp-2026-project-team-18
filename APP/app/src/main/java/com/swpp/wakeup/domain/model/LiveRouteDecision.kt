@@ -1,29 +1,15 @@
 package com.swpp.wakeup.domain.model
 
 import com.swpp.wakeup.sensing.GeoPoint
-import kotlin.math.abs
-import kotlin.math.cos
 
 /**
  * 이동 중에 "여기서부터 더 빠른 길" 을 언제 다시 받을지.
  *
  * ## 왜 판단을 따로 떼어 두는가
  *
- * 이 결정이 **하루 카카오 쿼터를 정한다.** 1분마다 부르면 40분 통학에 40회이고,
- * 왕복 두 번에 사용자 셋이면 240회다. 무료 한도가 하루 1,000건이므로 조건이
- * 하나 틀리면 오후에 앱이 경로를 못 받는다. 그래서 뷰모델 안에 조건문으로
- * 흩어 두지 않고 순수 함수로 꺼내 시험한다.
- *
- * ## 왜 시간만으로 정하지 않는가
- *
- * 지하철을 기다리거나 신호에 걸려 서 있는 동안에는 경로가 바뀌지 않는다. 시간만
- * 보면 그 몇 분도 그대로 호출이 되어 **아무 값 없이** 쿼터를 태운다. 그래서
- * 시간과 **움직인 거리**를 모두 넘어야 부른다.
- *
- * ## 왜 거리만으로 정하지 않는가
- *
- * 차로 이동하면 몇 초에 수백 미터를 간다. 거리만 보면 초당 한 번씩 선이 다시
- * 그려져서 지도가 어지럽다. [PERIOD_MILLIS] 가 아래쪽을 막는다.
+ * 사용자가 이동 중인 동안에는 보행·정차 여부와 관계없이 1분마다 현재 위치를
+ * 기준으로 경로를 다시 확인한다. 빠른 위치 콜백마다 선을 바꾸면 지도가 어지럽기
+ * 때문에 [PERIOD_MILLIS]가 하한을 고정한다.
  *
  * ## 위치 스트림이 시계다
  *
@@ -36,59 +22,26 @@ object LiveRouteDecision {
     /** 다시 받기까지의 최소 간격. */
     const val PERIOD_MILLIS = 60_000L
 
-    /** 정차 중이어도 이 시간이 지나면 교통 상황을 다시 확인한다. */
+    /** 화면 복귀 때 사용할 수 있는 마지막 성공 경로의 최대 보관 시간. */
     const val MAX_USABLE_AGE_MILLIS = 5 * 60_000L
-
-    /**
-     * 다시 받기까지 움직여야 하는 최소 거리(m).
-     *
-     * 도보 속도가 분당 약 70~90m 다. 150m 는 걸어서 2분쯤이므로, 걷는 사람은
-     * 2분에 한 번, 지하철·차는 1분에 한 번 받는다. 걷는 동안 경로가 바뀔 일이
-     * 거의 없으므로 이 차이는 손실이 아니다.
-     *
-     * `TripGeofence.MOVING_DISTANCE_M`(80m, 이동 시작 판정)보다 크다. 그쪽은
-     * "움직이기 시작했는가" 이고 이쪽은 "경로를 다시 볼 만큼 갔는가" 다.
-     */
-    const val MIN_MOVE_M = 150.0
-
-    private const val METERS_PER_DEGREE = 111_320.0
 
     /**
      * 지금 받아야 하는가.
      *
-     * @param lastAtMillis 마지막으로 받은 시각. 한 번도 안 받았으면 null
-     * @param lastPoint 마지막으로 받을 때의 위치. 한 번도 안 받았으면 null
-     * @param hasUsableRoute 현재 위치 기준으로 성공한 경로를 이미 들고 있는가.
-     * 첫 조회가 실패했다면 이동량과 무관하게 1분 뒤 재시도한다.
+     * @param lastAtMillis 마지막으로 요청을 시작한 단조 시계 시각. 한 번도 없으면 null
      */
     fun shouldFetch(
         lastAtMillis: Long?,
-        lastPoint: GeoPoint?,
         nowMillis: Long,
-        here: GeoPoint,
-        hasUsableRoute: Boolean = true,
     ): Boolean {
         // 처음은 무조건 받는다. 화면을 열자마자 보여 줄 것이 있어야 한다.
-        if (lastAtMillis == null || lastPoint == null) return true
+        if (lastAtMillis == null) return true
 
-        // 시계가 뒤로 갔다(사용자가 시간을 바꿨거나 기기가 보정했다). 간격을
-        // 신뢰할 수 없으므로 한 번 받고 기준을 다시 잡는다.
+        // elapsedRealtime 은 보통 뒤로 가지 않지만, 재부팅 등으로 기준이 바뀌면
+        // 간격을 신뢰할 수 없으므로 즉시 받고 기준을 다시 잡는다.
         if (nowMillis < lastAtMillis) return true
 
-        if (nowMillis - lastAtMillis < PERIOD_MILLIS) return false
-        if (!hasUsableRoute) return true
-        // 같은 자리에 있어도 배차·정체는 변한다. 이동 거리만 보면 지하철역에서
-        // 오래 기다리는 동안 한 번 성공한 경로가 무기한 남는다.
-        if (nowMillis - lastAtMillis >= MAX_USABLE_AGE_MILLIS) return true
-        return movedMeters(lastPoint, here) >= MIN_MOVE_M
-    }
-
-    /** 두 점 사이 거리(m). 서울 규모에서는 평면 근사로 충분하다. */
-    fun movedMeters(from: GeoPoint, to: GeoPoint): Double {
-        val dLat = abs(to.lat - from.lat) * METERS_PER_DEGREE
-        val dLng = abs(to.lng - from.lng) *
-            METERS_PER_DEGREE * cos(Math.toRadians((from.lat + to.lat) / 2))
-        return kotlin.math.sqrt(dLat * dLat + dLng * dLng)
+        return nowMillis - lastAtMillis >= PERIOD_MILLIS
     }
 }
 
