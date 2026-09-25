@@ -84,7 +84,7 @@ android {
         applicationId = "com.swpp.wakeup"
         minSdk = 34
         targetSdk = 37
-        versionCode = 6
+        versionCode = 7
         // 서버 APP_VERSION 과 같은 자리수를 쓴다. 실기기에서 "어느 빌드인가" 를
         // 서버 버전과 나란히 읽을 수 있어야 원인을 좁힐 수 있다.
         //   0.1.0  P1 — 고정 규칙 알람
@@ -96,7 +96,8 @@ android {
         //          경로 거리 기준 진행률, 경로 지도
         //   0.6.0  진행률 고도화 — 약속 시각 기준 지각 색, 움직임 감지,
         //          추적 기반 도착 예정, 임박 경로 주기 갱신
-        versionName = "0.6.0"
+        //   0.7.0  지금 더 빠른 대안 경로를 지도에 초록 점선으로 겹쳐 표시
+        versionName = "0.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
