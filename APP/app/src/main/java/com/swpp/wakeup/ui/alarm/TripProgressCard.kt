@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -21,20 +22,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.theme.JitColor
+import com.swpp.wakeup.ui.theme.JitTextStyle
 
 /**
  * 개인 진행률 (Figma ④ `card-진행률`).
  *
- * ## 무엇을 보여 주는가
+ * ## 바 하나가 전부다
  *
- * 지금 어느 단계인지(알람 전 / 준비 중 / 이동 중 / 도착)와, 이동 중이면 경로를
- * 얼마나 왔는지다.
+ * 단계 점 네 개 · 진행 바 · 퍼센트를 따로 놓던 형태를 **한 줄**로 합쳤다. 나뉘어
+ * 있으면 같은 사실을 세 번 말하면서도 정작 "지금 어떤 상태인가" 를 읽으려면 세
+ * 군데를 봐야 한다. 지금은 바의 채움이 진행률이고, 이름 아래 한 줄이 상태다.
  *
  * ## 바가 시간이 아니라 거리인 이유
  *
@@ -44,65 +49,188 @@ import com.swpp.wakeup.ui.theme.JitColor
  *
  * ## 진행률이 없을 때
  *
- * 추적 전이거나 좌표를 못 받았으면 **바를 그리지 않는다.** 0% 바를 띄우면
- * "아직 한 걸음도 못 갔다" 로 읽히는데, 사실은 측정하지 않는 상태다. 둘은
- * 다른 뜻이다.
+ * 추적 전이거나 좌표를 못 받았으면 **채우지 않는다.** 0% 를 채운 것과 측정하지
+ * 않는 것은 화면에서 같아 보이지만 뜻이 전혀 다르다. 그 차이는 바 아래 한 줄이
+ * 말한다.
  */
 @Composable
 fun TripProgressCard(
+    /** 진행 바에 쓸 이름. 이 화면의 주인이 누구인지 밝힌다 */
+    nickname: String,
+    /** 아바타에 넣을 두 글자. 닉네임 뒤 두 글자다 */
+    initials: String,
     stage: TripStage,
     progress: RouteProgress?,
+    /** "8:50". 도착 예정 시각. 계산 못 했으면 null */
+    arrivalAt: String?,
     /** "3분 전 갱신". 위치가 낡았으면 사용자가 그것을 알아야 한다 */
     freshness: String?,
 ) {
     JitCard(padding = 14.dp, gap = 8.dp) {
+        Text("개인 진행률", color = JitColor.TextSecondary, fontSize = 11.sp)
+
+        ProgressRow(
+            nickname = nickname,
+            initials = initials,
+            stage = stage,
+            progress = progress,
+            arrivalAt = arrivalAt,
+        )
+
+        // 바 아래는 **한 줄만** 쓴다. 경로 이탈이 가장 급하고, 그다음이 위치가
+        // 얼마나 낡았는지, 마지막이 왜 진행률이 없는지다.
+        val note = when {
+            progress != null && !progress.onRoute ->
+                "경로에서 ${progress.offRouteLabel} 떨어져 있음. 다른 길로 가는 중이면 " +
+                    "진행률을 계산할 수 없음" to JitColor.Amber
+
+            freshness != null -> freshness to JitColor.TextSecondary
+            else -> stageHint(stage) to JitColor.TextSecondary
+        }
+        Text(text = note.first, color = note.second, fontSize = 10.sp)
+    }
+}
+
+/**
+ * 진행 바 한 줄.
+ *
+ * 왼쪽부터 아바타 · 이름 · 상태, 오른쪽에 도착 시각 · 남은 거리다. 바탕의 채움이
+ * 진행률이라 **글씨가 채움 위에 얹힌다** — 그래서 채움을 불투명하게 두지 않는다.
+ * 불투명하면 경계를 넘는 글자의 대비가 급변해 읽기 어려워진다.
+ */
+@Composable
+private fun ProgressRow(
+    nickname: String,
+    initials: String,
+    stage: TripStage,
+    progress: RouteProgress?,
+    arrivalAt: String?,
+) {
+    val accent = stageColorFor(stage)
+    // 경로를 벗어났으면 채우지 않는다. 이탈한 위치를 경로에 투영한 비율은
+    // 사용자가 실제로 온 만큼이 아니다 — 그 숫자로 여유를 판단하면 지각한다.
+    val ratio = progress?.takeIf { it.onRoute }?.ratio ?: 0f
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(ROW_HEIGHT)
+            .clip(RoundedCornerShape(12.dp))
+            .background(JitColor.Surface2)
+            .border(1.5.dp, accent, RoundedCornerShape(12.dp)),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth(ratio.coerceIn(0f, 1f))
+                .fillMaxHeight()
+                .background(accent.copy(alpha = 0.2f))
+        )
+
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .padding(horizontal = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("개인 진행률", color = JitColor.TextSecondary, fontSize = 11.sp)
-            Spacer(Modifier.weight(1f))
-            StageChip(stage)
-        }
+            Avatar(initials = initials, color = accent)
+            Spacer(Modifier.width(9.dp))
 
-        StageTrack(stage)
-
-        if (progress != null && progress.onRoute) {
-            ProgressBar(progress.ratio)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Text(progress.label, color = JitColor.TextSecondary, fontSize = 10.sp)
-                Spacer(Modifier.weight(1f))
                 Text(
-                    text = "${progress.percent}%",
-                    color = JitColor.Blue,
-                    fontSize = 10.sp,
+                    text = nickname,
+                    color = JitColor.TextPrimary,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = statusLine(stage, progress),
+                    color = if (accent == JitColor.Track) JitColor.TextSecondary else accent,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-        } else if (progress != null) {
-            // 경로에서 벗어났다. 진행률을 보여 주면 틀린 정보이고, 그 숫자로
-            // 여유가 있다고 판단하면 지각한다. 벗어난 사실만 말한다.
-            Text(
-                text = "경로에서 ${formatDistance(progress.offRouteM)} 떨어져 있음. " +
-                    "다른 길로 가는 중이면 진행률을 계산할 수 없음",
-                color = JitColor.Amber,
-                fontSize = 10.sp,
-            )
-        } else {
-            Text(
-                text = stageHint(stage),
-                color = JitColor.TextSecondary,
-                fontSize = 10.sp,
-            )
-        }
 
-        freshness?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
+            Spacer(Modifier.width(6.dp))
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    // 도착 시각을 모르면 자리만 비운다. 지어낸 시각을 넣으면
+                    // 사용자가 그 시각을 기준으로 움직인다.
+                    text = arrivalAt ?: "—",
+                    color = JitColor.TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = trailingLine(stage, progress),
+                    color = JitColor.TextSecondary,
+                    fontSize = 9.sp,
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                )
+            }
         }
     }
+}
+
+/** 진행 바 높이. 두 줄 글씨와 34dp 아바타가 들어가는 최소값이다 */
+private val ROW_HEIGHT = 52.dp
+
+@Composable
+private fun Avatar(initials: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(color),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = initials,
+            // 밝은 원 위에는 어두운 글씨. Track 은 어두우므로 반대로 간다.
+            color = if (color == JitColor.Track) JitColor.TextPrimary else JitColor.Bg,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            style = JitTextStyle.TightCentered,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * 이름 아래 한 줄. 단계와 근거를 붙여 쓴다.
+ *
+ * 근거가 없을 때 억지로 붙이지 않는다. "이동 중 · 0km 이동" 은 측정하지 못한
+ * 것을 측정해서 0 이 나온 것처럼 보이게 한다.
+ */
+internal fun statusLine(stage: TripStage, progress: RouteProgress?): String = when (stage) {
+    TripStage.IN_TRANSIT -> when {
+        progress == null -> stage.label
+        progress.onRoute -> "${stage.label} · ${progress.movedLabel}"
+        else -> "${stage.label} · 경로 이탈"
+    }
+
+    TripStage.ARRIVED -> "도착 완료"
+    TripStage.PAST -> "이동 기록 없음"
+    else -> stage.label
+}
+
+/** 오른쪽 아래 한 줄. 도착 시각이 무엇인지 또는 얼마나 남았는지를 말한다. */
+internal fun trailingLine(stage: TripStage, progress: RouteProgress?): String = when {
+    stage == TripStage.ARRIVED -> "도착"
+    progress != null && progress.onRoute -> progress.remainingLabel
+    else -> "도착 예정"
 }
 
 /** 진행률을 못 그리는 이유. 상태마다 다르다. */
@@ -111,134 +239,20 @@ private fun stageHint(stage: TripStage): String = when (stage) {
     TripStage.PREPARING -> "집을 나서면 이동 거리가 표시됨"
     TripStage.IN_TRANSIT -> "위치를 아직 받지 못했음"
     TripStage.ARRIVED -> "도착함"
-}
-
-private fun formatDistance(meters: Int): String =
-    if (meters < 1000) "${meters}m" else "%.1fkm".format(meters / 1000.0)
-
-/** 현재 단계를 색 칩으로. 한눈에 "지금 무엇" 을 읽는 자리다. */
-@Composable
-private fun StageChip(stage: TripStage) {
-    val color = when (stage) {
-        TripStage.BEFORE_ALARM -> JitColor.Track
-        TripStage.PREPARING -> JitColor.Accent
-        TripStage.IN_TRANSIT -> JitColor.Blue
-        TripStage.ARRIVED -> JitColor.Green
-    }
-    Text(
-        text = stage.label,
-        // 밝은 바탕에는 어두운 글씨. 흰 글씨를 얹으면 10sp 에서 대비가 모자라다.
-        color = if (stage == TripStage.BEFORE_ALARM) JitColor.TextSecondary else JitColor.Bg,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(color)
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-    )
+    // 지난 일정이다. "추적이 시작됨" 같은 앞날 이야기를 하면 안 된다.
+    TripStage.PAST -> "일정 시각이 지났고 이동 기록이 없음"
 }
 
 /**
- * 네 단계를 선으로 이어 그린다.
+ * 단계 색. 아바타·테두리·채움·상태 글씨가 모두 이 색을 쓴다.
  *
- * 지난 단계는 채우고 앞으로 올 단계는 테두리만 둔다. 연결선도 지난 구간만
- * 밝게 해서 **선만 봐도 어디까지 왔는지** 읽히게 한다.
+ * [JitColor.Track] 은 "아직/이제 아님" 을 뜻한다. 알람 전과 지난 일정이 같은
+ * 색인데, 둘 다 **지금 일어나는 일이 아니다** 는 점에서 같다.
  */
-@Composable
-private fun StageTrack(current: TripStage) {
-    val currentIndex = TripStage.ordered.indexOf(current)
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        TripStage.ordered.forEachIndexed { index, stage ->
-            if (index > 0) {
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(1.dp)
-                        .background(if (index <= currentIndex) JitColor.Blue else JitColor.Track)
-                )
-            }
-            StageDot(
-                label = stage.label,
-                state = when {
-                    index < currentIndex -> DotState.DONE
-                    index == currentIndex -> DotState.NOW
-                    else -> DotState.TODO
-                },
-            )
-        }
-    }
-}
-
-private enum class DotState { DONE, NOW, TODO }
-
-@Composable
-private fun StageDot(label: String, state: DotState) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        when (state) {
-            DotState.TODO -> Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    // 채우지 않고 테두리만. 채우면 지나온 단계와 구별되지 않는다.
-                    .border(1.5.dp, JitColor.Track, CircleShape)
-            )
-
-            DotState.NOW -> Box(
-                Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(JitColor.Accent)
-            )
-
-            DotState.DONE -> Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(JitColor.Blue)
-            )
-        }
-        Text(
-            text = label,
-            color = if (state == DotState.TODO) JitColor.TextSecondary else JitColor.TextPrimary,
-            fontSize = 9.sp,
-            fontWeight = if (state == DotState.NOW) FontWeight.Bold else FontWeight.Normal,
-        )
-    }
-}
-
-/** 거리 기준 진행 바. */
-@Composable
-private fun ProgressBar(ratio: Float) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(8.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(JitColor.Track),
-    ) {
-        // 0 이면 `fillMaxWidth(0f)` 가 되어 아무것도 안 그려진다. 그것이 맞다 —
-        // 한 걸음도 안 갔으면 채울 것이 없다.
-        Box(
-            Modifier
-                .fillMaxWidth(ratio.coerceIn(0f, 1f))
-                .fillMaxHeight()
-                .background(JitColor.Blue)
-        )
-    }
-}
-
-/** 프리뷰·테스트에서 색을 직접 확인할 때만 쓴다. */
 internal fun stageColorFor(stage: TripStage): Color = when (stage) {
     TripStage.BEFORE_ALARM -> JitColor.Track
     TripStage.PREPARING -> JitColor.Accent
     TripStage.IN_TRANSIT -> JitColor.Blue
     TripStage.ARRIVED -> JitColor.Green
+    TripStage.PAST -> JitColor.Track
 }

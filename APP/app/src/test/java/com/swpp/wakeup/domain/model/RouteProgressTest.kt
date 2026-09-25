@@ -187,4 +187,94 @@ class RouteProgressTest {
             TripStage.ordered.map { it.label },
         )
     }
+
+    @Test
+    fun `지난 일정은 진행 순서에 들어가지 않는다`() {
+        // 여정의 한 칸이 아니라 "말할 것이 없다" 는 상태다. 순서에 넣으면
+        // 진행 바가 도착 다음 칸을 하나 더 그린다.
+        assertFalse(TripStage.PAST in TripStage.ordered)
+        assertEquals("지난 일정", TripStage.PAST.label)
+    }
+
+    // --- 단계 판정 ----------------------------------------------------------
+
+    @Test
+    fun `알람 전에는 알람 전이다`() {
+        assertEquals(
+            TripStage.BEFORE_ALARM,
+            TripStage.of(tracked = null, alarmPassed = false, eventPassed = false),
+        )
+    }
+
+    @Test
+    fun `알람이 지났고 일정은 아직이면 준비 중이다`() {
+        assertEquals(
+            TripStage.PREPARING,
+            TripStage.of(tracked = null, alarmPassed = true, eventPassed = false),
+        )
+    }
+
+    @Test
+    fun `일정까지 지났고 기록이 없으면 지난 일정이다`() {
+        // 이 판정이 없으면 이틀 전 일정을 열어도 "준비 중" 으로 남는다.
+        assertEquals(
+            TripStage.PAST,
+            TripStage.of(tracked = null, alarmPassed = true, eventPassed = true),
+        )
+    }
+
+    @Test
+    fun `추적 중이면 시각 판정을 이긴다`() {
+        // 일정 시각이 지났어도 실제로 이동 중이면 이동 중이다. 늦었을 뿐이다.
+        assertEquals(
+            TripStage.IN_TRANSIT,
+            TripStage.of(tracked = TripStage.IN_TRANSIT, alarmPassed = true, eventPassed = true),
+        )
+        assertEquals(
+            TripStage.ARRIVED,
+            TripStage.of(tracked = TripStage.ARRIVED, alarmPassed = true, eventPassed = true),
+        )
+    }
+
+    @Test
+    fun `알람 전에 위치가 들어와도 추적이 이긴다`() {
+        // 알람보다 먼저 일어나 나간 경우다. "알람 전" 이라고 말하면 이미
+        // 이동하고 있는 사람에게 틀린 상태를 보여 준다.
+        assertEquals(
+            TripStage.IN_TRANSIT,
+            TripStage.of(tracked = TripStage.IN_TRANSIT, alarmPassed = false, eventPassed = false),
+        )
+    }
+
+    // --- 남은 거리 ----------------------------------------------------------
+
+    @Test
+    fun `남은 거리는 전체에서 이동분을 뺀 값이다`() {
+        val p = RouteProgress.of(straight(), GeoPoint(37.505, 127.0))!!
+        assertEquals(p.totalM - p.traveledM, p.remainingM)
+        assertTrue(p.remainingLabel.endsWith("남음"))
+    }
+
+    @Test
+    fun `도착하면 남은 거리가 0이다`() {
+        val p = RouteProgress.of(straight(), GeoPoint(37.510, 127.0))!!
+        assertEquals(0, p.remainingM)
+        assertEquals("0m 남음", p.remainingLabel)
+    }
+
+    @Test
+    fun `남은 거리는 음수가 되지 않는다`() {
+        // 투영이 끝점으로 잘리므로 이동분이 전체를 넘을 수 없지만, 반올림
+        // 때문에 1m 넘칠 수 있다. 그때 "-1m 남음" 이 나오면 안 된다.
+        val p = RouteProgress(ratio = 1f, traveledM = 1001, totalM = 1000, offRouteM = 0)
+        assertEquals(0, p.remainingM)
+    }
+
+    @Test
+    fun `이동 표시는 짧은 형태다`() {
+        val p = RouteProgress(ratio = 0.46f, traveledM = 4600, totalM = 10000, offRouteM = 12)
+        assertEquals("4.6km 이동", p.movedLabel)
+        assertEquals("5.4km 남음", p.remainingLabel)
+        assertEquals("12m", p.offRouteLabel)
+    }
 }

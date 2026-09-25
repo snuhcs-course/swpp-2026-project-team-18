@@ -653,6 +653,20 @@ private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 private fun dayLabel(date: LocalDate): String = DAY_NAMES[date.dayOfWeek.value - 1]
 
 /**
+ * 오늘로부터 며칠인지를 사람 말로. 알람 결정 화면 머리글에 쓴다.
+ *
+ * **음수를 따로 다룬다.** 빼먹으면 이틀 전 일정이 "-2일 뒤" 로 나온다. 지난
+ * 일정을 열어 보는 일이 드물지 않으므로(기록 확인) 실제로 보이는 문구다.
+ */
+internal fun relativeDayLabel(days: Long): String = when {
+    days == 0L -> "오늘"
+    days == 1L -> "내일 아침"
+    days == -1L -> "어제"
+    days < 0L -> "${-days}일 전"
+    else -> "${days}일 뒤"
+}
+
+/**
  * 가져오기 후보의 시각 표시. "10월 5일 월 09:00"
  *
  * 홈 목록과 달리 **날짜를 반드시 보여준다.** 후보는 2주치가 섞여 있어서 시각만
@@ -949,12 +963,7 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     }
 
     val today = LocalDate.now(zone)
-    val days = ChronoUnit.DAYS.between(today, startLocal.toLocalDate())
-    val whenLabel = when (days) {
-        0L -> "오늘"
-        1L -> "내일 아침"
-        else -> "${days}일 뒤"
-    }
+    val whenLabel = relativeDayLabel(ChronoUnit.DAYS.between(today, startLocal.toLocalDate()))
 
     // 알람까지 남은 분. 음수면 이미 지났다. 표시 문구와 단계 판정이 **같은
     // 값**에서 나와야 둘이 어긋나지 않는다.
@@ -984,6 +993,7 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         prepBlocks = prepBlocks,
         totalMinutes = plan.totalMinutes,
         arrivalLine = arriveLocal?.let { "${it.format(ALARM_FORMAT)} 도착 예정" },
+        arrivalAt = arriveLocal?.format(ALARM_FORMAT),
         status = plan.status,
         statusLabel = plan.statusLabel,
         routeKey = plan.routeKey?.takeIf { it.isNotBlank() },
@@ -993,6 +1003,9 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         // 알람 시각을 아는 곳은 여기뿐이다(화면에는 표시 문자열만 간다).
         // 시각이 없으면 아직 계산되지 않은 것이므로 "지나지 않았다" 로 둔다.
         alarmPassed = (minutesToAlarm ?: 1L) <= 0L,
+        // 일정 시각이 지났는가. 알람과 따로 본다 — 알람은 지났지만 일정은
+        // 아직 안 온 구간(준비·이동 중)이 이 화면의 본래 자리다.
+        eventPassed = start.isBefore(OffsetDateTime.now()),
         routeDetail = plan.routeDetail?.takeIf { it.isNotBlank() },
         routePath = plan.routePath.toGeoPoints(),
         routeDistanceM = plan.routeDistanceM,

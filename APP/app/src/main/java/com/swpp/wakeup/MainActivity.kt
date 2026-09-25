@@ -357,6 +357,8 @@ private fun MainHost(
                         onRecompute = { viewModel.recomputePlan(route.eventId) },
                         onDelete = { viewModel.deleteEvent(route.eventId) },
                         modifier = Modifier.padding(innerPadding),
+                        nickname = state.nickname,
+                        initials = viewModel.avatarInitials(),
                         stage = plan?.let { viewModel.stageOf(it) } ?: TripStage.BEFORE_ALARM,
                         progress = progress,
                         freshness = live?.let { freshnessLabel(it.atMillis) },

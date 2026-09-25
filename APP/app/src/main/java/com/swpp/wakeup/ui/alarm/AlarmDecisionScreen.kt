@@ -74,6 +74,9 @@ fun AlarmDecisionScreen(
     onRecompute: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 진행 바에 쓸 이름과 아바타 두 글자 */
+    nickname: String = "나",
+    initials: String = "나",
     /** 지금 어느 단계인가. 추적 중이면 판정기 값, 아니면 알람 시각 기준 */
     stage: TripStage = TripStage.BEFORE_ALARM,
     /** 경로 거리 기준 진행률. null 이면 측정하지 않는 상태다 */
@@ -151,7 +154,14 @@ fun AlarmDecisionScreen(
             // 계산 근거 바로 아래에 "지금 어디쯤" 을 둔다. 같은 여정을 계획과
             // 실제 두 면에서 보여 주는 것이고, 순서가 바뀌면 진행률이 어느
             // 계획에 대한 것인지 연결이 끊긴다.
-            TripProgressCard(stage = stage, progress = progress, freshness = freshness)
+            TripProgressCard(
+                nickname = nickname,
+                initials = initials,
+                stage = stage,
+                progress = progress,
+                arrivalAt = plan.arrivalAt,
+                freshness = freshness,
+            )
 
             routeMap?.let { map ->
                 RouteMapCard(

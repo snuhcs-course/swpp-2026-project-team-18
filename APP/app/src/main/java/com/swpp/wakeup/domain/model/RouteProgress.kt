@@ -45,6 +45,23 @@ data class RouteProgress(
     val label: String
         get() = "경로 ${formatKm(totalM)} 중 ${formatKm(traveledM)} 이동"
 
+    /** "4.6km 이동". 진행 바 안에 들어가는 짧은 형태다 */
+    val movedLabel: String get() = "${formatKm(traveledM)} 이동"
+
+    /** 남은 거리(m). 음수가 되지 않게 0 에서 자른다 */
+    val remainingM: Int get() = (totalM - traveledM).coerceAtLeast(0)
+
+    /**
+     * "5.4km 남음".
+     *
+     * 이동한 거리 대신 **남은 거리**를 오른쪽에 둔다. 이동 중인 사람이 알고 싶은
+     * 것은 얼마나 왔는지가 아니라 얼마나 더 가야 하는지다.
+     */
+    val remainingLabel: String get() = "${formatKm(remainingM)} 남음"
+
+    /** 경로에서 벗어난 거리. "2.1km" */
+    val offRouteLabel: String get() = formatKm(offRouteM)
+
     val percent: Int get() = (ratio * 100).roundToInt().coerceIn(0, 100)
 
     companion object {
@@ -179,10 +196,39 @@ enum class TripStage(val label: String) {
     IN_TRANSIT("이동 중"),
 
     /** 목적지에 도착했다 */
-    ARRIVED("도착");
+    ARRIVED("도착"),
+
+    /**
+     * 일정 시각이 지났고 이동 기록이 없다.
+     *
+     * **[ordered] 에 넣지 않는다.** 진행 막대의 한 칸이 아니라 "막대로 말할
+     * 것이 없다" 는 상태다. 이것이 없으면 알람이 지난 일정은 영원히 "준비 중"
+     * 으로 남는다 — 이틀 전 일정을 열어도 지금 준비하고 있다고 말하게 된다.
+     */
+    PAST("지난 일정");
 
     companion object {
         /** 화면에 그릴 순서. 진행 막대의 단계 표시가 이 순서를 쓴다 */
         val ordered: List<TripStage> = listOf(BEFORE_ALARM, PREPARING, IN_TRANSIT, ARRIVED)
+
+        /**
+         * 단계를 정한다. 추적 중이면 [tracked] 가 이기고, 아니면 시각으로 가른다.
+         *
+         * **시각을 여기서 읽지 않는다.** 두 불린은 화면 문구("지난 알람")를 만든
+         * 것과 같은 시점에서 나온 값이다. 여기서 시계를 다시 보면 문구와 단계가
+         * 서로 다른 시점을 근거로 삼는다.
+         *
+         * @param tracked 추적기가 판정한 단계. 없으면 null
+         * @param alarmPassed 알람 시각이 지났는가
+         * @param eventPassed 일정 시각까지 지났는가
+         */
+        fun of(tracked: TripStage?, alarmPassed: Boolean, eventPassed: Boolean): TripStage = when {
+            tracked != null -> tracked
+            !alarmPassed -> BEFORE_ALARM
+            // 일정이 끝났는데 이동 기록이 없다. 알람만 보면 계속 "준비 중" 인데,
+            // 이틀 전 일정을 열어 놓고 지금 준비하고 있다고 말하는 셈이 된다.
+            eventPassed -> PAST
+            else -> PREPARING
+        }
     }
 }

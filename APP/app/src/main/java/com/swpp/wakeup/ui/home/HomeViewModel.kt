@@ -1826,20 +1826,25 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 지금 어느 단계인가.
      *
-     * 추적 중이면 판정기의 단계를 쓰고, 아니면 알람 시각과 현재 시각을 비교해
-     * "알람 전" 과 "준비 중" 을 가른다. 판정기는 둘을 구분하지 않는다 —
-     * 판정에는 같지만(둘 다 집에 있다) 사용자에게는 전혀 다른 상태다.
+     * 추적 중이면 판정기의 단계를 쓰고, 아니면 알람·일정 시각으로 가른다.
+     * 판정기는 "알람 전" 과 "준비 중" 을 구분하지 않는다 — 판정에는 같지만
+     * (둘 다 집에 있다) 사용자에게는 전혀 다른 상태다.
+     *
+     * 시각 판정은 [AlarmPlanView.alarmPassed]·[AlarmPlanView.eventPassed] 가 이미
+     * 담고 있다. 여기서 시계를 다시 읽으면 화면에 보이는 문구("지난 알람")와
+     * 단계가 서로 다른 시점을 근거로 삼게 된다.
      */
-    fun stageOf(plan: AlarmPlanView, nowMillis: Long = System.currentTimeMillis()): TripStage {
-        TripLiveState.pointFor(plan.eventId)?.let { live ->
-            return when (live.phase) {
+    fun stageOf(plan: AlarmPlanView): TripStage = TripStage.of(
+        tracked = TripLiveState.pointFor(plan.eventId)?.let { live ->
+            when (live.phase) {
                 TripGeofence.Phase.BEFORE_DEPARTURE -> TripStage.PREPARING
                 TripGeofence.Phase.IN_TRANSIT -> TripStage.IN_TRANSIT
                 TripGeofence.Phase.ARRIVED -> TripStage.ARRIVED
             }
-        }
-        return if (plan.alarmPassed) TripStage.PREPARING else TripStage.BEFORE_ALARM
-    }
+        },
+        alarmPassed = plan.alarmPassed,
+        eventPassed = plan.eventPassed,
+    )
 
     // --- 일정 추가 --------------------------------------------------------
 

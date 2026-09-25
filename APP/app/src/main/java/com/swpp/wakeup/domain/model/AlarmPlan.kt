@@ -58,6 +58,13 @@ data class AlarmPlanView(
     val totalMinutes: Int?,
     /** "8:50 도착 예정" */
     val arrivalLine: String?,
+    /**
+     * 도착 예정 시각만. "8:50".
+     *
+     * 진행 바가 오른쪽에 시각 하나만 크게 놓으므로 [arrivalLine] 에서 문구를
+     * 잘라 쓰지 않는다. 문구를 바꾸면 자르는 코드가 조용히 깨진다.
+     */
+    val arrivalAt: String? = null,
 
     /** `ok` / `no_home` / `no_place` / `route_failed` */
     val status: String,
@@ -79,6 +86,14 @@ data class AlarmPlanView(
      * 알람")로 판별하면 표시 문자열을 바꿀 때마다 단계 판정이 깨진다.
      */
     val alarmPassed: Boolean = false,
+    /**
+     * 일정 시각까지 지났는가.
+     *
+     * [alarmPassed] 만으로는 "준비 중" 을 벗어날 수 없다. 이틀 전 일정을 열어도
+     * 알람은 지났으니 계속 준비 중이 된다. 일정 자체가 끝났으면 단계를 말하지
+     * 않는 쪽이 맞다([TripStage.PAST]).
+     */
+    val eventPassed: Boolean = false,
     /**
      * 사람이 읽는 경로 설명. "2호선 → 5513".
      *
