@@ -109,8 +109,14 @@ class AlarmPlan(models.Model):
         "준비 내역",
         default=list,
         blank=True,
-        # 위 confidence_basis 와 같은 이유. JSON 배열 리터럴을 DB 기본값으로 둔다.
-        db_default=Value("[]", output_field=models.JSONField()),
+        # 위 confidence_basis 와 같은 이유. JSON 배열을 DB 기본값으로 둔다.
+        #
+        # **파이썬 리스트를 넘긴다. 문자열 "[]" 가 아니다.** `Value` 는 받은 값을
+        # `json.dumps` 로 인코딩하므로 `"[]"` 를 주면 DEFAULT 가 JSON **문자열**
+        # `'"[]"'` 이 된다. 그러면 이 기본값을 받은 행에서 API 가 배열 대신
+        # 문자열을 내려주고, 앱의 Gson 이 `Expected BEGIN_ARRAY but was STRING`
+        # 으로 터진다 — **필드 하나가 일정 목록 전체의 파싱을 깨뜨린다.**
+        db_default=Value([], output_field=models.JSONField()),
     )
 
     # 분포의 τ 분위수 원값(분). 반올림 전이라 재계산 비교에 쓴다.
@@ -150,8 +156,8 @@ class AlarmPlan(models.Model):
         default=list,
         blank=True,
         # prep_breakdown 과 같은 이유. 이 컬럼을 모르는 구버전 코드의 INSERT 가
-        # 쓰기만 500 을 내는 것을 막는다.
-        db_default=Value("[]", output_field=models.JSONField()),
+        # 쓰기만 500 을 내는 것을 막는다. 리스트를 넘기는 이유도 거기에 적어 두었다.
+        db_default=Value([], output_field=models.JSONField()),
     )
 
     # `route_path` 를 따라간 누적 길이(m).

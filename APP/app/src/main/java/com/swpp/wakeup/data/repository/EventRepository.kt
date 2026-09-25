@@ -931,9 +931,9 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     val alarmLocal = plan.alarmAt
         ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
         ?.atZoneSameInstant(zone)
-    val arriveLocal = plan.arriveAt
-        ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
-        ?.atZoneSameInstant(zone)
+    val arriveAt = plan.arriveAt?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+    val arriveLocal = arriveAt?.atZoneSameInstant(zone)
+    val departBy = plan.departBy?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
 
     // 근거 한 줄에 **출처**를 함께 적는다. 세 값의 신뢰도가 다르다 —
     // 이동 시간만 카카오 실측이고 준비·버퍼는 아직 고정값이다. 구분해 주지
@@ -994,6 +994,10 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         totalMinutes = plan.totalMinutes,
         arrivalLine = arriveLocal?.let { "${it.format(ALARM_FORMAT)} 도착 예정" },
         arrivalAt = arriveLocal?.format(ALARM_FORMAT),
+        departByMillis = departBy?.toInstant()?.toEpochMilli(),
+        arriveAtMillis = arriveAt?.toInstant()?.toEpochMilli(),
+        travelMinutes = plan.travelMinutes,
+        bufferMinutes = plan.bufferMinutes,
         status = plan.status,
         statusLabel = plan.statusLabel,
         routeKey = plan.routeKey?.takeIf { it.isNotBlank() },
@@ -1007,7 +1011,7 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         // 아직 안 온 구간(준비·이동 중)이 이 화면의 본래 자리다.
         eventPassed = start.isBefore(OffsetDateTime.now()),
         routeDetail = plan.routeDetail?.takeIf { it.isNotBlank() },
-        routePath = plan.routePath.toGeoPoints(),
+        routePath = plan.routePoints.toGeoPoints(),
         routeDistanceM = plan.routeDistanceM,
     )
 }
@@ -1019,8 +1023,8 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
  * 아닌 값이 섞이면 **그 점만 버리고** 나머지로 경로를 그린다 — 한 점 때문에
  * 지도와 진행률이 통째로 사라지는 것보다 낫다.
  */
-private fun List<List<Double>>?.toGeoPoints(): List<GeoPoint> =
-    this.orEmpty().mapNotNull { pair ->
+private fun List<List<Double>>.toGeoPoints(): List<GeoPoint> =
+    mapNotNull { pair ->
         if (pair.size >= 2) GeoPoint(lat = pair[0], lng = pair[1]) else null
     }
 

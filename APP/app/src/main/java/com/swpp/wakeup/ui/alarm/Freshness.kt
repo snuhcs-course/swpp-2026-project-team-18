@@ -26,3 +26,21 @@ internal fun freshnessLabel(
         else -> "${seconds / 3600}시간 전 갱신"
     }
 }
+
+/**
+ * epoch ms 를 진행 바에 쓰는 "8:50" 으로.
+ *
+ * 저장소가 만드는 표시 문자열(`arrivalAt`)은 계획한 시각이고, 이것은 **예상**
+ * 도착 시각이다. 예상은 초마다 바뀌므로 저장소에서 만들 수 없다.
+ *
+ * 기기 시간대를 쓴다. 서버가 준 시각도 같은 시간대로 바꿔 보여 주므로 둘이
+ * 어긋나지 않는다.
+ */
+internal fun arrivalClockLabel(
+    millis: Long,
+    zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+): String = java.time.Instant.ofEpochMilli(millis)
+    .atZone(zone)
+    .format(CLOCK_FORMAT)
+
+private val CLOCK_FORMAT = java.time.format.DateTimeFormatter.ofPattern("H:mm")

@@ -2,6 +2,7 @@ package com.swpp.wakeup.data.remote
 
 import com.google.gson.Gson
 import com.swpp.wakeup.data.repository.toOption
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -249,5 +250,84 @@ class NetworkDtoNullSafetyTest {
 
         // 폭 0 인 칸은 색만 한 줄 끼어 경계선처럼 보인다.
         assertTrue(option.segments.items.size == 1)
+    }
+}
+
+/**
+ * 경로 좌표가 배열이 아닐 때 응답 전체가 살아남는지.
+ *
+ * ## 무슨 일이 있었나
+ *
+ * `route_path` 를 `List<List<Double>>` 로 선언했다. 배포 서버의 JSON 컬럼 기본값이
+ * 배열 `[]` 이 아니라 **문자열** `"[]"` 로 들어가 있었고(서버 `db_default` 가
+ * `json.dumps` 로 한 번 더 감쌌다), Gson 이 이렇게 터졌다.
+ *
+ * ```
+ * Expected BEGIN_ARRAY but was STRING at $.results[0].alarm_plan.route_path
+ * ```
+ *
+ * 문제는 이 예외가 **필드 하나에서 끝나지 않는다**는 것이다. 목록 응답 전체의
+ * 파싱이 실패해 일정이 하나도 안 보이고, 화면은 "오프라인 · 51분 전 정보" 로
+ * 떨어졌다. 서버는 200 을 주고 있었으므로 서버 로그에는 흔적이 없었다.
+ *
+ * 서버를 고쳤지만 선언도 느슨하게 바꿨다. **경로선 하나가 앱 전체를 못 쓰게
+ * 만드는 구조**를 두지 않는다.
+ */
+class RoutePathToleranceTest {
+
+    private val gson = Gson()
+
+    private fun plan(routePath: String): AlarmPlanDto =
+        gson.fromJson("""{"status":"ok","route_path":$routePath}""", AlarmPlanDto::class.java)
+
+    @Test
+    fun `문자열로 와도 파싱이 터지지 않는다`() {
+        // 배포 서버가 실제로 이 모양을 줬다.
+        val dto = plan("\"[]\"")
+        assertTrue(dto.routePoints.isEmpty())
+        assertEquals("ok", dto.status)
+    }
+
+    @Test
+    fun `좌표가 담긴 문자열도 응답을 깨뜨리지 않는다`() {
+        // 값을 살려내지는 않는다. 배열로 올 것을 문자열로 보낸 서버를
+        // 추측해서 읽으면 다음에 모양이 또 바뀔 때 조용히 틀린다.
+        assertTrue(plan("\"[[37.5,127.0]]\"").routePoints.isEmpty())
+    }
+
+    @Test
+    fun `객체나 숫자로 와도 견딘다`() {
+        assertTrue(plan("{}").routePoints.isEmpty())
+        assertTrue(plan("3").routePoints.isEmpty())
+        assertTrue(plan("null").routePoints.isEmpty())
+    }
+
+    @Test
+    fun `키가 아예 없어도 견딘다`() {
+        val dto = gson.fromJson("""{"status":"ok"}""", AlarmPlanDto::class.java)
+        assertTrue(dto.routePoints.isEmpty())
+    }
+
+    @Test
+    fun `정상 배열은 그대로 읽는다`() {
+        val points = plan("[[37.5,127.0],[37.6,127.1]]").routePoints
+        assertEquals(2, points.size)
+        assertEquals(37.5, points[0][0], 1e-9)
+        assertEquals(127.1, points[1][1], 1e-9)
+    }
+
+    @Test
+    fun `모양이 틀린 점만 버리고 나머지를 살린다`() {
+        // 좌표 하나 때문에 지도가 통째로 사라지는 것보다 낫다.
+        val points = plan("""[[37.5,127.0],"쓰레기",[37.6],[37.7,127.2,9],{},[37.8,127.3]]""")
+            .routePoints
+        assertEquals(2, points.size)
+        assertEquals(37.5, points[0][0], 1e-9)
+        assertEquals(37.8, points[1][0], 1e-9)
+    }
+
+    @Test
+    fun `숫자가 아닌 좌표는 버린다`() {
+        assertTrue(plan("""[["가",127.0]]""").routePoints.isEmpty())
     }
 }

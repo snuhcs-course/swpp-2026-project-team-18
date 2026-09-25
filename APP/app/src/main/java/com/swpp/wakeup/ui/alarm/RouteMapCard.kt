@@ -266,15 +266,24 @@ private fun RouteOverlay(
         }
 
         // 출발·도착. 지도 배경색으로 속을 채운 링이라 밝은 지도에서도 보인다.
-        listOf(points.first() to JitColor.Green, points.last() to JitColor.Accent)
-            .forEach { (px, color) ->
+        //
+        // **초록·주황을 쓰지 않는다.** 바로 위 진행 바가 초록을 "정시", 주황을
+        // "여유 깎임" 으로 쓰고 있어서, 같은 화면에서 같은 색이 다른 뜻이 된다.
+        // 초록 링을 보고 "정시라는 표시" 로 읽을 여지를 남기지 않는다.
+        //
+        // 대신 채움 여부로 가른다 — 출발은 속이 빈 링, 도착은 속을 채운 점이다.
+        // 경로선이 출발에서 시작하므로 방향은 선으로도 읽힌다.
+        val markerColor = JitColor.TextPrimary
+        listOf(points.first() to false, points.last() to true)
+            .forEach { (px, filled) ->
                 drawCircle(
-                    color = JitColor.Bg,
+                    // 밝은 지도 위에서 흰 링이 사라지지 않게 속을 어둡게 깐다.
+                    color = if (filled) markerColor else JitColor.Bg,
                     radius = 7.dp.toPx(),
                     center = Offset(px.x, px.y),
                 )
                 drawCircle(
-                    color = color,
+                    color = if (filled) JitColor.Bg else markerColor,
                     radius = 7.dp.toPx(),
                     center = Offset(px.x, px.y),
                     style = Stroke(width = 3.dp.toPx()),

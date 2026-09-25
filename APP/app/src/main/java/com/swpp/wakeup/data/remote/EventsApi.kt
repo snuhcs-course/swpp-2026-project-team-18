@@ -1,5 +1,6 @@
 package com.swpp.wakeup.data.remote
 
+import com.google.gson.JsonElement
 import com.google.gson.annotations.SerializedName
 import okhttp3.ResponseBody
 import retrofit2.Response
@@ -410,8 +411,17 @@ data class AlarmPlanDto(
      *
      * 좌표를 못 받았으면 `null` 이거나 빈 배열이다. 그때는 지도와 진행률을
      * 그리지 않고 안내만 띄운다 — 알람 계산 자체는 그대로 성립한다.
+     *
+     * **`List<List<Double>>` 로 선언하지 않는다.** 그렇게 두면 서버가 이 자리에
+     * 배열이 아닌 값을 주는 순간 Gson 이 `Expected BEGIN_ARRAY but was STRING`
+     * 으로 터지고, 그 예외가 **응답 전체의 파싱을 깨뜨린다** — 일정 목록이 통째로
+     * 날아가고 화면은 "오프라인" 으로 떨어진다. 실기기에서 그렇게 만났다(서버의
+     * JSON 기본값이 배열이 아닌 문자열이었다).
+     *
+     * 원인은 서버에서 고쳤지만 선언을 느슨하게 남긴다. 경로선 하나가 앱 전체를
+     * 못 쓰게 만드는 구조를 두지 않는다. [routePoints] 가 모양을 확인해 꺼낸다.
      */
-    @SerializedName("route_path") val routePath: List<List<Double>>?,
+    @SerializedName("route_path") val routePath: JsonElement? = null,
     /** `routePath` 를 따라간 길이(m). 좌표가 없으면 null */
     @SerializedName("route_distance_m") val routeDistanceM: Int?,
     /**
@@ -441,6 +451,24 @@ data class AlarmPlanDto(
      */
     @SerializedName("prep_breakdown") val prepBreakdown: List<PrepBlockDto>? = null,
 ) {
+    /**
+     * [routePath] 를 좌표 쌍 목록으로. 모양이 아니면 빈 목록이다.
+     *
+     * 배열 안의 항목도 하나씩 확인한다. `[[37.5, 127.0], "쓰레기"]` 처럼 섞여
+     * 와도 읽을 수 있는 점만 가져온다 — 좌표 하나가 지도를 통째로 없애지 않는다.
+     */
+    val routePoints: List<List<Double>>
+        get() {
+            val array = routePath?.takeIf { it.isJsonArray }?.asJsonArray ?: return emptyList()
+            return array.mapNotNull { item ->
+                val pair = item?.takeIf { it.isJsonArray }?.asJsonArray ?: return@mapNotNull null
+                if (pair.size() != 2) return@mapNotNull null
+                val lat = pair[0].asDoubleOrNull() ?: return@mapNotNull null
+                val lng = pair[1].asDoubleOrNull() ?: return@mapNotNull null
+                listOf(lat, lng)
+            }
+        }
+
     companion object {
         const val STATUS_OK = "ok"
         const val STATUS_NO_HOME = "no_home"
@@ -461,6 +489,15 @@ data class AlarmPlanDto(
         const val PREP_FIXED = "fixed"
     }
 }
+
+/**
+ * 숫자로 읽을 수 있으면 숫자, 아니면 null.
+ *
+ * `asDouble` 은 문자열·객체에 대고 예외를 던진다. 좌표 하나 때문에 경로 전체를
+ * 잃지 않으려면 던지지 말고 걸러야 한다.
+ */
+private fun JsonElement.asDoubleOrNull(): Double? =
+    runCatching { if (isJsonPrimitive) asDouble else null }.getOrNull()
 
 /**
  * 준비 시간 블록 한 줄. 서버 `estimators.py` 의 breakdown 항목과 짝이다.

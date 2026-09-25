@@ -66,6 +66,27 @@ data class AlarmPlanView(
      */
     val arrivalAt: String? = null,
 
+    /**
+     * 일정대로면 집을 나서야 하는 시각(epoch ms). 계산 못 했으면 null.
+     *
+     * 표시용이 아니라 **계산용**이다. 진행 바가 "예정보다 몇 분 늦는가" 를
+     * 내려면 기준 시각이 필요하다([ArrivalOutlook]). 문자열로 두면 화면에서
+     * 다시 파싱해야 하고, 그 파싱이 실패하면 색이 조용히 회색으로 떨어진다.
+     */
+    val departByMillis: Long? = null,
+    /** 도착 예정 시각(epoch ms). [departByMillis] 와 같은 이유로 둔다 */
+    val arriveAtMillis: Long? = null,
+    /** 이동에 걸리는 분. 남은 거리를 분으로 바꾸는 환산율이다 */
+    val travelMinutes: Int? = null,
+    /**
+     * 문 앞 안전 버퍼(분).
+     *
+     * "조금 늦음" 과 "약속에 늦음" 의 경계다. 버퍼 안에서 늦는 것은 여유를
+     * 깎는 것이고, 버퍼를 넘기면 약속 시각 자체를 넘긴다. 상수 10 을 박지 않고
+     * 서버가 준 값을 쓴다 — 버퍼 정책이 바뀌면 경계도 함께 움직여야 한다.
+     */
+    val bufferMinutes: Int? = null,
+
     /** `ok` / `no_home` / `no_place` / `route_failed` */
     val status: String,
     val statusLabel: String?,

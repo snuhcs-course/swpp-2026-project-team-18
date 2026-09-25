@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swpp.wakeup.domain.model.ArrivalOutlook
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.common.JitCard
@@ -40,6 +41,15 @@ import com.swpp.wakeup.ui.theme.JitTextStyle
  * 단계 점 네 개 · 진행 바 · 퍼센트를 따로 놓던 형태를 **한 줄**로 합쳤다. 나뉘어
  * 있으면 같은 사실을 세 번 말하면서도 정작 "지금 어떤 상태인가" 를 읽으려면 세
  * 군데를 봐야 한다. 지금은 바의 채움이 진행률이고, 이름 아래 한 줄이 상태다.
+ *
+ * ## 색은 단계가 아니라 지각 여부다
+ *
+ * 초록 정시 · 노랑 여유를 깎는 중 · 빨강 약속에 늦음([ArrivalOutlook]). 단계는
+ * 글씨로 읽으면 되지만 "지각하겠는가" 는 한눈에 보여야 한다. 색을 단계에 쓰면
+ * 가장 급한 정보가 색을 잃는다.
+ *
+ * 판단할 수 없으면 **색을 쓰지 않는다**(흐린 회색). 지어낸 색은 지어낸 숫자보다
+ * 나쁘다 — 숫자는 의심하지만 색은 그냥 믿는다.
  *
  * ## 바가 시간이 아니라 거리인 이유
  *
@@ -61,7 +71,9 @@ fun TripProgressCard(
     initials: String,
     stage: TripStage,
     progress: RouteProgress?,
-    /** "8:50". 도착 예정 시각. 계산 못 했으면 null */
+    /** 지각 전망. null 이면 판단할 수 없어 색을 쓰지 않는다 */
+    outlook: ArrivalOutlook?,
+    /** "8:50". [outlook] 이 있으면 예상 도착, 없으면 도착 예정 */
     arrivalAt: String?,
     /** "3분 전 갱신". 위치가 낡았으면 사용자가 그것을 알아야 한다 */
     freshness: String?,
@@ -74,6 +86,7 @@ fun TripProgressCard(
             initials = initials,
             stage = stage,
             progress = progress,
+            outlook = outlook,
             arrivalAt = arrivalAt,
         )
 
@@ -94,9 +107,9 @@ fun TripProgressCard(
 /**
  * 진행 바 한 줄.
  *
- * 왼쪽부터 아바타 · 이름 · 상태, 오른쪽에 도착 시각 · 남은 거리다. 바탕의 채움이
- * 진행률이라 **글씨가 채움 위에 얹힌다** — 그래서 채움을 불투명하게 두지 않는다.
- * 불투명하면 경계를 넘는 글자의 대비가 급변해 읽기 어려워진다.
+ * 왼쪽부터 아바타 · 이름 · 상태, 오른쪽에 도착 시각 · 지각 전망이다. 바탕의
+ * 채움이 진행률이라 **글씨가 채움 위에 얹힌다** — 그래서 채움을 불투명하게 두지
+ * 않는다. 불투명하면 경계를 넘는 글자의 대비가 급변해 읽기 어려워진다.
  */
 @Composable
 private fun ProgressRow(
@@ -104,12 +117,11 @@ private fun ProgressRow(
     initials: String,
     stage: TripStage,
     progress: RouteProgress?,
+    outlook: ArrivalOutlook?,
     arrivalAt: String?,
 ) {
-    val accent = stageColorFor(stage)
-    // 경로를 벗어났으면 채우지 않는다. 이탈한 위치를 경로에 투영한 비율은
-    // 사용자가 실제로 온 만큼이 아니다 — 그 숫자로 여유를 판단하면 지각한다.
-    val ratio = progress?.takeIf { it.onRoute }?.ratio ?: 0f
+    val accent = rowColor(stage, progress, outlook)
+    val ratio = fillRatio(stage, progress)
 
     Box(
         modifier = Modifier
@@ -121,7 +133,7 @@ private fun ProgressRow(
     ) {
         Box(
             Modifier
-                .fillMaxWidth(ratio.coerceIn(0f, 1f))
+                .fillMaxWidth(ratio)
                 .fillMaxHeight()
                 .background(accent.copy(alpha = 0.2f))
         )
@@ -173,9 +185,15 @@ private fun ProgressRow(
                     maxLines = 1,
                 )
                 Text(
-                    text = trailingLine(stage, progress),
-                    color = JitColor.TextSecondary,
+                    text = trailingLine(stage, progress, outlook),
+                    // 지각 분수는 색을 함께 쓴다. 이 줄이 색의 근거다.
+                    color = if (outlook != null && accent != JitColor.Track) {
+                        accent
+                    } else {
+                        JitColor.TextSecondary
+                    },
                     fontSize = 9.sp,
+                    fontWeight = if (outlook != null) FontWeight.Bold else FontWeight.Normal,
                     textAlign = TextAlign.End,
                     maxLines = 1,
                 )
@@ -209,6 +227,47 @@ private fun Avatar(initials: String, color: Color) {
 }
 
 /**
+ * 바 한 줄의 색.
+ *
+ * 우선순위가 있다.
+ *
+ * 1. **경로 이탈** — 경고색. 전망을 계산할 수 없으므로(다른 길을 가는 중이다)
+ *    초록으로 "정시" 라고 말해서는 안 된다
+ * 2. **전망을 못 냄** — 흐린 회색. 알람 전이거나 기록이 없는 경우다
+ * 3. 전망대로 초록 · 노랑 · 빨강
+ */
+internal fun rowColor(
+    stage: TripStage,
+    progress: RouteProgress?,
+    outlook: ArrivalOutlook?,
+): Color = when {
+    progress != null && !progress.onRoute -> JitColor.Amber
+    stage == TripStage.BEFORE_ALARM || stage == TripStage.PAST -> JitColor.Track
+    outlook == null -> JitColor.Track
+    else -> outlookColor(outlook.verdict)
+}
+
+/** 전망 색. 세 단계뿐이고 다른 화면과 같은 뜻으로 쓴다 */
+internal fun outlookColor(verdict: ArrivalOutlook.Verdict): Color = when (verdict) {
+    ArrivalOutlook.Verdict.ON_TIME -> JitColor.Green
+    ArrivalOutlook.Verdict.TIGHT -> JitColor.Amber
+    ArrivalOutlook.Verdict.LATE -> JitColor.Red
+}
+
+/**
+ * 채우는 비율.
+ *
+ * 도착했으면 좌표가 없어도 가득 채운다 — 도착은 여정이 끝났다는 뜻이다.
+ * 경로를 벗어났으면 채우지 않는다: 이탈한 위치를 경로에 투영한 비율은 실제로 온
+ * 만큼이 아니고, 그 숫자로 여유를 판단하면 지각한다.
+ */
+internal fun fillRatio(stage: TripStage, progress: RouteProgress?): Float = when {
+    stage == TripStage.ARRIVED -> 1f
+    progress != null && progress.onRoute -> progress.ratio.coerceIn(0f, 1f)
+    else -> 0f
+}
+
+/**
  * 이름 아래 한 줄. 단계와 근거를 붙여 쓴다.
  *
  * 근거가 없을 때 억지로 붙이지 않는다. "이동 중 · 0km 이동" 은 측정하지 못한
@@ -226,10 +285,21 @@ internal fun statusLine(stage: TripStage, progress: RouteProgress?): String = wh
     else -> stage.label
 }
 
-/** 오른쪽 아래 한 줄. 도착 시각이 무엇인지 또는 얼마나 남았는지를 말한다. */
-internal fun trailingLine(stage: TripStage, progress: RouteProgress?): String = when {
+/**
+ * 오른쪽 아래 한 줄.
+ *
+ * 전망이 있으면 "정시" 또는 "+5분" 이다. 이 줄이 바 색의 근거이므로, 색만 보고
+ * 의아할 때 여기서 이유를 읽을 수 있어야 한다.
+ */
+internal fun trailingLine(
+    stage: TripStage,
+    progress: RouteProgress?,
+    outlook: ArrivalOutlook?,
+): String = when {
+    progress != null && !progress.onRoute -> "경로 이탈"
+    outlook != null -> outlook.label
     stage == TripStage.ARRIVED -> "도착"
-    progress != null && progress.onRoute -> progress.remainingLabel
+    stage == TripStage.PAST -> "기록 없음"
     else -> "도착 예정"
 }
 
@@ -241,18 +311,4 @@ private fun stageHint(stage: TripStage): String = when (stage) {
     TripStage.ARRIVED -> "도착함"
     // 지난 일정이다. "추적이 시작됨" 같은 앞날 이야기를 하면 안 된다.
     TripStage.PAST -> "일정 시각이 지났고 이동 기록이 없음"
-}
-
-/**
- * 단계 색. 아바타·테두리·채움·상태 글씨가 모두 이 색을 쓴다.
- *
- * [JitColor.Track] 은 "아직/이제 아님" 을 뜻한다. 알람 전과 지난 일정이 같은
- * 색인데, 둘 다 **지금 일어나는 일이 아니다** 는 점에서 같다.
- */
-internal fun stageColorFor(stage: TripStage): Color = when (stage) {
-    TripStage.BEFORE_ALARM -> JitColor.Track
-    TripStage.PREPARING -> JitColor.Accent
-    TripStage.IN_TRANSIT -> JitColor.Blue
-    TripStage.ARRIVED -> JitColor.Green
-    TripStage.PAST -> JitColor.Track
 }

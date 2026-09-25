@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.geometry.Offset
+import com.swpp.wakeup.domain.model.ArrivalOutlook
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.sensing.GeoPoint
@@ -81,6 +82,10 @@ fun AlarmDecisionScreen(
     stage: TripStage = TripStage.BEFORE_ALARM,
     /** 경로 거리 기준 진행률. null 이면 측정하지 않는 상태다 */
     progress: RouteProgress? = null,
+    /** 지각 전망. 진행 바 색의 근거다. null 이면 판단할 수 없다 */
+    outlook: ArrivalOutlook? = null,
+    /** 진행 바 오른쪽에 크게 놓을 시각. [outlook] 이 있으면 예상 도착이다 */
+    arrivalClock: String? = null,
     /** "3분 전 갱신" */
     freshness: String? = null,
     /** 경로 지도 상태. null 이면 경로 좌표가 없어 지도를 그릴 수 없다 */
@@ -159,7 +164,9 @@ fun AlarmDecisionScreen(
                 initials = initials,
                 stage = stage,
                 progress = progress,
-                arrivalAt = plan.arrivalAt,
+                outlook = outlook,
+                // 전망이 있으면 예상 도착 시각을, 없으면 계획한 도착 예정을 쓴다.
+                arrivalAt = arrivalClock ?: plan.arrivalAt,
                 freshness = freshness,
             )
 

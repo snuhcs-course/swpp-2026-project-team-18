@@ -43,9 +43,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.domain.model.ArrivalOutlook
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
+import com.swpp.wakeup.ui.alarm.arrivalClockLabel
 import com.swpp.wakeup.ui.alarm.freshnessLabel
 import com.swpp.wakeup.ui.calendar.CalendarImportScreen
 import com.swpp.wakeup.ui.alarm.RiskChoiceScreen
@@ -349,6 +351,36 @@ private fun MainHost(
                     val progress = plan
                         ?.takeIf { it.hasRoutePath }
                         ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
+                    val stage = plan?.let { viewModel.stageOf(it) } ?: TripStage.BEFORE_ALARM
+
+                    // 지각 전망. 진행 바의 색이 이것으로 정해진다.
+                    //
+                    // 알람 전에는 내지 않는다 — 아직 시작하지 않은 여정을 두고
+                    // 늦는다/안 늦는다 할 것이 없다. 경로를 벗어났을 때도 내지
+                    // 않는다: 다른 길을 가는 중이면 계획 속도로 환산한 값이
+                    // 아무 뜻이 없다.
+                    val outlook = plan?.takeIf {
+                        stage != TripStage.BEFORE_ALARM &&
+                            stage != TripStage.PAST &&
+                            progress?.onRoute != false
+                    }?.let { p ->
+                        if (stage == TripStage.ARRIVED && live != null) {
+                            ArrivalOutlook.arrived(
+                                arrivedMillis = live.atMillis,
+                                arriveAtMillis = p.arriveAtMillis,
+                                bufferMinutes = p.bufferMinutes,
+                            )
+                        } else {
+                            ArrivalOutlook.of(
+                                departByMillis = p.departByMillis,
+                                arriveAtMillis = p.arriveAtMillis,
+                                travelMinutes = p.travelMinutes,
+                                bufferMinutes = p.bufferMinutes,
+                                ratio = progress?.takeIf { it.onRoute }?.ratio ?: 0f,
+                                nowMillis = System.currentTimeMillis(),
+                            )
+                        }
+                    }
                     AlarmDecisionScreen(
                         plan = plan,
                         onBack = viewModel::goBack,
@@ -359,8 +391,10 @@ private fun MainHost(
                         modifier = Modifier.padding(innerPadding),
                         nickname = state.nickname,
                         initials = viewModel.avatarInitials(),
-                        stage = plan?.let { viewModel.stageOf(it) } ?: TripStage.BEFORE_ALARM,
+                        stage = stage,
                         progress = progress,
+                        outlook = outlook,
+                        arrivalClock = outlook?.let { arrivalClockLabel(it.predictedMillis) },
                         freshness = live?.let { freshnessLabel(it.atMillis) },
                         routeMap = routeMap?.takeIf { it.eventId == route.eventId },
                         here = live?.point,

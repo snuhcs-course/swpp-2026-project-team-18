@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from django.db import transaction
 from rest_framework import serializers
 
@@ -9,6 +11,29 @@ from rest_framework import serializers
 # 뷰를 import 하면 순환이 된다.
 from .geo import in_service_area
 from .models import Event, EventTag, Place
+
+
+def _as_list(value) -> list:
+    """JSON 필드를 **반드시 배열로** 내려준다.
+
+    DB 에 문자열이 들어가 있어도 배열로 고쳐 내보낸다. 앱은 Gson 으로 파싱하는데
+    배열을 기다리는 자리에 문자열이 오면 그 필드만 비는 것이 아니라 **응답 전체가
+    파싱 실패**한다. 일정 목록이 통째로 날아가고 화면은 "오프라인" 으로 떨어진다.
+    실기기에서 그 증상을 만났다 — 원인은 `db_default` 가 JSON 배열이 아니라 JSON
+    문자열이었던 것(`planning/migrations/0007`).
+
+    기본값은 고쳤지만 이 방어를 남긴다. 한 필드가 전 응답을 깨뜨릴 수 있는 구조
+    자체를 막는 값이 크고, 비용은 함수 호출 하나다.
+    """
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
 
 
 class PlaceSerializer(serializers.ModelSerializer):
@@ -62,12 +87,12 @@ class AlarmPlanSerializer(serializers.Serializer):
     route_detail = serializers.CharField()
     # 경로 폴리라인 `[[lat, lng], ...]`. 앱이 지도에 경로선을 그리고, 이동한
     # 거리 비율로 진행률을 계산한다. 좌표를 못 받았으면 빈 배열이다.
-    route_path = serializers.JSONField()
+    route_path = serializers.SerializerMethodField()
     # `route_path` 를 따라간 길이(m). 진행률의 분모다. 좌표가 없으면 null.
     route_distance_m = serializers.IntegerField(allow_null=True)
     # 블록별 내역. 근거 카드가 "샤워 14분 · 옷 5분" 을 그린다.
     # 블록이 없으면 빈 배열이다.
-    prep_breakdown = serializers.JSONField()
+    prep_breakdown = serializers.SerializerMethodField()
     # 사용자가 고른 경로가 그대로 쓰였는지. 배차가 바뀌어 사라지면 서버가
     # 대체 경로로 계산하는데, 화면이 그 사실을 알려야 한다.
     route_choice_honored = serializers.SerializerMethodField()
@@ -77,6 +102,12 @@ class AlarmPlanSerializer(serializers.Serializer):
     prep_source = serializers.SerializerMethodField()
     buffer_source = serializers.SerializerMethodField()
     travel_time_source = serializers.SerializerMethodField()
+
+    def get_route_path(self, obj) -> list:
+        return _as_list(obj.route_path)
+
+    def get_prep_breakdown(self, obj) -> list:
+        return _as_list(obj.prep_breakdown)
 
     def get_route_choice_honored(self, obj) -> bool | None:
         chosen = (obj.event.route_key or "").strip()
