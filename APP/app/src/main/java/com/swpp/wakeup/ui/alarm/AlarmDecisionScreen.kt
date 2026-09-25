@@ -290,6 +290,30 @@ private fun RecommendedAlarmCard(plan: AlarmPlanView) {
         plan.arrivalLine?.let {
             Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
         }
+
+        // 이 시각을 **언제** 계산했는지. 백그라운드가 임박한 일정의 경로를
+        // 15분마다 다시 조회하므로 알람 시각과 이동 시간이 조용히 바뀐다.
+        // 표시하지 않으면 사용자는 화면의 숫자가 방금 받은 것인지 어제 계산한
+        // 것인지 모르고, 배차가 바뀌었는데도 낡은 값을 믿고 움직인다.
+        computedAgoLabel(plan.computedAtMillis)?.let {
+            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
+        }
+
+        // 고른 경로가 사라져 다른 경로로 계산했다.
+        //
+        // **조용히 넘기면 안 된다.** 사용자는 자기가 고른 노선대로 계산된
+        // 알람이라고 믿고 그 노선을 타러 간다. 서버는 이 사실을
+        // `route_choice_honored=false` 로 알려 주는데 화면이 읽지 않고 있었다.
+        if (plan.routeFellBack) {
+            JitDotLabel(
+                text = "고른 경로가 없어져 다른 경로로 계산함. 경로를 다시 고르는 것이 정확함",
+                dotColor = JitColor.Amber,
+                textColor = JitColor.Amber,
+                fontSize = 10,
+                bold = false,
+                dotSize = 6.dp,
+            )
+        }
     }
 }
 

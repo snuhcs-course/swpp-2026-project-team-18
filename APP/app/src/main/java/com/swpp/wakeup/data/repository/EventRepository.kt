@@ -1007,6 +1007,9 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         startAtMillis = start.toInstant().toEpochMilli(),
         travelMinutes = plan.travelMinutes,
         prepApplies = prepApplies,
+        computedAtMillis = plan.computedAt
+            ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+            ?.toInstant()?.toEpochMilli(),
         status = plan.status,
         statusLabel = plan.statusLabel,
         routeKey = plan.routeKey?.takeIf { it.isNotBlank() },

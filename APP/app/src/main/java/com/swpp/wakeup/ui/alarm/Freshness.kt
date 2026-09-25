@@ -44,3 +44,34 @@ internal fun arrivalClockLabel(
     .format(CLOCK_FORMAT)
 
 private val CLOCK_FORMAT = java.time.format.DateTimeFormatter.ofPattern("H:mm")
+
+/**
+ * 이 계획을 계산한 지 얼마나 됐는지. "12분 전 계산"
+ *
+ * [freshnessLabel] 과 따로 두는 이유는 **말하는 대상이 다르기** 때문이다. 그쪽은
+ * 마지막으로 받은 **위치**가 얼마나 낡았는지이고, 이쪽은 알람 시각과 이동 시간을
+ * **언제 계산했는지**다. 둘은 독립적으로 낡는다 — 위치는 방금 받았는데 계획은
+ * 어제 것일 수 있다.
+ *
+ * 백그라운드가 임박한 일정의 경로를 15분마다 다시 계산하므로
+ * ([com.swpp.wakeup.background.RouteRefreshWorker]) 아침에는 이 값이 계속
+ * 줄어든다. 그것이 곧 "배차 변화를 따라가고 있다" 는 증거다.
+ *
+ * 하루가 넘으면 날짜 대신 "오래됨" 으로 뭉갠다. 정확히 며칠인지는 판단에 쓸모가
+ * 없고, 사용자가 해야 하는 일은 하나다 — 다시 계산하는 것.
+ */
+internal fun computedAgoLabel(
+    computedAtMillis: Long?,
+    nowMillis: Long = System.currentTimeMillis(),
+): String? {
+    if (computedAtMillis == null || computedAtMillis <= 0L) return null
+    val seconds = (nowMillis - computedAtMillis) / 1000
+    return when {
+        // 미래 시각이면 기기와 서버 시계가 어긋난 것이다. 거짓을 적기보다 비운다.
+        seconds < 0 -> null
+        seconds < 90 -> "방금 계산"
+        seconds < 3600 -> "${seconds / 60}분 전 계산"
+        seconds < 24 * 3600 -> "${seconds / 3600}시간 전 계산"
+        else -> "오래된 계산"
+    }
+}

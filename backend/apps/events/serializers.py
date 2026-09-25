@@ -97,6 +97,14 @@ class AlarmPlanSerializer(serializers.Serializer):
     # 대체 경로로 계산하는데, 화면이 그 사실을 알려야 한다.
     route_choice_honored = serializers.SerializerMethodField()
 
+    # 이 계획을 언제 계산했는지.
+    #
+    # **표시해야 하는 값이다.** 앱이 임박한 일정의 경로를 15분마다 다시 계산하고
+    # (`RouteRefreshWorker`) 그때 알람 시각과 이동 시간이 바뀐다. 이 값이 없으면
+    # 사용자는 화면의 숫자가 방금 받은 것인지 어제 계산한 것인지 알 수 없고,
+    # 배차가 바뀌었는데도 낡은 값을 믿고 움직인다.
+    computed_at = serializers.DateTimeField()
+
     # 계산에 쓴 값의 출처. 세 값의 신뢰도가 다른데 나란히 놓으면 전부
     # 학습된 값처럼 읽힌다(front-spec S_alarm 의 지적). 서버가 명시한다.
     prep_source = serializers.SerializerMethodField()

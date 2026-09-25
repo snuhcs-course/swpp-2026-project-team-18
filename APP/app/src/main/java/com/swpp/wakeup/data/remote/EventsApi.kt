@@ -450,6 +450,15 @@ data class AlarmPlanDto(
      * 들어가고, 각 행은 반올림된 값이다. 화면에서 합을 다시 계산하지 않는다.
      */
     @SerializedName("prep_breakdown") val prepBreakdown: List<PrepBlockDto>? = null,
+
+    /**
+     * 이 계획을 계산한 시각(ISO 8601). 계산 전이면 null.
+     *
+     * **표시해야 하는 값이다.** 앱이 임박한 일정의 경로를 15분마다 다시 계산하고
+     * (`RouteRefreshWorker`) 그때 알람 시각과 이동 시간이 바뀐다. 이 값이 없으면
+     * 사용자는 화면의 숫자가 방금 받은 것인지 어제 계산한 것인지 알 수 없다.
+     */
+    @SerializedName("computed_at") val computedAt: String? = null,
 ) {
     /**
      * [routePath] 를 좌표 쌍 목록으로. 모양이 아니면 빈 목록이다.

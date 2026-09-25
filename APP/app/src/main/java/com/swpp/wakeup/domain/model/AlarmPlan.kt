@@ -87,6 +87,14 @@ data class AlarmPlanView(
      * 사람과 구분되지 않는다.
      */
     val prepApplies: Boolean = true,
+    /**
+     * 이 계획을 계산한 시각(epoch ms). 모르면 null.
+     *
+     * 화면이 "N분 전 계산" 을 적는 데 쓴다. 임박한 일정은 백그라운드가 15분마다
+     * 경로를 다시 조회해 이 값과 알람 시각이 바뀐다. 표시하지 않으면 사용자는
+     * 숫자가 방금 받은 것인지 어제 것인지 모른 채로 움직인다.
+     */
+    val computedAtMillis: Long? = null,
 
     /** `ok` / `no_home` / `no_place` / `route_failed` */
     val status: String,
