@@ -330,25 +330,32 @@ private fun RouteOverlay(
             )
         }
 
-        // 출발·도착. 지도 배경색으로 속을 채운 링이라 밝은 지도에서도 보인다.
+        // 출발·도착.
         //
         // **초록·주황을 쓰지 않는다.** 바로 위 진행 바가 초록을 "정시", 주황을
         // "여유 깎임" 으로 쓰고 있어서, 같은 화면에서 같은 색이 다른 뜻이 된다.
-        // 초록 링을 보고 "정시라는 표시" 로 읽을 여지를 남기지 않는다.
+        // 초록은 이제 지도에서 **더 빠른 대안 경로**를 뜻하기도 한다.
         //
-        // 대신 채움 여부로 가른다 — 출발은 속이 빈 링, 도착은 속을 채운 점이다.
-        // 경로선이 출발에서 시작하므로 방향은 선으로도 읽힌다.
+        // 대신 무게로 가른다 — 도착이 더 무겁게 보여야 한다. 목적지가 이 화면의
+        // 목표이고, 지도 관례도 도착을 진한 표식으로 찍는다.
+        //
+        // **밝은 지도에서는 어두운 쪽이 "표식" 으로 읽힌다.** 흰 부분은 지도
+        // 배경과 섞여 바탕으로 넘어간다. 그래서 "무거워 보이는 것" 은 속이 어두운
+        // 원이고, "비어 보이는 것" 은 속이 흰 원이다 — 채움 여부를 그대로 쓰면
+        // 의도와 반대로 보인다(실기기에서 확인했다. 출발이 꽉 찬 점, 도착이 빈
+        // 링으로 보였다).
         val markerColor = JitColor.TextPrimary
         listOf(points.first() to false, points.last() to true)
-            .forEach { (px, filled) ->
+            .forEach { (px, heavy) ->
                 drawCircle(
-                    // 밝은 지도 위에서 흰 링이 사라지지 않게 속을 어둡게 깐다.
-                    color = if (filled) markerColor else JitColor.Bg,
+                    // 어두운 속 = 무겁게 보인다. 흰 속 = 비어 보인다.
+                    color = if (heavy) JitColor.Bg else markerColor,
                     radius = 7.dp.toPx(),
                     center = Offset(px.x, px.y),
                 )
                 drawCircle(
-                    color = if (filled) JitColor.Bg else markerColor,
+                    // 테두리는 속과 반대색이라 어느 쪽이든 밝은 지도에서 사라지지 않는다.
+                    color = if (heavy) markerColor else JitColor.Bg,
                     radius = 7.dp.toPx(),
                     center = Offset(px.x, px.y),
                     style = Stroke(width = 3.dp.toPx()),
