@@ -168,6 +168,43 @@ class TestStaticMapView:
         assert res.data["error"]["code"] == "invalid_coordinate"
         assert fake_map == []
 
+    # --- 뷰포트 범위 --------------------------------------------------------
+    #
+    # 범위를 벗어난 값을 잘라서 쓰면 **요청한 것과 다른 그림이 200 으로 돌아가고
+    # 클라이언트는 그것을 모른다.** 앱은 자기가 보낸 lv 로 좌표를 계산하므로
+    # lv=20 을 보내고 lv=15 그림을 받으면 경로선이 32배 어긋난 자리에 그려진다.
+    # 그림 자체는 정상이라 원인을 찾기 어렵다.
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "lv=0", "lv=16", "lv=99", "lv=-1",
+            "w=0", "w=4096",
+            "h=0", "h=2048",
+        ],
+    )
+    def test_out_of_range_viewport_is_400(self, client, fake_map, query):
+        res = client.get(f"{MAP_URL}?lat=37.4783&lng=126.9516&{query}")
+        assert res.status_code == 400, f"{query} 를 200 으로 받았다"
+        assert res.data["error"]["code"] == "invalid_viewport"
+        assert fake_map == [], f"{query} 인데 카카오를 불렀다"
+
+    @pytest.mark.parametrize("query", ["lv=1", "lv=15", "w=1", "w=2048", "h=1", "h=1024"])
+    def test_range_edges_are_accepted(self, client, fake_map, query):
+        res = client.get(f"{MAP_URL}?lat=37.4783&lng=126.9516&{query}")
+        assert res.status_code == 200, f"{query} 는 범위 안인데 거절했다"
+
+    @pytest.mark.parametrize("query", ["", "lv=", "lv=abc", "w=&h="])
+    def test_absent_or_unreadable_viewport_falls_back_to_defaults(
+        self, client, fake_map, query
+    ):
+        """없는 것과 불가능한 것은 다르다. 안 보냈으면 서버가 정한다."""
+        res = client.get(f"{MAP_URL}?lat=37.4783&lng=126.9516&{query}")
+        assert res.status_code == 200
+        assert fake_map[0]["level"] == 5
+        assert fake_map[0]["width"] == 360
+        assert fake_map[0]["height"] == 500
+
     def test_unavailable_map_is_503_with_a_usable_message(self, client, monkeypatch):
         """지도를 못 그렸다고 화면을 막지 않는다. 목록으로 계속 고를 수 있다."""
         monkeypatch.setattr(clients, "static_map", lambda **kw: (None, "", True))

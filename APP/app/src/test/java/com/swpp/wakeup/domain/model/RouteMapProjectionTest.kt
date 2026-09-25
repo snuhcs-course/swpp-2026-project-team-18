@@ -152,4 +152,43 @@ class RouteMapProjectionTest {
         val first = RouteMapProjection.toPx(path[0], vp)
         assertTrue("왼쪽 여백이 없다 (x=${first.x})", first.x >= 10f)
     }
+
+    // --- 줌 범위가 조작과 맞는가 -------------------------------------------
+
+    @Test
+    fun `전체 보기는 줌 조작이 닿는 범위만 고른다`() {
+        // 여기서 더 큰 값이 나오면 확대 버튼이 그 레벨을 끌어내려 한 번에 두
+        // 단계가 튀거나 축소 버튼이 꺼진 채로 남는다.
+        for (span in listOf(0.01, 0.05, 0.2, 0.5, 1.0, 3.0)) {
+            val path = listOf(GeoPoint(37.0, 126.9), GeoPoint(37.0 + span, 126.9 + span))
+            val (_, level) = RouteMapProjection.fit(path, 360, 260)!!
+            assertTrue(
+                "span=$span 에서 레벨 $level 이 범위를 넘었다",
+                level in StaticMapScale.MIN_LEVEL..StaticMapScale.ROUTE_MAX_LEVEL,
+            )
+        }
+    }
+
+    @Test
+    fun `수원에서 서울대 정도 거리도 한 화면에 들어온다`() {
+        // 장소 고르기 상한(레벨 10)은 360 단위 폭이 23km 라 이 경로가 잘린다.
+        // 통학 경로로 실제로 있을 거리다.
+        val path = listOf(GeoPoint(37.2636, 127.0286), GeoPoint(37.4599, 126.9519))
+        val (c, level) = RouteMapProjection.fit(path, 360, 260)!!
+        assertTrue("레벨 10 이하로는 이 경로가 안 들어간다", level > StaticMapScale.MAX_LEVEL)
+
+        val vp = RouteMapProjection.Viewport(c, level, 360, 360, 260)
+        for (p in path) {
+            val px = RouteMapProjection.toPx(p, vp)
+            assertTrue("x=${px.x} 가 화면 밖이다", px.x in 0f..360f)
+            assertTrue("y=${px.y} 가 화면 밖이다", px.y in 0f..260f)
+        }
+    }
+
+    @Test
+    fun `경로 지도 상한은 서버 상한과 같다`() {
+        // 서버(clients.STATIC_MAP_MAX_LEVEL)가 15 까지 받는다. 앱이 그보다 큰
+        // 값을 보내면 서버가 400 을 준다.
+        assertEquals(15, StaticMapScale.ROUTE_MAX_LEVEL)
+    }
 }

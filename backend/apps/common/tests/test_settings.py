@@ -112,3 +112,57 @@ class TestTimezone:
         """시각은 UTC 로 저장하고 KST 로 보여준다. 둘이 섞이면 9시간 어긋난다."""
         assert settings.USE_TZ is True
         assert settings.TIME_ZONE == "Asia/Seoul"
+
+
+class TestProductionCacheIsSharedBetweenWorkers:
+    """워커가 캐시를 나눠 쓰지 못하면 카카오 하루 한도가 절반이 된다.
+
+    ## 실제로 있었던 일
+
+    `CACHES` 를 아예 두지 않아 Django 기본값인 `LocMemCache` 가 쓰였다. 그것은
+    **프로세스마다 따로** 있고 `render.yaml` 이 `WEB_CONCURRENCY=2` 다. 배포
+    서버에 같은 지도를 연속으로 두 번 요청했더니 둘 다
+    `X-Jit-Map-Cache: miss` 였다(`jit-tools/check_deployed_new.py`).
+
+    정적 지도는 하루 1,000건이고 지도를 한 번 끌면 여러 장을 부른다. 캐시가
+    절반만 들으면 쓸 수 있는 한도도 절반이 된다. 지하철 20초·버스 15초·정류소
+    24시간 캐시도 같은 이유로 절반만 듣고 있었다.
+
+    설정이 **없어서** 난 문제이므로, 없어지면 다시 난다. 그래서 고정한다.
+    """
+
+    @pytest.fixture
+    def prod(self, monkeypatch):
+        # prod.py 는 비어 있으면 안 되는 값을 import 시점에 터뜨린다.
+        monkeypatch.setenv("DJANGO_SECRET_KEY", "test-only-not-a-real-key")
+        monkeypatch.setenv("DATABASE_URL", "postgres://u:p@127.0.0.1:5432/db")
+        monkeypatch.setenv("DJANGO_ALLOWED_HOSTS", ".onrender.com")
+        module = importlib.import_module("config.settings.prod")
+        return importlib.reload(module)
+
+    def test_cache_backend_is_not_per_process(self, prod):
+        backend = prod.CACHES["default"]["BACKEND"]
+        assert "locmem" not in backend.lower(), (
+            "LocMemCache 는 프로세스마다 따로다. 워커가 2개면 캐시가 절반만 듣고 "
+            "카카오 하루 한도도 절반이 된다."
+        )
+
+    def test_cache_has_a_location_workers_can_share(self, prod):
+        config = prod.CACHES["default"]
+        assert config.get("LOCATION"), "공유할 자리가 없으면 워커마다 따로 만든다"
+
+    def test_cache_entry_count_is_bounded(self, prod):
+        """지도 한 장이 수십~수백 KB 다. 상한이 없으면 임시 디스크를 채운다."""
+        options = prod.CACHES["default"].get("OPTIONS", {})
+        assert options.get("MAX_ENTRIES", 0) > 0
+
+    def test_importing_prod_does_not_mutate_shared_middleware(self, prod):
+        """`from .base import *` 는 **같은 리스트 객체**를 가져온다.
+
+        복사하지 않고 insert 하면 prod 를 import 한 것만으로 base 의
+        MIDDLEWARE 가 바뀌고, 같은 리스트를 쓰는 test 설정에도 whitenoise 가
+        끼어든다. 이 테스트가 그 경로를 막는다.
+        """
+        base = importlib.import_module("config.settings.base")
+        assert "whitenoise.middleware.WhiteNoiseMiddleware" not in base.MIDDLEWARE
+        assert "whitenoise.middleware.WhiteNoiseMiddleware" in prod.MIDDLEWARE

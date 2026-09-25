@@ -425,9 +425,28 @@ class PlaceStaticMapView(APIView):
                 "invalid_coordinate", "lat 과 lng 가 필요하다."
             )
 
-        level = _positive_int(request.query_params.get("lv"), default=5)
-        width = _positive_int(request.query_params.get("w"), default=360)
-        height = _positive_int(request.query_params.get("h"), default=500)
+        # **범위를 벗어난 값은 조용히 줄이지 않고 거절한다.**
+        #
+        # `clients.static_map` 은 범위로 잘라서 카카오에 보낸다. 그러면 lv=20 을
+        # 요청한 앱은 lv=15 그림을 받아 놓고 자기는 20 기준으로 좌표를 계산한다 —
+        # 경로선이 32배 어긋난 자리에 그려지고, 그림은 정상이라 원인을 찾기 어렵다.
+        # 400 으로 돌려주면 앱이 잘못 물었다는 것을 바로 안다.
+        #
+        # 값이 아예 없거나 숫자가 아니면 기본값을 쓴다. "정하지 않았다" 와
+        # "불가능한 값을 요구했다" 는 다르다.
+        level = _bounded_int(
+            request.query_params.get("lv"), 5,
+            clients.STATIC_MAP_MIN_LEVEL, clients.STATIC_MAP_MAX_LEVEL,
+        )
+        width = _bounded_int(request.query_params.get("w"), 360, 1, clients.STATIC_MAP_MAX_W)
+        height = _bounded_int(request.query_params.get("h"), 500, 1, clients.STATIC_MAP_MAX_H)
+        if level is None or width is None or height is None:
+            return _error_response(
+                "invalid_viewport",
+                f"lv 는 {clients.STATIC_MAP_MIN_LEVEL}~{clients.STATIC_MAP_MAX_LEVEL}, "
+                f"w 는 1~{clients.STATIC_MAP_MAX_W}, h 는 1~{clients.STATIC_MAP_MAX_H} 여야 한다.",
+            )
+
         scale = _positive_int(request.query_params.get("scale"), default=2)
         markers = _parse_markers(request.query_params.get("markers"))
 
@@ -495,6 +514,22 @@ def _positive_int(raw, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return value if value > 0 else default
+
+
+def _bounded_int(raw, default: int, low: int, high: int) -> int | None:
+    """범위 안의 정수. 값이 없거나 숫자가 아니면 [default], 범위를 벗어나면 ``None``.
+
+    셋을 구분하는 것이 요점이다. 없으면 서버가 정하고, 숫자가 아니면 오타로 보고
+    기본값으로 가고, **범위를 벗어나면 거절한다.** 잘라서 쓰면 요청한 값과 다른
+    그림이 200 으로 돌아가고 클라이언트는 그것을 모른다.
+    """
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if low <= value <= high else None
 
 
 def _parse_markers(raw: str | None) -> list[tuple[float, float]]:

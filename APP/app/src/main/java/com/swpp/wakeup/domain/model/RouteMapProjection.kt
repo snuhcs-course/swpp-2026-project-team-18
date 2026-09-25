@@ -90,7 +90,7 @@ object RouteMapProjection {
         val halfW = (requestUnits / 2.0 - marginUnits).coerceAtLeast(1.0)
         val halfH = (requestHeightUnits / 2.0 - marginUnits).coerceAtLeast(1.0)
 
-        for (level in StaticMapScale.BASE_LEVEL..15) {
+        for (level in StaticMapScale.BASE_LEVEL..StaticMapScale.ROUTE_MAX_LEVEL) {
             val mpu = StaticMapScale.metersPerUnit(level)
             val dxUnits = abs(maxLng - minLng) / 2 *
                 StaticMapScale.METERS_PER_DEGREE * cosLat / mpu
@@ -98,6 +98,8 @@ object RouteMapProjection {
                 StaticMapScale.METERS_PER_DEGREE / mpu
             if (dxUnits <= halfW && dyUnits <= halfH) return center to level
         }
-        return center to 15
+        // 가장 축소해도 안 들어가는 경로다. 상한을 준다 — 여기서 더 큰 값을
+        // 돌려주면 줌 버튼이 닿지 못하는 레벨이 되어 조작이 튄다.
+        return center to StaticMapScale.ROUTE_MAX_LEVEL
     }
 }

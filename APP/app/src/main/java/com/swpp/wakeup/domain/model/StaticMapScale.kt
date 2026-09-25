@@ -51,6 +51,21 @@ object StaticMapScale {
     const val MIN_LEVEL = BASE_LEVEL
     const val MAX_LEVEL = 10
 
+    /**
+     * 경로 지도의 줌 상한. 장소 고르기보다 넓다.
+     *
+     * [MAX_LEVEL] 은 **장소를 고르는** 지도의 상한이다. 경로 지도는 목적이
+     * 달라서 그 값으로 자르면 안 된다 — 레벨 10 은 360 단위 폭이 23km 라
+     * 수원에서 서울대까지(약 30km) 같은 통학 경로가 화면에 들어오지 않는다.
+     *
+     * **`RouteMapProjection.fit` 이 고를 수 있는 값과 같아야 한다.** 다르면
+     * 전체 보기가 12를 골랐는데 확대 버튼이 10으로 잘라 한 번 눌렀을 때 두
+     * 단계(4배)가 튀거나, 축소 버튼이 아예 꺼진 채로 남는다.
+     *
+     * 서버 상한(`clients.STATIC_MAP_MAX_LEVEL`)과 같은 15 로 둔다.
+     */
+    const val ROUTE_MAX_LEVEL = 15
+
     /** 장소를 고르기 좋은 기본 줌. 360 단위 폭이 약 1.4km 다 */
     const val DEFAULT_LEVEL = 6
 

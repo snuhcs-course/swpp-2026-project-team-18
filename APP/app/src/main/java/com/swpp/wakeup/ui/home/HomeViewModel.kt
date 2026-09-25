@@ -356,7 +356,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val pendingShift: Offset = Offset.Zero,
     ) {
         val canZoomIn: Boolean get() = level > StaticMapScale.MIN_LEVEL
-        val canZoomOut: Boolean get() = level < StaticMapScale.MAX_LEVEL
+
+        // 장소 고르기와 달리 ROUTE_MAX_LEVEL 을 쓴다. `RouteMapProjection.fit`
+        // 이 고를 수 있는 범위와 같아야 조작이 튀지 않는다.
+        val canZoomOut: Boolean get() = level < StaticMapScale.ROUTE_MAX_LEVEL
     }
 
     private val _routeMap = MutableStateFlow<RouteMapState?>(null)
@@ -1758,7 +1761,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _routeMap.update {
             val next = (it ?: return@update it).level
                 .plus(delta)
-                .coerceIn(StaticMapScale.MIN_LEVEL, StaticMapScale.MAX_LEVEL)
+                // 전체 보기가 고른 레벨까지 닿아야 한다. MAX_LEVEL(10) 로 자르면
+                // 30km 경로에서 전체 보기가 11을 골라 놓고 확대 버튼이 10으로
+                // 끌어내려 한 번에 두 단계가 튄다.
+                .coerceIn(StaticMapScale.MIN_LEVEL, StaticMapScale.ROUTE_MAX_LEVEL)
             it.copy(level = next)
         }
     }

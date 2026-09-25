@@ -112,10 +112,16 @@ STORAGES = {
     },
 }
 
+# **base 의 리스트를 그대로 건드리지 않는다.** `from .base import *` 는 이름만
+# 가져오므로 이 이름은 base 와 **같은 리스트 객체**다. 거기에 insert 하면 이
+# 모듈을 import 한 것만으로 base 의 MIDDLEWARE 가 바뀌고, 같은 리스트를 공유하는
+# test 설정에도 whitenoise 가 끼어든다. 복사해 두면 import 가 부작용을 남기지 않는다.
+MIDDLEWARE = list(MIDDLEWARE)  # noqa: F405
+
 # SecurityMiddleware 바로 뒤에 와야 한다. 순서를 바꾸면 정적 파일 응답에
 # 보안 헤더가 붙지 않는다.
-_security_index = MIDDLEWARE.index("django.middleware.security.SecurityMiddleware")  # noqa: F405
-MIDDLEWARE.insert(_security_index + 1, "whitenoise.middleware.WhiteNoiseMiddleware")  # noqa: F405
+_security_index = MIDDLEWARE.index("django.middleware.security.SecurityMiddleware")
+MIDDLEWARE.insert(_security_index + 1, "whitenoise.middleware.WhiteNoiseMiddleware")
 
 # ---------------------------------------------------------------------------
 # CORS
@@ -127,6 +133,32 @@ CORS_ALLOWED_ORIGINS = [
     for origin in os.getenv("DJANGO_CORS_ORIGINS", "").split(",")
     if origin.strip()
 ]
+
+# ---------------------------------------------------------------------------
+# 캐시
+# ---------------------------------------------------------------------------
+# **워커 사이에서 공유되어야 한다.** 이 설정을 비우면 Django 기본값인
+# LocMemCache 가 쓰이는데 그것은 프로세스마다 따로 있다. render.yaml 이
+# WEB_CONCURRENCY=2 라서 같은 지도를 두 번 요청하면 절반은 다른 워커에 붙어
+# 캐시를 못 찾는다. 배포 서버에서 연속 두 요청이 모두 `X-Jit-Map-Cache: miss`
+# 였다(jit-tools/check_deployed_new.py).
+#
+# 이것은 돈 문제다. 정적 지도는 하루 1,000건 한도이고 지도를 한 번 끌면 여러
+# 장을 부른다. 캐시가 절반만 들으면 쓸 수 있는 한도도 절반이 된다. 지하철
+# 20초·버스 15초·정류소 24시간 캐시도 같은 이유로 절반만 듣고 있었다.
+#
+# 파일 캐시를 쓴다. 워커가 같은 컨테이너에 있으니 파일시스템을 공유하고,
+# DatabaseCache 처럼 Neon(싱가포르, 왕복 약 75ms)을 거치지 않으며 DB 부하도
+# 늘리지 않는다. 재배포하면 비워지지만 한 시간짜리 지도 캐시에는 문제가 없다.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": os.getenv("DJANGO_CACHE_DIR", "/tmp/jit-cache"),
+        # 지도 한 장이 수십~수백 KB 다. 무료 플랜의 임시 디스크를 채우지 않게
+        # 항목 수로 상한을 둔다. 300장이면 3인 팀의 한 시간 사용량을 덮는다.
+        "OPTIONS": {"MAX_ENTRIES": 300},
+    }
+}
 
 # ---------------------------------------------------------------------------
 # 로그
