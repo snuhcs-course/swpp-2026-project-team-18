@@ -7,10 +7,16 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import math
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
-from django.core.cache import cache
+from django.conf import settings
+from django.core.cache import cache, caches
 from django.db import transaction
 from django.http import HttpResponse
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
@@ -29,6 +35,12 @@ from .serializers import (
     EventWriteSerializer,
     PlaceInputSerializer,
 )
+
+
+logger = logging.getLogger(__name__)
+_KST = ZoneInfo("Asia/Seoul")
+_STATIC_MAP_BUDGET_CACHE_ALIAS = "static_map_budget"
+_STATIC_MAP_BUDGET_KEY_PREFIX = "staticmap:upstream-calls"
 
 
 class _UserScopedMixin:
@@ -424,7 +436,8 @@ class PlaceStaticMapView(APIView):
     """
 
     throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "route"
+    # 지도 pan/pinch가 경로 후보·알람 재계산의 한도를 먹지 않게 통을 분리한다.
+    throttle_scope = "static_map"
 
     # 지도 타일은 자주 바뀌지 않는다. 한 시간이면 같은 화면을 여러 번 그려도
     # 카카오 호출은 한 번이다.
@@ -459,7 +472,10 @@ class PlaceStaticMapView(APIView):
                 f"w 는 1~{clients.STATIC_MAP_MAX_W}, h 는 1~{clients.STATIC_MAP_MAX_H} 여야 한다.",
             )
 
-        scale = _positive_int(request.query_params.get("scale"), default=2)
+        # 카카오는 1만 원본 크기이고 나머지는 모두 2배로 정규화한다. cache key도
+        # 먼저 같은 값으로 맞춰 scale=2/3/99가 같은 그림을 따로 저장하지 않게 한다.
+        requested_scale = _positive_int(request.query_params.get("scale"), default=2)
+        scale = 1 if requested_scale == 1 else 2
         markers = _parse_markers(request.query_params.get("markers"))
 
         cache_key = "staticmap:" + hashlib.sha1(
@@ -471,6 +487,18 @@ class PlaceStaticMapView(APIView):
         if cached is not None:
             body, content_type = cached
             return _image_response(body, content_type, hit=True)
+
+        budget_available, retry_after = _reserve_static_map_upstream_call()
+        if not budget_available:
+            response = _error_response(
+                "map_daily_budget_exhausted",
+                "오늘 사용할 수 있는 새 지도를 모두 불러왔습니다. "
+                "지도 없이 장소 목록에서 계속 선택할 수 있고, "
+                "한국 시간 자정 이후 다시 시도할 수 있습니다.",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+            response["Retry-After"] = str(retry_after)
+            return response
 
         body, content_type, degraded = clients.static_map(
             lat=lat, lng=lng, level=level,
@@ -487,6 +515,76 @@ class PlaceStaticMapView(APIView):
 
         cache.set(cache_key, (body, content_type), self.CACHE_SECONDS)
         return _image_response(body, content_type, hit=False)
+
+
+def _static_map_budget_window(now: datetime | None = None) -> tuple[str, int]:
+    """현재 KST 날짜의 카운터 키와 다음 자정까지 남은 초를 돌려준다."""
+
+    now_kst = (now or timezone.now()).astimezone(_KST)
+    next_midnight = datetime.combine(
+        now_kst.date() + timedelta(days=1),
+        time.min,
+        tzinfo=_KST,
+    )
+    retry_after = max(1, math.ceil((next_midnight - now_kst).total_seconds()))
+    key = f"{_STATIC_MAP_BUDGET_KEY_PREFIX}:{now_kst.date().isoformat()}"
+    return key, retry_after
+
+
+def _reserve_static_map_upstream_call() -> tuple[bool, int]:
+    """카카오 정적 지도 호출 한 건을 앱 전체 일일 예산에서 예약한다.
+
+    ``add``로 그날 첫 건을 만들고 이후에는 ``incr``를 쓴다. Redis/LocMem처럼
+    원자적 incr를 제공하는 백엔드에서는 동시 요청도 한도 이내로 정확히
+    제한된다. 배포의 공유 파일 캐시에서도 가능한 한 좁은 read-modify-write
+    경로를 쓰며, 1,000건보다 100건 낮은 기본값이 작은 경쟁 여유를 흡수한다.
+
+    한도에 닿은 뒤에는 더 올리지 않는다. 두 워커가 경계에서 동시에 경쟁해
+    한도를 넘긴 값은 되돌리지 않고 그대로 포화시킨다. FileBasedCache의
+    ``decr``도 비원자적 read-modify-write라 되돌리기가 오히려 허용된 호출을
+    지울 수 있기 때문이다. 캐시가 고장 나도 쿼터 보호를 위해 새 upstream
+    호출을 막는 fail-closed 동작을 한다.
+    """
+
+    key, retry_after = _static_map_budget_window()
+    limit = settings.STATIC_MAP_DAILY_UPSTREAM_LIMIT
+    if limit <= 0:
+        return False, retry_after
+
+    try:
+        budget_cache = caches[_STATIC_MAP_BUDGET_CACHE_ALIAS]
+        current = budget_cache.get(key)
+        if current is not None and current >= limit:
+            return False, retry_after
+
+        # add 실패 뒤 key가 만료/퇴출되는 아주 짧은 경합을 한 번 재시도한다.
+        used = None
+        added = False
+        for _ in range(2):
+            if budget_cache.add(key, 1, timeout=retry_after):
+                used = 1
+                added = True
+                break
+            try:
+                used = budget_cache.incr(key)
+                break
+            except ValueError:
+                continue
+
+        if used is None:
+            logger.error("static map budget counter disappeared during reservation")
+            return False, retry_after
+
+        # FileBasedCache.incr()는 원래 TTL 대신 backend 기본 TTL로 다시 쓴다.
+        # 설정의 25시간 TTL이 안전망이고, touch는 실제 KST 자정에 맞춰 정리한다.
+        if not added and not budget_cache.touch(key, timeout=retry_after):
+            logger.warning("could not refresh static map budget counter expiry")
+
+        # 경계에서 경쟁한 claim은 초과 값을 그대로 남겨 이후 요청을 막는다.
+        return used <= limit, retry_after
+    except Exception:
+        logger.exception("static map budget cache is unavailable")
+        return False, retry_after
 
 
 def _image_response(body: bytes, content_type: str, hit: bool) -> HttpResponse:

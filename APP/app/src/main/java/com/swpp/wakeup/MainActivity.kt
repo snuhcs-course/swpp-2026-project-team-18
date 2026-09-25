@@ -61,6 +61,7 @@ import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.morning.MorningProgressScreen
 import com.swpp.wakeup.sensing.LocationPermissions
+import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.places.MapPickScreen
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
@@ -348,7 +349,13 @@ private fun MainHost(
                 is AppRoute.AlarmDecision -> {
                     // 진행률은 계획(경로)과 추적 위치가 **둘 다** 있어야 낼 수
                     // 있다. 하나라도 없으면 null 로 두고 화면이 이유를 말한다.
-                    val live = tripLive?.takeIf { it.eventId == route.eventId }
+                    val nowMillis = System.currentTimeMillis()
+                    val live = tripLive?.takeIf {
+                        it.eventId == route.eventId &&
+                            it.accuracyM.isFinite() &&
+                            it.accuracyM <= TripGeofence.MAX_ACCURACY_M &&
+                            nowMillis - it.atMillis in 0..2 * 60_000L
+                    }
                     val progress = plan
                         ?.takeIf { it.hasRoutePath }
                         ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
@@ -407,12 +414,10 @@ private fun MainHost(
                         arrivalClock = outlook?.let { arrivalClockLabel(it.predictedMillis) },
                         freshness = live?.let { freshnessLabel(it.atMillis) },
                         routeMap = routeMap?.takeIf { it.eventId == route.eventId },
-                        here = live?.point,
                         onRouteMapViewport = viewModel::loadRouteMapImage,
-                        onRouteMapZoom = viewModel::onRouteMapZoom,
                         onRouteMapFit = viewModel::fitRouteMap,
-                        onRouteMapDrag = viewModel::onRouteMapDrag,
-                        onRouteMapDragEnd = viewModel::onRouteMapDragEnd,
+                        onRouteMapGestureEnd = viewModel::onRouteMapGestureEnd,
+                        onRouteMapRecenter = viewModel::onRouteMapRecenter,
                     )
                 }
 
@@ -470,9 +475,7 @@ private fun MainHost(
                     MapPickScreen(
                         state = map,
                         onViewport = viewModel::loadMapImage,
-                        onDrag = viewModel::onMapDrag,
-                        onDragEnd = viewModel::onMapDragEnd,
-                        onZoom = viewModel::onMapZoom,
+                        onGestureEnd = viewModel::onMapGestureEnd,
                         onRecenter = viewModel::onMapRecenter,
                         onResearch = viewModel::researchMapArea,
                         onSelect = viewModel::onMapPlaceSelected,
@@ -481,7 +484,6 @@ private fun MainHost(
                             viewModel.closeMapPick()
                             viewModel.goBack()
                         },
-                        currentPoint = viewModel.currentPoint,
                         onOpenPlaceUrl = openPlaceUrl,
                         modifier = Modifier.padding(innerPadding),
                     )

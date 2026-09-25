@@ -44,6 +44,8 @@ import com.swpp.wakeup.domain.model.RouteSegments
 import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.sensing.GeoPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import retrofit2.Response
 import java.io.IOException
 import java.time.Duration
@@ -52,6 +54,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 
 /**
  * 일정 저장소.
@@ -357,11 +360,19 @@ class EventRepository(
     ): Result<Bitmap> {
         val markerParam = markers
             .take(StaticMapScale.MARKER_LIMIT)
-            .joinToString(";") { "%.6f,%.6f".format(it.lat, it.lng) }
+            .joinToString(";") {
+                "%.6f,%.6f".format(Locale.ROOT, it.lat, it.lng)
+            }
             .takeIf { it.isNotBlank() }
 
         val key = "%.6f,%.6f,%d,%d,%d,%s".format(
-            center.lat, center.lng, level, widthDp, heightDp, markerParam.orEmpty()
+            Locale.ROOT,
+            center.lat,
+            center.lng,
+            level,
+            widthDp,
+            heightDp,
+            markerParam.orEmpty(),
         )
         mapCache[key]?.let { return Result.Success(it) }
 
@@ -379,8 +390,12 @@ class EventRepository(
                 return@guard Result.Failure(errorMessage(response))
             }
 
-            val bytes = body.use { it.bytes() }
-            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            // overscan 지도는 수 MB다. bytes()/decode를 Main에서 하면 손가락을
+            // 뗀 직후 화면이 멈추므로 읽기와 디코딩을 모두 IO에서 한다.
+            val bitmap = withContext(Dispatchers.IO) {
+                val bytes = body.use { it.bytes() }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            }
                 ?: return@guard Result.Failure("지도 이미지를 읽지 못했다.")
 
             synchronized(mapCache) {
@@ -437,7 +452,11 @@ class EventRepository(
             sort = sort,
             rect = rect,
         )
-        unwrap(response)?.let { Result.Success(it) } ?: Result.Failure(errorMessage(response))
+        val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
+        if (body.degraded) {
+            return@guard Result.Failure("장소 검색 결과를 불러오지 못했다.")
+        }
+        Result.Success(body)
     }
 
     suspend fun tags(): Result<List<EventTagDto>> = guard {
@@ -675,7 +694,7 @@ class EventRepository(
          * 720x1000 ARGB 한 장이 약 2.9MB 다. 네 장이면 12MB 로, 옮겼다 되돌리는
          * 동작을 덮으면서도 알람 앱이 들고 있을 만한 크기다.
          */
-        const val MAP_CACHE_MAX = 4
+        const val MAP_CACHE_MAX = 2
 
         /**
          * 삽입 순서를 지키는 맵. 가장 오래된 것을 먼저 버린다.

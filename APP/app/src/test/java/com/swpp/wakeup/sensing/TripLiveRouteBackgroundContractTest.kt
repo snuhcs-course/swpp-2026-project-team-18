@@ -33,6 +33,16 @@ class TripLiveRouteBackgroundContractTest {
         assertTrue("사본을 지운 뒤 서비스가 다시 쓰지 않도록 먼저 멈춰야 한다", stop < wipe)
     }
 
+    @Test
+    fun `화면 복귀 시 저장 경로가 현재 위치 기준 주 경로가 된다`() {
+        val viewModel = readSource("ui/home/HomeViewModel.kt")
+
+        assertTrue(viewModel.contains("cachedRoute != null -> true"))
+        assertTrue(viewModel.contains("path = usable.path"))
+        assertTrue(viewModel.contains("pathFromCurrent = true"))
+        assertFalse(viewModel.contains("altPath = live.path"))
+    }
+
     private fun readSource(relative: String): String {
         val path = "src/main/java/com/swpp/wakeup/$relative"
         val candidates = listOf(File(path), File("app/$path"), File("../app/$path"), File("APP/app/$path"))

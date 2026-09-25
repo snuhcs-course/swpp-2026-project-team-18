@@ -11,16 +11,34 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
-from django.core.cache import cache
+from django.core.cache import cache, caches
+from django.test import override_settings
 from rest_framework.test import APIClient
 
+from apps.events import views as event_views
 from apps.routing import clients
 
 pytestmark = pytest.mark.django_db
 
 SEARCH_URL = "/api/places/search"
 MAP_URL = "/api/places/staticmap"
+
+
+def test_static_map_budget_window_rolls_over_at_kst_midnight():
+    before_key, before_retry = event_views._static_map_budget_window(
+        datetime(2026, 1, 1, 14, 59, 59, tzinfo=timezone.utc)
+    )
+    after_key, after_retry = event_views._static_map_budget_window(
+        datetime(2026, 1, 1, 15, 0, 0, tzinfo=timezone.utc)
+    )
+
+    assert before_key.endswith(":2026-01-01")
+    assert before_retry == 1
+    assert after_key.endswith(":2026-01-02")
+    assert after_retry == 24 * 60 * 60
 
 
 @pytest.fixture
@@ -40,8 +58,10 @@ def client(user):
 @pytest.fixture(autouse=True)
 def clear_cache():
     cache.clear()
+    caches["static_map_budget"].clear()
     yield
     cache.clear()
+    caches["static_map_budget"].clear()
 
 
 @pytest.fixture
@@ -139,6 +159,98 @@ class TestStaticMapView:
         assert second.content == first.content
         assert len(fake_map) == 1, "같은 화면인데 카카오를 두 번 불렀다"
 
+    @override_settings(STATIC_MAP_DAILY_UPSTREAM_LIMIT=2)
+    def test_daily_budget_blocks_the_third_distinct_cache_miss(self, client, fake_map):
+        first = client.get(f"{MAP_URL}?lat=37.4783&lng=126.9516")
+        second = client.get(f"{MAP_URL}?lat=37.4784&lng=126.9516")
+        blocked = client.get(f"{MAP_URL}?lat=37.4785&lng=126.9516")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert blocked.status_code == 503
+        assert blocked.data["error"]["code"] == "map_daily_budget_exhausted"
+        assert "목록" in blocked.data["error"]["message"]
+        assert int(blocked["Retry-After"]) > 0
+        assert len(fake_map) == 2, "예산을 넘긴 요청이 카카오를 불렀다"
+        budget_key, _ = event_views._static_map_budget_window()
+        assert caches["static_map_budget"].get(budget_key) == 2
+
+    @override_settings(STATIC_MAP_DAILY_UPSTREAM_LIMIT=1)
+    def test_cache_hit_does_not_spend_daily_budget(self, client, fake_map):
+        url = f"{MAP_URL}?lat=37.4783&lng=126.9516"
+        first = client.get(url)
+        cached = client.get(url)
+        blocked = client.get(f"{MAP_URL}?lat=37.4784&lng=126.9516")
+
+        assert first["X-Jit-Map-Cache"] == "miss"
+        assert cached["X-Jit-Map-Cache"] == "hit"
+        assert blocked.status_code == 503
+        assert len(fake_map) == 1
+
+    @override_settings(STATIC_MAP_DAILY_UPSTREAM_LIMIT=1)
+    def test_failed_upstream_attempt_still_spends_budget(self, client, monkeypatch):
+        calls = []
+
+        def unavailable(**kwargs):
+            calls.append(kwargs)
+            return None, "", True
+
+        monkeypatch.setattr(clients, "static_map", unavailable)
+        first = client.get(f"{MAP_URL}?lat=37.4783&lng=126.9516")
+        blocked = client.get(f"{MAP_URL}?lat=37.4784&lng=126.9516")
+
+        assert first.status_code == 503
+        assert first.data["error"]["code"] == "map_unavailable"
+        assert blocked.status_code == 503
+        assert blocked.data["error"]["code"] == "map_daily_budget_exhausted"
+        assert len(calls) == 1
+
+    @override_settings(STATIC_MAP_DAILY_UPSTREAM_LIMIT=1)
+    def test_budget_retries_if_key_disappears_between_add_and_incr(self, monkeypatch):
+        class RacingCache:
+            add_calls = 0
+            incr_calls = 0
+
+            def get(self, key):
+                return None
+
+            def add(self, key, value, timeout):
+                self.add_calls += 1
+                return self.add_calls == 2
+
+            def incr(self, key):
+                self.incr_calls += 1
+                raise ValueError("expired between add and incr")
+
+        racing_cache = RacingCache()
+        monkeypatch.setattr(
+            event_views,
+            "caches",
+            {"static_map_budget": racing_cache},
+        )
+
+        allowed, retry_after = event_views._reserve_static_map_upstream_call()
+
+        assert allowed is True
+        assert retry_after > 0
+        assert racing_cache.add_calls == 2
+        assert racing_cache.incr_calls == 1
+
+    def test_budget_cache_failure_is_503_without_upstream_call(
+        self, client, fake_map, monkeypatch
+    ):
+        class BrokenCaches:
+            def __getitem__(self, alias):
+                raise OSError("cache unavailable")
+
+        monkeypatch.setattr(event_views, "caches", BrokenCaches())
+
+        response = client.get(f"{MAP_URL}?lat=37.4783&lng=126.9516")
+
+        assert response.status_code == 503
+        assert response.data["error"]["code"] == "map_daily_budget_exhausted"
+        assert fake_map == []
+
     def test_different_center_is_a_separate_call(self, client, fake_map):
         client.get(f"{MAP_URL}?lat=37.4783&lng=126.9516&lv=5&w=360&h=500")
         client.get(f"{MAP_URL}?lat=37.5000&lng=126.9516&lv=5&w=360&h=500")
@@ -149,6 +261,16 @@ class TestStaticMapView:
         client.get(base)
         client.get(f"{base}&markers=37.48,126.95")
         assert len(fake_map) == 2
+
+    def test_equivalent_scales_share_one_cache_entry(self, client, fake_map):
+        base = f"{MAP_URL}?lat=37.4783&lng=126.9516&lv=5&w=360&h=500"
+        first = client.get(f"{base}&scale=3")
+        second = client.get(f"{base}&scale=99")
+
+        assert first["X-Jit-Map-Cache"] == "miss"
+        assert second["X-Jit-Map-Cache"] == "hit"
+        assert fake_map[0]["scale"] == 2
+        assert len(fake_map) == 1
 
     def test_markers_are_parsed_into_pairs(self, client, fake_map):
         client.get(

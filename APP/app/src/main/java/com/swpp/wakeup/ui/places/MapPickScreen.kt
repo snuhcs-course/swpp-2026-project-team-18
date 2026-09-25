@@ -1,8 +1,10 @@
 package com.swpp.wakeup.ui.places
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -15,36 +17,52 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.Image
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.swpp.wakeup.data.remote.PlaceSearchItem
+import com.swpp.wakeup.domain.model.MapCameraMath
 import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.ui.common.JitPrimaryButton
+import com.swpp.wakeup.ui.common.KakaoMapAttribution
+import com.swpp.wakeup.ui.common.mapGestures
+import com.swpp.wakeup.ui.common.rememberMapGestureState
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
+import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
@@ -69,34 +87,30 @@ private val SHEET_LIST_MAX_HEIGHT = 210.dp
  * 부르므로 앱에는 키가 없고 등록할 것도 없다. 다른 카카오 호출과 같은 규정
  * (back-spec.md 5.3 프록시)이기도 하다.
  *
- * ## 이미지 지도로 어떻게 움직이는가
+ * 배경은 화면보다 크게 받은 정적 지도 한 장이지만, pan·pinch 중에는 그 장과
+ * 모든 표식을 같은 변환으로 즉시 움직인다. 손을 뗐을 때만 새 카메라를 확정해
+ * API를 호출하므로 조작감과 호출량을 함께 지킨다.
  *
- * 끄는 동안은 **이미지를 밀어 보여 주기만** 한다. 손가락을 떼는 순간 중심을
- * 옮겨 새 이미지를 받는다. 끄는 중에 매번 받으면 초당 몇 번씩 호출해 하루
- * 한도(1,000건)를 몇 분에 태운다.
- *
- * 핀을 눌러 고르는 방식은 쓸 수 없다 — 마커는 카카오가 이미지에 그려 넣으므로
- * 어느 픽셀이 어느 장소인지 앱이 알 수 없다. 대신 **아래 목록에서 고르면 지도가
- * 그 자리로 옮겨 간다.** 고른 것이 항상 화면 가운데에 온다.
+ * 장소 핀은 PNG에 굽지 않고 앱이 직접 그린다. 그래야 아래 목록과 정확히 같은
+ * 다섯 곳만 표시할 수 있고, 고른 핀 하나만 보라색으로 바꾸거나 핀 자체를 눌러
+ * 선택할 수 있다.
  */
 @Composable
 fun MapPickScreen(
     state: HomeViewModel.MapPickState,
     /** 화면 크기를 알았을 때 지도 이미지를 받으라고 알린다 */
     onViewport: (widthDp: Int, heightDp: Int) -> Unit,
-    onDrag: (androidx.compose.ui.geometry.Offset) -> Unit,
-    onDragEnd: (metersPerPixel: Double) -> Unit,
-    onZoom: (Int) -> Unit,
+    onGestureEnd: (pan: Offset, zoom: Float, metersPerPixel: Double) -> Unit,
     onRecenter: () -> Unit,
     onResearch: (widthPx: Int, heightPx: Int, metersPerPixel: Double) -> Unit,
     onSelect: (PlaceSearchItem) -> Unit,
     onConfirm: () -> Unit,
     onBack: () -> Unit,
-    /** 현재 위치. 모르면 내 위치 점을 그리지 않는다 */
-    currentPoint: com.swpp.wakeup.sensing.GeoPoint?,
     modifier: Modifier = Modifier,
     onOpenPlaceUrl: ((String) -> Unit)? = null,
 ) {
+    val gestureState = rememberMapGestureState()
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -108,6 +122,7 @@ fun MapPickScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .clipToBounds()
                 .background(JitColor.Surface),
         ) {
             val density = LocalDensity.current
@@ -129,28 +144,125 @@ fun MapPickScreen(
             }
 
             val bitmap = state.image
-            if (bitmap != null) {
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "지도",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        // 끄는 동안은 이미지를 그만큼 밀어 둔다. 새 이미지를 받기
-                        // 전까지 화면이 손가락을 따라오게 하는 것이 목적이다.
-                        .offset {
-                            IntOffset(
-                                state.pendingShift.x.roundToInt(),
-                                state.pendingShift.y.roundToInt(),
+            val frameCenter = state.imageCenter ?: state.center
+            val frameLevel = state.imageLevel ?: state.level
+            val frameWidthDp = state.imageWidthDp.takeIf { it > 0 } ?: widthDp
+            val frameHeightDp = state.imageHeightDp.takeIf { it > 0 } ?: heightDp
+            val frameWidthPx = with(density) { frameWidthDp.dp.toPx() }
+            val frameHeightPx = with(density) { frameHeightDp.dp.toPx() }
+            val frameCenterOffset = MapCameraMath.offsetPx(
+                point = frameCenter,
+                center = state.center,
+                metersPerPixel = metersPerPixel,
+            )
+            val persistentFrameScale = MapCameraMath.frameScale(frameLevel, state.level)
+            val visualTransform = mapVisualTransform(
+                pan = gestureState.pan,
+                zoom = gestureState.zoom,
+                frameCenterOffset = frameCenterOffset,
+                persistentFrameScale = persistentFrameScale,
+                frameWidthPx = frameWidthPx,
+                frameHeightPx = frameHeightPx,
+                viewportWidthPx = widthPx.toFloat(),
+                viewportHeightPx = heightPx.toFloat(),
+            )
+
+            // 터치 영역은 움직이는 이미지가 아니라 viewport 전체다. 큰 이미지를
+            // 밀었을 때 드러난 가장자리에서도 다음 손짓을 바로 이어 갈 수 있다.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .mapGestures(
+                        state = gestureState,
+                        enabled = bitmap != null,
+                        onGestureEnd = { pan, zoom ->
+                            val end = mapVisualTransform(
+                                pan = pan,
+                                zoom = zoom,
+                                frameCenterOffset = frameCenterOffset,
+                                persistentFrameScale = persistentFrameScale,
+                                frameWidthPx = frameWidthPx,
+                                frameHeightPx = frameHeightPx,
+                                viewportWidthPx = widthPx.toFloat(),
+                                viewportHeightPx = heightPx.toFloat(),
+                            )
+                            onGestureEnd(
+                                end.committedPan,
+                                end.committedZoom,
+                                metersPerPixel,
+                            )
+                        },
+                    ),
+            ) {
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "장소 선택 지도",
+                        contentScale = ContentScale.FillBounds,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .requiredSize(frameWidthDp.dp, frameHeightDp.dp)
+                            .graphicsLayer {
+                                translationX = visualTransform.frameTranslation.x
+                                translationY = visualTransform.frameTranslation.y
+                                scaleX = visualTransform.frameScale
+                                scaleY = visualTransform.frameScale
+                            },
+                    )
+                }
+
+                // 선택 핀을 마지막에 그려 겹친 장소가 있어도 항상 위에 보인다.
+                state.markers
+                    .withIndex()
+                    .sortedBy { indexed -> state.isSelected(indexed.value) }
+                    .forEach { indexed ->
+                        val place = indexed.value
+                        val picked = state.isSelected(place)
+                        key(placeStableKey(place, indexed.index)) {
+                            val pointOffset = MapCameraMath.offsetPx(
+                                point = com.swpp.wakeup.sensing.GeoPoint(place.lat, place.lng),
+                                center = state.center,
+                                metersPerPixel = metersPerPixel,
+                            )
+                            PlaceMarker(
+                                number = indexed.index + 1,
+                                name = place.name,
+                                selected = picked,
+                                offsetPx = pointOffset * visualTransform.overlayZoom +
+                                    visualTransform.overlayPan,
+                                onClick = { onSelect(place) },
+                                modifier = Modifier.align(Alignment.Center),
                             )
                         }
-                        .pointerInput(state.level, state.center) {
-                            detectDragGestures(
-                                onDragEnd = { onDragEnd(metersPerPixel) },
-                                onDragCancel = { onDragEnd(metersPerPixel) },
-                            ) { _, delta -> onDrag(delta) }
-                        },
-                )
+                    }
+
+                state.currentLocation?.let { fix ->
+                    val pointOffset = MapCameraMath.offsetPx(
+                        point = fix.point,
+                        center = state.center,
+                        metersPerPixel = metersPerPixel,
+                    ) * visualTransform.overlayZoom + visualTransform.overlayPan
+                    // 일부 기기는 accuracy를 보고하지 않는다. 그때 ViewModel은
+                    // Float.MAX_VALUE로 표시하므로 크기를 그대로 dp로 바꾸면 레이아웃이
+                    // 넘친다. 실제 원이 화면보다 크면 어차피 viewport 전체를 덮으므로
+                    // 화면 긴 변까지만 그려도 같은 정보를 전달한다.
+                    val reportedAccuracyM = fix.accuracyM
+                        .takeIf { it.isFinite() && it in 0f..100_000f }
+                    val accuracyM = reportedAccuracyM ?: 0f
+                    val accuracyRadiusPx = (
+                        (accuracyM / metersPerPixel).toFloat() * visualTransform.overlayZoom
+                    ).coerceAtMost(max(widthPx, heightPx).toFloat())
+                    if (abs(pointOffset.x) <= widthPx / 2f + accuracyRadiusPx &&
+                        abs(pointOffset.y) <= heightPx / 2f + accuracyRadiusPx
+                    ) {
+                        CurrentLocationMarker(
+                            offsetPx = pointOffset,
+                            accuracyRadiusPx = accuracyRadiusPx,
+                            accuracyM = reportedAccuracyM,
+                            modifier = Modifier.align(Alignment.Center),
+                        )
+                    }
+                }
             }
 
             if (state.imageLoading && bitmap == null) {
@@ -161,40 +273,56 @@ fun MapPickScreen(
                 )
             }
 
+            bitmap?.let {
+                KakaoMapAttribution(
+                    bitmap = it,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(start = 6.dp, bottom = 6.dp),
+                )
+            }
+
+            if (state.imageLoading && bitmap != null) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(14.dp)
+                        .size(16.dp),
+                    color = JitColor.Blue,
+                    strokeWidth = 2.dp,
+                )
+            }
+
             // 지도를 못 받아도 화면을 막지 않는다. 아래 목록으로 계속 고른다.
             if (bitmap == null && !state.imageLoading) {
                 Text(
-                    text = state.imageError ?: "지도를 불러오는 중",
+                    text = state.imageError?.let { "$it · 탭하여 재시도" }
+                        ?: "지도를 불러오는 중",
                     color = JitColor.TextSecondary,
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier
                         .align(Alignment.Center)
+                        .clickable(enabled = state.imageError != null) {
+                            onViewport(widthDp, heightDp)
+                        }
                         .padding(horizontal = 32.dp),
                 )
             }
 
-            // 카카오가 그린 마커는 눌러도 어느 장소인지 알 수 없으므로, 가운데
-            // 표식으로 "이것을 골랐다" 를 가리킨다. 단 **실제로 중앙에 있을
-            // 때만** 그린다 — 끌기·줌·재검색은 중심을 그대로 두고 선택만 바꾸므로,
-            // 그때도 그리면 빈 자리를 가리키며 거짓을 말한다.
-            if (state.selectedAtCenter) {
-                CenterPin(Modifier.align(Alignment.Center))
-            }
-
-            // 내 위치. 중심에서 얼마나 떨어졌는지를 실측 축척으로 계산해 찍는다.
-            if (currentPoint != null) {
-                MyLocationDot(
-                    offsetPx = StaticMapScale.let {
-                        val dLat = currentPoint.lat - state.center.lat
-                        val dLng = currentPoint.lng - state.center.lng
-                        val cos = kotlin.math.cos(Math.toRadians(state.center.lat))
-                        val dyPx = -(dLat * StaticMapScale.METERS_PER_DEGREE) / metersPerPixel
-                        val dxPx = (dLng * StaticMapScale.METERS_PER_DEGREE * cos) / metersPerPixel
-                        androidx.compose.ui.geometry.Offset(dxPx.toFloat(), dyPx.toFloat())
-                    },
-                    visible = { dx, dy -> kotlin.math.abs(dx) < widthPx / 2f && kotlin.math.abs(dy) < heightPx / 2f },
-                    modifier = Modifier.align(Alignment.Center),
+            // 새 지도를 못 받았어도 마지막 정상 bitmap과 목록 조작은 그대로 둔다.
+            if (bitmap != null && state.imageError != null) {
+                Text(
+                    text = "이전 지도를 표시 중 · 탭하여 재시도",
+                    color = JitColor.TextSecondary,
+                    fontSize = 10.sp,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(12.dp)
+                        .clip(CircleShape)
+                        .background(JitColor.Bg.copy(alpha = 0.9f))
+                        .clickable { onViewport(widthDp, heightDp) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
                 )
             }
 
@@ -212,15 +340,12 @@ fun MapPickScreen(
                 )
             }
 
-            Column(
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 14.dp, bottom = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                MapFab(glyph = "＋", enabled = state.canZoomIn) { onZoom(-1) }
-                MapFab(glyph = "－", enabled = state.canZoomOut) { onZoom(1) }
-                MapFab(glyph = "◎", enabled = true, onClick = onRecenter)
+                LocationFab(locating = state.locating, onClick = onRecenter)
             }
 
             state.error?.let {
@@ -230,7 +355,7 @@ fun MapPickScreen(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
-                        .align(Alignment.BottomStart)
+                        .align(Alignment.BottomCenter)
                         .padding(14.dp)
                         .clip(RoundedCornerShape(JitRadius.Hint))
                         .background(JitColor.Bg)
@@ -249,6 +374,74 @@ fun MapPickScreen(
 }
 
 // ---------------------------------------------------------------------------
+
+/** 마지막 bitmap과 현재 카메라 사이의 차이 및 손짓을 한 변환으로 합친 값. */
+private data class MapVisualTransform(
+    val frameScale: Float,
+    val frameTranslation: Offset,
+    val overlayZoom: Float,
+    val overlayPan: Offset,
+    /** overscan 경계 보정은 빼고 실제 사용자가 움직인 만큼만 남긴 값. */
+    val committedPan: Offset,
+    /** 자동 빈 면 보정을 제외한 실제 사용자 pinch 배율. */
+    val committedZoom: Float,
+)
+
+private fun mapVisualTransform(
+    pan: Offset,
+    zoom: Float,
+    frameCenterOffset: Offset,
+    persistentFrameScale: Float,
+    frameWidthPx: Float,
+    frameHeightPx: Float,
+    viewportWidthPx: Float,
+    viewportHeightPx: Float,
+): MapVisualTransform {
+    // 두 배 overscan도 한 번에 아주 크게 축소하면 viewport보다 작아질 수 있다.
+    // 배경만 작아져 빈 테두리가 생기지 않도록 보이는 동안만 최소 배율을 둔다.
+    val minimumCoverScale = max(
+        viewportWidthPx / frameWidthPx.coerceAtLeast(1f),
+        viewportHeightPx / frameHeightPx.coerceAtLeast(1f),
+    )
+    val frameZoom = MapCameraMath.resolveFrameZoom(
+        persistentFrameScale = persistentFrameScale,
+        gestureScale = zoom,
+        minimumCoverScale = minimumCoverScale,
+    )
+    val totalFrameScale = frameZoom.displayScale
+    val overlayZoom = frameZoom.overlayScale
+    val scaledFrameCenterOffset = frameCenterOffset * overlayZoom
+    val displayedPan = MapCameraMath.clampPan(
+        requested = pan,
+        frameCenterOffset = scaledFrameCenterOffset,
+        frameWidthPx = frameWidthPx,
+        frameHeightPx = frameHeightPx,
+        frameScale = totalFrameScale,
+        viewportWidthPx = viewportWidthPx,
+        viewportHeightPx = viewportHeightPx,
+    )
+    // 마지막 frame이 새 카메라에서 너무 멀면 빈 면을 막기 위해 기본 보정이
+    // 생긴다. 그 보정까지 새 camera pan으로 넘기면 손을 떼는 순간 지도가 튄다.
+    val coverageCorrection = MapCameraMath.clampPan(
+        requested = Offset.Zero,
+        frameCenterOffset = scaledFrameCenterOffset,
+        frameWidthPx = frameWidthPx,
+        frameHeightPx = frameHeightPx,
+        frameScale = totalFrameScale,
+        viewportWidthPx = viewportWidthPx,
+        viewportHeightPx = viewportHeightPx,
+    )
+    return MapVisualTransform(
+        frameScale = totalFrameScale,
+        frameTranslation = scaledFrameCenterOffset + displayedPan,
+        overlayZoom = overlayZoom,
+        overlayPan = displayedPan,
+        committedPan = displayedPan - coverageCorrection,
+        // overlayZoom에는 오래된 frame이 빈 면을 만들지 않게 하는 자동 확대가
+        // 들어 있다. 카메라에는 실제 pinch만 확정해야 연속 손짓이 역전되지 않는다.
+        committedZoom = frameZoom.committedGestureScale,
+    )
+}
 
 @Composable
 private fun MapTopBar(query: String, onBack: () -> Unit) {
@@ -280,21 +473,78 @@ private fun MapTopBar(query: String, onBack: () -> Unit) {
     }
 }
 
-/** 고른 장소를 가리키는 중앙 표식. */
+/** 목록과 같은 번호를 가진 장소 핀. 핀 끝이 실제 좌표에 닿는다. */
 @Composable
-private fun CenterPin(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.size(34.dp), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .size(34.dp)
-                .clip(CircleShape)
-                .background(JitColor.Accent.copy(alpha = 0.22f))
-        )
-        Box(
-            Modifier
-                .size(16.dp)
-                .clip(CircleShape)
-                .background(JitColor.Accent)
+private fun PlaceMarker(
+    number: Int,
+    name: String,
+    selected: Boolean,
+    offsetPx: Offset,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val halfHitTargetPx = with(density) { 24.dp.toPx() }
+    val color = if (selected) JitColor.Purple else JitColor.Blue
+    Box(
+        modifier = modifier
+            .offset {
+                IntOffset(
+                    x = offsetPx.x.roundToInt(),
+                    y = (offsetPx.y - halfHitTargetPx).roundToInt(),
+                )
+            }
+            .zIndex(if (selected) 3f else 1f)
+            .size(48.dp)
+            .semantics {
+                contentDescription = "${number}번 $name${if (selected) ", 선택됨" else ""}"
+                role = Role.Button
+            }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Canvas(Modifier.width(32.dp).height(40.dp)) {
+            val centerX = size.width / 2f
+            val headCenterY = size.width * 0.45f
+            val path = Path().apply {
+                moveTo(centerX, size.height)
+                cubicTo(
+                    size.width * 0.40f, size.height * 0.78f,
+                    size.width * 0.08f, size.height * 0.61f,
+                    size.width * 0.08f, headCenterY,
+                )
+                cubicTo(
+                    size.width * 0.08f, size.height * 0.13f,
+                    size.width * 0.28f, 0f,
+                    centerX, 0f,
+                )
+                cubicTo(
+                    size.width * 0.72f, 0f,
+                    size.width * 0.92f, size.height * 0.13f,
+                    size.width * 0.92f, headCenterY,
+                )
+                cubicTo(
+                    size.width * 0.92f, size.height * 0.61f,
+                    size.width * 0.60f, size.height * 0.78f,
+                    centerX, size.height,
+                )
+                close()
+            }
+            drawPath(path, color)
+            drawCircle(
+                color = Color.White,
+                radius = size.width * 0.20f,
+                center = Offset(centerX, headCenterY),
+            )
+        }
+        Text(
+            text = number.toString(),
+            color = color,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .offset(y = (-2).dp),
         )
     }
 }
@@ -306,28 +556,41 @@ private fun CenterPin(modifier: Modifier = Modifier) {
  * 하나로 읽힌다. 지도 앱들이 쓰는 방식대로 점은 작게, 정확도 원은 넓게 둔다.
  */
 @Composable
-private fun MyLocationDot(
-    offsetPx: androidx.compose.ui.geometry.Offset,
-    visible: (Float, Float) -> Boolean,
+private fun CurrentLocationMarker(
+    offsetPx: Offset,
+    accuracyRadiusPx: Float,
+    accuracyM: Float?,
     modifier: Modifier = Modifier,
 ) {
-    if (!visible(offsetPx.x, offsetPx.y)) return
+    val density = LocalDensity.current
+    val haloDiameter = with(density) {
+        (accuracyRadiusPx * 2f)
+            .coerceAtLeast(28.dp.toPx())
+            .toDp()
+    }
     Box(
         modifier = modifier
             .offset { IntOffset(offsetPx.x.roundToInt(), offsetPx.y.roundToInt()) }
-            .size(44.dp),
+            .requiredSize(haloDiameter)
+            .zIndex(2f)
+            .semantics {
+                contentDescription = accuracyM?.let {
+                    "현재 위치, 오차 약 ${it.roundToInt()}미터"
+                } ?: "현재 위치, 정확도 정보 없음"
+            },
         contentAlignment = Alignment.Center,
     ) {
         Box(
             Modifier
-                .size(44.dp)
+                .fillMaxSize()
                 .clip(CircleShape)
                 .background(JitColor.Blue.copy(alpha = 0.16f))
         )
         Box(
             Modifier
-                .size(14.dp)
+                .size(18.dp)
                 .clip(CircleShape)
+                .border(2.dp, Color.White, CircleShape)
                 .background(JitColor.Blue)
         )
     }
@@ -364,29 +627,68 @@ private fun MapPill(
 }
 
 @Composable
-private fun MapFab(glyph: String, enabled: Boolean, onClick: () -> Unit) {
+private fun LocationFab(locating: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(JitColor.Bg)
-            .clickable(enabled = enabled, onClick = onClick),
+            .semantics {
+                contentDescription = if (locating) "현재 위치 확인 중" else "현재 위치로 지도 이동"
+                role = Role.Button
+            }
+            .clickable(enabled = !locating, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = glyph,
-            color = if (enabled) JitColor.Accent else JitColor.TextSecondary,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        if (locating) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                color = JitColor.Blue,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            // 글꼴마다 모양이 달라지는 특수문자 대신 직접 그린 표준 위치 표식.
+            Canvas(Modifier.size(24.dp)) {
+                val center = Offset(size.width / 2f, size.height / 2f)
+                drawCircle(
+                    color = JitColor.Blue,
+                    radius = size.minDimension * 0.30f,
+                    center = center,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = size.minDimension * 0.08f,
+                    ),
+                )
+                drawCircle(
+                    color = JitColor.Blue,
+                    radius = size.minDimension * 0.08f,
+                    center = center,
+                )
+                val arm = size.minDimension * 0.16f
+                val stroke = size.minDimension * 0.08f
+                drawLine(JitColor.Blue, Offset(center.x, 0f), Offset(center.x, arm), stroke)
+                drawLine(
+                    JitColor.Blue,
+                    Offset(center.x, size.height - arm),
+                    Offset(center.x, size.height),
+                    stroke,
+                )
+                drawLine(JitColor.Blue, Offset(0f, center.y), Offset(arm, center.y), stroke)
+                drawLine(
+                    JitColor.Blue,
+                    Offset(size.width - arm, center.y),
+                    Offset(size.width, center.y),
+                    stroke,
+                )
+            }
+        }
     }
 }
 
 /**
  * 하단 시트.
  *
- * 핀을 눌러 고르는 대신 여기서 고른다 — 마커는 카카오가 이미지에 그려 넣어
- * 앱이 좌표를 알 수 없다. 고르면 지도가 그 자리로 옮겨 간다.
+ * 지도 핀과 목록은 같은 순서·번호를 쓴다. 어느 쪽을 눌러도 같은 장소가
+ * 선택되고, 지도에서는 그 핀 하나만 보라색으로 바뀐다.
  */
 @Composable
 private fun MapSheet(
@@ -441,13 +743,15 @@ private fun MapSheet(
         ) {
             state.markers.forEachIndexed { index, place ->
                 if (index > 0) HorizontalDivider(color = JitColor.Bg)
-                MapSheetRow(
-                    place = place,
-                    picked = place === state.selected ||
-                        (place.kakaoPlaceId != null && place.kakaoPlaceId == state.selected?.kakaoPlaceId),
-                    onClick = { onSelect(place) },
-                    onOpenPlaceUrl = onOpenPlaceUrl,
-                )
+                key(placeStableKey(place, index)) {
+                    MapSheetRow(
+                        number = index + 1,
+                        place = place,
+                        picked = state.isSelected(place),
+                        onClick = { onSelect(place) },
+                        onOpenPlaceUrl = onOpenPlaceUrl,
+                    )
+                }
             }
         }
 
@@ -461,6 +765,7 @@ private fun MapSheet(
 
 @Composable
 private fun MapSheetRow(
+    number: Int,
     place: PlaceSearchItem,
     picked: Boolean,
     onClick: () -> Unit,
@@ -473,11 +778,26 @@ private fun MapSheetRow(
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(if (picked) JitColor.Purple else JitColor.Blue),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = number.toString(),
+                color = Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = place.name,
-                    color = if (picked) JitColor.Accent else JitColor.TextPrimary,
+                    color = if (picked) JitColor.Purple else JitColor.TextPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
@@ -530,10 +850,15 @@ private fun MapSheetRow(
         if (picked) {
             Text(
                 text = "✓",
-                color = JitColor.Accent,
+                color = JitColor.Purple,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
     }
 }
+
+/** 카카오 ID가 없는 역지오코딩 장소도 좌표로 안정적으로 식별한다. */
+private fun placeStableKey(place: PlaceSearchItem, index: Int): String =
+    place.kakaoPlaceId?.takeIf { it.isNotBlank() }
+        ?: "${place.lat.toBits()}:${place.lng.toBits()}:${place.name}:$index"

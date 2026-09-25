@@ -33,11 +33,13 @@ import com.swpp.wakeup.domain.model.CalendarImportState
 import com.swpp.wakeup.domain.model.DropCost
 import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.ImportCandidate
+import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.MorningSession
 import com.swpp.wakeup.domain.model.RoutineEditorState
 import com.swpp.wakeup.sensing.BlockObservationQueue
 import com.swpp.wakeup.sensing.CurrentLocation
 import com.swpp.wakeup.domain.model.PlanRow
+import com.swpp.wakeup.domain.model.MapCameraMath
 import com.swpp.wakeup.domain.model.RouteMapProjection
 import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.domain.model.TripStage
@@ -50,6 +52,8 @@ import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.nav.NavState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,6 +65,7 @@ import java.time.OffsetDateTime
 import kotlin.math.cos
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * 홈 화면 상태와 `MainActivity` 안의 화면 이동.
@@ -270,7 +275,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (query.isBlank()) return
 
         val wantedSort = sort ?: current.sort
-        val origin = near ?: lastKnownPoint
+        val origin = near ?: rememberedLocation(MAP_LOCATION_MAX_AGE_MS)?.point
 
         set(
             current.copy(
@@ -334,6 +339,59 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 그 값이 있으면 검색에 얹는다. 없으면 거리 없이 검색한다.
      */
     private var lastKnownPoint: GeoPoint? = null
+    private var lastKnownAccuracyM: Float? = null
+    private var lastKnownAtMillis: Long? = null
+    private var currentLocationPrimeJob: Job? = null
+
+    /** 지도에 표시할 위치는 좌표뿐 아니라 오차와 측정 시각까지 한 덩어리다. */
+    data class MapLocationFix(
+        val point: GeoPoint,
+        val accuracyM: Float,
+        val atMillis: Long,
+    )
+
+    private fun rememberedLocation(
+        maxAgeMillis: Long? = null,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): MapLocationFix? {
+        val point = lastKnownPoint ?: return null
+        val atMillis = lastKnownAtMillis ?: return null
+        if (maxAgeMillis != null && nowMillis - atMillis !in 0..maxAgeMillis) return null
+        return MapLocationFix(
+            point = point,
+            accuracyM = lastKnownAccuracyM ?: Float.MAX_VALUE,
+            atMillis = atMillis,
+        )
+    }
+
+    private fun rememberLocation(
+        point: GeoPoint,
+        accuracyM: Float,
+        atMillis: Long,
+    ): MapLocationFix {
+        val previousAt = lastKnownAtMillis
+        val previousAccuracy = lastKnownAccuracyM
+        if (previousAt != null &&
+            (atMillis < previousAt ||
+                (atMillis == previousAt && previousAccuracy != null &&
+                    accuracyM >= previousAccuracy) ||
+                (atMillis - previousAt in 0..LOCATION_QUALITY_GRACE_MS &&
+                    previousAccuracy != null && accuracyM > previousAccuracy * 1.5f))
+        ) {
+            return rememberedLocation()!!
+        }
+        lastKnownPoint = point
+        lastKnownAccuracyM = accuracyM
+        lastKnownAtMillis = atMillis
+        return MapLocationFix(point, accuracyM, atMillis)
+    }
+
+    private fun rememberLocation(location: android.location.Location): MapLocationFix =
+        rememberLocation(
+            point = GeoPoint(location.latitude, location.longitude),
+            accuracyM = if (location.hasAccuracy()) location.accuracy else Float.MAX_VALUE,
+            atMillis = location.time.takeIf { it > 0L } ?: System.currentTimeMillis(),
+        )
 
     /** 알람 결정 화면이 보고 있는 계획. */
     private val _plan = MutableStateFlow<AlarmPlanView?>(null)
@@ -351,20 +409,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     data class RouteMapState(
         val eventId: Long,
+        /** 화면에 실제로 그릴 주 경로. 이동 중에는 현재 위치 기준 경로다. */
         val path: List<GeoPoint>,
+        /** 이동이 끝났을 때 되돌릴 일정의 원래 출발지 기준 경로. */
+        val plannedPath: List<GeoPoint> = path,
         val center: GeoPoint,
         val level: Int,
         val summary: String? = null,
+        val plannedSummary: String? = summary,
+        /** [path]가 백그라운드에서 갱신된 현재 위치 기준 경로인가. */
+        val pathFromCurrent: Boolean = false,
+        /** 경로 유무와 별개로 실제 이동 중인가. 갱신 대기 중에도 true를 유지한다. */
+        val inTransit: Boolean = false,
         /**
          * 보라 실선으로 [path] 아래에 까는 경로.
          *
          * 고른 경로가 주(主)다. 겹치는 구간에서는 고른 경로의 색이 보여야
          * 사용자가 "내가 갈 길" 을 잃지 않는다.
          *
-         * **기준점이 두 가지다.** 출발 전에는 계획에 담긴 출발지 기준 대안이고,
-         * 이동 중에는 `routes/live` 가 준 현재 위치 기준 최단선이다. 선택 경로가
-         * 이미 최단이어도 후자는 채운다 — 그래야 선의 시작점이 옛 출발지에
-         * 남지 않는다.
+         * 출발 전 계획에 담긴 대안만 이 필드를 쓴다. 이동 중 `routes/live`가 준
+         * 현재 위치 기준 최단선은 보조선이 아니라 [path] 자체를 교체한다.
          */
         val altPath: List<GeoPoint> = emptyList(),
         /**
@@ -372,11 +436,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * 대안이 없으면 null.
          */
         val altSummary: String? = null,
-        /** [altPath] 가 출발 전 대안이 아니라 현재 위치 기준 실시간 경로인가. */
-        val altFromCurrent: Boolean = false,
         val image: Bitmap? = null,
+        /** [image]가 실제로 나타내는 카메라. 원하는 center/level과 다를 수 있다. */
+        val imageCenter: GeoPoint? = null,
+        val imageLevel: Int? = null,
+        val imageWidthDp: Int = 0,
+        val imageHeightDp: Int = 0,
         val imageLoading: Boolean = false,
         val imageError: String? = null,
+        val currentLocation: MapLocationFix? = null,
+        val locating: Boolean = false,
+        val locationError: String? = null,
+        /** 손으로 지도를 살핀 뒤 1분 경로 갱신이 카메라를 강제로 되돌리지 않는다. */
+        val cameraMode: RouteCameraMode = RouteCameraMode.FIT_ROUTE,
         /** 손가락을 떼기 전까지 끈 거리(px) */
         val pendingShift: Offset = Offset.Zero,
     ) {
@@ -388,6 +460,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 이 고를 수 있는 범위와 같아야 조작이 튀지 않는다.
         val canZoomOut: Boolean get() = level < StaticMapScale.ROUTE_MAX_LEVEL
     }
+
+    enum class RouteCameraMode { FIT_ROUTE, FREE }
 
     private val _routeMap = MutableStateFlow<RouteMapState?>(null)
     val routeMap: StateFlow<RouteMapState?> = _routeMap.asStateFlow()
@@ -422,13 +496,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         TripLiveState.restoreLiveRoute(liveRouteStore.current())
         viewModelScope.launch {
             TripLiveState.snapshot.collect { snapshot ->
-                if (snapshot == null) clearLiveRouteOverlay()
+                if (snapshot == null) clearLiveRoutePath()
                 else onTrackedPoint(snapshot)
             }
         }
         viewModelScope.launch {
             TripLiveState.liveRoute.collect { snapshot ->
-                if (snapshot == null) clearLiveRouteOverlay()
+                if (snapshot == null) clearLiveRoutePath()
                 else applyLiveRoute(snapshot)
             }
         }
@@ -1288,7 +1362,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val fix = CurrentLocation.get(appContext) ?: return null
         // 좌표는 역지오코딩이 실패해도 쓸 데가 있다 — 장소 검색에 거리를 붙이고
         // 지도의 "내 위치" 를 찍는다. 주소를 못 얻었다고 버리지 않는다.
-        lastKnownPoint = GeoPoint(fix.latitude, fix.longitude)
+        rememberLocation(fix)
         return when (val r = repository.reversePlace(fix.latitude, fix.longitude)) {
             is EventRepository.Result.Success -> r.data
             is EventRepository.Result.Failure -> null
@@ -1304,15 +1378,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 막을 이유가 없다.
      */
     fun primeCurrentLocation() {
-        if (lastKnownPoint != null) return
-        viewModelScope.launch {
+        val recent = rememberedLocation(MAP_LOCATION_MAX_AGE_MS)
+        if (recent != null) {
+            _mapPick.update { state -> state?.copy(currentLocation = recent) }
+            return
+        }
+        if (currentLocationPrimeJob?.isActive == true) return
+        currentLocationPrimeJob = viewModelScope.launch {
             val fix = CurrentLocation.get(appContext) ?: return@launch
-            lastKnownPoint = GeoPoint(fix.latitude, fix.longitude)
+            val remembered = rememberLocation(fix)
+            _mapPick.update { state ->
+                state?.copy(currentLocation = remembered)
+            }
         }
     }
-
-    /** 지도·거리 표시에 쓸 현재 위치. 아직 못 잡았으면 null */
-    val currentPoint: GeoPoint? get() = lastKnownPoint
 
     // --- 지도에서 고르기 ---------------------------------------------------
 
@@ -1332,7 +1411,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val target: MapTarget = MapTarget.DESTINATION,
         val center: GeoPoint = SEOUL_CENTER,
         val level: Int = StaticMapScale.DEFAULT_LEVEL,
-        /** 지도에 찍을 결과. 카카오가 한 번에 다섯 개까지만 그린다 */
+        /** 지도와 목록에 함께 표시할 결과. 앱이 같은 목록으로 마커를 그린다. */
         val markers: List<PlaceSearchItem> = emptyList(),
         val selected: PlaceSearchItem? = null,
         /** 영역 재검색 중 */
@@ -1344,6 +1423,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val moved: Boolean = false,
         /** 지금 그릴 지도 이미지. 아직 못 받았으면 null */
         val image: Bitmap? = null,
+        /** [image]가 실제로 나타내는 카메라와 요청 크기(overscan 포함). */
+        val imageCenter: GeoPoint? = null,
+        val imageLevel: Int? = null,
+        val imageWidthDp: Int = 0,
+        val imageHeightDp: Int = 0,
         val imageLoading: Boolean = false,
         /**
          * 지도를 못 받은 이유.
@@ -1352,27 +1436,31 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * 지도 자리에만 문구를 띄운다.
          */
         val imageError: String? = null,
+        /** 최초 진입에서 목록의 마커를 모두 보이게 맞췄는가. */
+        val fittedMarkers: Boolean = false,
+        val currentLocation: MapLocationFix? = null,
+        val locating: Boolean = false,
     ) {
         val canZoomIn: Boolean get() = level > StaticMapScale.MIN_LEVEL
         val canZoomOut: Boolean get() = level < StaticMapScale.MAX_LEVEL
 
-        /**
-         * 고른 장소가 지금 지도 중앙에 있는가.
-         *
-         * 중앙 표식은 "이것을 골랐다" 는 뜻이므로 이 값이 참일 때만 그려야 한다.
-         * [onMapPlaceSelected] 는 중심을 그 장소로 옮기지만, **끌기·줌·영역
-         * 재검색은 중심을 그대로 둔 채 선택만 바꾼다.** 그 상태에서 표식을 계속
-         * 그리면 빈 자리를 가리키며 그곳을 골랐다고 말한다. 실기기에서 재검색
-         * 직후 주황 표식이 아무 가게도 없는 지점에 놓여 있었다.
-         */
-        val selectedAtCenter: Boolean
-            get() {
-                val place = selected ?: return false
-                // 같은 값에서 복사되므로 보통은 정확히 같다. 부동소수 잡음만
-                // 견디면 되고, 1e-6도는 약 0.1m 라 다른 장소와 헷갈리지 않는다.
-                return kotlin.math.abs(place.lat - center.lat) < 1e-6 &&
-                    kotlin.math.abs(place.lng - center.lng) < 1e-6
-            }
+        fun isSelected(place: PlaceSearchItem): Boolean =
+            placeStableKey(place) == selected?.let(::placeStableKey)
+
+        fun withSearchResults(results: List<PlaceSearchItem>): MapPickState {
+            val nextMarkers = results.take(StaticMapScale.MARKER_LIMIT)
+            val selectedKey = selected?.let(::placeStableKey)
+            return copy(
+                searching = false,
+                error = null,
+                markers = nextMarkers,
+                selected = nextMarkers.firstOrNull {
+                    placeStableKey(it) == selectedKey
+                } ?: nextMarkers.firstOrNull(),
+                moved = false,
+                fittedMarkers = true,
+            )
+        }
     }
 
     /** 지도에서 고른 장소를 어디로 되돌릴지. */
@@ -1380,6 +1468,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _mapPick = MutableStateFlow<MapPickState?>(null)
     val mapPick: StateFlow<MapPickState?> = _mapPick.asStateFlow()
+    private var mapPickGeneration = 0L
+    private var mapImageJob: Job? = null
 
     /**
      * 지도 화면을 연다.
@@ -1391,83 +1481,115 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun openMapPick(target: MapTarget) {
         val place = placeSearchOf(target)
         val results = place.results
-        val center = results.firstOrNull()?.let { GeoPoint(it.lat, it.lng) }
-            ?: lastKnownPoint
+        val previouslySelected = when (target) {
+            MapTarget.DESTINATION -> _add.value.selectedPlace
+            MapTarget.HOME -> _homeSetup.value.selected
+            MapTarget.ORIGIN -> _routeChoice.value?.origin
+        }
+        val markers = (listOfNotNull(previouslySelected) + results)
+            .distinctBy(::placeStableKey)
+            .take(StaticMapScale.MARKER_LIMIT)
+        val selected = previouslySelected
+            ?.takeIf { wanted -> markers.any { placeStableKey(it) == placeStableKey(wanted) } }
+            ?: markers.firstOrNull()
+        val center = markers.firstOrNull()?.let { GeoPoint(it.lat, it.lng) }
+            ?: rememberedLocation(MAP_LOCATION_MAX_AGE_MS)?.point
             ?: SEOUL_CENTER
 
+        mapPickGeneration += 1L
+        lastMapSignature = null
+        mapImageJob?.cancel()
         _mapPick.value = MapPickState(
             target = target,
             center = center,
-            markers = results.take(StaticMapScale.MARKER_LIMIT),
-            selected = results.firstOrNull(),
+            markers = markers,
+            selected = selected,
+            currentLocation = rememberedLocation(MAP_LOCATION_MAX_AGE_MS),
         )
         _nav.update { it.copy(stack = it.stack + AppRoute.MapPick, forward = true) }
+        // 화면 진입 자체가 GPS 고정밀 측정을 강제하지는 않는다. 값이 없으면
+        // 배터리 부담이 작은 선점만 하고, 위치 버튼을 누른 순간 getFresh로
+        // 정확한 fix를 받아 같은 탭 안에서 이동한다.
+        primeCurrentLocation()
     }
 
     fun closeMapPick() {
+        mapPickGeneration += 1L
+        mapImageJob?.cancel()
+        lastMapSignature = null
         _mapPick.value = null
     }
 
-    /** 지도에서 핀 하나를 고른다. 지도를 그 자리로 옮긴다. */
+    /** 지도/목록에서 핀 하나를 고른다. 카메라는 그대로 두어 위치 관계를 보존한다. */
     fun onMapPlaceSelected(item: PlaceSearchItem) {
         _mapPick.update {
-            it?.copy(selected = item, center = GeoPoint(item.lat, item.lng), moved = false)
+            val current = it ?: return@update it
+            if (current.markers.none { marker ->
+                    placeStableKey(marker) == placeStableKey(item)
+                }
+            ) current else current.copy(selected = item, error = null)
         }
     }
 
-    /** 끄는 중. 이미지를 밀어 보여 주기만 하고 아직 받지 않는다. */
-    fun onMapDrag(delta: Offset) {
-        _mapPick.update { it?.copy(pendingShift = it.pendingShift + delta) }
-    }
-
     /**
-     * 손가락을 뗐다. 밀린 만큼 중심을 옮기고 이미지를 다시 받는다.
-     *
-     * 픽셀을 좌표로 바꾸는 데 실측 축척을 쓴다. 위도는 남북이라 그대로 나누고,
-     * 경도는 위도에 따라 1도의 길이가 줄어들므로 cos 로 보정한다.
+     * pan/pinch가 끝난 카메라를 한 번에 확정한다. 손짓 중에는 Composable이
+     * 마지막 정상 bitmap과 overlay를 함께 변환하므로 StateFlow를 매 프레임
+     * 갱신하지 않는다.
      */
-    fun onMapDragEnd(metersPerPixel: Double) {
+    fun onMapGestureEnd(pan: Offset, zoom: Float, metersPerPixel: Double) {
         val state = _mapPick.value ?: return
-        val shift = state.pendingShift
-        if (shift == Offset.Zero) return
-
-        // 이미지를 오른쪽으로 끌면 지도는 서쪽으로 간다. 부호가 반대다.
-        val dLat = (shift.y * metersPerPixel) / StaticMapScale.METERS_PER_DEGREE
-        val dLng = (-shift.x * metersPerPixel) /
-            (StaticMapScale.METERS_PER_DEGREE * cos(Math.toRadians(state.center.lat)))
-
+        val camera = MapCameraMath.finishGesture(
+            center = state.center,
+            level = state.level,
+            panPx = pan,
+            zoomScale = zoom,
+            metersPerPixel = metersPerPixel,
+            minLevel = StaticMapScale.MIN_LEVEL,
+            maxLevel = StaticMapScale.MAX_LEVEL,
+        )
+        if (camera.center == state.center && camera.level == state.level) return
         _mapPick.update {
             it?.copy(
-                center = GeoPoint(
-                    lat = (it.center.lat + dLat).coerceIn(-89.0, 89.0),
-                    lng = it.center.lng + dLng,
-                ),
+                center = camera.center,
+                level = camera.level,
                 pendingShift = Offset.Zero,
                 moved = true,
             )
         }
     }
 
-    fun onMapZoom(delta: Int) {
-        _mapPick.update {
-            val next = (it ?: return@update it)
-                .level
-                .plus(delta)
-                .coerceIn(StaticMapScale.MIN_LEVEL, StaticMapScale.MAX_LEVEL)
-            it.copy(level = next, moved = true)
-        }
+    /** 새 고정밀 fix를 받은 같은 탭 안에서 지도를 내 위치로 옮긴다. */
+    fun onMapRecenter() {
+        currentLocationPrimeJob?.cancel()
+        val generation = mapPickGeneration
+        refreshMapLocation(recenter = true, generation = generation)
     }
 
-    /** 지도를 내 위치로 되돌린다. */
-    fun onMapRecenter() {
-        val here = lastKnownPoint
-        if (here == null) {
-            _mapPick.update { it?.copy(error = "현재 위치를 확인할 수 없음") }
-            primeCurrentLocation()
-            return
-        }
-        _mapPick.update {
-            it?.copy(center = here, moved = true, error = null, pendingShift = Offset.Zero)
+    private fun refreshMapLocation(recenter: Boolean, generation: Long) {
+        if (_mapPick.value?.locating == true) return
+        _mapPick.update { it?.copy(locating = true, error = null) }
+        viewModelScope.launch {
+            val measured = CurrentLocation.getFresh(appContext)?.let(::rememberLocation)
+            if (generation != mapPickGeneration) return@launch
+            _mapPick.update { current ->
+                current ?: return@update current
+                val fix = measured
+                    ?: current.currentLocation?.takeIf {
+                        System.currentTimeMillis() - it.atMillis in 0..MAP_LOCATION_MAX_AGE_MS
+                    }
+                    ?: rememberedLocation(MAP_LOCATION_MAX_AGE_MS)
+                current.copy(
+                    center = if (recenter && fix != null) fix.point else current.center,
+                    currentLocation = fix,
+                    locating = false,
+                    moved = if (recenter && fix != null) true else current.moved,
+                    pendingShift = if (recenter && fix != null) Offset.Zero else current.pendingShift,
+                    error = if (recenter && measured == null) {
+                        if (fix == null) "정확한 현재 위치를 확인할 수 없음"
+                        else "새 위치를 못 받아 마지막 위치를 표시함"
+                    } else current.error,
+                )
+            }
         }
     }
 
@@ -1480,35 +1602,47 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun researchMapArea(viewWidthPx: Int, viewHeightPx: Int, metersPerPixel: Double) {
         val state = _mapPick.value ?: return
         val target = state.target
+        val generation = mapPickGeneration
         val query = placeSearchOf(target).query.trim()
         if (query.isBlank()) return
 
         val halfLatDeg =
             (viewHeightPx / 2.0 * metersPerPixel) / StaticMapScale.METERS_PER_DEGREE
         val halfLngDeg = (viewWidthPx / 2.0 * metersPerPixel) /
-            (StaticMapScale.METERS_PER_DEGREE * cos(Math.toRadians(state.center.lat)))
+            (StaticMapScale.METERS_PER_DEGREE *
+                cos(Math.toRadians(state.center.lat)).coerceAtLeast(0.01))
 
         val rect = listOf(
             state.center.lng - halfLngDeg,
             state.center.lat - halfLatDeg,
             state.center.lng + halfLngDeg,
             state.center.lat + halfLatDeg,
-        ).joinToString(",") { "%.6f".format(it) }
+        ).joinToString(",") { "%.6f".format(Locale.ROOT, it) }
 
         _mapPick.update { it?.copy(searching = true, error = null) }
         runPlaceSearch(
             get = { placeSearchOf(target) },
             set = { next ->
+                if (generation != mapPickGeneration || _mapPick.value?.target != target) {
+                    return@runPlaceSearch
+                }
                 setPlaceSearch(target, next)
                 _mapPick.update { current ->
-                    current?.copy(
-                        searching = next.searching,
-                        error = next.error,
-                        markers = next.results.take(StaticMapScale.MARKER_LIMIT),
-                        // 영역을 다시 검색했으면 고른 것도 새 목록 기준으로 둔다.
-                        selected = next.results.firstOrNull() ?: current.selected,
-                        moved = false,
-                    )
+                    if (current?.target != target) return@update current
+                    if (next.searching || next.loadingMore) {
+                        return@update current.copy(searching = true, error = null)
+                    }
+                    if (next.error != null) {
+                        // 실패했다고 마지막 정상 목록·선택을 지우지 않는다.
+                        // 사용자는 그대로 고르거나 같은 영역을 다시 시도할 수 있다.
+                        return@update current.copy(
+                            searching = false,
+                            error = next.error,
+                        )
+                    }
+                    // 새 결과에도 있으면 사용자가 고른 핀을 유지한다. 없으면
+                    // 첫 핀으로 옮기고, 0건이면 선택도 반드시 비운다.
+                    current.withSearchResults(next.results)
                 }
             },
             page = 1,
@@ -1539,35 +1673,95 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 부르면 같은 이미지를 반복해서 요청한다.
      */
     fun loadMapImage(widthDp: Int, heightDp: Int) {
-        val state = _mapPick.value ?: return
+        var state = _mapPick.value ?: return
         if (widthDp <= 0 || heightDp <= 0) return
 
-        val signature = "${state.center.lat},${state.center.lng},${state.level}," +
-            "$widthDp,$heightDp,${state.markers.joinToString { it.kakaoPlaceId ?: it.name }}"
-        if (signature == lastMapSignature && state.image != null) return
-        lastMapSignature = signature
+        // 최초 진입에서는 목록의 다섯 마커가 모두 보이도록 한 번만 맞춘다.
+        if (!state.fittedMarkers && state.markers.isNotEmpty()) {
+            val fit = RouteMapProjection.fit(
+                path = state.markers.map { GeoPoint(it.lat, it.lng) },
+                requestUnits = widthDp,
+                requestHeightUnits = heightDp,
+                marginUnits = 42,
+            )
+            val fitted = state.copy(
+                center = fit?.first ?: state.center,
+                level = fit?.second
+                    ?.coerceIn(StaticMapScale.MIN_LEVEL, StaticMapScale.MAX_LEVEL)
+                    ?: state.level,
+                fittedMarkers = true,
+            )
+            _mapPick.value = fitted
+            state = fitted
+        }
 
-        _mapPick.update { it?.copy(imageLoading = true, imageError = null) }
-        viewModelScope.launch {
+        val requestWidth = MapCameraMath.bufferedRequestUnits(widthDp, STATIC_MAP_MAX_WIDTH)
+        val requestHeight = MapCameraMath.bufferedRequestUnits(heightDp, STATIC_MAP_MAX_HEIGHT)
+        val generation = mapPickGeneration
+        val signature = "$generation,${state.target},${state.center.lat},${state.center.lng}," +
+            "${state.level},$requestWidth,$requestHeight"
+
+        val alreadyDisplayed = state.image != null &&
+            state.imageCenter == state.center && state.imageLevel == state.level &&
+            state.imageWidthDp == requestWidth && state.imageHeightDp == requestHeight
+        if (alreadyDisplayed) {
+            // B를 받는 중 다시 A(현재 frame)로 돌아오면 B의 늦은 응답은
+            // 버려지지만 loading만 남을 수 있다. 요청도 함께 취소하고 A를
+            // 현재 signature로 확정한다.
+            if (state.imageLoading || signature != lastMapSignature) {
+                mapImageJob?.cancel()
+                lastMapSignature = signature
+                _mapPick.update { current ->
+                    if (current?.center == state.center && current.level == state.level) {
+                        current.copy(imageLoading = false, imageError = null)
+                    } else current
+                }
+            }
+            return
+        }
+        if (signature == lastMapSignature && state.imageLoading) return
+
+        lastMapSignature = signature
+        mapImageJob?.cancel()
+        _mapPick.update { current ->
+            if (current == null || current.target != state.target) current
+            else current.copy(imageLoading = true, imageError = null)
+        }
+        mapImageJob = viewModelScope.launch {
+            // 연속 손짓은 마지막 카메라 한 장만 요청한다. 경로 API와 공유하는
+            // 호출 한도를 지키고, 이미 끝난 손짓의 bitmap이 끼어들지 않게 한다.
+            delay(MAP_REQUEST_DEBOUNCE_MS)
             val result = repository.staticMap(
                 center = state.center,
                 level = state.level,
-                widthDp = widthDp,
-                heightDp = heightDp,
-                markers = state.markers.map { GeoPoint(it.lat, it.lng) },
+                widthDp = requestWidth,
+                heightDp = requestHeight,
+                // 핀은 목록과 같은 state.markers를 Compose가 그린다. PNG에
+                // 구워 넣으면 선택색과 목록 동기화를 제어할 수 없다.
+                markers = emptyList(),
             )
             _mapPick.update { current ->
                 current ?: return@update current
+                if (generation != mapPickGeneration || signature != lastMapSignature ||
+                    current.target != state.target || current.center != state.center ||
+                    current.level != state.level
+                ) return@update current
                 when (result) {
                     is EventRepository.Result.Success ->
                         current.copy(
                             image = result.data,
+                            imageCenter = state.center,
+                            imageLevel = state.level,
+                            imageWidthDp = requestWidth,
+                            imageHeightDp = requestHeight,
                             imageLoading = false,
                             imageError = null,
                         )
 
-                    is EventRepository.Result.Failure ->
+                    is EventRepository.Result.Failure -> {
+                        lastMapSignature = null
                         current.copy(imageLoading = false, imageError = result.message)
+                    }
                 }
             }
         }
@@ -1578,6 +1772,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 경로 지도의 마지막 요청 조합. 같으면 다시 받지 않는다 */
     private var lastRouteMapSignature: String? = null
+    private var routeMapImageJob: Job? = null
 
     private fun placeSearchOf(target: MapTarget): PlaceSearch = when (target) {
         MapTarget.DESTINATION -> _add.value.place
@@ -1761,7 +1956,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         plan = result.data,
                         // 같은 일정을 잠깐 닫았다 다시 연 경우, 1분 게이트는 지키되
                         // 이미 받은 현재 위치 기준 선은 빈 화면으로 만들지 않는다.
-                        preservedLive = previousMap?.takeIf { it.altFromCurrent },
+                        preservedLive = previousMap?.takeIf { it.pathFromCurrent },
                     )
                 }
 
@@ -1782,55 +1977,75 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         if (!plan.hasRoutePath) return
 
-        // **이미 출발했으면 출발지 기준 대안을 쓰지 않는다.** 계획에 담긴
-        // `alt_route_*` 는 집에서부터 계산한 것이라, 이동 중인 사람에게는 지금 갈
-        // 수 없는 길이다. 그것을 잠깐이라도 그려 두면 사용자는 자기 위치에서
-        // 시작하는 선으로 읽는다. 비워 두고 `routes/live` 응답을 기다린다.
+        val plannedSummary = listOfNotNull(
+            plan.routeDetail?.takeIf { it.isNotBlank() },
+            plan.routeDistanceM?.let { "%.1fkm".format(it / 1000.0) },
+            plan.breakdown
+                .firstOrNull { it.kind == PlanRow.Kind.TRAVEL }
+                ?.let { "${it.minutes}분" },
+        ).joinToString(" · ").takeIf { it.isNotBlank() }
+
+        // 디스크 사본은 프로세스가 재생성돼 위치 Flow가 아직 비어 있어도 쓴다.
+        // 이 사본은 서비스가 이동 중에만 만들고 5분 뒤 폐기하므로, 새 GPS fix를
+        // 기다리며 옛 출발지 경로를 다시 보일 이유가 없다.
         val tracked = TripLiveState.pointFor(plan.eventId)
-        val moving = tracked?.phase == TripGeofence.Phase.IN_TRANSIT
-        val cachedLive = if (moving) TripLiveState.liveRouteFor(plan.eventId)?.route else null
-        val altPath =
-            when {
-                cachedLive != null -> cachedLive.path
-                moving && preservedLive?.altFromCurrent == true -> preservedLive.altPath
-                !moving && plan.hasAltRoute -> plan.altRoutePath
-                else -> emptyList()
-            }
-        val altSummary =
-            if (moving) cachedLive?.summary ?: preservedLive?.altSummary
-            else plan.altFasterMinutes
+        val cachedSnapshot = TripLiveState.liveRouteFor(plan.eventId)
+        val cachedRoute = cachedSnapshot?.usableLiveRoute()
+        val moving = when {
+            tracked != null -> tracked.phase == TripGeofence.Phase.IN_TRANSIT
+            cachedRoute != null -> true
+            else -> stageOf(plan) == TripStage.IN_TRANSIT
+        }
+        val livePath = when {
+            cachedRoute != null -> cachedRoute.path
+            moving && preservedLive?.pathFromCurrent == true -> preservedLive.path
+            else -> emptyList()
+        }
+        val displayPath = if (moving) livePath else plan.routePath
+        val displaySummary = if (moving) {
+            cachedRoute?.summary
+                ?: preservedLive?.summary
+                ?: "현재 위치에서 가장 빠른 경로 확인 중"
+        } else {
+            plannedSummary
+        }
+        val altPath = if (!moving && plan.hasAltRoute) plan.altRoutePath else emptyList()
+        val altSummary = if (!moving) {
+            plan.altFasterMinutes
                 ?.takeIf { plan.hasAltRoute }
                 ?.let { minutes ->
                     listOfNotNull(plan.altRouteLabel, "${minutes}분 빠름")
                         .joinToString(" · ")
                 }
+        } else null
+
+        val currentLocation = tracked?.toUsableMapLocation()
+            ?: rememberedLocation(MAP_LOCATION_MAX_AGE_MS)
+        val fitPath = (displayPath + altPath).ifEmpty {
+            listOfNotNull(
+                currentLocation?.point ?: cachedSnapshot?.origin?.takeIf { cachedRoute != null },
+                plan.routePath.lastOrNull(),
+            )
+        }
 
         val fit = RouteMapProjection.fit(
-            // **두 경로를 합쳐 넘긴다.** 고른 경로만 기준으로 맞추면 대안 선이
-            // 화면 밖으로 나가 잘린 선이 된다 — 대안은 다른 길로 돌아가므로
-            // 범위가 더 넓은 쪽이 대안일 수 있다.
-            path = plan.routePath + altPath,
+            path = fitPath,
             requestUnits = ROUTE_MAP_FIT_WIDTH,
             requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
         ) ?: return
         _routeMap.value = RouteMapState(
             eventId = plan.eventId,
-            path = plan.routePath,
+            path = displayPath,
+            plannedPath = plan.routePath,
             center = fit.first,
             level = fit.second,
-            summary = listOfNotNull(
-                plan.routeDetail?.takeIf { it.isNotBlank() },
-                plan.routeDistanceM?.let { "%.1fkm".format(it / 1000.0) },
-                plan.breakdown
-                    .firstOrNull { it.kind == PlanRow.Kind.TRAVEL }
-                    ?.let { "${it.minutes}분" },
-            ).joinToString(" · ").takeIf { it.isNotBlank() },
+            summary = displaySummary,
+            plannedSummary = plannedSummary,
+            pathFromCurrent = moving && displayPath.size >= 2,
+            inTransit = moving,
             altPath = altPath,
-            // 보라 선이 무엇인지 글씨가 밝혀야 한다. 기준점(출발지냐 현재
-            // 위치냐)도 이 문구만이 말해 준다.
             altSummary = altSummary,
-            altFromCurrent = moving &&
-                (cachedLive != null || preservedLive?.altFromCurrent == true),
+            currentLocation = currentLocation,
         )
 
         // 서비스가 이미 백그라운드에서 받은 경로가 있으면 이 호출이 즉시
@@ -1842,84 +2057,145 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun fitRouteMap() {
         val state = _routeMap.value ?: return
         val fit = RouteMapProjection.fit(
-            path = state.path + state.altPath,
+            path = (state.path + state.altPath).ifEmpty {
+                listOfNotNull(state.currentLocation?.point, state.plannedPath.lastOrNull())
+            },
             requestUnits = ROUTE_MAP_FIT_WIDTH,
             requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
         ) ?: return
         _routeMap.update {
             val current = it ?: return@update it
-            val changed = current.center != fit.first || current.level != fit.second
             current.copy(
                 center = fit.first,
                 level = fit.second,
                 pendingShift = Offset.Zero,
-                image = if (changed) null else current.image,
-                imageLoading = if (changed) false else current.imageLoading,
-                imageError = if (changed) null else current.imageError,
+                imageError = null,
+                cameraMode = RouteCameraMode.FIT_ROUTE,
             )
         }
     }
 
-    fun onRouteMapZoom(delta: Int) {
-        _routeMap.update {
-            val next = (it ?: return@update it).level
-                .plus(delta)
-                // 전체 보기가 고른 레벨까지 닿아야 한다. MAX_LEVEL(10) 로 자르면
-                // 30km 경로에서 전체 보기가 11을 골라 놓고 확대 버튼이 10으로
-                // 끌어내려 한 번에 두 단계가 튄다.
-                .coerceIn(StaticMapScale.MIN_LEVEL, StaticMapScale.ROUTE_MAX_LEVEL)
-            val changed = next != it.level
-            it.copy(
-                level = next,
-                image = if (changed) null else it.image,
-                imageLoading = if (changed) false else it.imageLoading,
-                imageError = if (changed) null else it.imageError,
-            )
-        }
-    }
-
-    fun onRouteMapDrag(delta: Offset) {
-        _routeMap.update { it?.copy(pendingShift = it.pendingShift + delta) }
-    }
-
-    /** 손가락을 뗐다. 밀린 만큼 중심을 옮기고 이미지를 다시 받는다. */
-    fun onRouteMapDragEnd(metersPerPixel: Double) {
+    /** 실제 경로 지도의 pan/pinch를 끝날 때 한 번만 확정한다. */
+    fun onRouteMapGestureEnd(pan: Offset, zoom: Float, metersPerPixel: Double) {
         val state = _routeMap.value ?: return
-        val shift = state.pendingShift
-        if (shift == Offset.Zero) return
-
-        // 이미지를 오른쪽으로 끌면 지도는 서쪽으로 간다. 부호가 반대다.
-        val dLat = (shift.y * metersPerPixel) / StaticMapScale.METERS_PER_DEGREE
-        val dLng = (-shift.x * metersPerPixel) /
-            (StaticMapScale.METERS_PER_DEGREE * cos(Math.toRadians(state.center.lat)))
-
+        val camera = MapCameraMath.finishGesture(
+            center = state.center,
+            level = state.level,
+            panPx = pan,
+            zoomScale = zoom,
+            metersPerPixel = metersPerPixel,
+            minLevel = StaticMapScale.MIN_LEVEL,
+            maxLevel = StaticMapScale.ROUTE_MAX_LEVEL,
+        )
+        if (camera.center == state.center && camera.level == state.level) return
         _routeMap.update {
             val current = it ?: return@update it
             current.copy(
-                center = GeoPoint(
-                    lat = (current.center.lat + dLat).coerceIn(-89.0, 89.0),
-                    lng = current.center.lng + dLng,
-                ),
+                center = camera.center,
+                level = camera.level,
                 pendingShift = Offset.Zero,
-                image = null,
-                imageLoading = false,
                 imageError = null,
+                cameraMode = RouteCameraMode.FREE,
             )
+        }
+    }
+
+    /** 실제 경로 지도에서 최신의 신뢰할 수 있는 GPS 위치로 이동한다. */
+    fun onRouteMapRecenter() {
+        val state = _routeMap.value ?: return
+        currentLocationPrimeJob?.cancel()
+        _routeMap.update { current ->
+            if (current?.eventId != state.eventId) current
+            else current.copy(locating = true, locationError = null)
+        }
+        viewModelScope.launch {
+            val measured = CurrentLocation.getFresh(appContext)?.let(::rememberLocation)
+            _routeMap.update { current ->
+                if (current?.eventId != state.eventId) return@update current
+                val now = System.currentTimeMillis()
+                val fix = measured
+                    ?: TripLiveState.pointFor(state.eventId)?.toUsableMapLocation(now)
+                    ?: current.currentLocation?.takeIf {
+                        now - it.atMillis in 0..MAP_LOCATION_MAX_AGE_MS
+                    }
+                    ?: rememberedLocation(MAP_LOCATION_MAX_AGE_MS, now)
+                current.copy(
+                    center = fix?.point ?: current.center,
+                    currentLocation = fix,
+                    locating = false,
+                    locationError = if (measured == null) {
+                        if (fix == null) "정확한 현재 위치를 확인할 수 없음"
+                        else "새 위치를 못 받아 마지막 위치를 표시함"
+                    } else null,
+                    cameraMode = if (fix != null) RouteCameraMode.FREE else current.cameraMode,
+                    pendingShift = if (fix != null) Offset.Zero else current.pendingShift,
+                )
+            }
         }
     }
 
     // --- 이동 중이면 여기서부터 다시 본다 ---------------------------------
 
-    /** 추적이 끝났는데 몇 분 전의 "여기서부터" 선이 남지 않게 한다. */
-    private fun clearLiveRouteOverlay() {
-        _routeMap.update { current ->
-            if (current?.altFromCurrent != true) current
-            else current.copy(
-                altPath = emptyList(),
-                altSummary = null,
-                altFromCurrent = false,
-            )
+    /**
+     * 현재 위치 경로가 사라졌을 때 화면을 실제 이동 단계와 맞춘다.
+     *
+     * `snapshot`과 `liveRoute`는 별도 Flow라서 하나가 먼저 null이 될 수 있다.
+     * 아직 이동 중이라면 그 짧은 틈에도 출발지 기준 [RouteMapState.plannedPath]를
+     * 복원하지 않는다. 유효한 현재 위치 경로가 남아 있으면 그것을 다시 적용하고,
+     * 없으면 새 경로가 올 때까지 선을 비운다.
+     */
+    private fun clearLiveRoutePath(inTransit: Boolean? = null) {
+        val map = _routeMap.value ?: return
+        val tracked = TripLiveState.pointFor(map.eventId)
+        val moving = inTransit
+            ?: tracked?.let { it.phase == TripGeofence.Phase.IN_TRANSIT }
+            ?: map.inTransit
+
+        val freshSnapshot = if (moving) {
+            TripLiveState.liveRouteFor(map.eventId)
+                ?.takeIf { it.usableLiveRoute() != null }
+        } else null
+        if (freshSnapshot != null) {
+            applyLiveRoute(freshSnapshot)
+            return
         }
+
+        _routeMap.update { current ->
+            if (current == null || current.eventId != map.eventId) current else {
+                val next = current.withLiveRouteDisplay(
+                    inTransit = moving,
+                    liveRoute = null,
+                )
+                val fit = if (current.cameraMode == RouteCameraMode.FIT_ROUTE) {
+                    RouteMapProjection.fit(
+                        path = if (moving) {
+                            listOfNotNull(
+                                current.currentLocation?.point,
+                                current.plannedPath.lastOrNull(),
+                            )
+                        } else {
+                            current.plannedPath
+                        },
+                        requestUnits = ROUTE_MAP_FIT_WIDTH,
+                        requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
+                    )
+                } else null
+                next.copy(
+                    center = fit?.first ?: current.center,
+                    level = fit?.second ?: current.level,
+                    pendingShift = if (fit != null) Offset.Zero else current.pendingShift,
+                )
+            }
+        }
+    }
+
+    private fun TripLiveState.Snapshot.toUsableMapLocation(
+        nowMillis: Long = System.currentTimeMillis(),
+    ): MapLocationFix? {
+        val age = nowMillis - atMillis
+        if (!accuracyM.isFinite() || accuracyM > TripGeofence.MAX_ACCURACY_M) return null
+        if (age !in 0..MAP_LOCATION_MAX_AGE_MS) return null
+        return MapLocationFix(point, accuracyM, atMillis)
     }
 
     /**
@@ -1930,18 +2206,39 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val map = _routeMap.value ?: return
         if (snapshot.eventId != map.eventId) return
 
+        val moving = snapshot.phase == TripGeofence.Phase.IN_TRANSIT
+        _routeMap.update { current ->
+            if (current?.eventId != snapshot.eventId) current
+            else current.copy(inTransit = moving)
+        }
+
+        // 오차가 큰 raw fix는 판정에도 쓰이지 않는다. 지도에도 정확한 현재
+        // 위치처럼 내보내지 않고 마지막 신뢰 가능한 점을 유지한다.
+        snapshot.toUsableMapLocation()?.let { fix ->
+            rememberLocation(fix.point, fix.accuracyM, fix.atMillis)
+            _routeMap.update { current ->
+                if (current?.eventId != snapshot.eventId) current
+                else current.copy(currentLocation = fix, locationError = null)
+            }
+        }
+
         // 이동 중이 끝났으면 몇 분 전 좌표 기준의 선도 끝낸다.
-        if (snapshot.phase != TripGeofence.Phase.IN_TRANSIT) {
-            clearLiveRouteOverlay()
+        if (!moving) {
+            clearLiveRoutePath(inTransit = false)
             return
         }
 
         // 출발한 순간부터 출발지 기준 대안은 거짓 정보다. 첫 현재 위치 조회가
         // 실패하더라도 그 선을 그대로 두지 않는다.
-        if (!map.altFromCurrent && map.hasAltPath) {
+        if (!map.pathFromCurrent && (map.path.isNotEmpty() || map.hasAltPath)) {
             _routeMap.update { current ->
                 if (current == null || current.eventId != map.eventId) current
-                else current.copy(altPath = emptyList(), altSummary = null)
+                else current.copy(
+                    path = emptyList(),
+                    summary = "현재 위치에서 가장 빠른 경로 확인 중",
+                    altPath = emptyList(),
+                    altSummary = null,
+                )
             }
         }
 
@@ -1951,43 +2248,44 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 서비스가 검증·저장한 최신 결과를 현재 지도에 투영한다. */
     private fun applyLiveRoute(snapshot: LiveRouteStore.Snapshot) {
         val tracked = TripLiveState.pointFor(snapshot.eventId)
-        if (tracked?.phase != TripGeofence.Phase.IN_TRANSIT) return
-        if (!snapshot.isFresh()) {
-            // 이 오래된 사본을 검사하는 사이 서비스가 새 결과를 게시했을 수
+        // 새 GPS fix 전(프로세스 재생성 직후)에는 저장 사본을 허용한다. 다만
+        // 도착/출발 전이라는 새 판정이 이미 있으면 오래된 사본이 이길 수 없다.
+        if (tracked != null && tracked.phase != TripGeofence.Phase.IN_TRANSIT) return
+        val live = snapshot.usableLiveRoute()
+        if (live == null) {
+            // 이 오래됐거나 깨진 사본을 검사하는 사이 서비스가 새 결과를 게시했을 수
             // 있다. 시각까지 같은 사본만 지워 새 경로를 실수로 없애지 않는다.
             TripLiveState.clearLiveRoute(
                 eventId = snapshot.eventId,
                 expectedFetchedAtMillis = snapshot.fetchedAtMillis,
             )
-            clearLiveRouteOverlay()
+            clearLiveRoutePath()
             return
         }
 
-        val live = snapshot.route
         _routeMap.update { current ->
             // 다른 일정의 저장 사본이나 늦은 서비스 응답은 절대 섞지 않는다.
             if (current == null || current.eventId != snapshot.eventId) return@update current
 
-            val fit = RouteMapProjection.fit(
-                path = current.path + live.path,
-                requestUnits = ROUTE_MAP_FIT_WIDTH,
-                requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
-            )
+            val fit = if (current.cameraMode == RouteCameraMode.FIT_ROUTE) {
+                RouteMapProjection.fit(
+                    path = live.path,
+                    requestUnits = ROUTE_MAP_FIT_WIDTH,
+                    requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
+                )
+            } else null
             val nextCenter = fit?.first ?: current.center
             val nextLevel = fit?.second ?: current.level
-            val viewportChanged = nextCenter != current.center || nextLevel != current.level
-            current.copy(
-                altPath = live.path,
-                altSummary = live.summary,
-                altFromCurrent = true,
+            current.withLiveRouteDisplay(
+                inTransit = true,
+                liveRoute = live,
+            ).copy(
                 center = nextCenter,
                 level = nextLevel,
                 pendingShift = if (fit != null) Offset.Zero else current.pendingShift,
-                // 선은 새 좌표계로 즉시 투영된다. 예전 중심의 비트맵을 한
-                // 프레임이라도 밑에 두면 길이 엉뚱한 도로 위에 보인다.
-                image = if (viewportChanged) null else current.image,
-                imageLoading = if (viewportChanged) false else current.imageLoading,
-                imageError = if (viewportChanged) null else current.imageError,
+                // 새 배경이 올 때까지 마지막 정상 frame을 같은 좌표 변환으로
+                // 유지한다. 따라서 1분 갱신 때 빈 카드가 번쩍이지 않는다.
+                imageError = null,
             )
         }
     }
@@ -1997,12 +2295,29 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val state = _routeMap.value ?: return
         if (widthDp <= 0 || heightDp <= 0) return
 
+        val requestWidth = MapCameraMath.bufferedRequestUnits(widthDp, STATIC_MAP_MAX_WIDTH)
+        val requestHeight = MapCameraMath.bufferedRequestUnits(heightDp, STATIC_MAP_MAX_HEIGHT)
         val signature = "${state.eventId},${state.center.lat},${state.center.lng}," +
-            "${state.level},$widthDp,$heightDp"
-        if (signature == lastRouteMapSignature &&
-            (state.image != null || state.imageLoading)
-        ) return
+            "${state.level},$requestWidth,$requestHeight"
+        val alreadyDisplayed = state.image != null &&
+            state.imageCenter == state.center && state.imageLevel == state.level &&
+            state.imageWidthDp == requestWidth && state.imageHeightDp == requestHeight
+        if (alreadyDisplayed) {
+            if (state.imageLoading || signature != lastRouteMapSignature) {
+                routeMapImageJob?.cancel()
+                lastRouteMapSignature = signature
+                _routeMap.update { current ->
+                    if (current?.eventId == state.eventId &&
+                        current.center == state.center && current.level == state.level
+                    ) current.copy(imageLoading = false, imageError = null)
+                    else current
+                }
+            }
+            return
+        }
+        if (signature == lastRouteMapSignature && state.imageLoading) return
         lastRouteMapSignature = signature
+        routeMapImageJob?.cancel()
 
         _routeMap.update { current ->
             if (current == null || current.eventId != state.eventId ||
@@ -2010,14 +2325,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             ) current
             else current.copy(imageLoading = true, imageError = null)
         }
-        viewModelScope.launch {
+        routeMapImageJob = viewModelScope.launch {
+            delay(MAP_REQUEST_DEBOUNCE_MS)
             // 마커는 보내지 않는다. 출발·도착 표식을 앱이 경로선과 같은 좌표계로
             // 그리므로, 카카오가 그린 마커와 겹치면 두 번 표시된다.
             val result = repository.staticMap(
                 center = state.center,
                 level = state.level,
-                widthDp = widthDp,
-                heightDp = heightDp,
+                widthDp = requestWidth,
+                heightDp = requestHeight,
                 markers = emptyList(),
             )
             _routeMap.update { current ->
@@ -2029,10 +2345,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 ) return@update current
                 when (result) {
                     is EventRepository.Result.Success ->
-                        current.copy(image = result.data, imageLoading = false, imageError = null)
+                        current.copy(
+                            image = result.data,
+                            imageCenter = state.center,
+                            imageLevel = state.level,
+                            imageWidthDp = requestWidth,
+                            imageHeightDp = requestHeight,
+                            imageLoading = false,
+                            imageError = null,
+                        )
 
-                    is EventRepository.Result.Failure ->
+                    is EventRepository.Result.Failure -> {
+                        lastRouteMapSignature = null
                         current.copy(imageLoading = false, imageError = result.message)
+                    }
                 }
             }
         }
@@ -2056,7 +2382,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 TripGeofence.Phase.IN_TRANSIT -> TripStage.IN_TRANSIT
                 TripGeofence.Phase.ARRIVED -> TripStage.ARRIVED
             }
-        },
+        } ?: TripLiveState.liveRouteFor(plan.eventId)
+            ?.takeIf { it.usableLiveRoute() != null }
+            ?.let { TripStage.IN_TRANSIT },
         alarmPassed = plan.alarmPassed,
         eventPassed = plan.eventPassed,
         prepApplies = plan.prepApplies,
@@ -2470,6 +2798,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         const val ROUTE_MAP_FIT_WIDTH = 360
         const val ROUTE_MAP_FIT_HEIGHT = 260
 
+        /** 카카오 정적 지도 REST API가 받는 최대 요청 단위. */
+        const val STATIC_MAP_MAX_WIDTH = 2048
+        const val STATIC_MAP_MAX_HEIGHT = 1024
+
+        /** 연속 pan/pinch에서 마지막 카메라만 네트워크로 보낸다. */
+        const val MAP_REQUEST_DEBOUNCE_MS = 180L
+
+        /** 지도에 '현재'라고 표시할 추적 위치의 최대 나이. */
+        const val MAP_LOCATION_MAX_AGE_MS = 2 * 60 * 1000L
+
+        /** 거의 동시에 끝난 측정은 시각보다 정확도를 우선하는 구간. */
+        const val LOCATION_QUALITY_GRACE_MS = 10_000L
+
         /** 준비 시간으로 받아들이는 범위(분). 밖의 값은 입력 실수로 본다. */
         const val PREP_MIN = 5
         const val PREP_MAX = 240
@@ -2497,3 +2838,64 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_PLACE_LOOKUPS = 20
     }
 }
+
+/** 카카오 id가 없을 때도 목록과 마커가 같은 장소를 가리키게 하는 안정 키. */
+private fun placeStableKey(place: PlaceSearchItem): String =
+    place.kakaoPlaceId?.takeIf { it.isNotBlank() }
+        ?: "${place.lat.toBits()}:${place.lng.toBits()}:${place.name}"
+
+/**
+ * 이동 단계와 현재 위치 경로의 유효성을 별개로 다루는 지도 표시 reducer.
+ *
+ * 이동 중인데 쓸 수 있는 live route가 없으면 계획 당시 출발지 경로로
+ * fallback하지 않는다. 다음 백그라운드 갱신이 올 때까지 선을 비워 두는 것이
+ * 현재 위치와 무관한 경로를 잠깐 보여 주는 것보다 정확하다.
+ */
+internal fun HomeViewModel.RouteMapState.withLiveRouteDisplay(
+    inTransit: Boolean,
+    liveRoute: LiveRoute?,
+): HomeViewModel.RouteMapState {
+    val usable = liveRoute?.takeIf { it.isUsableForMap() }
+    return when {
+        inTransit && usable != null -> copy(
+            path = usable.path,
+            summary = usable.summary,
+            pathFromCurrent = true,
+            inTransit = true,
+            altPath = emptyList(),
+            altSummary = null,
+        )
+
+        inTransit -> copy(
+            path = emptyList(),
+            summary = "현재 위치에서 가장 빠른 경로 확인 중",
+            pathFromCurrent = false,
+            inTransit = true,
+            altPath = emptyList(),
+            altSummary = null,
+        )
+
+        else -> copy(
+            path = plannedPath,
+            summary = plannedSummary,
+            pathFromCurrent = false,
+            inTransit = false,
+            altPath = emptyList(),
+            altSummary = null,
+        )
+    }
+}
+
+/** 메모리 Flow로 들어온 값도 디스크 복원과 같은 조건으로 한 번 더 검증한다. */
+internal fun LiveRouteStore.Snapshot.usableLiveRoute(
+    nowMillis: Long = System.currentTimeMillis(),
+): LiveRoute? = route.takeIf {
+    eventId > 0L &&
+        origin.lat.isFinite() && origin.lng.isFinite() &&
+        fetchedAtMillis > 0L && isFresh(nowMillis) &&
+        it.isUsableForMap()
+}
+
+private fun LiveRoute.isUsableForMap(): Boolean =
+    minutes > 0 && path.size >= 2 &&
+        path.all { it.lat.isFinite() && it.lng.isFinite() }

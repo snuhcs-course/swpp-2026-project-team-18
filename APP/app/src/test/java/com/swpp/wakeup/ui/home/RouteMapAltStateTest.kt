@@ -15,8 +15,8 @@ import org.junit.Test
  * 분리했다. 보라 선도 출발지 기준 대안인지 현재 위치 기준 경로인지 글씨와
  * **항상 함께** 밝혀야 한다.
  *
- * 그래서 [HomeViewModel.RouteMapState.hasAltPath] 가 좌표와 라벨을 **둘 다**
- * 요구한다. 뜻 없는 색은 지어낸 숫자보다 나쁘다.
+ * 출발 전 대안은 [HomeViewModel.RouteMapState.hasAltPath]가 좌표와 라벨을
+ * **둘 다** 요구한다. 이동 중 경로는 보조선이 아니라 `path` 자체를 교체한다.
  */
 class RouteMapAltStateTest {
 
@@ -63,5 +63,30 @@ class RouteMapAltStateTest {
         val withAlt = state(path, "9호선 → 2호선 · 4분 빠름")
         assertEquals(path, withAlt.path)
         assertEquals(2, withAlt.altPath.size)
+    }
+
+    @Test
+    fun `첫 진입은 전체 경로 카메라이고 손 조작 뒤에는 자유 카메라를 유지한다`() {
+        val initial = state()
+        assertEquals(HomeViewModel.RouteCameraMode.FIT_ROUTE, initial.cameraMode)
+        assertEquals(
+            HomeViewModel.RouteCameraMode.FREE,
+            initial.copy(cameraMode = HomeViewModel.RouteCameraMode.FREE).cameraMode,
+        )
+    }
+
+    @Test
+    fun `이동 중 경로는 보조선이 아니라 주 경로다`() {
+        val live = listOf(GeoPoint(37.485, 126.98), GeoPoint(37.49, 127.02))
+        val moving = state().copy(
+            path = live,
+            pathFromCurrent = true,
+            altPath = emptyList(),
+            altSummary = null,
+        )
+
+        assertEquals(live, moving.path)
+        assertTrue(moving.pathFromCurrent)
+        assertFalse(moving.hasAltPath)
     }
 }

@@ -3,18 +3,12 @@ package com.swpp.wakeup.ui.home
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.sensing.GeoPoint
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * 지도 화면 상태의 판단들.
- *
- * 중앙 표식은 "이것을 골랐다" 는 주장이다. 그 주장이 참일 때만 그려야 한다.
- * 실기기에서 영역 재검색 직후 표식이 **아무 가게도 없는 지점**에 놓여 있었고,
- * 화면만 보면 그곳을 고른 것처럼 읽혔다. 끌기·줌·재검색이 중심은 그대로 두고
- * 선택만 바꾸기 때문이다.
- */
+/** 목록과 Compose 마커가 한 선택 상태를 공유하는지 고정한다. */
 class MapPickStateTest {
 
     private fun place(lat: Double, lng: Double, name: String = "가게") = PlaceSearchItem(
@@ -32,49 +26,53 @@ class MapPickStateTest {
         level: Int = StaticMapScale.DEFAULT_LEVEL,
     ) = HomeViewModel.MapPickState(center = center, selected = selected, level = level)
 
-    // --- 중앙 표식 --------------------------------------------------------
+    // --- 선택 마커 --------------------------------------------------------
 
     @Test
-    fun `고른 장소가 중앙에 있으면 표식을 그린다`() {
-        val here = place(37.4783, 126.9516)
-        assertTrue(state(GeoPoint(37.4783, 126.9516), here).selectedAtCenter)
+    fun `카카오 id가 같으면 같은 선택 마커다`() {
+        val selected = place(37.4783, 126.9516, "12345")
+        val sameId = place(37.5000, 127.0000, "12345")
+        assertTrue(state(GeoPoint(37.48, 126.95), selected).isSelected(sameId))
     }
 
     @Test
-    fun `아무것도 고르지 않았으면 표식이 없다`() {
-        assertFalse(state(GeoPoint(37.4783, 126.9516), null).selectedAtCenter)
+    fun `다른 카카오 id는 선택되지 않는다`() {
+        val selected = place(37.4783, 126.9516, "12345")
+        val other = place(37.4783, 126.9516, "67890")
+        assertFalse(state(GeoPoint(37.48, 126.95), selected).isSelected(other))
     }
 
     @Test
-    fun `지도를 끌어 중심이 옮겨지면 표식이 사라진다`() {
-        // onMapDragEnd 는 center 만 바꾸고 selected 는 그대로 둔다.
-        val picked = place(37.4783, 126.9516)
-        val dragged = state(GeoPoint(37.4820, 126.9560), picked)
-        assertFalse("중심이 옮겨졌는데도 표식을 그린다", dragged.selectedAtCenter)
+    fun `선택이 없으면 어떤 마커도 선택되지 않는다`() {
+        assertFalse(
+            state(GeoPoint(37.4783, 126.9516), null)
+                .isSelected(place(37.4783, 126.9516)),
+        )
     }
 
     @Test
-    fun `영역 재검색으로 선택만 바뀌면 표식이 사라진다`() {
-        // researchMapArea 는 selected 를 새 목록의 첫 건으로 바꾸지만 center 는
-        // 사용자가 옮겨 둔 그 자리에 남긴다.
-        val center = GeoPoint(37.4820, 126.9560)
-        val newFirst = place(37.4791, 126.9502, "재검색 첫 결과")
-        assertFalse(state(center, newFirst).selectedAtCenter)
+    fun `영역 재검색에도 같은 장소가 있으면 사용자 선택을 유지한다`() {
+        val first = place(37.47, 126.94, "1")
+        val picked = place(37.48, 126.95, "4")
+        val next = listOf(first, picked, place(37.49, 126.96, "5"))
+
+        val replaced = state(GeoPoint(37.48, 126.95), picked)
+            .copy(markers = listOf(picked))
+            .withSearchResults(next)
+
+        assertTrue(replaced.isSelected(picked))
+        assertEquals(next, replaced.markers)
     }
 
     @Test
-    fun `부동소수 잡음은 같은 자리로 본다`() {
-        // 같은 값에서 복사되므로 보통 정확히 같지만, 0.1m 미만 차이로 표식이
-        // 깜빡이면 안 된다.
-        val here = place(37.4783000001, 126.9516000001)
-        assertTrue(state(GeoPoint(37.4783, 126.9516), here).selectedAtCenter)
-    }
+    fun `영역 재검색이 0건이면 선택도 비운다`() {
+        val picked = place(37.48, 126.95, "4")
+        val replaced = state(GeoPoint(37.48, 126.95), picked)
+            .copy(markers = listOf(picked))
+            .withSearchResults(emptyList())
 
-    @Test
-    fun `한 블록 떨어진 곳은 다른 자리로 본다`() {
-        // 1e-4도는 약 11m. 옆 건물이면 다른 장소다.
-        val here = place(37.4784, 126.9516)
-        assertFalse(state(GeoPoint(37.4783, 126.9516), here).selectedAtCenter)
+        assertTrue(replaced.markers.isEmpty())
+        assertTrue(replaced.selected == null)
     }
 
     // --- 줌 한계 ----------------------------------------------------------

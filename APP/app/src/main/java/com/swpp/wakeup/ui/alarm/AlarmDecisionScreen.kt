@@ -13,7 +13,6 @@ import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.domain.model.ArrivalOutlook
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripStage
-import com.swpp.wakeup.sensing.GeoPoint
 import com.swpp.wakeup.ui.home.HomeViewModel
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -90,13 +89,11 @@ fun AlarmDecisionScreen(
     freshness: String? = null,
     /** 경로 지도 상태. null 이면 경로 좌표가 없어 지도를 그릴 수 없다 */
     routeMap: HomeViewModel.RouteMapState? = null,
-    /** 추적 중인 현재 위치. 지도에 점으로 찍는다 */
-    here: GeoPoint? = null,
     onRouteMapViewport: (widthDp: Int, heightDp: Int) -> Unit = { _, _ -> },
-    onRouteMapZoom: (Int) -> Unit = {},
     onRouteMapFit: () -> Unit = {},
-    onRouteMapDrag: (Offset) -> Unit = {},
-    onRouteMapDragEnd: (Double) -> Unit = {},
+    onRouteMapGestureEnd: (pan: Offset, zoom: Float, metersPerPixel: Double) -> Unit =
+        { _, _, _ -> },
+    onRouteMapRecenter: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -174,13 +171,11 @@ fun AlarmDecisionScreen(
                 RouteMapCard(
                     state = map,
                     progress = progress,
-                    here = here,
-                    moving = stage == TripStage.IN_TRANSIT,
+                    moving = stage == TripStage.IN_TRANSIT || map.pathFromCurrent,
                     onViewport = onRouteMapViewport,
-                    onZoom = onRouteMapZoom,
                     onFitRoute = onRouteMapFit,
-                    onDrag = onRouteMapDrag,
-                    onDragEnd = onRouteMapDragEnd,
+                    onGestureEnd = onRouteMapGestureEnd,
+                    onRecenter = onRouteMapRecenter,
                 )
             }
         } else {

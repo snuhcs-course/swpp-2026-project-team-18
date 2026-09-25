@@ -185,6 +185,26 @@ class TestThrottleIsAttached:
                 f"{path} 의 throttle_scope={scope!r} 가 DEFAULT_THROTTLE_RATES 에 없다"
             )
 
+    @pytest.mark.parametrize(
+        "path,expected_scope",
+        [
+            ("/api/places/staticmap", "static_map"),
+            ("/api/routes/live", "route_live"),
+            ("/api/events/1/recompute", "route"),
+        ],
+    )
+    def test_automatic_or_gesture_traffic_has_an_isolated_scope(
+        self, path, expected_scope,
+    ):
+        """지도 손짓·1분 갱신이 사람이 누르는 경로 계산 한도를 먹지 않는다."""
+        from django.urls import resolve
+
+        match = resolve(path)
+        view_class = getattr(match.func, "cls", None) or getattr(
+            match.func, "view_class", None
+        )
+        assert getattr(view_class, "throttle_scope", None) == expected_scope
+
 
 # ---------------------------------------------------------------------------
 # 교차 사용자 격리

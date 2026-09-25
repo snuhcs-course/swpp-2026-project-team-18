@@ -103,7 +103,7 @@ class TestThrottleRatesAreDefined:
     def test_scopes_used_by_views_exist(self, settings):
         """뷰가 쓰는 scope 가 설정에 없으면 DRF 가 예외를 던진다."""
         rates = settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
-        for scope in ("route", "observation", "nlp"):
+        for scope in ("route", "static_map", "observation", "nlp"):
             assert scope in rates, f"{scope} 가 DEFAULT_THROTTLE_RATES 에 없다"
 
 
@@ -112,6 +112,11 @@ class TestTimezone:
         """시각은 UTC 로 저장하고 KST 로 보여준다. 둘이 섞이면 9시간 어긋난다."""
         assert settings.USE_TZ is True
         assert settings.TIME_ZONE == "Asia/Seoul"
+
+
+class TestStaticMapDailyBudget:
+    def test_default_leaves_headroom_below_kakao_quota(self, settings):
+        assert settings.STATIC_MAP_DAILY_UPSTREAM_LIMIT == 900
 
 
 class TestProductionCacheIsSharedBetweenWorkers:
@@ -155,6 +160,15 @@ class TestProductionCacheIsSharedBetweenWorkers:
         """지도 한 장이 수십~수백 KB 다. 상한이 없으면 임시 디스크를 채운다."""
         options = prod.CACHES["default"].get("OPTIONS", {})
         assert options.get("MAX_ENTRIES", 0) > 0
+
+    def test_static_map_budget_cache_is_shared_and_isolated(self, prod):
+        image_cache = prod.CACHES["default"]
+        budget_cache = prod.CACHES["static_map_budget"]
+
+        assert "locmem" not in budget_cache["BACKEND"].lower()
+        assert budget_cache["LOCATION"] != image_cache["LOCATION"]
+        assert budget_cache["TIMEOUT"] > 24 * 60 * 60
+        assert budget_cache["OPTIONS"]["MAX_ENTRIES"] > 0
 
     def test_importing_prod_does_not_mutate_shared_middleware(self, prod):
         """`from .base import *` 는 **같은 리스트 객체**를 가져온다.

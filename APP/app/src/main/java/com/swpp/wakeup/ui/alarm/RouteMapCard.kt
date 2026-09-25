@@ -4,7 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,8 +13,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -30,26 +29,43 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swpp.wakeup.domain.model.MapCameraMath
 import com.swpp.wakeup.domain.model.RouteMapProjection
 import com.swpp.wakeup.domain.model.RouteProgress
+import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.sensing.GeoPoint
+import com.swpp.wakeup.ui.common.mapGestures
+import com.swpp.wakeup.ui.common.rememberMapGestureState
+import com.swpp.wakeup.ui.common.KakaoMapAttribution
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 /** 지도 높이. 피그마 ④-a 의 260 을 그대로 쓴다 */
 private val MAP_HEIGHT = 260.dp
+
+private data class MapLayerTransform(
+    val scale: Float,
+    val translation: Offset,
+    /** 빈 가장자리를 내보이지 않는 범위에서 실제로 화면에 적용한 pan. */
+    val committedPan: Offset,
+    /** 마지막 frame의 자동 경계 보정을 제외한 실제 사용자 pinch 배율. */
+    val committedZoom: Float,
+)
 
 /**
  * 선택한 경로와 실시간 위치를 띄우는 지도 (Figma ④-a / 이동 중 ④-d).
@@ -75,13 +91,11 @@ private val MAP_HEIGHT = 260.dp
 fun RouteMapCard(
     state: HomeViewModel.RouteMapState,
     progress: RouteProgress?,
-    here: GeoPoint?,
     moving: Boolean,
     onViewport: (widthDp: Int, heightDp: Int) -> Unit,
-    onZoom: (Int) -> Unit,
     onFitRoute: () -> Unit,
-    onDrag: (Offset) -> Unit,
-    onDragEnd: (metersPerPixel: Double) -> Unit,
+    onGestureEnd: (pan: Offset, zoom: Float, metersPerPixel: Double) -> Unit,
+    onRecenter: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -106,98 +120,193 @@ fun RouteMapCard(
             val heightDp = maxHeight.value.roundToInt()
             val widthPx = with(density) { maxWidth.roundToPx() }
             val heightPx = with(density) { maxHeight.roundToPx() }
+            val gesture = rememberMapGestureState()
+
+            // 카메라는 즉시 바뀌지만 PNG는 네트워크를 돌아 나중에 도착한다.
+            // 이미지가 담고 있는 카메라를 따로 사용해야 그 사이에도 배경·경로·
+            // 현재 위치가 같은 도로 위에 머문다.
+            val frameCenter = state.imageCenter ?: state.center
+            val frameLevel = state.imageLevel ?: state.level
+            val frameWidthDp = state.imageWidthDp.takeIf { it > 0 } ?: widthDp
+            val frameHeightDp = state.imageHeightDp.takeIf { it > 0 } ?: heightDp
+            val frameWidthPx = with(density) { frameWidthDp.dp.roundToPx() }
+            val frameHeightPx = with(density) { frameHeightDp.dp.roundToPx() }
+
+            val desiredMetersPerPixel = StaticMapScale.metersPerPixel(
+                level = state.level,
+                requestUnits = widthDp,
+                viewPixels = widthPx,
+            )
+            val frameViewport = RouteMapProjection.Viewport(
+                center = frameCenter,
+                level = frameLevel,
+                requestUnits = frameWidthDp,
+                viewPx = frameWidthPx,
+                viewHeightPx = frameHeightPx,
+            )
+
+            fun layerTransform(pan: Offset, zoom: Float): MapLayerTransform {
+                val persistentFrameScale = MapCameraMath.frameScale(frameLevel, state.level)
+                // overscan 가장자리보다 멀리 끌거나 빠르게 축소해도 빈 바탕을
+                // 드러내지 않는다. 다음 frame이 오면 자연스럽게 1배로 돌아온다.
+                val coverScale = max(
+                    widthPx.toFloat() / frameWidthPx.coerceAtLeast(1),
+                    heightPx.toFloat() / frameHeightPx.coerceAtLeast(1),
+                )
+                val frameZoom = MapCameraMath.resolveFrameZoom(
+                    persistentFrameScale = persistentFrameScale,
+                    gestureScale = zoom,
+                    minimumCoverScale = coverScale,
+                )
+                val scale = frameZoom.displayScale
+                val shownMetersPerPixel = frameViewport.metersPerPixel / scale
+                val frameCenterOffset = MapCameraMath.offsetPx(
+                    point = frameCenter,
+                    center = state.center,
+                    metersPerPixel = shownMetersPerPixel,
+                )
+                val safePan = MapCameraMath.clampPan(
+                    requested = pan,
+                    frameCenterOffset = frameCenterOffset,
+                    frameWidthPx = frameWidthPx.toFloat(),
+                    frameHeightPx = frameHeightPx.toFloat(),
+                    frameScale = scale,
+                    viewportWidthPx = widthPx.toFloat(),
+                    viewportHeightPx = heightPx.toFloat(),
+                )
+                val coverageCorrection = MapCameraMath.clampPan(
+                    requested = Offset.Zero,
+                    frameCenterOffset = frameCenterOffset,
+                    frameWidthPx = frameWidthPx.toFloat(),
+                    frameHeightPx = frameHeightPx.toFloat(),
+                    frameScale = scale,
+                    viewportWidthPx = widthPx.toFloat(),
+                    viewportHeightPx = heightPx.toFloat(),
+                )
+                return MapLayerTransform(
+                    scale = scale,
+                    translation = frameCenterOffset + safePan,
+                    // 마지막 frame을 화면에 덮기 위한 자동 보정은 사용자의
+                    // 손짓이 아니다. 카메라로 넘기면 손을 떼는 순간 옆으로 튄다.
+                    committedPan = safePan - coverageCorrection,
+                    // 화면을 덮기 위한 자동 배율은 제외하고 실제 pinch만 확정한다.
+                    committedZoom = frameZoom.committedGestureScale,
+                )
+            }
+
+            val transform = layerTransform(gesture.pan, gesture.zoom)
 
             LaunchedEffect(widthDp, heightDp, state.center, state.level) {
                 onViewport(widthDp, heightDp)
             }
 
-            val viewport = RouteMapProjection.Viewport(
-                center = state.center,
-                level = state.level,
-                requestUnits = widthDp,
-                viewPx = widthPx,
-                viewHeightPx = heightPx,
-            )
-
-            state.image?.let { bitmap ->
-                Image(
-                    bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "경로 지도",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .offset {
-                            IntOffset(
-                                state.pendingShift.x.roundToInt(),
-                                state.pendingShift.y.roundToInt(),
-                            )
-                        }
-                        .pointerInput(state.level, state.center) {
-                            detectDragGestures(
-                                onDragEnd = { onDragEnd(viewport.metersPerPixel) },
-                                onDragCancel = { onDragEnd(viewport.metersPerPixel) },
-                            ) { _, delta -> onDrag(delta) }
-                        },
-                )
-            }
-
-            if (state.imageLoading && state.image == null) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center).size(22.dp),
-                    color = JitColor.Accent,
-                    strokeWidth = 2.dp,
-                )
-            }
-
-            if (state.image == null && !state.imageLoading) {
-                Text(
-                    text = state.imageError ?: "지도를 불러오는 중",
-                    color = JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
-                )
-            }
-
-            // 경로선. 이미지와 같이 밀려야 하므로 같은 offset 을 쓴다.
-            if (state.path.size >= 2) {
-                RouteOverlay(
-                    path = state.path,
-                    altPath = if (state.hasAltPath) state.altPath else emptyList(),
-                    viewport = viewport,
-                    travelRatio = progress?.takeIf { it.onRoute }?.ratio ?: 0f,
-                    shift = state.pendingShift,
-                )
-            }
-
-            here?.let { point ->
-                MeDot(
-                    px = RouteMapProjection.toPx(point, viewport),
-                    shift = state.pendingShift,
-                    widthPx = widthPx,
-                    heightPx = heightPx,
-                )
-            }
-
-            // 확대해서 들여다본 뒤 되돌아올 방법이 없으면 갇힌다.
-            MapPill(
-                text = "경로 전체 보기",
-                icon = "⤢",
-                onClick = onFitRoute,
-                modifier = Modifier.align(Alignment.TopStart).padding(14.dp),
-            )
-
-            Column(
+            Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 14.dp, bottom = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                    .fillMaxSize()
+                    .mapGestures(
+                        state = gesture,
+                        enabled = state.image != null,
+                    ) { pan, zoom ->
+                        val committed = layerTransform(pan, zoom)
+                        onGestureEnd(
+                            committed.committedPan,
+                            committed.committedZoom,
+                            desiredMetersPerPixel,
+                        )
+                    },
             ) {
-                MapFab("＋", state.canZoomIn) { onZoom(-1) }
-                MapFab("－", state.canZoomOut) { onZoom(1) }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .requiredSize(frameWidthDp.dp, frameHeightDp.dp)
+                        .graphicsLayer {
+                            transformOrigin = TransformOrigin.Center
+                            translationX = transform.translation.x
+                            translationY = transform.translation.y
+                            scaleX = transform.scale
+                            scaleY = transform.scale
+                        },
+                ) {
+                    state.image?.let { bitmap ->
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "경로 지도",
+                            contentScale = ContentScale.FillBounds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+
+                    if (state.path.size >= 2) {
+                        RouteOverlay(
+                            path = state.path,
+                            altPath = if (state.hasAltPath) state.altPath else emptyList(),
+                            viewport = frameViewport,
+                            travelRatio = if (state.pathFromCurrent) 0f
+                            else progress?.takeIf { it.onRoute }?.ratio ?: 0f,
+                            pathFromCurrent = state.pathFromCurrent,
+                        )
+                    }
+
+                    state.currentLocation?.let { fix ->
+                        CurrentLocationOverlay(fix = fix, viewport = frameViewport)
+                    }
+                }
+
+                if (state.imageLoading && state.image == null) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center).size(22.dp),
+                        color = JitColor.Accent,
+                        strokeWidth = 2.dp,
+                    )
+                }
+
+                if (state.image == null && !state.imageLoading) {
+                    Text(
+                        text = state.imageError ?: "지도를 불러오는 중",
+                        color = JitColor.TextSecondary,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.align(Alignment.Center).padding(horizontal = 32.dp),
+                    )
+                }
+
+                // 마지막 정상 지도는 그대로 둔 채 오류만 비차단 안내로 얹는다.
+                // 하단 왼쪽의 카카오 CI를 가리지 않도록 우상단을 쓴다.
+                if (state.image != null) {
+                    (state.locationError ?: state.imageError)?.let { message ->
+                        MapStatusMessage(
+                            text = "$message · 탭하여 재시도",
+                            onClick = if (state.locationError != null) onRecenter
+                                else ({ onViewport(widthDp, heightDp) }),
+                            modifier = Modifier.align(Alignment.TopEnd).padding(14.dp),
+                        )
+                    }
+                }
+
+                // 확대해서 들여다본 뒤 되돌아올 방법이 없으면 갇힌다.
+                MapPill(
+                    text = "경로 전체 보기",
+                    icon = "⤢",
+                    onClick = onFitRoute,
+                    modifier = Modifier.align(Alignment.TopStart).padding(14.dp),
+                )
+
+                CurrentLocationButton(
+                    loading = state.locating,
+                    onClick = onRecenter,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 14.dp, bottom = 14.dp),
+                )
+                state.image?.let {
+                    KakaoMapAttribution(
+                        bitmap = it,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 6.dp, bottom = 6.dp),
+                    )
+                }
             }
-            // 좌하단은 카카오 CI 로고 자리다. 로고는 제거할 수 없고 가리면
-            // 이용 조건을 어기므로 어떤 것도 놓지 않는다.
         }
 
         Row(
@@ -205,7 +314,12 @@ fun RouteMapCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             state.summary?.let {
-                Text(it, color = JitColor.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    it,
+                    color = if (state.pathFromCurrent) JitColor.Purple else JitColor.TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
             }
             Spacer(Modifier.weight(1f))
             progress?.takeIf { it.onRoute }?.let {
@@ -263,10 +377,8 @@ private fun formatKm(meters: Int): String =
  *
  * ## 더 빠른 길은 아래에 깔고 얇게 그린다
  *
- * [altPath] 는 출발 전에는 "지금은 이쪽이 더 빠르다" 는 제안이고, 이동 중에는
- * 현재 위치부터 다시 받은 최단선이다. 어느 경우든 저장된 계획 경로보다 한 단계
- * 얇게(3dp vs 4dp) 아래에 깐다. 겹치는 구간에서는 계획 경로의 색이 남고,
- * 현재 위치부터 갈라지는 부분에서만 새 선택지가 또렷해진다.
+ * [altPath] 는 출발 전의 대안만 나타낸다. 이동 중 현재 위치부터 다시 받은
+ * 최단선은 [path] 자체이며 [pathFromCurrent]일 때 보라색 주 경로로 그린다.
  *
  * 색은 [JitColor.Purple] 이다. 처음에는 초록이었는데 같은 화면의 진행 바가
  * 초록을 "정시 도착" 으로 쓰고 있어서 한 색이 두 뜻이 됐다.
@@ -277,13 +389,9 @@ private fun RouteOverlay(
     altPath: List<GeoPoint>,
     viewport: RouteMapProjection.Viewport,
     travelRatio: Float,
-    shift: Offset,
+    pathFromCurrent: Boolean,
 ) {
-    Canvas(
-        modifier = Modifier
-            .fillMaxSize()
-            .offset { IntOffset(shift.x.roundToInt(), shift.y.roundToInt()) }
-    ) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
         // 고른 경로보다 먼저 그려서 아래에 깔린다.
         if (altPath.size >= 2) {
             val altPx = altPath.map { RouteMapProjection.toPx(it, viewport) }
@@ -299,30 +407,64 @@ private fun RouteOverlay(
         }
 
         val points = path.map { RouteMapProjection.toPx(it, viewport) }
-        // 진행 비율을 점 인덱스로 바꾼다. 거리 비례가 아니라 점 개수 비례라
-        // 점 간격이 고른 경로에서는 거의 같고, 선 색이 바뀌는 위치가 몇 픽셀
-        // 어긋나는 것은 눈에 띄지 않는다.
-        val cut = (points.size * travelRatio).toInt().coerceIn(0, points.size - 1)
+        val segmentMeters = List(path.lastIndex) { index ->
+            RouteProgress.distanceM(path[index], path[index + 1])
+        }
+        val totalMeters = segmentMeters.sum()
+        val targetMeters = totalMeters * travelRatio.coerceIn(0f, 1f)
+        val traveledLine = Path().apply { moveTo(points.first().x, points.first().y) }
+        val remainingLine = Path()
+        var hasTraveled = false
+        var hasRemaining = false
+        var reachedCut = targetMeters <= 0.0
+        var walkedMeters = 0.0
 
-        fun pathOf(from: Int, to: Int): Path? {
-            if (to - from < 1) return null
-            return Path().apply {
-                moveTo(points[from].x, points[from].y)
-                for (i in from + 1..to) lineTo(points[i].x, points[i].y)
+        if (reachedCut) {
+            remainingLine.moveTo(points.first().x, points.first().y)
+        }
+        for (index in segmentMeters.indices) {
+            val from = points[index]
+            val to = points[index + 1]
+            val segment = segmentMeters[index]
+            val nextMeters = walkedMeters + segment
+
+            if (!reachedCut && (segment <= 0.0 || nextMeters <= targetMeters)) {
+                traveledLine.lineTo(to.x, to.y)
+                hasTraveled = true
+            } else if (!reachedCut) {
+                val fraction = ((targetMeters - walkedMeters) / segment)
+                    .coerceIn(0.0, 1.0)
+                    .toFloat()
+                val cutX = from.x + (to.x - from.x) * fraction
+                val cutY = from.y + (to.y - from.y) * fraction
+                if (fraction > 0f) {
+                    traveledLine.lineTo(cutX, cutY)
+                    hasTraveled = true
+                }
+                remainingLine.moveTo(cutX, cutY)
+                remainingLine.lineTo(to.x, to.y)
+                hasRemaining = true
+                reachedCut = true
+            } else {
+                remainingLine.lineTo(to.x, to.y)
+                hasRemaining = true
             }
+            walkedMeters = nextMeters
         }
 
-        pathOf(cut, points.lastIndex)?.let {
+        if (hasRemaining) {
             drawPath(
-                path = it,
-                // 지도가 밝은 테마다. 앱 배경 기준의 흰 반투명은 여기서 사라진다.
-                color = JitColor.Track,
-                style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round),
+                path = remainingLine,
+                color = if (pathFromCurrent) JitColor.Purple else JitColor.Track,
+                style = Stroke(
+                    width = if (pathFromCurrent) 4.5.dp.toPx() else 4.dp.toPx(),
+                    cap = StrokeCap.Round,
+                ),
             )
         }
-        pathOf(0, cut)?.let {
+        if (hasTraveled) {
             drawPath(
-                path = it,
+                path = traveledLine,
                 color = JitColor.Blue,
                 style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round),
             )
@@ -363,41 +505,98 @@ private fun RouteOverlay(
 }
 
 /**
- * 내 위치.
+ * GPS가 보고한 내 위치와 오차 반경.
  *
- * 경로를 잘 따르고 있으면 점이 선 위에 온다. 선에서 벗어나 있으면 그것 자체가
- * "경로를 벗어났다" 는 신호다 — 문구로 따로 말할 필요가 없다.
+ * 고정 크기 장식 원을 오차 반경처럼 쓰지 않는다. 실제 accuracy를 현재 축척으로
+ * 바꿔 그리되, 정확도가 아주 좋을 때도 점이 지도 무늬에 묻히지 않을 최소 크기만
+ * 둔다. Canvas 좌표로 직접 그리므로 화면 밀도를 3으로 가정하던 오차도 없다.
  */
 @Composable
-private fun MeDot(
-    px: RouteMapProjection.Px,
-    shift: Offset,
-    widthPx: Int,
-    heightPx: Int,
+private fun CurrentLocationOverlay(
+    fix: HomeViewModel.MapLocationFix,
+    viewport: RouteMapProjection.Viewport,
 ) {
-    val x = px.x + shift.x
-    val y = px.y + shift.y
-    // 화면 밖이면 그리지 않는다. 테두리에 붙은 점은 실제 위치를 잘못 알린다.
-    if (x < 0 || y < 0 || x > widthPx || y > heightPx) return
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val point = RouteMapProjection.toPx(fix.point, viewport)
+        val center = Offset(point.x, point.y)
+        val reportedRadius = (fix.accuracyM.toDouble() / viewport.metersPerPixel)
+            .takeIf { it.isFinite() && it >= 0.0 }
+            ?.toFloat()
+            ?: 0f
+        // accuracy가 없는 비정상 fix(Float.MAX_VALUE)가 GPU에 무한대에 가까운
+        // 원을 요구하지 않게 한다. 화면을 모두 덮는 크기 이상은 시각적 의미도 같다.
+        val accuracyRadius = max(18.dp.toPx(), reportedRadius)
+            .coerceAtMost(max(size.width, size.height) * 2f)
+        if (center.x < -accuracyRadius || center.y < -accuracyRadius ||
+            center.x > size.width + accuracyRadius || center.y > size.height + accuracyRadius
+        ) return@Canvas
 
+        drawCircle(
+            color = JitColor.Blue.copy(alpha = 0.16f),
+            radius = accuracyRadius,
+            center = center,
+        )
+        drawCircle(
+            color = JitColor.TextPrimary,
+            radius = 8.dp.toPx(),
+            center = center,
+        )
+        drawCircle(color = JitColor.Blue, radius = 6.dp.toPx(), center = center)
+    }
+}
+
+@Composable
+private fun MapStatusMessage(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = text,
+        color = JitColor.TextPrimary,
+        fontSize = 10.sp,
+        textAlign = TextAlign.Center,
+        maxLines = 2,
+        modifier = modifier
+            .clip(RoundedCornerShape(JitRadius.Hint))
+            .background(JitColor.Bg.copy(alpha = 0.9f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 6.dp),
+    )
+}
+
+/** 현재 GPS 위치를 새로 확인한 뒤 그곳으로 지도를 옮긴다. */
+@Composable
+private fun CurrentLocationButton(
+    loading: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Box(
-        modifier = Modifier
-            .offset { IntOffset((x - 22 * 3).roundToInt(), (y - 22 * 3).roundToInt()) }
-            .size(44.dp),
+        modifier = modifier
+            .size(48.dp)
+            .semantics {
+                contentDescription = if (loading) "현재 위치 확인 중" else "현재 위치로 이동"
+            }
+            .clip(CircleShape)
+            .background(JitColor.Bg.copy(alpha = 0.9f))
+            .clickable(enabled = !loading, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(JitColor.Blue.copy(alpha = 0.18f))
-        )
-        Box(
-            Modifier
-                .size(14.dp)
-                .clip(CircleShape)
-                .background(JitColor.Blue)
-        )
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                color = JitColor.Accent,
+                strokeWidth = 2.dp,
+            )
+        } else {
+            Text(
+                text = "◎",
+                color = JitColor.Accent,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
 }
 
@@ -419,24 +618,5 @@ private fun MapPill(
         Text(icon, color = JitColor.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(5.dp))
         Text(text, color = JitColor.TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun MapFab(glyph: String, enabled: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .clip(CircleShape)
-            .background(JitColor.Bg.copy(alpha = 0.86f))
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = glyph,
-            color = if (enabled) JitColor.Accent else JitColor.TextSecondary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-        )
     }
 }

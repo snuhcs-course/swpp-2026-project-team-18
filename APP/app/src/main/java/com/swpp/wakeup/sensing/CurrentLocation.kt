@@ -8,6 +8,9 @@ import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.Granularity
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationToken
+import com.google.android.gms.tasks.CancellationTokenSource
+import com.google.android.gms.tasks.Task
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
@@ -32,6 +35,9 @@ object CurrentLocation {
 
     /** 새로 측정할 때 기다리는 한계. 실내에서 GPS 가 안 잡히는 경우를 끊는다. */
     private const val FRESH_TIMEOUT_MS = 10_000L
+
+    /** 지도에서 '내 위치'를 눌렀을 때 허용하는 캐시 나이. */
+    private const val RECENTER_CACHE_AGE_MS = 10_000L
 
     /**
      * 현재 위치. 권한이 없거나 측정에 실패하면 null.
@@ -70,8 +76,40 @@ object CurrentLocation {
             .setDurationMillis(FRESH_TIMEOUT_MS)
             .build()
 
-        return runCatching { await(fused.getCurrentLocation(request, null)) }
+        return runCatching {
+            awaitCurrent { token -> fused.getCurrentLocation(request, token) }
+        }
             .onFailure { Log.w(TAG, "현재 위치 측정 실패", it) }
+            .getOrNull()
+    }
+
+    /**
+     * 사용자가 명시적으로 현재 위치를 요청했을 때의 고정밀 측정.
+     *
+     * 일반 검색 준비용 [get]은 배터리를 아끼기 위해 2분 캐시와 balanced
+     * accuracy를 허용한다. 반면 지도 위치 버튼은 눈앞의 점이므로 그 값을 쓰면
+     * 이미 몇 블록 이동한 뒤에도 예전 자리를 가리킬 수 있다. 최근 10초 이내의
+     * fix만 재사용하고, 없으면 GPS를 포함한 high accuracy 한 번을 요청한다.
+     */
+    @SuppressLint("MissingPermission")
+    suspend fun getFresh(context: Context): Location? {
+        if (!LocationPermissions.granted(context)) {
+            Log.i(TAG, "정밀 위치 권한이 없어 지도 현재 위치를 측정하지 못함")
+            return null
+        }
+
+        val fused = LocationServices.getFusedLocationProviderClient(context)
+        val request = CurrentLocationRequest.Builder()
+            .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+            .setGranularity(Granularity.GRANULARITY_FINE)
+            .setMaxUpdateAgeMillis(RECENTER_CACHE_AGE_MS)
+            .setDurationMillis(FRESH_TIMEOUT_MS)
+            .build()
+
+        return runCatching {
+            awaitCurrent { token -> fused.getCurrentLocation(request, token) }
+        }
+            .onFailure { Log.w(TAG, "지도 현재 위치 고정밀 측정 실패", it) }
             .getOrNull()
     }
 
@@ -82,9 +120,22 @@ object CurrentLocation {
      * 구현한다. 의존성 하나를 이것 때문에 추가할 이유가 없다.
      */
     private suspend fun <T> await(
-        task: com.google.android.gms.tasks.Task<T>,
+        task: Task<T>,
     ): T? = suspendCancellableCoroutine { cont ->
         task.addOnCompleteListener { done ->
+            if (cont.isActive) {
+                cont.resume(if (done.isSuccessful) done.result else null)
+            }
+        }
+    }
+
+    /** 화면이 닫히거나 더 정확한 요청으로 교체되면 Play Services 측 측정도 멈춘다. */
+    private suspend fun <T> awaitCurrent(
+        task: (CancellationToken) -> Task<T>,
+    ): T? = suspendCancellableCoroutine { cont ->
+        val cancellation = CancellationTokenSource()
+        cont.invokeOnCancellation { cancellation.cancel() }
+        task(cancellation.token).addOnCompleteListener { done ->
             if (cont.isActive) {
                 cont.resume(if (done.isSuccessful) done.result else null)
             }

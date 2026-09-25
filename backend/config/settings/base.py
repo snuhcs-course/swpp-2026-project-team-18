@@ -171,6 +171,9 @@ REST_FRAMEWORK = {
     # 2건이지만 오프라인 큐가 재전송하면 같은 건이 여러 번 올 수 있다.
     "DEFAULT_THROTTLE_RATES": {
         "route": "120/hour",
+        # pan/pinch는 사람이 짧게 여러 번 할 수 있다. 경로 계산과 같은 통을
+        # 쓰면 지도 탐색 뒤 알람 계산이 429가 되므로 별도 계정 한도로 격리한다.
+        "static_map": "120/hour",
         # 이동 중 1분마다 부르는 경로 조회(`RouteLiveView`). 정상 사용이 시간당
         # 60회라 `route` 와 같은 통을 쓰면 다른 경로 기능이 굶는다. 통을 나눠
         # 폭주가 재계산·장소 검색까지 막지 못하게 한다.
@@ -201,6 +204,30 @@ SIMPLE_JWT = {
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "")
 KAKAO_MOBILITY_KEY = os.getenv("KAKAO_MOBILITY_KEY", "")
 KMA_API_KEY = os.getenv("KMA_API_KEY", "")
+
+# 카카오 정적 지도 무료 쿼터는 하루 1,000건이다. 앱 전체가 공유하는 안전
+# 여유분을 남겨 두고, 캐시에서 찾지 못해 실제로 카카오를 부를 때만 차감한다.
+STATIC_MAP_DAILY_UPSTREAM_LIMIT = int(
+    os.getenv("STATIC_MAP_DAILY_UPSTREAM_LIMIT", "900")
+)
+
+# 일일 카운터는 지도 이미지 캐시와 분리한다. 배포 이미지 캐시는 용량 때문에
+# 항목을 퇴출하는데, 그때 카운터까지 사라지면 같은 날 한도가 0부터 다시 센다.
+# 개발·테스트는 한 프로세스라 LocMemCache면 충분하고, prod.py가 워커 공용
+# FileBasedCache로 덮어쓴다.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "jit-default",
+    },
+    "static_map_budget": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "jit-static-map-budget",
+        # 일부 백엔드의 incr()는 원래 TTL 대신 기본 TTL로 다시 저장한다.
+        # 키에 KST 날짜도 들어가므로 하루보다 조금 길게 남아도 다음 날과 섞이지 않는다.
+        "TIMEOUT": 25 * 60 * 60,
+    },
+}
 
 # ---------------------------------------------------------------------------
 # 실시간 도착 정보
@@ -273,8 +300,9 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 #          고른 경로는 바꾸지 않고 앱이 지도에 겹쳐 보여 준다
 #   0.8.0  이동 중 현재 위치부터 목적지까지의 최단 경로를 1분마다 다시 계산한다.
 #          앱이 백그라운드여도 추적 서비스가 경로를 최신 상태로 유지한다
+#   0.9.0  지도 핀치 줌·GPS 재중심·장소 마커/목록 동기화.
 #
 # 버전만으로 판별하지 않는 것이 더 확실하다. `scripts/check_deployed.py` 와
 # 같은 방식으로 **새 엔드포인트의 404 여부**를 보면 버전을 올리는 것을
 # 잊었더라도 드러난다 — 인증이 필요한 경로는 배포됐으면 401, 미배포면 404 다.
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.9.0"

@@ -157,7 +157,21 @@ CACHES = {
         # 지도 한 장이 수십~수백 KB 다. 무료 플랜의 임시 디스크를 채우지 않게
         # 항목 수로 상한을 둔다. 300장이면 3인 팀의 한 시간 사용량을 덮는다.
         "OPTIONS": {"MAX_ENTRIES": 300},
-    }
+    },
+    # 이미지 캐시의 300개 상한/cull과 분리한다. 이 디렉터리에는 날짜별 작은
+    # 정수 하나만 생기므로 1년 넘게 보관해도 디스크 부담이 사실상 없다.
+    # FileBasedCache라 gunicorn 워커 둘이 같은 카운터를 본다.
+    "static_map_budget": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": os.getenv(
+            "DJANGO_STATIC_MAP_BUDGET_CACHE_DIR",
+            "/tmp/jit-static-map-budget",
+        ),
+        # FileBasedCache.incr()가 기본 timeout으로 다시 쓰므로 하루보다 길게 둔다.
+        # KST 날짜가 키에 포함되어 다음 날 카운터와 섞이지 않는다.
+        "TIMEOUT": 25 * 60 * 60,
+        "OPTIONS": {"MAX_ENTRIES": 400},
+    },
 }
 
 # ---------------------------------------------------------------------------
