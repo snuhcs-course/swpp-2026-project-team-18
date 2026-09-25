@@ -101,6 +101,16 @@ def main() -> int:
         return 1
     check("version 응답", bool(body.get("version")), str(body))
 
+    # 새 이동 중 경로 API 가 실제 배포본에 붙었는지, 계정이나 외부 경로 API 를
+    # 건드리지 않고 확인한다. 인증 검사가 본문 검증보다 먼저이므로 배포됐으면
+    # 401, 아직 구버전이면 404 다. 400/200 이면 권한 경계가 깨진 것이므로 실패다.
+    st, body = api("/api/routes/live", "POST", {}, auth=False)
+    check(
+        "이동 중 경로 엔드포인트 배포 (토큰 없이 401)",
+        st == 401,
+        f"status={st} body={str(body)[:160]}",
+    )
+
     # --- 2. 계정 ----------------------------------------------------------
     print("\n[2] 계정")
     email = f"depcheck_{uuid.uuid4().hex[:8]}@example.com"

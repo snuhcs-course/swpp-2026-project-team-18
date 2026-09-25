@@ -6,6 +6,8 @@ import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
 import com.swpp.wakeup.sensing.BlockObservationQueue
 import com.swpp.wakeup.sensing.TripObservationQueue
+import com.swpp.wakeup.sensing.TripLiveState
+import com.swpp.wakeup.sensing.TripTrackingService
 
 /**
  * 기기에 남는 앱 자체 저장소를 한자리에서 지운다.
@@ -46,12 +48,17 @@ object LocalStores {
      * 정리될 때 취소된다. 팀이 이미 한 번 당했고 그래서 Room 삭제는
      * [OfflineCache.wipeDetached] 로 분리돼 있다.
      *
-     * 여기는 SharedPreferences 파일 네 개라 그 방식까지 필요하지 않다 — 작고,
+     * 여기는 SharedPreferences 파일 다섯 개라 그 방식까지 필요하지 않다 — 작고,
      * 블로킹 시간이 화면 전환 한 프레임 안에 들어온다. 정말 옮겨야 한다면
      * 화면 수명과 분리된 스코프를 써야 하고, `viewModelScope` 는 답이 아니다.
      */
     fun wipeAll(context: Context) {
         val app = context.applicationContext
+
+        // 먼저 생산자를 멈춘다. 서비스가 살아 있으면 아래에서 사본을 지운 직후
+        // 진행 중인 네트워크 응답으로 위치 경로를 다시 쓸 수 있다.
+        runCatching { TripTrackingService.stop(app) }
+            .onFailure { Log.w(TAG, "이동 추적 서비스 중지 실패", it) }
 
         runCatching {
             // 해제가 먼저다. cancelAll 이 사본을 읽어 어떤 PendingIntent 를
@@ -69,5 +76,9 @@ object LocalStores {
 
         runCatching { MorningSessionStore(app).wipe() }
             .onFailure { Log.w(TAG, "아침 기록 삭제 실패", it) }
+
+        runCatching { LiveRouteStore(app).wipe() }
+            .onFailure { Log.w(TAG, "실시간 경로 사본 삭제 실패", it) }
+        TripLiveState.clear()
     }
 }

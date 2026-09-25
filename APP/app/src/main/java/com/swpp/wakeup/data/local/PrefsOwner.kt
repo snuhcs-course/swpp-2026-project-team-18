@@ -96,6 +96,31 @@ internal fun SharedPreferences.stampOwner(context: Context) {
 }
 
 /**
+ * 값과 소유자를 **같은 SharedPreferences 트랜잭션**에 쓴다.
+ *
+ * 민감한 값을 먼저 쓰고 [stampOwner]를 나중에 부르면 두 apply 사이에 프로세스가
+ * 죽었을 때 소유자 없는 값만 남는다. 그러면 다음 계정이 구버전 데이터로 판단해
+ * 읽을 수 있다. 새 저장소는 가능하면 이 함수를 써야 한다.
+ */
+internal inline fun SharedPreferences.editOwned(
+    context: Context,
+    commit: Boolean = false,
+    crossinline action: SharedPreferences.Editor.() -> Unit,
+): Boolean {
+    // 새 민감 데이터는 소유자를 모를 때 아예 쓰지 않는다. 로그아웃과 네트워크
+    // 응답이 엇갈려 ownerless 값이 다시 생기는 것을 막는다.
+    val owner = currentOwner(context) ?: return false
+    val editor = edit().apply {
+        action()
+        putString(KEY_OWNER, owner)
+    }
+    return if (commit) editor.commit() else {
+        editor.apply()
+        true
+    }
+}
+
+/**
  * 다른 계정의 저장소면 비우고 true 를 돌려준다.
  *
  * 남의 데이터를 들고 있을 이유가 없다. 큐에 쌓인 관측은 **그 사용자의 토큰이

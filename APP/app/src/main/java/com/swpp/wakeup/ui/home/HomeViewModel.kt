@@ -9,6 +9,7 @@ import com.swpp.wakeup.BuildConfig
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.local.LocalStores
+import com.swpp.wakeup.data.local.LiveRouteStore
 import com.swpp.wakeup.data.local.MorningSessionStore
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.SessionState
@@ -105,6 +106,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * `HomeViewModelInitOrderTest` 가 그 순서를 강제한다.
      */
     private val morningStore = MorningSessionStore(application)
+
+    /** 서비스가 화면이 없는 동안 갱신한 현재-위치 경로를 복원한다. */
+    private val liveRouteStore = LiveRouteStore(application)
 
     /**
      * 진행 중인 아침 기록. 없으면 null.
@@ -334,6 +338,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 알람 결정 화면이 보고 있는 계획. */
     private val _plan = MutableStateFlow<AlarmPlanView?>(null)
     val plan: StateFlow<AlarmPlanView?> = _plan.asStateFlow()
+    /** 빠르게 A→B 화면을 열 때 A의 늦은 응답이 B를 덮지 못하게 한다. */
+    private var planLoadGeneration: Long = 0L
 
     /**
      * 알람 결정 화면의 경로 지도 상태.
@@ -350,14 +356,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val level: Int,
         val summary: String? = null,
         /**
-         * 지금 더 빠른 대안 경로. 초록 점선으로 [path] 아래에 깔린다.
+         * 보라 실선으로 [path] 아래에 까는 경로.
          *
          * 고른 경로가 주(主)다. 겹치는 구간에서는 고른 경로의 색이 보여야
          * 사용자가 "내가 갈 길" 을 잃지 않는다.
+         *
+         * **기준점이 두 가지다.** 출발 전에는 계획에 담긴 출발지 기준 대안이고,
+         * 이동 중에는 `routes/live` 가 준 현재 위치 기준 최단선이다. 선택 경로가
+         * 이미 최단이어도 후자는 채운다 — 그래야 선의 시작점이 옛 출발지에
+         * 남지 않는다.
          */
         val altPath: List<GeoPoint> = emptyList(),
-        /** "9호선 → 2호선 · 4분 빠름". 대안이 없으면 null */
+        /**
+         * "9호선 → 2호선 · 4분 빠름" 또는 "여기서부터 9호선 · 3분 빠름".
+         * 대안이 없으면 null.
+         */
         val altSummary: String? = null,
+        /** [altPath] 가 출발 전 대안이 아니라 현재 위치 기준 실시간 경로인가. */
+        val altFromCurrent: Boolean = false,
         val image: Bitmap? = null,
         val imageLoading: Boolean = false,
         val imageError: String? = null,
@@ -400,6 +416,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private var homeOnboardingAsked = false
 
     init {
+        // 화면보다 오래 사는 서비스가 저장한 최신 성공 결과를 먼저 복원한다.
+        // 이후 두 Flow 수집기는 Activity가 백그라운드여도 ViewModel이 살아 있는
+        // 동안 계속 상태를 맞추고, ViewModel이 새로 생겨도 이 사본에서 이어진다.
+        TripLiveState.restoreLiveRoute(liveRouteStore.current())
+        viewModelScope.launch {
+            TripLiveState.snapshot.collect { snapshot ->
+                if (snapshot == null) clearLiveRouteOverlay()
+                else onTrackedPoint(snapshot)
+            }
+        }
+        viewModelScope.launch {
+            TripLiveState.liveRoute.collect { snapshot ->
+                if (snapshot == null) clearLiveRouteOverlay()
+                else applyLiveRoute(snapshot)
+            }
+        }
+
         refresh()
         // 알람 액티비티가 세션을 만들어 두었을 수 있다. 홈 카드가 보이려면
         // 여기서 한 번 읽어야 한다.
@@ -1713,6 +1746,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadPlan(eventId: Long) {
+        val previousMap = _routeMap.value?.takeIf { it.eventId == eventId }
+        val generation = ++planLoadGeneration
         _plan.value = null
         // 다른 일정의 지도가 남아 있으면 안 된다. 계획을 받기 전에 비운다.
         _routeMap.value = null
@@ -1720,12 +1755,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = repository.loadPlan(eventId)) {
                 is EventRepository.Result.Success -> {
+                    if (generation != planLoadGeneration) return@launch
                     _plan.value = result.data
-                    initRouteMap(result.data)
+                    initRouteMap(
+                        plan = result.data,
+                        // 같은 일정을 잠깐 닫았다 다시 연 경우, 1분 게이트는 지키되
+                        // 이미 받은 현재 위치 기준 선은 빈 화면으로 만들지 않는다.
+                        preservedLive = previousMap?.takeIf { it.altFromCurrent },
+                    )
                 }
 
-                is EventRepository.Result.Failure ->
+                is EventRepository.Result.Failure -> {
+                    if (generation != planLoadGeneration) return@launch
                     _state.update { it.copy(error = result.message) }
+                }
             }
         }
     }
@@ -1733,11 +1776,37 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // --- 알람 결정 화면의 경로 지도 ----------------------------------------
 
     /** 경로 좌표가 있으면 지도를 경로 전체가 보이는 상태로 시작한다. */
-    private fun initRouteMap(plan: AlarmPlanView) {
+    private fun initRouteMap(
+        plan: AlarmPlanView,
+        preservedLive: RouteMapState? = null,
+    ) {
         if (!plan.hasRoutePath) return
-        val altPath = if (plan.hasAltRoute) plan.altRoutePath else emptyList()
+
+        // **이미 출발했으면 출발지 기준 대안을 쓰지 않는다.** 계획에 담긴
+        // `alt_route_*` 는 집에서부터 계산한 것이라, 이동 중인 사람에게는 지금 갈
+        // 수 없는 길이다. 그것을 잠깐이라도 그려 두면 사용자는 자기 위치에서
+        // 시작하는 선으로 읽는다. 비워 두고 `routes/live` 응답을 기다린다.
+        val tracked = TripLiveState.pointFor(plan.eventId)
+        val moving = tracked?.phase == TripGeofence.Phase.IN_TRANSIT
+        val cachedLive = if (moving) TripLiveState.liveRouteFor(plan.eventId)?.route else null
+        val altPath =
+            when {
+                cachedLive != null -> cachedLive.path
+                moving && preservedLive?.altFromCurrent == true -> preservedLive.altPath
+                !moving && plan.hasAltRoute -> plan.altRoutePath
+                else -> emptyList()
+            }
+        val altSummary =
+            if (moving) cachedLive?.summary ?: preservedLive?.altSummary
+            else plan.altFasterMinutes
+                ?.takeIf { plan.hasAltRoute }
+                ?.let { minutes ->
+                    listOfNotNull(plan.altRouteLabel, "${minutes}분 빠름")
+                        .joinToString(" · ")
+                }
+
         val fit = RouteMapProjection.fit(
-            // **두 경로를 합쳐 넘긴다.** 고른 경로만 기준으로 맞추면 초록 점선이
+            // **두 경로를 합쳐 넘긴다.** 고른 경로만 기준으로 맞추면 대안 선이
             // 화면 밖으로 나가 잘린 선이 된다 — 대안은 다른 길로 돌아가므로
             // 범위가 더 넓은 쪽이 대안일 수 있다.
             path = plan.routePath + altPath,
@@ -1757,16 +1826,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     ?.let { "${it.minutes}분" },
             ).joinToString(" · ").takeIf { it.isNotBlank() },
             altPath = altPath,
-            // 초록 선이 무엇인지 글씨가 밝혀야 한다. 바로 위 진행 바가 초록을
-            // "정시 도착" 으로 쓰고 있어서, 라벨이 없으면 같은 색이 한 화면에서
-            // 두 가지 뜻이 된다.
-            altSummary = plan.altFasterMinutes
-                ?.takeIf { plan.hasAltRoute }
-                ?.let { minutes ->
-                    listOfNotNull(plan.altRouteLabel, "${minutes}분 빠름")
-                        .joinToString(" · ")
-                },
+            // 보라 선이 무엇인지 글씨가 밝혀야 한다. 기준점(출발지냐 현재
+            // 위치냐)도 이 문구만이 말해 준다.
+            altSummary = altSummary,
+            altFromCurrent = moving &&
+                (cachedLive != null || preservedLive?.altFromCurrent == true),
         )
+
+        // 서비스가 이미 백그라운드에서 받은 경로가 있으면 이 호출이 즉시
+        // 적용한다. 네트워크 요청은 화면이 아니라 서비스가 담당한다.
+        tracked?.let { onTrackedPoint(it) }
     }
 
     /** 경로 전체가 보이는 상태로 되돌린다. */
@@ -1778,7 +1847,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
         ) ?: return
         _routeMap.update {
-            it?.copy(center = fit.first, level = fit.second, pendingShift = Offset.Zero)
+            val current = it ?: return@update it
+            val changed = current.center != fit.first || current.level != fit.second
+            current.copy(
+                center = fit.first,
+                level = fit.second,
+                pendingShift = Offset.Zero,
+                image = if (changed) null else current.image,
+                imageLoading = if (changed) false else current.imageLoading,
+                imageError = if (changed) null else current.imageError,
+            )
         }
     }
 
@@ -1790,7 +1868,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 // 30km 경로에서 전체 보기가 11을 골라 놓고 확대 버튼이 10으로
                 // 끌어내려 한 번에 두 단계가 튄다.
                 .coerceIn(StaticMapScale.MIN_LEVEL, StaticMapScale.ROUTE_MAX_LEVEL)
-            it.copy(level = next)
+            val changed = next != it.level
+            it.copy(
+                level = next,
+                image = if (changed) null else it.image,
+                imageLoading = if (changed) false else it.imageLoading,
+                imageError = if (changed) null else it.imageError,
+            )
         }
     }
 
@@ -1810,12 +1894,100 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             (StaticMapScale.METERS_PER_DEGREE * cos(Math.toRadians(state.center.lat)))
 
         _routeMap.update {
-            it?.copy(
+            val current = it ?: return@update it
+            current.copy(
                 center = GeoPoint(
-                    lat = (it.center.lat + dLat).coerceIn(-89.0, 89.0),
-                    lng = it.center.lng + dLng,
+                    lat = (current.center.lat + dLat).coerceIn(-89.0, 89.0),
+                    lng = current.center.lng + dLng,
                 ),
                 pendingShift = Offset.Zero,
+                image = null,
+                imageLoading = false,
+                imageError = null,
+            )
+        }
+    }
+
+    // --- 이동 중이면 여기서부터 다시 본다 ---------------------------------
+
+    /** 추적이 끝났는데 몇 분 전의 "여기서부터" 선이 남지 않게 한다. */
+    private fun clearLiveRouteOverlay() {
+        _routeMap.update { current ->
+            if (current?.altFromCurrent != true) current
+            else current.copy(
+                altPath = emptyList(),
+                altSummary = null,
+                altFromCurrent = false,
+            )
+        }
+    }
+
+    /**
+     * 위치 Flow 는 단계 전환과 현재 마커만 반영한다. 네트워크 호출은 하지 않는다.
+     * 화면이 백그라운드일 때도 돌아야 하는 작업은 [TripTrackingService] 소유다.
+     */
+    private fun onTrackedPoint(snapshot: TripLiveState.Snapshot) {
+        val map = _routeMap.value ?: return
+        if (snapshot.eventId != map.eventId) return
+
+        // 이동 중이 끝났으면 몇 분 전 좌표 기준의 선도 끝낸다.
+        if (snapshot.phase != TripGeofence.Phase.IN_TRANSIT) {
+            clearLiveRouteOverlay()
+            return
+        }
+
+        // 출발한 순간부터 출발지 기준 대안은 거짓 정보다. 첫 현재 위치 조회가
+        // 실패하더라도 그 선을 그대로 두지 않는다.
+        if (!map.altFromCurrent && map.hasAltPath) {
+            _routeMap.update { current ->
+                if (current == null || current.eventId != map.eventId) current
+                else current.copy(altPath = emptyList(), altSummary = null)
+            }
+        }
+
+        TripLiveState.liveRouteFor(map.eventId)?.let(::applyLiveRoute)
+    }
+
+    /** 서비스가 검증·저장한 최신 결과를 현재 지도에 투영한다. */
+    private fun applyLiveRoute(snapshot: LiveRouteStore.Snapshot) {
+        val tracked = TripLiveState.pointFor(snapshot.eventId)
+        if (tracked?.phase != TripGeofence.Phase.IN_TRANSIT) return
+        if (!snapshot.isFresh()) {
+            // 이 오래된 사본을 검사하는 사이 서비스가 새 결과를 게시했을 수
+            // 있다. 시각까지 같은 사본만 지워 새 경로를 실수로 없애지 않는다.
+            TripLiveState.clearLiveRoute(
+                eventId = snapshot.eventId,
+                expectedFetchedAtMillis = snapshot.fetchedAtMillis,
+            )
+            clearLiveRouteOverlay()
+            return
+        }
+
+        val live = snapshot.route
+        _routeMap.update { current ->
+            // 다른 일정의 저장 사본이나 늦은 서비스 응답은 절대 섞지 않는다.
+            if (current == null || current.eventId != snapshot.eventId) return@update current
+
+            val fit = RouteMapProjection.fit(
+                path = current.path + live.path,
+                requestUnits = ROUTE_MAP_FIT_WIDTH,
+                requestHeightUnits = ROUTE_MAP_FIT_HEIGHT,
+            )
+            val nextCenter = fit?.first ?: current.center
+            val nextLevel = fit?.second ?: current.level
+            val viewportChanged = nextCenter != current.center || nextLevel != current.level
+            current.copy(
+                altPath = live.path,
+                altSummary = live.summary,
+                altFromCurrent = true,
+                center = nextCenter,
+                level = nextLevel,
+                pendingShift = if (fit != null) Offset.Zero else current.pendingShift,
+                // 선은 새 좌표계로 즉시 투영된다. 예전 중심의 비트맵을 한
+                // 프레임이라도 밑에 두면 길이 엉뚱한 도로 위에 보인다.
+                image = if (viewportChanged) null else current.image,
+                imageLoading = if (viewportChanged) false else current.imageLoading,
+                imageError = if (viewportChanged) null else current.imageError,
             )
         }
     }
@@ -1827,10 +1999,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         val signature = "${state.eventId},${state.center.lat},${state.center.lng}," +
             "${state.level},$widthDp,$heightDp"
-        if (signature == lastRouteMapSignature && state.image != null) return
+        if (signature == lastRouteMapSignature &&
+            (state.image != null || state.imageLoading)
+        ) return
         lastRouteMapSignature = signature
 
-        _routeMap.update { it?.copy(imageLoading = true, imageError = null) }
+        _routeMap.update { current ->
+            if (current == null || current.eventId != state.eventId ||
+                current.center != state.center || current.level != state.level
+            ) current
+            else current.copy(imageLoading = true, imageError = null)
+        }
         viewModelScope.launch {
             // 마커는 보내지 않는다. 출발·도착 표식을 앱이 경로선과 같은 좌표계로
             // 그리므로, 카카오가 그린 마커와 겹치면 두 번 표시된다.
@@ -1843,6 +2022,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             )
             _routeMap.update { current ->
                 current ?: return@update current
+                // 중심·줌·크기 중 하나라도 바뀐 뒤 끝난 예전 응답은 버린다.
+                if (signature != lastRouteMapSignature ||
+                    current.eventId != state.eventId ||
+                    current.center != state.center || current.level != state.level
+                ) return@update current
                 when (result) {
                     is EventRepository.Result.Success ->
                         current.copy(image = result.data, imageLoading = false, imageError = null)

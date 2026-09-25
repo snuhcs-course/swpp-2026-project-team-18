@@ -11,6 +11,7 @@ import android.location.Location
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -22,14 +23,19 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.gson.Gson
 import com.swpp.wakeup.alarm.AlarmNotifications
+import com.swpp.wakeup.data.local.LiveRouteStore
 import com.swpp.wakeup.data.local.withDiskDefaults
+import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.TripObservationInput
+import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ArrivalVerdict
+import com.swpp.wakeup.domain.model.LiveRouteRefreshGate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -60,7 +66,14 @@ class TripTrackingService : Service() {
     private val handler = Handler(Looper.getMainLooper())
 
     private lateinit var queue: TripObservationQueue
+    private lateinit var liveRouteStore: LiveRouteStore
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
+    private val repository by lazy { EventRepository() }
+
+    /** 화면 수명과 무관하게 서비스가 소유하는 1분 호출 게이트. */
+    private val liveRouteGate = LiveRouteRefreshGate()
+    private var liveRouteJob: Job? = null
+    @Volatile private var liveRouteSessionGeneration = 0L
 
     private var schedule: AlarmSchedule? = null
     private var geofence: TripGeofence? = null
@@ -92,6 +105,7 @@ class TripTrackingService : Service() {
     override fun onCreate() {
         super.onCreate()
         queue = TripObservationQueue(this)
+        liveRouteStore = LiveRouteStore(this)
         AlarmNotifications.ensureChannels(this)
     }
 
@@ -126,6 +140,23 @@ class TripTrackingService : Service() {
             return START_NOT_STICKY
         }
 
+        val redelivered = flags and START_FLAG_REDELIVERY != 0
+
+        // 정상 ACTION_START 는 새 추적 세션의 경계다. 같은 event id가 다음 날
+        // 다시 쓰이더라도 어제 좌표의 경로를 잠깐 보여 주지 않는다. 반대로
+        // 프로세스 복구의 redelivery라면 5분 안의 마지막 성공 결과를 유지한다.
+        liveRouteJob?.cancel()
+        liveRouteGate.reset()
+        liveRouteSessionGeneration++
+        liveRouteStore.beginSession()
+        if (redelivered) {
+            TripLiveState.restoreLiveRoute(liveRouteStore.current(parsed.eventId))
+        } else {
+            liveRouteStore.clear()
+            TripLiveState.clearLiveRoute()
+        }
+        movingSinceMillis = null
+
         schedule = parsed
         geofence = TripGeofence(
             home = parsed.homeLat?.let { lat ->
@@ -158,11 +189,14 @@ class TripTrackingService : Service() {
                 "출발판별=${parsed.canDetectDeparture} 도착판별=${parsed.canDetectArrival} " +
                 "마감=${remaining / 60_000}분 뒤",
         )
-        return START_STICKY
+        // 프로세스가 메모리 압박으로 죽으면 원래 schedule Intent를 다시 받아야
+        // 같은 포그라운드 추적과 백그라운드 경로 갱신을 이어 갈 수 있다.
+        return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(deadlineRunnable)
+        liveRouteSessionGeneration++
         runCatching { fused.removeLocationUpdates(callback) }
         // 남은 관측을 마지막으로 한 번 올려 본다. scope 를 바로 닫으면
         // 이 요청이 취소되므로 별도 스코프를 쓴다.
@@ -176,6 +210,8 @@ class TripTrackingService : Service() {
         // **화면에 내보낸 위치를 반드시 지운다.** 남겨 두면 알람 결정 화면이
         // 몇 시간 전 좌표를 현재 위치처럼 그리고, 사용자는 그 진행률로 여유가
         // 있다고 판단한다. 도착·마감·사용자 중지 모두 여기를 지나간다.
+        schedule?.eventId?.let(liveRouteStore::clear)
+        liveRouteGate.reset()
         TripLiveState.clear()
         Log.i(TAG, "추적 종료 (대기 관측 ${pending}건)")
         super.onDestroy()
@@ -232,6 +268,11 @@ class TripTrackingService : Service() {
                 movingSinceMillis = movingSinceMillis,
             )
         )
+
+        // 위치를 계속 받는 포그라운드 서비스가 경로 갱신도 소유한다. Activity가
+        // STOPPED/파괴된 동안에도 이 지점은 10초마다 실행되고, 게이트가 실제
+        // 서버 호출을 최대 1분에 한 번으로 제한한다.
+        maybeRefreshLiveRoute(current, fix, fence.phase)
 
         when (decision) {
             is TripEvent.Departed -> {
@@ -318,6 +359,76 @@ class TripTrackingService : Service() {
         queue.enqueue(observation)
         scope.launch { queue.flush() }
     }
+
+    /** 현재 위치부터 목적지까지의 최신 경로를 백그라운드에서도 갱신한다. */
+    private fun maybeRefreshLiveRoute(
+        current: AlarmSchedule,
+        fix: LocationFix,
+        phase: TripGeofence.Phase,
+    ) {
+        if (phase != TripGeofence.Phase.IN_TRANSIT) return
+        if (fix.accuracyM > TripGeofence.MAX_ACCURACY_M) return
+        if (!ApiClient.isReady) return
+
+        val here = GeoPoint(fix.lat, fix.lng)
+        val token = liveRouteGate.beginIfDue(
+            nowMillis = SystemClock.elapsedRealtime(),
+            here = here,
+            hasUsableRoute = TripLiveState.liveRouteFor(current.eventId) != null,
+        ) ?: return
+        val sessionGeneration = liveRouteSessionGeneration
+
+        liveRouteJob = scope.launch {
+            val result = repository.liveRoute(current.eventId, here)
+            val route = (result as? EventRepository.Result.Success)?.data
+            val success = route != null
+
+            // 다른 ACTION_START/종료 뒤 도착한 응답은 디스크와 화면에 쓰지 않는다.
+            if (!liveRouteGate.finish(token, success)) return@launch
+            if (!isCurrentLiveRouteSession(current.eventId, sessionGeneration)) return@launch
+
+            if (route == null) {
+                val reason = (result as? EventRepository.Result.Failure)?.message
+                    ?: "사용 가능한 경로가 없음"
+                Log.w(TAG, "현재 위치 경로 갱신 실패: $reason")
+                // 직전 성공 경로는 유지한다. 잠깐의 지하 구간 때문에 지도를
+                // 출발지 경로로 되돌리는 것보다, 다음 1분 재시도까지 마지막으로
+                // 확인된 현재-위치 경로를 보여 주는 편이 안전하다.
+                return@launch
+            }
+
+            val snapshot = LiveRouteStore.Snapshot(
+                eventId = current.eventId,
+                origin = here,
+                fetchedAtMillis = System.currentTimeMillis(),
+                route = route,
+            )
+            // 디스크 기록이 먼저다. 직후 Activity가 재생성돼도 Flow에는 있는데
+            // 디스크에는 없는 짧은 창이 생기지 않게 한다.
+            var published = false
+            val saved = liveRouteStore.save(snapshot) {
+                if (isCurrentLiveRouteSession(current.eventId, sessionGeneration)) {
+                    TripLiveState.publishLiveRoute(snapshot)
+                    published = true
+                }
+            }
+            if (!saved) {
+                Log.i(TAG, "로그아웃 상태라 현재 위치 경로를 저장하지 않는다")
+                return@launch
+            }
+            if (!published) {
+                // save 직후 새 여정이 시작됐다. 방금 쓴 사본도 남기지 않는다.
+                liveRouteStore.clear(current.eventId)
+                return@launch
+            }
+            Log.i(TAG, "현재 위치 경로 갱신: 일정 ${current.eventId}, ${route.minutes}분")
+        }
+    }
+
+    private fun isCurrentLiveRouteSession(eventId: Long, generation: Long): Boolean =
+        liveRouteSessionGeneration == generation &&
+            schedule?.eventId == eventId &&
+            geofence?.phase == TripGeofence.Phase.IN_TRANSIT
 
     /**
      * 마감 시각에 추적을 끝낸다.
@@ -626,9 +737,10 @@ class TripTrackingService : Service() {
         }
 
         fun stop(context: Context) {
-            context.startService(
-                Intent(context, TripTrackingService::class.java).setAction(ACTION_STOP)
-            )
+            // 로그아웃에서는 저장소를 지우기 전에 생산자를 동기적으로 멈춰야
+            // 한다. ACTION_STOP startService는 전달되기 전에 wipe가 끝나 경로를
+            // 다시 쓰는 경합이 생길 수 있으므로 stopService를 쓴다.
+            context.stopService(Intent(context, TripTrackingService::class.java))
         }
     }
 }

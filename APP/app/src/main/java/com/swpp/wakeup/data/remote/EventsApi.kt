@@ -153,10 +153,63 @@ interface EventsApi {
         @Query("origin_label") originLabel: String? = null,
     ): Response<RouteCandidateResponse>
 
+    /**
+     * **지금 있는 곳**부터 더 빠른 길이 있는지. 이동 중에 1분마다 부른다.
+     *
+     * 계획에 저장된 대안(`alt_route_*`)은 **출발지** 기준이라 이미 집을 나선
+     * 사람에게는 의미가 없다. 이쪽은 보낸 좌표를 출발지로 삼아 다시 조회한다.
+     *
+     * 서버는 계획이 실제로 쓴 수단·노선을 기준으로 한 번만 조회하고, 그 응답에서
+     * 가장 빠른 경로를 [LiveRouteResponse.route] 로 준다. 같은 경로가 최단이어도
+     * 현재 위치부터의 새 폴리라인을 돌려준다.
+     *
+     * **GET 이 아닌 이유는 좌표다.** 쿼리스트링에 넣으면 배포 서버 접근 로그에
+     * 사용자의 이동 기록이 그대로 남는다.
+     *
+     * 호출 간격은 [com.swpp.wakeup.domain.model.LiveRouteDecision] 이 정한다 —
+     * 시간과 움직인 거리를 모두 넘어야 부른다. 그 판단이 하루 쿼터를 정한다.
+     */
+    @POST("api/routes/live")
+    suspend fun liveRoute(@Body body: LiveRouteRequest): Response<LiveRouteResponse>
+
     companion object {
         /** 한 번에 받아올 일정 수. 서버 PAGE_SIZE(20)를 덮어쓴다. */
         const val DEFAULT_LIMIT = 200
     }
+}
+
+data class LiveRouteRequest(
+    @SerializedName("event_id") val eventId: Long,
+    val lat: Double,
+    val lng: Double,
+)
+
+/**
+ * [route] 는 항상 **요청 좌표부터 목적지까지** 다시 계산한 경로다.
+ *
+ * 선택한 대중교통 노선보다 빠른 후보가 있으면 그 후보가 오고, 아니면
+ * 선택한 수단의 현재 위치 기준 경로가 온다. `null` 은 비교할 경로 key 가
+ * 없는 경우뿐이다. 외부 조회 실패는 [degraded] 로 구분한다.
+ */
+data class LiveRouteResponse(
+    val route: LiveRouteDto? = null,
+    val degraded: Boolean = false,
+)
+
+data class LiveRouteDto(
+    @SerializedName("route_key") val routeKey: String? = null,
+    /** 사람이 읽는 수단·노선 이름. "9호선 → 2호선", "도보" */
+    val label: String? = null,
+    /** 현재 위치부터의 카카오 원 소요시간. */
+    val minutes: Int? = null,
+    /** 선택 경로 대신 더 빠른 후보를 돌려준 것인가. */
+    @SerializedName("is_alternative") val isAlternative: Boolean = false,
+    /** 대안일 때 선택 경로보다 몇 분 빠른가. 같은 카카오 응답끼리의 차이다. */
+    @SerializedName("faster_minutes") val fasterMinutes: Int? = null,
+    /** `[[lat, lng], ...]`. [routePath] 와 같은 이유로 느슨하게 받는다. */
+    val path: JsonElement? = null,
+) {
+    val points: List<List<Double>> get() = path.toLatLngPairs()
 }
 
 /**
@@ -429,7 +482,10 @@ data class AlarmPlanDto(
      * 지금 더 빠른 대안 경로의 key. 대안이 없으면 `null` 이거나 빈 문자열이다.
      *
      * **고른 경로를 바꾸는 값이 아니다.** 계산은 계속 [routeKey] 로 하고, 이건
-     * 지도에 초록 점선으로 겹쳐 보여 주기만 한다 — 바꿀지는 사람이 정한다.
+     * 지도에 보라 실선으로 겹쳐 보여 주기만 한다 — 바꿀지는 사람이 정한다.
+     *
+     * **출발지 기준이다.** 이미 출발했으면 이 값을 쓰지 않고 `routes/live` 로
+     * 현재 위치부터 다시 조회한다.
      */
     @SerializedName("alt_route_key") val altRouteKey: String? = null,
     /** 사람이 읽는 노선 이름. "9호선 → 2호선" */

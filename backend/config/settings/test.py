@@ -76,6 +76,7 @@ REST_FRAMEWORK = {  # noqa: F405
     **REST_FRAMEWORK,  # noqa: F405
     "DEFAULT_THROTTLE_RATES": {
         "route": None,
+        "route_live": None,
         "nlp": None,
         "observation": None,
     },

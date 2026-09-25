@@ -16,6 +16,7 @@ import com.swpp.wakeup.data.remote.EventCreateRequest
 import com.swpp.wakeup.data.remote.EventDto
 import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.EventsApi
+import com.swpp.wakeup.data.remote.LiveRouteRequest
 import com.swpp.wakeup.data.remote.PlaceInput
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.remote.PlaceSearchResponse
@@ -31,6 +32,7 @@ import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ConfidenceView
 import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.ImportCandidate
+import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.PlanRow
 import com.swpp.wakeup.domain.model.PrepBlockLine
 import com.swpp.wakeup.domain.model.ScheduledBlock
@@ -281,6 +283,50 @@ class EventRepository(
                 // 일정 생성 때 출발지를 보내지 않고 서버 기본값에 맡긴다.
                 originLat = origin?.lat,
                 originLng = origin?.lng,
+            )
+        )
+    }
+
+    /**
+     * 지금 있는 곳부터 더 빠른 길. 이동 중에만 부른다.
+     *
+     * 성공하면 선택 경로가 이미 최단이어도 현재 위치 기준 경로가 온다. 그래야
+     * 도보·자동차나 대안 없는 대중교통도 출발지부터의 낡은 선을 계속 쓰지 않는다.
+     *
+     * 호출 간격은 [com.swpp.wakeup.domain.model.LiveRouteDecision] 이 정한다.
+     * 이 함수는 부르라고 하면 부르기만 한다 — 간격 판단을 여기 섞으면 시험할
+     * 수 없다.
+     */
+    suspend fun liveRoute(eventId: Long, here: GeoPoint): Result<LiveRoute?> = guard {
+        val response = api.liveRoute(
+            LiveRouteRequest(eventId = eventId, lat = here.lat, lng = here.lng)
+        )
+        val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
+
+        // **"없다" 와 "확인하지 못했다" 를 가른다.** `degraded` 는 카카오 호출이
+        // 실패했다는 뜻이다. 그때 Success(null) 로 내리면 호출자가 "더 빠른 길이
+        // 없다" 로 읽고 이미 그려 둔 선을 지운다 — 1분에 한 번 실패할 때마다 선이
+        // 깜빡인다. 실패는 실패로 알려 이전 값을 그대로 두게 한다.
+        if (body.degraded) {
+            return@guard Result.Failure("경로를 확인하지 못했다.")
+        }
+
+        val route = body.route ?: return@guard Result.Success(null)
+        val path = route.points.toGeoPoints()
+        val minutes = route.minutes ?: 0
+        // 성공 응답인데 선이나 소요시간이 없으면 "경로 없음" 으로 지우지 않는다.
+        // 깨진 응답은 실패로 올려 직전의 쓸 수 있는 선을 유지한다.
+        if (path.size < 2 || minutes <= 0) {
+            return@guard Result.Failure("경로를 확인하지 못했다.")
+        }
+        Result.Success(
+            LiveRoute(
+                routeKey = route.routeKey.orEmpty(),
+                label = route.label?.trim()?.takeIf { it.isNotEmpty() },
+                minutes = minutes,
+                isAlternative = route.isAlternative,
+                fasterMinutes = route.fasterMinutes?.takeIf { it > 0 },
+                path = path,
             )
         )
     }

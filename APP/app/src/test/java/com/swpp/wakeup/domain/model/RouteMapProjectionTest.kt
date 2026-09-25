@@ -197,7 +197,7 @@ class RouteMapProjectionTest {
 /**
  * 전체 보기가 **두 경로를 함께** 담는지.
  *
- * 고른 경로 위에 "지금 더 빠른 대안" 을 초록 점선으로 겹쳐 그린다. 대안은 다른
+ * 고른 경로 위에 "지금 더 빠른 대안" 을 보라 실선으로 겹쳐 그린다. 대안은 다른
  * 길로 돌아가므로 좌표 범위가 고른 경로보다 넓을 수 있다. 고른 경로만 기준으로
  * 맞추면 초록 선이 화면 밖으로 나가고, 사용자는 **선이 잘렸다**고 읽는다.
  *
@@ -249,7 +249,7 @@ class RouteMapFitWithAltTest {
 
         assertTrue("고른 경로는 당연히 들어온다", allInside(chosen, center, level))
         assertFalse(
-            "이 상태에서 초록 점선을 그리면 잘린다 — 그래서 합쳐서 맞춘다",
+            "이 상태에서 보라 경로선을 그리면 잘린다 — 그래서 합쳐서 맞춘다",
             allInside(alt, center, level),
         )
     }

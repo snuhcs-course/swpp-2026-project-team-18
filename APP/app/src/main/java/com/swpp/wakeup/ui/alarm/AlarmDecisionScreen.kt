@@ -175,6 +175,7 @@ fun AlarmDecisionScreen(
                     state = map,
                     progress = progress,
                     here = here,
+                    moving = stage == TripStage.IN_TRANSIT,
                     onViewport = onRouteMapViewport,
                     onZoom = onRouteMapZoom,
                     onFitRoute = onRouteMapFit,

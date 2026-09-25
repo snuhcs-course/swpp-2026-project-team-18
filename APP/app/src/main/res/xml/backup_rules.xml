@@ -6,6 +6,8 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
+    <!-- 현재 위치에서 시작하는 이동 경로는 민감하며 잠깐만 필요한 캐시다. -->
+    <exclude domain="sharedpref" path="jit_live_route.xml"/>
     <!--
    <include domain="sharedpref" path="."/>
    <exclude domain="sharedpref" path="device.xml"/>

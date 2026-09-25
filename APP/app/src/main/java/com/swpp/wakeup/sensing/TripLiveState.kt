@@ -1,8 +1,10 @@
 package com.swpp.wakeup.sensing
 
+import com.swpp.wakeup.data.local.LiveRouteStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * 추적 중인 여정의 현재 상태. 서비스가 쓰고 화면이 읽는다.
@@ -17,13 +19,15 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * 서비스와 화면이 **같은 프로세스**에 있다. 바인더나 브로드캐스트는 프로세스
  * 경계를 넘기 위한 장치이고, 넘을 경계가 없는데 쓰면 직렬화와 생명주기 관리만
- * 늘어난다. 프로세스가 죽으면 추적도 함께 죽으므로 상태를 잃어도 맞다 —
- * 남겨야 하는 것은 이미 서버에 올라간 관측이다.
+ * 늘어난다. 프로세스가 죽으면 위치 Flow 는 사라지고, 재전달된 서비스가 다음
+ * fix로 복구한다. 화면 복귀에 필요한 마지막 성공 경로만 [LiveRouteStore]에
+ * 짧게 보존한다.
  *
  * ## 무엇을 담지 않는가
  *
- * 좌표를 디스크에 쓰지 않는다. 이동 경로는 민감 정보이고, 화면에 그리는 데는
- * 지금 위치 하나로 충분하다. 앱이 꺼지면 사라지는 것이 의도된 동작이다.
+ * 10초마다 오는 원시 위치와 이동 이력은 디스크에 쓰지 않는다. 이동 경로는
+ * 민감 정보이므로 마지막 성공 결과 하나만 계정별로 최대 5분 보존하고,
+ * 로그아웃·추적 종료 때 지우며 Android 백업에서도 제외한다.
  */
 object TripLiveState {
 
@@ -60,12 +64,60 @@ object TripLiveState {
 
     private val _snapshot = MutableStateFlow<Snapshot?>(null)
 
+    /**
+     * 추적 서비스가 백그라운드에서 마지막으로 성공한 현재-위치 경로.
+     *
+     * 위치와 별도 Flow 인 이유는 위치가 10초마다 오고 경로는 최대 1분마다
+     * 바뀌기 때문이다. 한 Flow 로 합치면 위치가 올 때마다 같은 큰 경로 목록을
+     * 다시 내보내고 화면도 불필요하게 전체 맞춤을 반복한다.
+     */
+    private val _liveRoute = MutableStateFlow<LiveRouteStore.Snapshot?>(null)
+
     /** null 이면 추적 중이 아니다. 화면은 그때 진행률 대신 안내를 띄운다 */
     val snapshot: StateFlow<Snapshot?> = _snapshot.asStateFlow()
+
+    val liveRoute: StateFlow<LiveRouteStore.Snapshot?> = _liveRoute.asStateFlow()
 
     /** 서비스가 위치를 받을 때마다 부른다. */
     fun publish(snapshot: Snapshot) {
         _snapshot.value = snapshot
+    }
+
+    /** 서비스가 디스크에 저장을 마친 성공 경로만 게시한다. */
+    fun publishLiveRoute(snapshot: LiveRouteStore.Snapshot) {
+        _liveRoute.value = snapshot
+    }
+
+    /** ViewModel 재생성 때 디스크 사본을 메모리 Flow 로 복원한다. */
+    fun restoreLiveRoute(snapshot: LiveRouteStore.Snapshot?) {
+        if (snapshot == null) return
+        // 디스크를 읽은 직후 서비스가 더 새 결과를 게시할 수 있다. 단순한
+        // read-compare-write 는 그 새 값을 오래된 디스크 사본으로 덮으므로,
+        // StateFlow 자체에서 원자적으로 비교하고 교체한다.
+        _liveRoute.update { current ->
+            if (current == null || current.fetchedAtMillis < snapshot.fetchedAtMillis) {
+                snapshot
+            } else {
+                current
+            }
+        }
+    }
+
+    fun liveRouteFor(eventId: Long): LiveRouteStore.Snapshot? =
+        _liveRoute.value?.takeIf { it.eventId == eventId }
+
+    fun clearLiveRoute(
+        eventId: Long? = null,
+        expectedFetchedAtMillis: Long? = null,
+    ) {
+        _liveRoute.update { current ->
+            if (current == null) return@update null
+
+            val eventMatches = eventId == null || current.eventId == eventId
+            val snapshotMatches = expectedFetchedAtMillis == null ||
+                current.fetchedAtMillis == expectedFetchedAtMillis
+            if (eventMatches && snapshotMatches) null else current
+        }
     }
 
     /**
@@ -76,6 +128,7 @@ object TripLiveState {
      */
     fun clear() {
         _snapshot.value = null
+        _liveRoute.value = null
     }
 
     /** 이 일정을 추적하는 중인 경우에만 위치를 준다. */

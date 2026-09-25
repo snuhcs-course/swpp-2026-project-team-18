@@ -689,3 +689,129 @@ class RouteCandidateView(APIView):
                 "degraded": degraded,
             }
         )
+
+
+class RouteLiveView(_UserScopedMixin, APIView):
+    """POST /api/routes/live — **지금 있는 곳**부터 목적지까지 가장 빠른 길.
+
+    body: `{"event_id": 1, "lat": 37.49, "lng": 126.98}`
+
+    ## 왜 필요한가
+
+    `AlarmPlan.route_path` 와 `alt_route_*` 는 **출발지**부터 계산한 경로다. 이미
+    집을 나선 사람에게 집에서부터의 선은 의미가 없다 — 지금 있는 곳에서 목적지로
+    이어지는 선이 필요하다. 이동 중에는 앱이 이 엔드포인트를 1분마다 부르고,
+    응답의 `route.path` 를 지도에 그린다.
+
+    ## 저장하지 않는다
+
+    `AlarmPlan` 에 쓰지 않는다. 세 가지 이유다.
+
+    1. **수명이 1분이다.** 다음 위치가 오면 낡는다. 낡은 값을 DB 에 남기면 화면을
+       다시 열었을 때 "여기서부터" 가 몇 시간 전 좌표 기준이 된다.
+    2. `AlarmPlan.computed_at` 이 `auto_now` 다. 1분마다 쓰면 "N분 전 계산" 이
+       항상 "방금" 이 되어, 알람 숫자가 낡았는지 알려 주는 장치가 거짓말을 한다.
+    3. 이동 경로가 디스크에 쌓인다. `TripLiveState` 가 좌표를 저장하지 않기로 한
+       것과 같은 이유다.
+
+    ## 호출 1회를 유지한다
+
+    계획이 실제로 쓴 경로(`AlarmPlan.route_key`)를 **출발지만 현재 위치로 바꿔**
+    `resolve_route` 에 넘긴다. 그러면 대중교통 후보 목록을 한 번 받고 그 안에서
+    최단 후보를 함께 얻는다([clients._with_alternative]). `alternative` 가 있으면
+    그것을, 없으면 다시 푼 선택 경로 자체를 `route` 로 내린다. 별도로
+    `best_route` 를 부르면 1분마다 2~3회가 되어 하루 쿼터가 마른다.
+
+    그래서 대중교통은 같은 응답 안의 후보 중 가장 빠른 경로가 내려오고, 도보·
+    자전거·자동차는 해당 수단의 다시 계산한 경로가 내려온다. 수단이 달라지는
+    전역 최단을 구하는 계약은 아니다 — 그것은 서로 다른 API 를 더 불러야 한다.
+
+    ## 같은 경로여도 현재 위치 기준 선을 준다
+
+    지금 타고 있는 것이 최단이면 `resolve_route` 의 `alternative` 는 null 이다.
+    그렇다고 응답을 비우면 앱은 출발지부터 저장된 낡은 선을 계속 그린다. 따라서
+    이때도 다시 계산한 선택 경로의 `path` 를 `route` 로 내려 준다. `is_alternative`
+    와 `faster_minutes` 는 각각 false, 0 이다.
+
+    ## 왜 GET 이 아닌가
+
+    좌표가 쿼리스트링에 들어가면 배포 서버의 접근 로그에 사용자의 이동 기록이
+    그대로 남는다. 읽기 요청이지만 본문으로 받는다.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "route_live"
+
+    def post(self, request):
+        event_id = request.data.get("event_id")
+        try:
+            event_id = int(event_id)
+            lat = float(request.data["lat"])
+            lng = float(request.data["lng"])
+        except (KeyError, TypeError, ValueError):
+            return _error(
+                "invalid_request",
+                "event_id 와 lat, lng 가 필요하다.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not in_service_area(lat, lng):
+            return _error(
+                "invalid_coordinate",
+                "국내 좌표만 경로를 계산할 수 있다.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        event = (
+            self.get_queryset()
+            .select_related("place", "alarm_plan")
+            .filter(pk=event_id)
+            .first()
+        )
+        if event is None or event.place_id is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        plan = getattr(event, "alarm_plan", None)
+        # 계획이 실제로 쓴 경로가 기준이다. 사용자가 고르지 않았으면 서버가 고른
+        # 것이 여기 남아 있으므로, `Event.route_key` 가 비어도 비교할 대상이 있다.
+        chosen = (getattr(plan, "route_key", "") or event.route_key or "").strip()
+        if not chosen:
+            return Response({"route": None, "degraded": False})
+
+        route, degraded = clients.resolve_route(
+            chosen,
+            start_lat=lat,
+            start_lng=lng,
+            end_lat=event.place.lat,
+            end_lng=event.place.lng,
+        )
+        if degraded or not route:
+            return Response({"route": None, "degraded": True})
+
+        alt = route.get("alternative")
+        if alt:
+            faster_minutes = int(alt.get("faster_minutes") or 0)
+            live_route = {
+                "route_key": alt["key"],
+                "label": alt.get("label") or "",
+                "minutes": max(1, int(route["minutes"]) - faster_minutes),
+                "path": alt.get("path") or [],
+                "is_alternative": True,
+                "faster_minutes": faster_minutes,
+            }
+        else:
+            live_route = {
+                "route_key": route["key"],
+                "label": route.get("detail") or route.get("mode") or "",
+                "minutes": int(route["minutes"]),
+                "path": route.get("path") or [],
+                "is_alternative": False,
+                "faster_minutes": 0,
+            }
+
+        return Response(
+            {
+                "route": live_route,
+                "degraded": False,
+            }
+        )

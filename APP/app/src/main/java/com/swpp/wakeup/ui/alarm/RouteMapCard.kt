@@ -29,7 +29,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -53,7 +52,7 @@ import kotlin.math.roundToInt
 private val MAP_HEIGHT = 260.dp
 
 /**
- * 선택한 경로와 실시간 위치를 띄우는 지도 (Figma ④-a).
+ * 선택한 경로와 실시간 위치를 띄우는 지도 (Figma ④-a / 이동 중 ④-d).
  *
  * ## 정적 지도 위에 선을 직접 그린다
  *
@@ -77,6 +76,7 @@ fun RouteMapCard(
     state: HomeViewModel.RouteMapState,
     progress: RouteProgress?,
     here: GeoPoint?,
+    moving: Boolean,
     onViewport: (widthDp: Int, heightDp: Int) -> Unit,
     onZoom: (Int) -> Unit,
     onFitRoute: () -> Unit,
@@ -88,7 +88,11 @@ fun RouteMapCard(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Text("경로", color = JitColor.TextSecondary, fontSize = 11.sp)
+        Text(
+            text = if (moving) "이동 중 · 현재 위치부터 가장 빠른 길" else "경로",
+            color = JitColor.TextSecondary,
+            fontSize = 11.sp,
+        )
 
         BoxWithConstraints(
             modifier = Modifier
@@ -214,19 +218,20 @@ fun RouteMapCard(
             }
         }
 
-        // 초록 점선의 뜻을 밝히는 줄. 색만으로는 부족하다 — 바로 위 진행 바가
-        // 초록을 "정시 도착" 으로 쓰고 있어서, 글씨가 없으면 같은 색이 한 화면에서
-        // 두 가지 뜻이 된다. 점선 견본을 앞에 두어 어느 선을 말하는지 잇는다.
+        // 보라 선의 뜻을 밝히는 줄. 선 견본을 앞에 두어 어느 선을 말하는지 잇는다.
+        //
+        // 이동 중이면 문구가 "여기서부터" 로 시작한다. 출발지 기준 대안과 같은
+        // 자리에 같은 색으로 나오므로, 기준점을 글씨가 말해야 한다.
         if (state.hasAltPath) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                DashSwatch()
+                LineSwatch()
                 Spacer(Modifier.width(7.dp))
                 Text(
                     text = state.altSummary.orEmpty(),
-                    color = JitColor.Green,
+                    color = JitColor.Purple,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                 )
@@ -235,20 +240,16 @@ fun RouteMapCard(
     }
 }
 
-/** 지도의 초록 점선과 같은 모양의 작은 견본. */
+/** 지도의 보라 실선과 같은 모양의 작은 견본. */
 @Composable
-private fun DashSwatch() {
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        repeat(2) {
-            Box(
-                Modifier
-                    .width(6.dp)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(1.5.dp))
-                    .background(JitColor.Green)
-            )
-        }
-    }
+private fun LineSwatch() {
+    Box(
+        Modifier
+            .width(16.dp)
+            .height(3.dp)
+            .clip(RoundedCornerShape(1.5.dp))
+            .background(JitColor.Purple)
+    )
 }
 
 private fun formatKm(meters: Int): String =
@@ -260,12 +261,15 @@ private fun formatKm(meters: Int): String =
  * 남은 구간을 먼저 그리고 지나온 구간을 위에 겹친다. 순서를 바꾸면 겹치는
  * 지점에서 지나온 선이 아래로 깔려 끊긴 것처럼 보인다.
  *
- * ## 더 빠른 대안은 아래에 깔고 점선으로 그린다
+ * ## 더 빠른 길은 아래에 깔고 얇게 그린다
  *
- * [altPath] 는 "지금은 이쪽이 더 빠르다" 는 **제안**이다. 고른 경로와 같은
- * 굵기의 실선으로 그리면 두 개의 확정된 경로처럼 보여서, 사용자가 자기가 갈
- * 길을 못 고른다. 그래서 세 가지로 낮춘다 — 맨 아래에 깔고, 한 단계 얇게,
- * 점선으로. 겹치는 구간에서는 고른 경로의 색이 그대로 보인다.
+ * [altPath] 는 출발 전에는 "지금은 이쪽이 더 빠르다" 는 제안이고, 이동 중에는
+ * 현재 위치부터 다시 받은 최단선이다. 어느 경우든 저장된 계획 경로보다 한 단계
+ * 얇게(3dp vs 4dp) 아래에 깐다. 겹치는 구간에서는 계획 경로의 색이 남고,
+ * 현재 위치부터 갈라지는 부분에서만 새 선택지가 또렷해진다.
+ *
+ * 색은 [JitColor.Purple] 이다. 처음에는 초록이었는데 같은 화면의 진행 바가
+ * 초록을 "정시 도착" 으로 쓰고 있어서 한 색이 두 뜻이 됐다.
  */
 @Composable
 private fun RouteOverlay(
@@ -289,14 +293,8 @@ private fun RouteOverlay(
             }
             drawPath(
                 path = line,
-                color = JitColor.Green,
-                style = Stroke(
-                    width = 3.dp.toPx(),
-                    cap = StrokeCap.Round,
-                    pathEffect = PathEffect.dashPathEffect(
-                        floatArrayOf(7.dp.toPx(), 5.dp.toPx())
-                    ),
-                ),
+                color = JitColor.Purple,
+                style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round),
             )
         }
 
@@ -332,9 +330,9 @@ private fun RouteOverlay(
 
         // 출발·도착.
         //
-        // **초록·주황을 쓰지 않는다.** 바로 위 진행 바가 초록을 "정시", 주황을
-        // "여유 깎임" 으로 쓰고 있어서, 같은 화면에서 같은 색이 다른 뜻이 된다.
-        // 초록은 이제 지도에서 **더 빠른 대안 경로**를 뜻하기도 한다.
+        // **색으로 가르지 않는다.** 이 화면에서 색은 이미 세 가지 뜻을 지고 있다 —
+        // 초록은 정시 도착, 주황은 여유 깎임, 보라는 더 빠른 길이다. 표식에 색을
+        // 하나 더 얹으면 어느 것도 뜻이 남지 않는다.
         //
         // 대신 무게로 가른다 — 도착이 더 무겁게 보여야 한다. 목적지가 이 화면의
         // 목표이고, 지도 관례도 도착을 진한 표식으로 찍는다.

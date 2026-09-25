@@ -5,11 +5,16 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <!-- 현재 위치에서 시작하는 이동 경로는 민감하며 잠깐만 필요한 캐시다. -->
+        <exclude domain="sharedpref" path="jit_live_route.xml"/>
         <!-- TODO: Use <include> and <exclude> to control what is backed up.
         <include .../>
         <exclude .../>
         -->
     </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="jit_live_route.xml"/>
+    </device-transfer>
     <!--
     <device-transfer>
         <include .../>
