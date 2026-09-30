@@ -6,127 +6,136 @@
 
 A normal alarm makes you pick "7:40". But what you actually want to decide is not a
 time — it is *how sure you want to be that you won't be late*. JustInTime works
-backwards from when your event starts, subtracting `prep time + travel time + safety
-buffer`, and **shows you the reasoning behind the number**.
+backwards from when your event starts:
 
-![Screens](docs/screens-overview.png)
+```
+alarm = event start − safety buffer (10 min) − τ-quantile of (prep + travel)
+```
 
-> All 13 Figma screens, plus one input-state fragment of the add-event screen.
-> Columns are stages; screens below a frame are its children.
+τ is the confidence you ask for — 0.90 for a class, 0.99 for an exam or a train. The
+app **shows the reasoning behind the number**: what was measured (a Kakao route of
+20 min, 4.6 km, one transfer), what is fixed (the buffer) and what was learned from
+your own mornings.
+
+| | |
+| --- | --- |
+| Version | **0.9.0** — server `APP_VERSION` and app `versionName` |
+| Shared server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
+| Stack | Android · Kotlin · Jetpack Compose — Django · DRF · Neon Postgres — Render |
+
+![Figma board](docs/screens-overview.png)
+
+> The Figma board: 17 screens plus state variants (route map, progress colors, route
+> modes, input states). Columns are stages; screens below a frame are its children.
+> The board is ahead of the app in places — the lists below describe the app.
 
 ---
 
 ## Features
 
-| | Feature | Status |
-| --- | --- | --- |
-| ✅ | **Backward alarm calculation** — event start − buffer − travel − prep | Done |
-| ✅ | **Real travel times from Kakao** — actual route lookup from home to destination | Done |
-| ✅ | **Route selection** — pick from the candidates Kakao returns, e.g. 23 min with one transfer vs. 27 min with none | Done |
-| ✅ | **Visible reasoning** — prep / travel / buffer broken out, with each value labeled as measured or fixed | Done |
-| ✅ | **Per-category safety margin (τ)** — exams, presentations and trains wake you earlier | Done |
-| ✅ | **Learning from your mornings** — one tap per prep block records how long it took and how much slack you had; the server shifts the distribution | Done |
-| 🚧 | **On-time probability** — the pipeline is complete end to end, but it stays blank until enough observations exist. The UI says why instead of guessing | Learning |
-| ✅ | **Exact alarm delivery** — `setAlarmClock` (survives Doze, shows the system next-alarm icon), full-screen intent over the lock screen, re-registration after reboot, app update and clock changes | Done |
-| 🚧 | **Replanning** — alternatives when you're already running late | Planned |
-| 🚧 | **Group rooms** — see everyone's expected arrival together | Planned |
+What works end to end in 0.9.0:
+
+1. **Sign up and onboard** — email and password, home address, usual prep time
+2. **Add an event** — title, time, category (which sets τ), destination (Kakao place
+   search or a pick on the map), origin (home by default), and a route chosen from
+   Kakao's candidates: transit, walk, bicycle or car
+3. **See the alarm and why** — the server computes it; the decision screen breaks out
+   prep, travel and buffer, each labeled as measured or fixed, with a progress bar and
+   a route map. A faster alternative from the origin is drawn on the map
+4. **Wake up reliably** — `setAlarmClock` (survives Doze, shows the system next-alarm
+   icon), full screen over the lock screen, re-registered after reboot, app update and
+   clock changes, 5-minute snooze. Alarms for the next 7 days are registered
+5. **Log the morning** — dismissing the alarm starts one-tap-per-block prep logging and
+   GPS trip tracking
+6. **Commute** — departure and arrival are detected on the device (arrival = within
+   50 m of the destination for 2 minutes). While you are moving, the app fetches the
+   fastest route from your current position every minute and draws it in purple; the
+   progress bar shows a live ETA and colors the lateness outlook
+7. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
+   offline. Prep observations feed the next calculation directly
+8. **Review** — weekly report and calibration: did you arrive as often as τ promised?
+
+Also: Seoul subway and bus real-time arrivals on the route (express, last train,
+congestion), device calendar import, an offline cache and background sync (plans every
+6 hours, routes every 15 minutes for events within 3 hours).
 
 ### Why the probability is blank
 
-Showing an on-time probability requires a **distribution of travel times**. Kakao's
-routing response has no variance information — just a single `totalTime` point
-estimate — and there are no user observations yet.
-
-So the probability field is left empty and the UI says "learning" instead. Filling in
-an arbitrary 90% would make the screen look finished while being untrue. Once
-observations accumulate, the value is computed from quantiles.
+An on-time probability needs a **distribution** of travel times. Kakao returns a single
+`totalTime` with no variance, so the spread has to come from your own trips — route
+corrections learned from observed departures and arrivals. Until that evidence exists,
+the field stays empty and the screen says "learning". Filling in an arbitrary 90% would
+make the screen look finished while being untrue.
 
 ---
 
-## Tech Stack
+## Known limitations and todos
 
-| Layer | Choice |
-| --- | --- |
-| App | Native Android · Kotlin · **Jetpack Compose** · Material3 |
-| State | `ViewModel` + `StateFlow` + Coroutines |
-| Networking | Retrofit + Gson + OkHttp |
-| On-device storage | Room (offline cache of server responses) + WorkManager (background sync) |
-| Server | **Django + Django REST Framework** |
-| Database | **Neon Postgres — one database for both development and deployment** |
-| Auth | SimpleJWT (email + password) |
-| External APIs | Kakao Map (routing, place search), OpenAI, KMA weather, FCM |
-| Design | Figma |
+**Partial**
 
-We did not use a cross-platform framework (Flutter, React Native). The core of this
-app is **exact alarm delivery** — `AlarmManager.setAlarmClock`, Doze exemptions,
-full-screen intents, re-registration after reboot. Those need direct platform access,
-and putting a plugin layer in between makes them harder to debug.
+- On-time probability *value* — the pipeline is complete; the value waits for travel
+  variance evidence (above)
+- Risk choice ⑤ — an explanation screen only, no per-time probability options yet
+- Replanning while moving ⑦ — colors, ETA and the live route; no checkpoints or causes
+- Route choice — one list; the per-mode tabs on the board (⑬) are not in the app
+- Weekly and detailed reports ⑧⑨ — part of the board is implemented
+- Sign-in — email and password only; the social buttons show a notice, no terms consent
+- Route learning — corrections update only when someone runs
+  `python manage.py train_models`; there is no scheduler on Render's free plan
+
+**Not started**
+
+- Replanning before departure ⑥ and a "switch to this route" action
+- Group rooms ⑩⑪
+- Editing a saved event — the server's `PATCH /api/events/{id}` recomputes, but the
+  app has no edit screen
+- Adjusting τ directly, natural-language input, weather adjustment, push (FCM),
+  bedtime suggestions
+- Encrypted token storage — tokens sit in plain SharedPreferences; required before a
+  real release
+- Battery-optimization guidance
+
+**Known bugs** (found in review, not fixed yet)
+
+1. "Fastest route" is the fastest within the chosen mode, not across modes — the scope
+   is still to be decided
+2. The arrived state does not stay on screen
+3. When the tracking service restarts, the moving state and the live route are lost
+4. Map panning can jump twice as far during consecutive gestures while a response is slow
+5. A small pinch (12%) snaps a whole zoom level
 
 ---
 
-## Getting Started
+## Getting started
 
-The app does not work on its own. **Start the backend first.**
+### Run the app
 
-### Prerequisites
+No backend setup is needed. Every build talks to the shared server (`jitApiBaseUrl` in
+[`APP/gradle.properties`](APP/gradle.properties)), so anyone who clones the repository
+sees the same data.
 
-- Android Studio (2025.1 or newer) with Android SDK 37
+- Android Studio with Android SDK 37 (the project uses AGP 9.3 and Gradle 9.5; Gradle
+  downloads the JDKs it needs)
 - An emulator or device running **Android 14 (API 34) or newer**
-- Python 3.12
-- JDK — the JBR bundled with Android Studio is fine
-- A Kakao REST API key ([how to get one](#api-keys))
 
-### Installation
-
-**1. Backend**
-
-```powershell
-cd backend
-
-# first time only
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements\dev.txt
-Copy-Item .env.example .env      # then fill in the keys
-.\.venv\Scripts\python.exe manage.py migrate
-
-# run — must bind 0.0.0.0 so the emulator can reach it
-.\.venv\Scripts\python.exe manage.py runserver 0.0.0.0:8000
-```
-
-Binding to `127.0.0.1:8000` works from the host but **the emulator cannot connect**.
-
-Demo account: `demo@demo.com` / `demo1234` (created only when `DEBUG=True`).
-Admin site: `http://127.0.0.1:8000/admin/`.
-
-**2. App**
-
-```powershell
+```bash
 cd APP
-$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
-.\gradlew.bat assembleDebug
-.\gradlew.bat installDebug
+./gradlew assembleDebug        # Windows: .\gradlew.bat assembleDebug
+./gradlew installDebug
 ```
 
-From an emulator the host machine is `10.0.2.2`, and the app resolves that at runtime,
-so no configuration is needed. For a physical device put your machine's LAN IP in
-`local.properties` (git-ignored):
+The build log prints `[JustInTime] API=...` — the server that build talks to. If Gradle
+cannot find a JDK, point `JAVA_HOME` at the JBR bundled with Android Studio.
 
-```properties
-devServerHost=192.168.0.12
-```
+Sign in with the demo account `demo@demo.com` / `demo1234`, or create one.
 
-`APP/scripts/use_device.ps1` fills that in for you and checks the firewall and the
-connected device. You do not have to undo it to go back to the emulator — the app
-detects one and substitutes `10.0.2.2`, so a single build works on both.
+The shared server runs on Render's free plan and sleeps after 15 minutes without
+traffic. The first request then takes 30–60 seconds; the app wakes the server with a
+health check and says so on screen.
 
-**See [docs/device-setup.md](docs/device-setup.md)** for the full walkthrough,
-including permissions, battery optimization and testing an actual commute.
+**Emulator setup** — skip these and you will mistake them for app bugs.
 
-**3. Emulator setup**
-
-Skip these and you will mistake them for app bugs.
-
-```powershell
+```bash
 # Time zone. The default is GMT, which puts every displayed time 9 hours off.
 adb shell cmd alarm set-timezone Asia/Seoul
 
@@ -135,174 +144,240 @@ adb shell cmd alarm set-timezone Asia/Seoul
 adb shell settings put secure show_ime_with_hard_keyboard 1
 ```
 
-For Korean input, add the language under **Settings → Languages → Add a language →
-한국어(대한민국)**. Gboard ships with English only, so Hangul cannot be typed until
-you do.
+For Korean input, add **Settings → Languages → Add a language → 한국어(대한민국)**.
 
-### Using the app
+**Physical devices** — see [docs/device-setup.md](docs/device-setup.md) for USB and
+wireless debugging, permissions and battery settings. Test devices against the shared
+server; that guide's "local server" section predates it.
+[`APP/scripts/`](APP/scripts/README.md) has PowerShell helpers for installing and
+checking a device.
 
+### Work on the backend
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements/dev.txt
+cp .env.example .env               # Windows: copy .env.example .env
+python -m pytest                   # 717 tests — in-memory SQLite, no keys needed
 ```
-Sign in → set home location → add an event → choose a route → see the alarm
+
+Unit tests need nothing else. Running the server needs `DATABASE_URL` and the API keys
+in `.env` ([Configuration](#configuration)); the values come from the team and are never
+committed. The dev settings refuse to start without `DATABASE_URL`.
+
+> **`DATABASE_URL` is the team's shared Neon database** — the one the deployed server
+> uses. `runserver`, `migrate` and scripts run locally write team data. Run
+> `python scripts/backup_db.py` before anything destructive.
+
+To try server changes in the app before deploying, run the server locally and point an
+emulator build at it with a git-ignored `APP/local.properties` line. Remove the line and
+rebuild to go back to the shared server.
+
+```bash
+python manage.py runserver 0.0.0.0:8000
 ```
 
-The home location is the origin for every travel-time lookup. Without it the alarm
-cannot be computed; the banner on the home screen takes you straight to the setting.
+```properties
+devServerHost=10.0.2.2
+```
 
 ---
 
-## Project Structure
+## Architecture
+
+App — one direction only, `ui → ViewModel → repository → remote/local`:
 
 ```
-├── APP/                        Android (Kotlin + Compose)
-│   └── app/src/main/java/com/swpp/wakeup/
-│       ├── alarm/              AlarmManager scheduling, full-screen alarm, boot re-register
-│       ├── background/         WorkManager — observation upload, plan sync
-│       ├── calendar/           device calendar reader (CalendarContract)
-│       ├── data/               remote (Retrofit) · local (Room cache, prefs) · repositories
-│       ├── domain/model/       view-facing models
-│       ├── sensing/            departure / arrival detection, upload queues
-│       └── ui/                 auth · onboarding · home · events · routines · alarm
-│                               · morning · report · calendar · common · nav · theme
-├── backend/                    Django + DRF
+ui/                        Compose screens
+  ↑ StateFlow   ↓ actions
+HomeViewModel · AuthViewModel
+  ↓
+data/repository            → data/remote (Retrofit) · data/local (Room cache, SharedPreferences)
+domain/model               pure calculations and view models, covered by JVM tests
+alarm/ sensing/ background/   receivers, the trip-tracking foreground service, WorkManager workers
+```
+
+Server — the app talks to it only over HTTPS with JWT:
+
+```
+accounts · events · routines · observations · reports    views and serializers
+  ↓
+planning     alarm calculation (compute_and_store)
+  ↓
+routing      Kakao routes, places, static maps · Seoul subway and bus real-time
+prediction   learning from observations (manage.py train_models)
+  ↓
+Neon Postgres
+```
+
+Creating or changing an event runs the calculation on the server: resolve the route
+with Kakao, estimate the prep and travel distributions, take the τ-quantile and store
+the result as an `AlarmPlan` returned with the event. The app caches responses in Room,
+so screens look the same online and offline.
+
+**The app never calls Kakao or the real-time APIs directly.** An API key shipped in an
+APK can be extracted, so the server proxies those calls, throttles them and keeps a daily
+budget for static maps.
+
+### Project structure
+
+```
+├── APP/                          Android app (Gradle root)
+│   ├── app/src/main/java/com/swpp/wakeup/
+│   │   ├── alarm/                scheduling, full-screen alarm, re-registration
+│   │   ├── background/           workers — observation upload, plan sync, route refresh
+│   │   ├── calendar/             device calendar reader
+│   │   ├── data/                 remote (Retrofit) · local (Room, prefs) · repository
+│   │   ├── domain/model/         pure calculations and view models
+│   │   ├── sensing/              trip tracking, departure/arrival detection, upload queues
+│   │   └── ui/                   alarm · auth · calendar · common · events · home · morning
+│   │                             · nav · onboarding · places · report · routines · settings · theme
+│   ├── gradle.properties         jitApiBaseUrl — the shared server
+│   └── scripts/                  PowerShell helpers for physical devices
+├── backend/                      Django + DRF
 │   ├── apps/
-│   │   ├── accounts/           User · Profile
-│   │   ├── events/             Place · EventTag · Event · calendar import
-│   │   ├── routines/           RoutineBlock, per-event checks, block observations
-│   │   ├── planning/           AlarmPlan, distributions, estimators
-│   │   ├── prediction/         parameter learning from observations
-│   │   ├── observations/       TripObservation (real departure / arrival times)
-│   │   ├── reports/            weekly report, probability calibration
-│   │   ├── routing/            Kakao clients
-│   │   └── common/             shared error format
-│   └── scripts/                API verification scripts (see run_local_suite.py)
-├── .github/workflows/ci.yml    backend tests · contract checks · app build
-└── docs/                       guides and images referenced from this README
+│   │   ├── accounts/             User · Profile (home, prep time, default τ)
+│   │   ├── events/               Place · EventTag · Event · calendar import · place and route views
+│   │   ├── planning/             AlarmPlan · distributions · estimators · compute_and_store
+│   │   ├── routing/              Kakao client · real-time arrivals · RouteCorrection
+│   │   ├── routines/             prep blocks, per-event selection, block observations
+│   │   ├── observations/         detected departures and arrivals
+│   │   ├── prediction/           learning from observations
+│   │   ├── reports/              weekly report, calibration
+│   │   └── common/               error format, health
+│   ├── config/settings/          base · dev · prod · test
+│   ├── scripts/                  HTTP checks and DB tools
+│   └── Dockerfile                migrate, then gunicorn
+├── docs/                         setup guides, design notes, the board image
+├── .github/workflows/ci.yml      CI
+└── render.yaml                   Render Blueprint
 ```
-
-`docs/` holds what you need to run the project:
-
-- **[Team setup](docs/team-setup.md)** — shared server and database, verification
-  scripts, CI, and how to tell whether the deployed code is stale
-- **[Running on a physical device](docs/device-setup.md)** — network setup, pairing,
-  permissions, and how to test a commute when the dev server stays at home
-- `screens-overview.png` — the Figma board capture used above
-
-Design documents (specifications, checklists, proposal drafts) are kept out of the
-repository on purpose and shared through the course **Wiki**.
 
 ---
 
 ## Verification
 
-Three suites, all runnable locally. CI runs the same three on every push and pull
-request ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+Three suites run locally and in CI on every push to `main` and every pull request
+([`ci.yml`](.github/workflows/ci.yml)). CI uses no secrets.
 
 ```bash
-cd backend && python -m pytest                       # 680 unit tests
-cd backend && python scripts/run_local_suite.py      # 8 HTTP suites against a live server
-cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 457 tests + lint + build
+cd backend && python -m pytest                      # 717 unit tests
+cd backend && python scripts/run_local_suite.py     # 8 HTTP suites against a live local server
+cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 487 unit tests + lint + build
 ```
 
 The middle one is the unusual part. `scripts/check_*.py` drive a **running** Django
 server over HTTP, which catches what the Django test client does not: a URL that was
-never wired up, a serializer field the app reads under a different name, a permission
-class that was left off. `run_local_suite.py` starts the server, shuts it down
-afterwards, and refuses to run if port 8000 is already taken — a stale server
-answering health checks once made an entire suite pass against old code.
+never wired up, a serializer field the app reads under a different name, a missing
+permission class. `run_local_suite.py` starts the server, stops it afterwards, and
+refuses to run if port 8000 is already taken — a stale server answering health checks
+once made a whole suite pass against old code.
 
 It also pins the database to a **throwaway SQLite file in the temp directory**, never
-the team's Neon database. These scripts create close to a hundred accounts per run,
-and Neon is the only copy of the team's data. The same reasoning applies to `pytest`,
-which uses in-memory SQLite: neither is a second database to maintain, both exist only
-while the checks run.
+the team's Neon database; the scripts create close to a hundred accounts per run.
+Without `KAKAO_REST_API_KEY` the checks that need route lookups are **skipped rather
+than failed**, so CI never burns the daily free quota. Lint blocks errors only.
 
-No secrets are needed. Without `KAKAO_REST_API_KEY` the checks that require route
-lookups are **skipped rather than failed**, so CI never burns the daily free quota
-that the team needs for development.
+For the deployed server, `python scripts/check_deployed.py` runs HTTP checks (it covers
+the 0.3.0 features and whether `routes/live` is deployed; it is being extended), and
+`/api/health` reports the running version.
 
 ---
 
 ## API
 
-```
-POST  /api/auth/register              sign up
-POST  /api/auth/token                 sign in (access + refresh)
-POST  /api/auth/token/refresh         refresh
-GET   /api/auth/me                    validate the stored token
+Everything is under `/api/`. Requests carry `Authorization: Bearer <access>` except
+health, sign-up, token and refresh.
 
-GET   PATCH  /api/profile             home location, prep time, default τ
+| Area | Endpoints |
+| --- | --- |
+| Health | `GET health` — version and real-time availability |
+| Auth | `POST auth/register` · `POST auth/token` · `POST auth/token/refresh` · `GET auth/me` |
+| Profile | `GET PATCH PUT profile` — home, prep time, default τ. A new home or prep time recomputes up to 50 future events |
+| Events | `GET POST events` · `GET PATCH DELETE events/{id}` · `POST events/{id}/recompute` · `POST events/import` · `GET events/tags` · `GET PUT events/{id}/blocks` |
+| Places | `GET places/search` · `GET places/staticmap` · `GET places/reverse` |
+| Routes | `GET routes/candidates` · `POST routes/live` (from the current position, while moving) |
+| Observations | `POST observations/batch` · `GET observations` |
+| Routines | `GET POST routines/blocks` · `GET PATCH DELETE routines/blocks/{id}` · `POST routines/observations/batch` |
+| Reports | `GET reports/weekly` · `GET reports/calibration` |
 
-GET   POST   /api/events              list, create
-GET   PATCH  DELETE  /api/events/{id}
-POST  /api/events/{id}/recompute      recalculate the alarm only
-GET   /api/events/tags                the six event categories
-
-GET   /api/places/search?q=           Kakao place search (proxied, paged, sortable)
-GET   /api/places/staticmap           Kakao static map tile (proxied, cached)
-GET   /api/routes/candidates          route candidates
-
-POST  /api/observations/batch         upload detected departures / arrivals
-GET   /api/observations               list, filterable by event, kind and time
-```
-
-`/api/observations/batch` is idempotent on `(user, client_uuid)`. Detection happens
-mid-commute where there is often no network, so the app queues records on disk and
-resends them; a retry must not create a second row.
-
-**The app never calls Kakao directly.** An API key shipped in an APK can be extracted,
-so the server proxies those calls.
-
-`/api/places/search` reports `reachable_count` rather than Kakao's `total_count`.
-Kakao answers "카페" with 142,759 matches but only serves 45 of them, so the larger
-number next to a list that ends at 45 reads as a bug. Ratings and photos are not in
-the response at all, so each result carries `place_url` instead of an invented score.
-`/api/places/staticmap` returns a rendered PNG and caches it for an hour — the free
-quota is 1,000 requests a day and panning a map would burn that in minutes. Failures
-are not cached, or a map would stay blank for an hour after Kakao recovered.
-
-### Verification
-
-Every script makes real HTTP calls. Run them with the server up.
-
-```powershell
-cd backend
-.\.venv\Scripts\python.exe scripts\check_auth_api.py          # auth, 18 cases
-.\.venv\Scripts\python.exe scripts\check_events_api.py        # events, 28 cases
-.\.venv\Scripts\python.exe scripts\check_route_api.py         # routes, 33 cases
-.\.venv\Scripts\python.exe scripts\check_observations_api.py  # observations, 29 cases
-.\.venv\Scripts\python.exe scripts\db_status.py               # database summary
-```
-
-The app side has unit tests for the logic that cannot be checked by hand — the
-departure and arrival decisions, where blurry fixes and stray coordinates have to be
-reproduced deliberately:
-
-```powershell
-cd APP
-$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
-.\gradlew.bat testDebugUnitTest
-```
+- Errors look like `{"error": {"code", "message", "details"}}`. Another user's id
+  returns **404, not 403**, so existence does not leak
+- Batch uploads are idempotent on `(user, client_uuid)`. Detection happens mid-commute
+  where there is often no network, so the app queues records and resends them; a retry
+  must not create a second row
+- `places/search` reports `reachable_count` rather than Kakao's `total_count`: Kakao
+  answers "카페" with 142,759 matches but serves only 45, and the larger number next to a
+  list that ends at 45 reads as a bug
+- `places/staticmap` returns a PNG cached for an hour, within a daily budget (900 by
+  default) of the 1,000 free Kakao requests. Failures are not cached
 
 ---
 
-## API Keys
+## Deployment
 
-Put them in `backend/.env`, copied from `.env.example`.
-**`.env` is never committed** (see `.gitignore`).
+| | |
+| --- | --- |
+| Service | Render `justintime-api` — Docker, free plan, Singapore, deploys `main` |
+| Start | `backend/Dockerfile` runs `migrate`, then gunicorn with 2 workers |
+| Database | Neon Postgres, **direct** URL (the `-pooler` endpoint can break migrations) |
+| Health | `GET /api/health` → `{"ok": true, "version": "0.9.0", "realtime": {"subway": true, "bus": true}}`, independent of the database |
+| Idle | sleeps after 15 minutes; waking takes 30–60 seconds |
 
-| Variable | Where to get it | Notes |
-| --- | --- | --- |
-| `KAKAO_REST_API_KEY` | [developers.kakao.com](https://developers.kakao.com) | One key covers transit, walk, bicycle, car and place search |
-| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) | Natural-language event parsing (planned) |
-| `KMA_API_KEY` | [KMA API Hub](https://apihub.kma.go.kr) | Short-term forecast; requires an access request |
-| `FCM_CREDENTIALS_PATH` | Firebase console | A **path** to the JSON. Keep the file outside the repository |
+Bump the server `APP_VERSION` and the app `versionName` / `versionCode` together in the
+change you deploy — the app adds a "server is behind" hint to its errors when the server
+reports an older version. After deploying, check that `/api/health` shows the new
+version: a 200 alone does not mean the new code is live. `render.yaml` deliberately has
+no `databases` block — with one, Render attached its own Postgres and the demo login
+broke while health stayed 200.
 
-Kakao Map needs no review process — just switch it on under
-`My Application > Product Settings > Kakao Map`. **The free quota applies to only one
-app per developer account, so the team should create a single app and share the key.**
+---
+
+## Configuration
+
+Local values go in `backend/.env`, copied from `.env.example`. **`.env` is never
+committed.** The deployed values live in the Render dashboard, and CI needs none.
+
+| Variable | Used for |
+| --- | --- |
+| `DATABASE_URL` | Neon Postgres, direct URL. Required |
+| `DJANGO_SECRET_KEY` | Django secret key |
+| `KAKAO_REST_API_KEY` | [Kakao](https://developers.kakao.com) routes (transit, walk, bicycle, car), place search, reverse geocoding, static maps |
+| `SEOUL_SUBWAY_API_KEY` | Subway real-time arrivals ([data.seoul.go.kr](https://data.seoul.go.kr)) |
+| `SEOUL_BUS_API_KEY_ENCODING` / `_DECODING` | Bus real-time arrivals ([data.go.kr](https://www.data.go.kr)). Set both forms of the key |
+| `STATIC_MAP_DAILY_UPSTREAM_LIMIT` | Daily budget for Kakao static-map requests, default 900 |
+
+Without the real-time keys the arrival lines simply do not appear; routing still works.
+`KMA_API_KEY`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `FCM_CREDENTIALS_PATH`,
+`KAKAO_MOBILITY_KEY` and `REDIS_URL` are reserved for planned features; nothing uses
+them yet.
+
+Kakao Map needs no review — switch it on under `My Application > Product Settings >
+Kakao Map`. **The free quota applies to one app per developer account, so the team
+shares a single app and key.**
+
+---
+
+## Documentation
+
+- [docs/team-setup.md](docs/team-setup.md) — shared server and database, deployment,
+  verification scripts (Korean)
+- [docs/device-setup.md](docs/device-setup.md) — running on a physical device
+- [docs/progress-tracking.md](docs/progress-tracking.md) — progress bar, lateness
+  outlook, ETA and route refresh design (Korean)
+- [APP/scripts/README.md](APP/scripts/README.md) — device scripts
+
+Specifications, checklists and course documents are kept out of the repository and
+shared through the course **Wiki**.
 
 ---
 
 ## Team
 
-SNU SWPP 2026 Fall · Team 18
+SNU SWPP 2026 Fall · Team 18 · Momentum
+
+Each iteration has three roles — **UI** (Figma, screens, research), **BE** (backend,
+unit tests, QA) and **PM** (schedule, decisions, integration, deliverables). The PM
+rotates every iteration.
