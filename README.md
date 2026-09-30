@@ -23,11 +23,12 @@ your own mornings.
 | Shared server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
 | Stack | Android · Kotlin · Jetpack Compose — Django · DRF · Neon Postgres — Render |
 
-![Figma board](docs/screens-overview.png)
+![Figma board](docs/figma-board.png)
 
-> The Figma board: 17 screens plus state variants (route map, progress colors, route
-> modes, input states). Columns are stages; screens below a frame are its children.
-> The board is ahead of the app in places — the lists below describe the app.
+> The Figma board as of 2026-09-30: 17 screens plus state variants (route map,
+> progress colors, route modes, input states). Columns are stages; screens below a
+> frame are its children. The board is ahead of the app in places — the lists below
+> describe the app.
 
 ---
 
