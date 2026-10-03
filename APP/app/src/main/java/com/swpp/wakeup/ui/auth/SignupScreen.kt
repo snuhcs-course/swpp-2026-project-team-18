@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -24,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -53,6 +57,9 @@ fun SignupScreen(
     nickname: String,
     password: String,
     passwordConfirm: String,
+    /** 두 비밀번호 칸이 같은지. 확인 칸 오른쪽 ✓ 로만 쓴다. */
+    passwordsMatch: Boolean,
+    termsAgreed: Boolean,
     loading: Boolean,
     error: String?,
     canSubmit: Boolean,
@@ -60,6 +67,7 @@ fun SignupScreen(
     onNicknameChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
     onPasswordConfirmChange: (String) -> Unit,
+    onTermsAgreedChange: (Boolean) -> Unit,
     onSubmitClick: () -> Unit,
     onBackToLoginClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -135,6 +143,9 @@ fun SignupScreen(
             enabled = !loading
         )
 
+        // Figma 순서: 비밀번호 → 조건 카드 → 비밀번호 확인
+        PasswordRuleCard()
+
         JitTextField(
             label = stringResource(R.string.auth_password_confirm),
             value = passwordConfirm,
@@ -142,12 +153,24 @@ fun SignupScreen(
             isPassword = true,
             keyboardType = KeyboardType.Password,
             imeAction = ImeAction.Done,
-            enabled = !loading
+            enabled = !loading,
+            trailing = if (passwordsMatch) {
+                {
+                    Text(
+                        text = "✓",
+                        color = JitColor.Green,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else null
         )
 
-        PasswordRuleCard()
-
-        StoredInfoCard()
+        TermsAgreementRow(
+            checked = termsAgreed,
+            onCheckedChange = onTermsAgreedChange,
+            enabled = !loading
+        )
 
         if (error != null) {
             ErrorText(error)
@@ -196,9 +219,18 @@ fun SignupScreen(
     }
 }
 
-/** Figma card-비밀번호규칙 — 서버 검증기 규칙을 미리 알려준다. */
+/**
+ * Figma card-비밀번호규칙 — 서버 검증기 규칙을 미리 알려준다.
+ *
+ * 조건별 통과 여부는 서버 검사 API(task.md B-1)의 결과를 그대로 넘겨받는다.
+ * 앱에서 규칙을 따로 판정하지 않으며, 결과가 없으면(null) 회색으로 둔다.
+ */
 @Composable
-private fun PasswordRuleCard(modifier: Modifier = Modifier) {
+private fun PasswordRuleCard(
+    modifier: Modifier = Modifier,
+    lengthPassed: Boolean? = null,
+    mixPassed: Boolean? = null,
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -207,56 +239,68 @@ private fun PasswordRuleCard(modifier: Modifier = Modifier) {
             .padding(JitSpace.CardPadding),
         verticalArrangement = Arrangement.spacedBy(JitSpace.CardGap)
     ) {
-        RuleRow(stringResource(R.string.signup_rule_length))
-        RuleRow(stringResource(R.string.signup_rule_mix))
-        RuleRow(stringResource(R.string.signup_rule_similar))
-    }
+        RuleRow(stringResource(R.string.signup_rule_length), lengthPassed)
+        RuleRow(stringResource(R.string.signup_rule_mix), mixPassed)    }
 }
 
+/** 점 색: 통과 = 초록, 미통과 = 빨강, 아직 결과 없음(null) = 회색. */
 @Composable
-private fun RuleRow(text: String) {
+private fun RuleRow(text: String, passed: Boolean?) {
+    val dotColor = when (passed) {
+        true -> JitColor.Green
+        false -> JitColor.Red
+        null -> JitColor.TextSecondary
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier
                 .size(6.dp)
                 .clip(CircleShape)
-                .background(JitColor.Green)
+                .background(dotColor)
         )
         Spacer(Modifier.width(9.dp))
         Text(text = text, color = JitColor.TextPrimary, fontSize = 12.sp)
     }
 }
 
-/** Figma card-저장정보 — 무엇을 저장하는지 미리 밝힌다. */
+/**
+ * 이용약관 및 개인정보처리방침 동의. 체크하지 않으면 가입 버튼이 꺼진다.
+ * 동의 여부를 서버에 보내는 것은 B-2 이후.
+ */
 @Composable
-private fun StoredInfoCard(modifier: Modifier = Modifier) {
-    Column(
+private fun TermsAgreementRow(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(JitRadius.Hint))
-            .background(JitColor.Surface2)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp)
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Checkbox,
+                onValueChange = onCheckedChange
+            ),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(JitColor.Blue)
+        // 줄 전체가 눌리므로 체크박스 자체의 클릭은 끈다(onCheckedChange = null).
+        Checkbox(
+            checked = checked,
+            onCheckedChange = null,
+            enabled = enabled,
+            colors = CheckboxDefaults.colors(
+                checkedColor = JitColor.Accent,
+                uncheckedColor = JitColor.TextSecondary,
+                checkmarkColor = JitColor.Bg
             )
-            Spacer(Modifier.width(9.dp))
-            Text(
-                text = stringResource(R.string.signup_stored_title),
-                color = JitColor.TextPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
+        )
+        Spacer(Modifier.width(9.dp))
         Text(
-            text = stringResource(R.string.signup_stored_body),
-            color = JitColor.TextSecondary,
-            fontSize = 11.sp
+            text = stringResource(R.string.signup_terms),
+            color = JitColor.TextPrimary,
+            fontSize = 12.sp
         )
     }
 }
@@ -270,6 +314,8 @@ private fun SignupScreenPreview() {
             nickname = "김진호",
             password = "swpp2026Alarm",
             passwordConfirm = "swpp2026Alarm",
+            passwordsMatch = true,
+            termsAgreed = true,
             loading = false,
             error = null,
             canSubmit = true,
@@ -277,6 +323,7 @@ private fun SignupScreenPreview() {
             onNicknameChange = {},
             onPasswordChange = {},
             onPasswordConfirmChange = {},
+            onTermsAgreedChange = {},
             onSubmitClick = {},
             onBackToLoginClick = {},
         )

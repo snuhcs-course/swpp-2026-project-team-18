@@ -3,11 +3,13 @@ package com.swpp.wakeup.ui.common
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -19,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
@@ -55,6 +58,8 @@ fun JitTextField(
     enabled: Boolean = true,
     /** 키보드의 확인·검색 키를 눌렀을 때. null 이면 기본 동작(포커스 이동) */
     onImeAction: (() -> Unit)? = null,
+    /** 입력칸 오른쪽에 붙는 표시(예: 비밀번호 확인 일치 ✓). null 이면 없음 */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     val borderColor = if (focused) JitColor.Accent else JitColor.Track
@@ -80,38 +85,44 @@ fun JitTextField(
             fontWeight = FontWeight.Medium
         )
         Spacer(Modifier.height(2.dp))
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            enabled = enabled,
-            singleLine = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .onFocusChanged { focused = it.isFocused },
-            textStyle = LocalTextStyle.current.merge(
-                TextStyle(
-                    color = JitColor.TextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            ),
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(JitColor.Accent),
-            visualTransformation =
-                if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = keyboardType,
-                imeAction = imeAction
-            ),
-            keyboardActions = if (onImeAction == null) {
-                KeyboardActions.Default
-            } else {
-                KeyboardActions(
-                    onSearch = { onImeAction() },
-                    onDone = { onImeAction() },
-                    onGo = { onImeAction() },
-                )
-            },
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                enabled = enabled,
+                singleLine = true,
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { focused = it.isFocused },
+                textStyle = LocalTextStyle.current.merge(
+                    TextStyle(
+                        color = JitColor.TextPrimary,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                ),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(JitColor.Accent),
+                visualTransformation =
+                    if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = keyboardType,
+                    imeAction = imeAction
+                ),
+                keyboardActions = if (onImeAction == null) {
+                    KeyboardActions.Default
+                } else {
+                    KeyboardActions(
+                        onSearch = { onImeAction() },
+                        onDone = { onImeAction() },
+                        onGo = { onImeAction() },
+                    )
+                },
+            )
+            if (trailing != null) {
+                Spacer(Modifier.width(8.dp))
+                trailing()
+            }
+        }
     }
 }
 

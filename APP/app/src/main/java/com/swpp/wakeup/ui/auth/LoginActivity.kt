@@ -14,8 +14,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -100,14 +102,13 @@ class LoginActivity : ComponentActivity() {
             JitTheme {
                 AuthHost(
                     onAuthenticated = ::goToMain,
-                    onBrowse = { goToMain(null) },
                 )
             }
         }
     }
 
     /**
-     * @param nickname 환영 문구에 쓸 이름. 둘러보기와 **자동 로그인**은 null 이다.
+     * @param nickname 환영 문구에 쓸 이름. **자동 로그인**은 null 이다.
      *   앱을 다시 열 때마다 "환영합니다" 가 뜨면 성가시다.
      */
     private fun goToMain(nickname: String?) {
@@ -123,7 +124,6 @@ class LoginActivity : ComponentActivity() {
 @Composable
 private fun AuthHost(
     onAuthenticated: (String?) -> Unit,
-    onBrowse: () -> Unit,
 ) {
     val viewModel: AuthViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -145,7 +145,9 @@ private fun AuthHost(
 
     Scaffold(
         containerColor = JitColor.Bg,
-        contentWindowInsets = WindowInsets.systemBars,
+        // 키보드(ime)도 포함한다. edge-to-edge 에서는 adjustResize 가 창을 줄여 주지
+        // 않으므로, 빼면 키보드가 아래 칸을 덮고 스크롤로도 닿지 않는다.
+        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
         val showSocialNotice: () -> Unit = {
@@ -180,7 +182,6 @@ private fun AuthHost(
                     onSignupClick = viewModel::goToSignup,
                     onGoogleClick = showSocialNotice,
                     onKakaoClick = showSocialNotice,
-                    onBrowseClick = onBrowse,
                     modifier = Modifier.padding(innerPadding),
                     waking = state.waking
                 )
@@ -190,6 +191,8 @@ private fun AuthHost(
                     nickname = state.nickname,
                     password = state.password,
                     passwordConfirm = state.passwordConfirm,
+                    passwordsMatch = state.passwordsMatch,
+                    termsAgreed = state.termsAgreed,
                     loading = state.loading,
                     error = state.error,
                     canSubmit = state.canSubmitSignup,
@@ -197,6 +200,7 @@ private fun AuthHost(
                     onNicknameChange = viewModel::onNicknameChange,
                     onPasswordChange = viewModel::onPasswordChange,
                     onPasswordConfirmChange = viewModel::onPasswordConfirmChange,
+                    onTermsAgreedChange = viewModel::onTermsAgreedChange,
                     onSubmitClick = viewModel::signup,
                     onBackToLoginClick = viewModel::goToLogin,
                     modifier = Modifier.padding(innerPadding),

@@ -61,6 +61,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val password: String = "",
         val nickname: String = "",
         val passwordConfirm: String = "",
+        /** 이용약관 및 개인정보처리방침 동의. 서버 저장은 B-2 이후. */
+        val termsAgreed: Boolean = false,
 
         val loading: Boolean = false,
         /** 서버가 준 메시지를 그대로 담는다. */
@@ -80,9 +82,22 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val canSubmitLogin: Boolean
             get() = !loading && email.isNotBlank() && password.isNotBlank()
 
+        /**
+         * 비밀번호 확인 일치. 화면 표시(✓)용 비교라 앱에서 한다.
+         * 서버도 `password_confirm` 으로 다시 확인한다.
+         */
+        val passwordsMatch: Boolean
+            get() = passwordConfirm.isNotEmpty() && password == passwordConfirm
+
+        /**
+         * 가입 버튼 활성 조건.
+         *
+         * 비밀번호 규칙 통과 여부는 아직 넣지 않았다. B-1 검사 API 가 생기면 그
+         * 결과를 여기에 더한다. 앱에서 규칙을 따로 판정하지 않는다.
+         */
         val canSubmitSignup: Boolean
             get() = !loading && email.isNotBlank() && nickname.isNotBlank() &&
-                password.isNotBlank() && passwordConfirm.isNotBlank()
+                password.isNotBlank() && passwordsMatch && termsAgreed
     }
 
     private val _state = MutableStateFlow(UiState())
@@ -95,6 +110,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun onNicknameChange(value: String) = _state.update { it.copy(nickname = value, error = null) }
     fun onPasswordConfirmChange(value: String) =
         _state.update { it.copy(passwordConfirm = value, error = null) }
+    fun onTermsAgreedChange(value: Boolean) = _state.update { it.copy(termsAgreed = value) }
 
     // --- 화면 이동 --------------------------------------------------------
 
@@ -119,12 +135,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun signup() {
         val current = _state.value
+        // 확인 일치·약관 동의는 canSubmitSignup 이 막는다(일치는 확인 칸의 ✓ 로 보인다).
         if (!current.canSubmitSignup) return
-        // 서버도 같은 검사를 하지만, 왕복 없이 즉시 알려주는 편이 낫다.
-        if (current.password != current.passwordConfirm) {
-            _state.update { it.copy(error = "비밀번호가 일치하지 않는다.") }
-            return
-        }
         submit {
             repository.register(
                 email = current.email,
