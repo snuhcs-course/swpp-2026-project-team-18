@@ -20,8 +20,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -305,7 +307,9 @@ private fun MainHost(
 
     Scaffold(
         containerColor = JitColor.Bg,
-        contentWindowInsets = WindowInsets.systemBars,
+        // 키보드(ime)도 포함한다. edge-to-edge 에서는 adjustResize 가 창을 줄여 주지
+        // 않으므로, 빼면 키보드가 아래 칸을 덮고 스크롤로도 닿지 않는다.
+        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         AnimatedContent(

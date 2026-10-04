@@ -881,8 +881,17 @@ private fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
         planStatusLabel = plan?.statusLabel,
         startAtEpochSecond = start.toEpochSecond(),
         startDate = local.toLocalDate(),
+        alarmClock = alarmLocal?.format(CLOCK_12_FORMAT),
+        alarmMeridiem = alarmLocal?.let(::meridiem),
+        placeName = place?.name?.takeIf(String::isNotBlank),
+        startClock = local.format(CLOCK_12_FORMAT) + meridiem(local),
     )
 }
+
+/** 홈 행의 12시간제 시각. 예 "7:40" (AM/PM 은 따로 붙인다) */
+private val CLOCK_12_FORMAT = DateTimeFormatter.ofPattern("h:mm")
+
+private fun meridiem(time: java.time.ZonedDateTime): String = if (time.hour < 12) "AM" else "PM"
 
 /**
  * 준비 시간 한 줄의 근거 문구.
@@ -1058,6 +1067,8 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
             listOfNotNull(p.name, p.address?.takeIf(String::isNotBlank)).joinToString(" · ")
         } ?: "장소 없음",
         sensitivityTag = tag?.label,
+        isFirstAlarm = isFirstAlarm,
+        latenessSensitive = latenessSensitivity == "high",
         alarmAt = alarmLocal?.format(ALARM_FORMAT),
         meridiem = alarmLocal?.let { if (it.hour < 12) "AM" else "PM" } ?: "",
         remaining = remaining,

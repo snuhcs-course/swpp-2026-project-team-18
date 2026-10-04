@@ -269,6 +269,17 @@ data class EventDto(
 
     @SerializedName("alarm_plan") val alarmPlan: AlarmPlanDto?,
     @SerializedName("created_at") val createdAt: String?,
+
+    /**
+     * 그날 켜진 알람 중 가장 이른 일정인지. 서버가 판정한다(task.md B-3).
+     * 서버가 아직 보내지 않으면 null 이다.
+     */
+    @SerializedName("is_first_alarm") val isFirstAlarm: Boolean? = null,
+    /**
+     * 지각 민감도 `high` / `normal` / `low`. 서버가 판정한다(task.md B-4).
+     * 서버가 아직 보내지 않으면 null 이다.
+     */
+    @SerializedName("lateness_sensitivity") val latenessSensitivity: String? = null,
 )
 
 /**

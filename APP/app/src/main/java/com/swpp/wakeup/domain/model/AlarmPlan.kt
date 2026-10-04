@@ -26,6 +26,14 @@ data class AlarmPlanView(
     /** 태그 라벨. 예 "수업" */
     val sensitivityTag: String?,
 
+    /**
+     * 그날 켜진 알람 중 가장 이른 일정인지(서버 `is_first_alarm`, B-3).
+     * null 이면 서버가 아직 판정을 보내지 않는 것이다.
+     */
+    val isFirstAlarm: Boolean? = null,
+    /** 서버가 판정한 지각 민감도가 "높음" 인지(`lateness_sensitivity == "high"`, B-4) */
+    val latenessSensitive: Boolean = false,
+
     /** "7:40". 계산 못 했으면 null */
     val alarmAt: String?,
     /** "AM" / "PM" */

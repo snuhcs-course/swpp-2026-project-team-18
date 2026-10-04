@@ -56,7 +56,7 @@
     <string name="alarm_how_computed">이렇게 계산했음</string>
     <string name="alarm_total">합계 %1$d분</string>
     <string name="alarm_minutes">%1$d분</string>
-    <string name="alarm_confirm">이 알람으로 설정</string>
+    <string name="alarm_confirm">확인</string>
     <string name="alarm_change_risk">지각 위험 바꾸기</string>
 
     <!-- 리스크 선택 (Figma ⑤) -->
