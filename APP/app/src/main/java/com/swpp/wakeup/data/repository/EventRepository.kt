@@ -771,6 +771,11 @@ internal fun RouteCandidateDto.toOption(fetchedAtElapsedMs: Long = 0L): RouteOpt
         minutesLabel = "${minutes}분",
         detailLine = detailLine.ifBlank { summary.orEmpty() },
         badge = reason?.takeIf { it.isNotBlank() },
+        // 서버가 배지 목록을 주면 그걸, 아니면 reason 하나를 쓴다. 문구는 서버 값 그대로.
+        badges = badges.orEmpty().map(String::trim).filter(String::isNotEmpty).distinct()
+            .ifEmpty { listOfNotNull(reason?.trim()?.takeIf { it.isNotEmpty() }) },
+        distanceM = distanceM?.takeIf { it > 0 },
+        bikeRoadPercent = bikeRoadPercent?.takeIf { it in 0..100 },
         // segments 가 null 인 경우가 정상이다 — 구버전 서버 응답과 Gson 의
         // 기본값 무시가 겹치는 자리다. 근거는 RouteCandidateDto.segments 주석.
         segments = RouteSegments(
@@ -804,6 +809,21 @@ private fun RouteSegmentDto.toSegment(fetchedAtElapsedMs: Long = 0L): RouteSegme
         guidance = guidance?.trim().orEmpty(),
         arrivals = arrivals.orEmpty().mapNotNull { it.toArrival(fetchedAtElapsedMs) }.take(2),
         headwayMinutes = headwayMinutes?.takeIf { it > 0 },
+        // 대체 노선은 이 구간을 복제하고 번호·종류만 바꾼다. 같은 번호는 뺀다.
+        alternatives = altVehicles.orEmpty()
+            .mapNotNull { alt -> alt.name?.trim()?.takeIf { it.isNotEmpty() }?.let { it to alt } }
+            .filter { (name, _) -> name != vehicle?.trim() }
+            .distinctBy { (name, _) -> name }
+            .map { (name, alt) ->
+                RouteSegment(
+                    kind = kind,
+                    seconds = seconds,
+                    label = name,
+                    lineName = name,
+                    busType = alt.vehicleType?.trim().orEmpty(),
+                    region = region?.trim().orEmpty(),
+                )
+            },
     )
 }
 

@@ -90,7 +90,7 @@ fun PrepOnboardingScreen(
         )
 
         Text(
-            text = "깨서부터 문을 나서기까지 걸리는 시간",
+            text = "기상 후 문을 나서기까지 걸리는 시간",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )

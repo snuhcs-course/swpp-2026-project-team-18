@@ -160,6 +160,7 @@ private fun MainHost(
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
+    val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
@@ -435,6 +436,7 @@ private fun MainHost(
                     state = addState,
                     hasHome = state.hasHome,
                     homePlace = state.homePlace,
+                    tags = eventTags,
                     onTitleChange = viewModel::onAddTitleChange,
                     onDateChange = viewModel::onAddDateChange,
                     onTimeChange = viewModel::onAddTimeChange,
@@ -448,6 +450,19 @@ private fun MainHost(
                         viewModel.openMapPick(HomeViewModel.MapTarget.DESTINATION)
                     },
                     onOpenPlaceUrl = openPlaceUrl,
+                    onOriginQueryChange = viewModel::onAddOriginQueryChange,
+                    onOriginSearch = viewModel::searchAddOriginPlaces,
+                    onOriginSelect = viewModel::onAddOriginSelected,
+                    onOriginLoadMore = viewModel::loadMoreAddOriginPlaces,
+                    onOriginSortChange = viewModel::onAddOriginSortChange,
+                    onOriginOpenMap = {
+                        viewModel.openMapPick(HomeViewModel.MapTarget.ORIGIN)
+                    },
+                    onUseCurrentLocation = viewModel::useCurrentLocationForAddOrigin,
+                    onSetHome = {
+                        viewModel.resetHomeSetup()
+                        viewModel.openHomeSetup()
+                    },
                     onPickRoute = viewModel::openRouteChoice,
                     onSubmit = viewModel::submitAdd,
                     onBack = viewModel::goBack,
@@ -461,18 +476,8 @@ private fun MainHost(
                     onRetry = viewModel::retryRouteChoice,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
-                    homePlace = state.homePlace,
-                    onOriginEditToggle = viewModel::onOriginEditToggle,
-                    onOriginQueryChange = viewModel::onOriginQueryChange,
-                    onOriginSearch = viewModel::searchOriginPlaces,
-                    onOriginSelect = viewModel::onOriginSelected,
-                    onOriginLoadMore = viewModel::loadMoreOriginPlaces,
-                    onOriginSortChange = viewModel::onOriginSortChange,
-                    onOriginOpenMap = {
-                        viewModel.openMapPick(HomeViewModel.MapTarget.ORIGIN)
-                    },
-                    onOpenPlaceUrl = openPlaceUrl,
-                    onUseCurrentLocation = viewModel::useCurrentLocationAsOrigin,
+                    // 일정 시작 시각 = 도착 목표. 카드의 출발~도착 시각을 만든다.
+                    arriveBy = addState.date.atTime(addState.hour, addState.minute),
                 )
 
                 AppRoute.MapPick -> mapPickState?.let { map ->

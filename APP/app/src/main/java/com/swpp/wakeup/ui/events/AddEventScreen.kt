@@ -22,6 +22,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.ui.common.JitCard
@@ -55,25 +58,23 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 /**
- * 종류 선택지. 서버 `EventTag.key` 와 값이 맞아야 한다.
+ * 종류 선택지. 서버 `GET /api/events/tags` 응답으로 만든다 — 이름과 τ 를 앱에
+ * 복사해 두면 서버 값을 바꿨을 때 화면만 낡은 값을 보여준다.
  *
- * τ 는 마이그레이션 `0002_seed_event_tags` 의 값이다. 화면에 함께 보여주는
- * 이유는 종류를 고르는 행위가 곧 안전 여유를 정하는 행위이기 때문이다.
- * "시험을 고르면 더 일찍 깨운다" 는 걸 알 수 있어야 한다.
+ * τ 를 함께 보여주는 이유는 종류를 고르는 행위가 곧 안전 여유를 정하는
+ * 행위이기 때문이다. "시험을 고르면 더 일찍 깨운다" 는 걸 알 수 있어야 한다.
  *
- * **마지막 "기타" 는 `key = null` 이다.** 태그를 비우면 서버가
- * `profile.default_tau` 로 내려간다(`Event.effective_tau`). τ 숫자를 여기
- * 복사해 두면 프로필 기본값을 바꿀 때 낡은 값이 남으므로 복사하지 않는다.
+ * 목록 끝에는 "기타" 대신 "+ 추가" 를 둔다(명세 12-a, [TagDropdown]). 사용자가
+ * 만든 종류를 저장하는 일은 서버(B-8)가 하므로 그 전까지 "+ 추가" 는 안내만 띄운다.
  */
-private val TAG_OPTIONS: List<TagOption> = listOf(
-    TagOption("class", "수업", "τ 0.90"),
-    TagOption("exam", "시험", "τ 0.99"),
-    TagOption("presentation", "발표", "τ 0.98"),
-    TagOption("train", "기차·비행", "τ 0.99"),
-    TagOption("parttime", "알바", "τ 0.95"),
-    TagOption("meetup", "약속", "τ 0.85"),
-    TagOption(null, "기타", "프로필 기본"),
-)
+internal fun tagOptionsOf(tags: List<com.swpp.wakeup.data.remote.EventTagDto>): List<TagOption> =
+    tags.map { tag ->
+        TagOption(
+            key = tag.key,
+            label = tag.label,
+            tau = tag.defaultTau?.let { "τ ${"%.2f".format(java.util.Locale.ROOT, it)}" } ?: "",
+        )
+    }
 
 internal data class TagOption(val key: String?, val label: String, val tau: String)
 
@@ -101,6 +102,8 @@ fun AddEventScreen(
      * 조용히 사라진 것을 아무도 모른다.
      */
     homePlace: com.swpp.wakeup.data.remote.PlaceSearchItem?,
+    /** 서버가 준 일정 종류 목록(`GET /api/events/tags`). 비어 있으면 "기타" 만 보인다 */
+    tags: List<com.swpp.wakeup.data.remote.EventTagDto>,
     onTitleChange: (String) -> Unit,
     onDateChange: (LocalDate) -> Unit,
     onTimeChange: (Int, Int) -> Unit,
@@ -112,11 +115,26 @@ fun AddEventScreen(
     onSortChange: (String) -> Unit,
     onOpenMap: () -> Unit,
     onOpenPlaceUrl: (String) -> Unit,
+    onOriginQueryChange: (String) -> Unit,
+    onOriginSearch: () -> Unit,
+    /** 출발지 선택. null 이면 집(서버가 프로필 집을 쓴다) */
+    onOriginSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit,
+    onOriginLoadMore: () -> Unit,
+    onOriginSortChange: (String) -> Unit,
+    onOriginOpenMap: () -> Unit,
+    onUseCurrentLocation: () -> Unit,
+    /** 집이 없을 때 집 버튼을 누르면 ⑭ 집 주소로 보낸다 */
+    onSetHome: () -> Unit,
     onPickRoute: () -> Unit,
     onSubmit: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 검색 칸은 "검색" 을 눌렀을 때만 펼친다. 고르면 접는다.
+    // 도착지는 아직 아무것도 없으면 처음부터 펼쳐 둔다 — 무엇을 할지 바로 보이게.
+    var originSearching by rememberSaveable { mutableStateOf(false) }
+    var destinationSearching by rememberSaveable { mutableStateOf(state.selectedPlace == null) }
+    val enabled = !state.submitting
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -157,51 +175,124 @@ fun AddEventScreen(
         RepeatRow(selected = emptySet(), onToggle = {}, available = REPEAT_AVAILABLE)
         TimeRow(state.hour, state.minute, onTimeChange, enabled = !state.submitting)
 
-        PlacePicker(
-            label = "장소 검색",
-            state = state.place,
-            selected = state.selectedPlace,
-            onQueryChange = onQueryChange,
-            onSearch = onSearch,
-            onSelect = onPlaceSelect,
-            enabled = !state.submitting,
-            onLoadMore = onLoadMore,
-            onSortChange = onSortChange,
-            onOpenMap = onOpenMap,
-            onOpenPlaceUrl = onOpenPlaceUrl,
-            // 목적지가 집인 경우도 있다 — 퇴근·귀가 일정이 그렇다.
-            homePlace = homePlace,
-        )
+        // Figma 13-a 출발·도착 지정: 각 줄 [값] [집] [검색].
+        JitCard(gap = 10.dp) {
+            // 출발지: null 이면 집. 집이 저장돼 있으면 처음부터 집이 선택된 상태다.
+            val originIsHome = state.origin == null && homePlace != null
+            EndpointRow(
+                label = "출발지",
+                value = when {
+                    state.originLocating -> "현재 위치를 확인하는 중"
+                    state.origin != null -> state.origin.name
+                    homePlace != null -> "집 · ${homePlace.name}"
+                    else -> "출발지를 정해 주세요"
+                },
+                hasValue = state.origin != null || homePlace != null,
+                isHome = originIsHome,
+                homeAvailable = homePlace != null,
+                searching = originSearching,
+                enabled = enabled && !state.originLocating,
+                onHome = {
+                    if (homePlace == null) onSetHome()
+                    else {
+                        onOriginSelect(null)
+                        originSearching = false
+                    }
+                },
+                onSearchToggle = { originSearching = !originSearching },
+            )
+            state.originNotice?.let { NoticeLine(it) }
+            if (originSearching) {
+                // 현재 위치는 버튼을 늘리지 않고 검색 맨 위에 한 줄로 둔다.
+                Text(
+                    text = "📍 현재 위치 사용",
+                    color = JitColor.Accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(JitRadius.Hint))
+                        .background(JitColor.Surface2)
+                        .clickable(enabled = enabled) {
+                            onUseCurrentLocation()
+                            originSearching = false
+                        }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+                PlacePicker(
+                    label = "출발지 검색",
+                    state = state.originPlace,
+                    selected = null,
+                    onQueryChange = onOriginQueryChange,
+                    onSearch = onOriginSearch,
+                    onSelect = { item ->
+                        onOriginSelect(item)
+                        originSearching = false
+                    },
+                    enabled = enabled,
+                    onLoadMore = onOriginLoadMore,
+                    onSortChange = onOriginSortChange,
+                    onOpenMap = onOriginOpenMap,
+                    onOpenPlaceUrl = onOpenPlaceUrl,
+                )
+            }
 
-        TagDropdown(state.tagKey, onTagChange, enabled = !state.submitting)
+            HorizontalDivider(color = JitColor.Track)
 
-        // 집이 없어도 경로를 고를 수 있다. 경로 선택 화면이 현재 위치를 출발지로
-        // 잡으므로 집이 없다고 막으면 쓸 수 있는 길을 닫는다.
+            // 도착지: 집 버튼을 누르면 저장된 집이 들어간다(퇴근·귀가 일정).
+            val destination = state.selectedPlace
+            EndpointRow(
+                label = "도착지",
+                value = destination?.name ?: "도착지를 검색해 주세요",
+                hasValue = destination != null,
+                isHome = destination != null && homePlace != null && destination.isSameSpot(homePlace),
+                homeAvailable = homePlace != null,
+                searching = destinationSearching,
+                enabled = enabled,
+                onHome = {
+                    if (homePlace == null) onSetHome()
+                    else {
+                        onPlaceSelect(homePlace)
+                        destinationSearching = false
+                    }
+                },
+                onSearchToggle = { destinationSearching = !destinationSearching },
+            )
+            if (destinationSearching) {
+                PlacePicker(
+                    label = "도착지 검색",
+                    state = state.place,
+                    selected = null,
+                    onQueryChange = onQueryChange,
+                    onSearch = onSearch,
+                    onSelect = { item ->
+                        onPlaceSelect(item)
+                        if (item != null) destinationSearching = false
+                    },
+                    enabled = enabled,
+                    onLoadMore = onLoadMore,
+                    onSortChange = onSortChange,
+                    onOpenMap = onOpenMap,
+                    onOpenPlaceUrl = onOpenPlaceUrl,
+                )
+            }
+        }
+
+        // Figma 순서: 출발지 → 도착지 → 경로 → 종류 → "일정 추가"
+        val canPickRoute = state.canPickRoute(hasHome)
         RouteRow(
             routeLabel = state.routeLabel,
-            originLabel = state.originLabel,
-            enabled = state.canPickRoute,
-            hasPlace = state.selectedPlace != null,
+            enabled = canPickRoute,
+            ready = state.selectedPlace != null && (state.origin != null || hasHome),
             onClick = onPickRoute,
         )
 
-        // 알람이 계산되지 않을 조건을 미리 알린다. 추가한 뒤에 "왜 알람이
-        // 없지" 하고 헤매지 않게 하려는 것이다.
-        if (state.selectedPlace == null) {
-            NoticeCard(
-                dot = JitColor.Amber,
-                title = "장소를 넣지 않으면 알람이 계산되지 않음",
-                body = "이동 시간을 구할 수 없어서다. 일정은 저장되고 나중에 장소를 넣으면 계산됨",
-            )
-        } else if (!hasHome && state.origin == null) {
-            // 집도 없고 출발지도 고르지 않은 상태에서만 경고한다. 경로 선택에서
-            // 출발지를 잡았으면 집이 없어도 계산되므로 경고가 거짓이 된다.
-            NoticeCard(
-                dot = JitColor.Amber,
-                title = "출발지가 없어 알람이 계산되지 않음",
-                body = "경로 고르기에서 출발지를 정하거나, 홈 화면 안내에서 집 위치를 설정",
-            )
-        }
+        TagDropdown(
+            options = tagOptionsOf(tags),
+            selected = state.tagKey,
+            onChange = onTagChange,
+            enabled = !state.submitting,
+        )
 
         state.error?.let {
             Text(
@@ -271,13 +362,13 @@ fun HomeSetupScreen(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "집에서 나서는 시각을 이 위치로 계산함",
+            text = "출발지 설정",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
 
         PlacePicker(
-            label = "집 주변 검색",
+            label = "주소 검색",
             state = state.place,
             selected = state.selected,
             onQueryChange = onQueryChange,
@@ -288,12 +379,6 @@ fun HomeSetupScreen(
             onSortChange = onSortChange,
             onOpenMap = onOpenMap,
             onOpenPlaceUrl = onOpenPlaceUrl,
-        )
-
-        NoticeCard(
-            dot = JitColor.Blue,
-            title = "저장하는 정보",
-            body = "고른 지점의 좌표와 이름만 저장함. 이동 중 실시간 위치는 서버에 보내지 않음",
         )
 
         state.error?.let {
@@ -704,9 +789,20 @@ private fun Long.toUtcLocalDate(): LocalDate =
  * 어두운 팔레트에서 눈에 튀기 때문이다.
  */
 @Composable
-private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled: Boolean) {
+private fun TagDropdown(
+    options: List<TagOption>,
+    selected: String?,
+    onChange: (String?) -> Unit,
+    enabled: Boolean,
+) {
     var expanded by remember { mutableStateOf(false) }
-    val current = TAG_OPTIONS.firstOrNull { it.key == selected } ?: TAG_OPTIONS.last()
+    // "+ 추가" 를 눌렀을 때의 안내. B-8 전까지는 저장할 곳이 없다.
+    var addNotice by remember { mutableStateOf(false) }
+    // 서버 목록을 아직 못 받았으면 고른 key 의 이름을 모른다. 따로 표시한다.
+    // 종류를 비우면(null) 서버가 프로필 기본 τ 를 쓴다.
+    val current = options.firstOrNull { it.key == selected }
+        ?: if (selected == null) TagOption(null, "선택 안 함", "프로필 기본")
+        else TagOption(selected, "불러오는 중", "")
 
     JitCard(gap = 9.dp) {
         Row(
@@ -716,7 +812,7 @@ private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled:
         ) {
             Text("종류", color = JitColor.TextSecondary, fontSize = 11.sp)
             Text(
-                text = "고르면 안전 여유(τ)가 정해짐",
+                text = "시험·발표는 τ 를 높게",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
@@ -754,7 +850,7 @@ private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled:
                 containerColor = JitColor.Surface2,
                 modifier = Modifier.fillMaxWidth(0.82f),
             ) {
-                TAG_OPTIONS.forEach { option ->
+                options.forEach { option ->
                     val on = option.key == current.key
                     DropdownMenuItem(
                         onClick = {
@@ -789,7 +885,32 @@ private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled:
                         },
                     )
                 }
+                // 명세 12-a: 맨 끝은 "기타" 가 아니라 "+ 추가".
+                // ⏳ B-8 이후: 이름을 입력받아 서버에 저장하고 목록에 붙인다.
+                // 앱에만 저장하는 임시 구현은 하지 않는다 — 다른 기기·재설치에서 사라진다.
+                DropdownMenuItem(
+                    onClick = {
+                        expanded = false
+                        addNotice = true
+                    },
+                    text = {
+                        Text(
+                            text = "+ 추가",
+                            color = JitColor.Accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    },
+                )
             }
+        }
+
+        if (addNotice) {
+            Text(
+                text = "종류 직접 추가는 준비 중",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+            )
         }
     }
 }
@@ -804,13 +925,13 @@ private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled:
 @Composable
 private fun RouteRow(
     routeLabel: String?,
-    originLabel: String?,
     enabled: Boolean,
-    hasPlace: Boolean,
+    /** 출발지와 도착지가 둘 다 정해졌는지 */
+    ready: Boolean,
     onClick: () -> Unit,
 ) {
     val hint = when {
-        !hasPlace -> "장소를 먼저 고름"
+        !ready -> "출발지·도착지를 먼저 고름"
         routeLabel != null -> "선택함"
         else -> "선택 안 함 · 최단 경로 사용"
     }
@@ -838,7 +959,7 @@ private fun RouteRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = routeLabel ?: "경로 고르기",
+                text = routeLabel ?: "경로 고르기 ›",
                 color = when {
                     !enabled -> JitColor.Track
                     routeLabel != null -> JitColor.TextPrimary
@@ -847,37 +968,107 @@ private fun RouteRow(
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = if (routeLabel != null) "변경 ›" else "›",
-                color = if (enabled) JitColor.TextSecondary else JitColor.Track,
-                fontSize = if (routeLabel != null) 12.sp else 16.sp,
-            )
+            if (routeLabel != null) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "변경 ›",
+                    color = if (enabled) JitColor.TextSecondary else JitColor.Track,
+                    fontSize = 12.sp,
+                )
+            }
         }
+    }
+}
 
-        // 어디서 출발하는 기준인지 적는다. 출발지가 집이 아닐 수 있으므로
-        // 숨기면 알람 시각을 설명할 수 없다.
-        originLabel?.takeIf { it.isNotBlank() }?.let {
+/**
+ * 출발지·도착지 한 줄. Figma 13-a: `[값] [집] [검색]`.
+ *
+ * 집 버튼은 값이 집이면 주황(활성), 아니면 회색이다. 집이 저장되지 않았으면
+ * 흐리게 그리고, 누르면 ⑭ 집 주소로 보낸다([onHome] 이 처리).
+ */
+@Composable
+private fun EndpointRow(
+    label: String,
+    value: String,
+    hasValue: Boolean,
+    isHome: Boolean,
+    homeAvailable: Boolean,
+    searching: Boolean,
+    enabled: Boolean,
+    onHome: () -> Unit,
+    onSearchToggle: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = JitColor.TextSecondary, fontSize = 11.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "$it 에서 출발",
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                text = value,
+                color = if (hasValue) JitColor.TextPrimary else JitColor.TextSecondary,
+                fontSize = 14.sp,
+                fontWeight = if (hasValue) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            EndpointButton(
+                text = "집",
+                active = isHome,
+                dimmed = !homeAvailable,
+                enabled = enabled,
+                onClick = onHome,
+            )
+            Spacer(Modifier.width(6.dp))
+            EndpointButton(
+                text = if (searching) "닫기" else "검색",
+                active = searching,
+                dimmed = false,
+                enabled = enabled,
+                onClick = onSearchToggle,
             )
         }
     }
 }
 
 @Composable
-private fun NoticeCard(dot: androidx.compose.ui.graphics.Color, title: String, body: String) {
-    Column(
+private fun EndpointButton(
+    text: String,
+    active: Boolean,
+    dimmed: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = text,
+        color = when {
+            active -> JitColor.Bg
+            dimmed -> JitColor.Track
+            else -> JitColor.TextPrimary
+        },
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
         modifier = Modifier
-            .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Hint))
-            .background(JitColor.Surface2)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        JitDotLabel(text = title, dotColor = dot, fontSize = 12, dotSize = 6.dp)
-        Text(text = body, color = JitColor.TextSecondary, fontSize = 11.sp)
-    }
+            .background(if (active) JitColor.Accent else JitColor.Surface2)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
 }
+
+/** 행 아래 짧은 안내. 예: 현재 위치를 못 구했을 때 */
+@Composable
+private fun NoticeLine(text: String) {
+    JitDotLabel(
+        text = text,
+        dotColor = JitColor.Amber,
+        textColor = JitColor.TextSecondary,
+        fontSize = 11,
+        bold = false,
+        dotSize = 6.dp,
+    )
+}
+
+/** 같은 지점인지. 검색 결과와 저장된 집은 객체가 달라서 좌표로 비교한다(약 10m). */
+internal fun com.swpp.wakeup.data.remote.PlaceSearchItem.isSameSpot(
+    other: com.swpp.wakeup.data.remote.PlaceSearchItem,
+): Boolean = kotlin.math.abs(lat - other.lat) < 1e-4 && kotlin.math.abs(lng - other.lng) < 1e-4
