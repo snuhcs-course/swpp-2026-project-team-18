@@ -58,7 +58,7 @@ class PublicSetupTest {
                 find(By.res("home_setup_scroll"), timeout = 150_000)
             }
             step("02_home_setup") {
-                searchPlace(config.getString("home_query"), "home_setup_scroll")
+                searchHomePlace(config.getString("home_query"))
                 click(By.res("home_setup_submit"), "home_setup_scroll")
                 find(By.res("prep_minutes"), timeout = 90_000)
             }
@@ -94,8 +94,9 @@ class PublicSetupTest {
                 click(By.res("place_query"), "add_event_scroll")
                 input("place_query", config.getString("destination_query"))
                 click(By.res("place_search"), "add_event_scroll")
-                click(By.res("place_result_${config.getString("destination_query")}"),
-                    "add_event_scroll", 90_000)
+                val destination = config.getString("destination_query")
+                click(By.res("place_result_$destination"), "add_event_scroll", 90_000)
+                find(By.text(destination).clazz("android.widget.TextView"), "add_event_scroll")
                 click(By.textContains("경로 고르기"), "add_event_scroll")
                 click(By.text("도보"), "route_scroll", 90_000)
                 click(By.res("route_${config.getString("route_key")}"), "route_scroll", 90_000)
@@ -195,6 +196,8 @@ class PublicSetupTest {
     private fun click(selector: BySelector, scroll: String? = null, timeout: Long = 30_000) {
         freshNode {
             device.waitForIdle()
+            find(selector, scroll, timeout)
+            device.waitForIdle()
             find(selector, scroll, timeout).click()
         }
     }
@@ -211,10 +214,17 @@ class PublicSetupTest {
         }
     }
 
-    private fun searchPlace(query: String, scroll: String) {
+    private fun searchHomePlace(query: String) {
+        val scroll = "home_setup_scroll"
         input("place_query", query, scroll)
         click(By.res("place_search"), scroll)
-        click(By.res("place_result_$query"), scroll, 90_000)
+        val row = By.res("place_result_$query")
+        repeat(3) {
+            click(row, scroll, 90_000)
+            device.waitForIdle()
+            if (device.findObject(row)?.findObject(By.text("✓")) != null) return
+        }
+        throw AssertionError("장소 선택 표시가 없음: $query")
     }
 
     private fun find(selector: BySelector, scroll: String? = null, timeout: Long = 30_000): UiObject2 {
@@ -232,7 +242,8 @@ class PublicSetupTest {
                 try {
                     val container = device.findObject(By.res(scroll))
                     if (container != null) {
-                        container.swipe(if (swipes++ / 5 % 2 == 0) Direction.UP else Direction.DOWN, .65f)
+                        container.swipe(if (swipes++ / 5 % 2 == 0) Direction.UP else Direction.DOWN, .45f, 1000)
+                        device.waitForIdle()
                     }
                 } catch (_: StaleObjectException) {
                     // 서버 응답으로 목록이 바뀌면 다음 반복에서 새 컨테이너를 찾는다.
