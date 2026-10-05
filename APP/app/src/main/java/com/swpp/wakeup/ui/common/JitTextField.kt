@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.TextStyle
@@ -55,6 +56,7 @@ fun JitTextField(
     enabled: Boolean = true,
     /** 키보드의 확인·검색 키를 눌렀을 때. null 이면 기본 동작(포커스 이동) */
     onImeAction: (() -> Unit)? = null,
+    inputTag: String? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     val borderColor = if (focused) JitColor.Accent else JitColor.Track
@@ -86,6 +88,7 @@ fun JitTextField(
             enabled = enabled,
             singleLine = true,
             modifier = Modifier
+                .then(if (inputTag != null) Modifier.testTag(inputTag) else Modifier)
                 .fillMaxWidth()
                 .onFocusChanged { focused = it.isFocused },
             textStyle = LocalTextStyle.current.merge(

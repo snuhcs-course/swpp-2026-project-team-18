@@ -75,6 +75,8 @@ logger.lifecycle(
 )
 
 android {
+    // E2E는 개인 앱 데이터와 분리하고 일회용 로컬 백엔드에만 연결한다.
+    testBuildType = if (providers.gradleProperty("jitE2e").orNull == "true") "e2e" else "debug"
     namespace = "com.swpp.wakeup"
     compileSdk {
         version = release(37)
@@ -132,6 +134,16 @@ android {
             optimization {
                 enable = false
             }
+        }
+        create("e2e") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".qa"
+            versionNameSuffix = "-qa"
+            matchingFallbacks += listOf("debug")
+            val qaUrl = "http://10.0.2.2:8765/"
+            buildConfigField("String", "BASE_URL", "\"$qaUrl\"")
+            buildConfigField("String", "EMULATOR_BASE_URL", "\"$qaUrl\"")
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
     }
 
@@ -204,4 +216,8 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.uiautomator)
 }
+
+// QA는 FCM을 사용하지 않는다. 개인 앱의 Firebase 등록 정보도 공유하지 않는다.
+tasks.matching { it.name == "processE2eGoogleServices" }.configureEach { enabled = false }

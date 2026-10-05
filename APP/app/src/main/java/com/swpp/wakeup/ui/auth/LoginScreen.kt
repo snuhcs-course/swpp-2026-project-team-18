@@ -22,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -86,6 +87,7 @@ fun LoginScreen(
 ) {
     Column(
         modifier = modifier
+            .testTag("login_scroll")
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
@@ -123,6 +125,7 @@ fun LoginScreen(
             value = email,
             onValueChange = onEmailChange,
             keyboardType = KeyboardType.Email,
+            inputTag = "login_email",
             enabled = !loading
         )
 
@@ -132,6 +135,7 @@ fun LoginScreen(
             onValueChange = onPasswordChange,
             isPassword = true,
             keyboardType = KeyboardType.Password,
+            inputTag = "login_password",
             imeAction = ImeAction.Done,
             enabled = !loading
         )
@@ -153,6 +157,7 @@ fun LoginScreen(
 
         JitPrimaryButton(
             label = stringResource(R.string.auth_login),
+            modifier = Modifier.testTag("login_submit"),
             onClick = onLoginClick,
             enabled = canSubmit,
             loading = loading

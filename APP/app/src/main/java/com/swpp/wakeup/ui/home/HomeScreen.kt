@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -69,6 +70,7 @@ fun HomeScreen(
 ) {
     LazyColumn(
         modifier = modifier
+            .testTag("home_list")
             .fillMaxSize()
             .background(JitColor.Bg),
         contentPadding = PaddingValues(
@@ -157,6 +159,7 @@ fun HomeScreen(
 private fun ReportShortcut(onClick: () -> Unit) {
     Row(
         modifier = Modifier
+            .testTag("open_report")
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Button))
             .background(JitColor.Surface)
@@ -489,7 +492,7 @@ private fun EmptyState(onAddEventClick: () -> Unit) {
  */
 @Composable
 private fun NextAlarmCard(event: UpcomingEvent, onClick: () -> Unit) {
-    JitCard(modifier = Modifier.clickable(onClick = onClick), accented = true, gap = 8.dp) {
+    JitCard(modifier = Modifier.testTag("next_alarm").clickable(onClick = onClick), accented = true, gap = 8.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,

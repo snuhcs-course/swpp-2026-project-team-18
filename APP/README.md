@@ -72,3 +72,6 @@ devServerHost=10.0.2.2
 ```
 
 현재 검증 결과는 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다.
+
+에뮬레이터에서 로그인부터 실제 알람·GPS 도착·리포트까지 자동 검증하려면
+[데모 E2E QA](../qa/demo/README.md)를 따른다. 별도 QA 앱과 일회용 DB를 사용한다.

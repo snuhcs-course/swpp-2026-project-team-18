@@ -1,0 +1,14 @@
+{
+  "name": "alarm_to_arrival",
+  "nickname": "QA 데모",
+  "event_title": "QA 카페 약속",
+  "home": {"lat": 37.5255, "lng": 126.9648, "label": "QA 출발지 · 용산역 인근"},
+  "destination_query": "스타벅스 신용산역점",
+  "route_key": "walk",
+  "blocks": ["세수", "가방 챙기기"],
+  "block_min_minutes": 1,
+  "block_max_minutes": 2,
+  "alarm_wait_seconds": 30,
+  "block_seconds": 5,
+  "travel_seconds": 65
+}
