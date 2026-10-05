@@ -111,9 +111,10 @@ make the screen look finished while being untrue.
 
 ### Run the app
 
-No backend setup is needed. Every build talks to the shared server (`jitApiBaseUrl` in
-[`APP/gradle.properties`](APP/gradle.properties)), so anyone who clones the repository
-sees the same data.
+No backend setup is needed to try the app. The default build talks to the shared server
+(`jitApiBaseUrl` in [`APP/gradle.properties`](APP/gradle.properties)). A local
+`devServerHost` override takes precedence; remove that line and rebuild to use the shared server.
+See the [app run guide](APP/README.md) and [MVP demo checklist](docs/demo-checklist.md).
 
 - Android Studio with Android SDK 37 (the project uses AGP 9.3 and Gradle 9.5; Gradle
   downloads the JDKs it needs)
@@ -149,7 +150,7 @@ For Korean input, add **Settings → Languages → Add a language → 한국어(
 
 **Physical devices** — see [docs/device-setup.md](docs/device-setup.md) for USB and
 wireless debugging, permissions and battery settings. Test devices against the shared
-server; that guide's "local server" section predates it.
+server; the guide also covers optional local-server development.
 [`APP/scripts/`](APP/scripts/README.md) has PowerShell helpers for installing and
 checking a device.
 
@@ -160,10 +161,11 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements/dev.txt
-cp .env.example .env               # Windows: copy .env.example .env
+test -f .env || cp .env.example .env  # Create the template only when .env does not exist
 python -m pytest                   # 717 tests — in-memory SQLite, no keys needed
 ```
 
+For platform instructions and `.env` setup, see the [backend run guide](backend/README.md).
 Unit tests need nothing else. Running the server needs `DATABASE_URL` and the API keys
 in `.env` ([Configuration](#configuration)); the values come from the team and are never
 committed. The dev settings refuse to start without `DATABASE_URL`.
@@ -363,6 +365,9 @@ shares a single app and key.**
 
 ## Documentation
 
+- [APP/README.md](APP/README.md) — running the app in Android Studio, macOS and Windows (Korean)
+- [backend/README.md](backend/README.md) — local backend setup and isolated verification (Korean)
+- [docs/demo-checklist.md](docs/demo-checklist.md) — MVP rehearsal, pass criteria and verified scope (Korean)
 - [docs/team-setup.md](docs/team-setup.md) — shared server and database, deployment,
   verification scripts (Korean)
 - [docs/device-setup.md](docs/device-setup.md) — running on a physical device
