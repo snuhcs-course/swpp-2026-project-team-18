@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -93,6 +94,7 @@ fun RouteChoiceScreen(
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
+            .testTag("route_scroll")
             .padding(
                 start = JitSpace.ScreenHorizontal,
                 end = JitSpace.ScreenHorizontal,
@@ -151,6 +153,7 @@ fun RouteChoiceScreen(
 
                 JitPrimaryButton(
                     label = "이 경로로 계산",
+                    modifier = Modifier.testTag("route_confirm"),
                     onClick = onConfirm,
                     enabled = choice.selectedKey != null,
                 )
@@ -333,6 +336,7 @@ private fun RouteCard(
 ) {
     Column(
         modifier = Modifier
+            .testTag("route_${option.key}")
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Card))
             .background(JitColor.Surface)

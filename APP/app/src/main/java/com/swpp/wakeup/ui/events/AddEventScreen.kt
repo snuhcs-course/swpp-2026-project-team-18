@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -122,6 +123,7 @@ fun AddEventScreen(
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
+            .testTag("add_event_scroll")
             .padding(
                 start = JitSpace.ScreenHorizontal,
                 end = JitSpace.ScreenHorizontal,
@@ -146,6 +148,7 @@ fun AddEventScreen(
 
         JitTextField(
             label = "일정 제목",
+            inputTag = "event_title",
             value = state.title,
             onValueChange = onTitleChange,
             imeAction = ImeAction.Next,
@@ -214,6 +217,7 @@ fun AddEventScreen(
 
         JitPrimaryButton(
             label = "일정 추가",
+            modifier = Modifier.testTag("event_submit"),
             onClick = onSubmit,
             enabled = state.canSubmit,
             loading = state.submitting,
@@ -252,6 +256,7 @@ fun HomeSetupScreen(
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
+            .testTag("home_setup_scroll")
             .padding(
                 start = JitSpace.ScreenHorizontal,
                 end = JitSpace.ScreenHorizontal,
@@ -302,6 +307,7 @@ fun HomeSetupScreen(
 
         JitPrimaryButton(
             label = "이 주소로 저장",
+            modifier = Modifier.testTag("home_setup_submit"),
             onClick = onSubmit,
             enabled = state.canSubmit,
             loading = state.submitting,
@@ -373,6 +379,7 @@ private fun TappableValue(
     fontSize: Int,
     enabled: Boolean,
     keyboardType: KeyboardType,
+    inputTag: String,
     modifier: Modifier = Modifier,
     parse: (String) -> String?,
 ) {
@@ -421,6 +428,7 @@ private fun TappableValue(
                 ),
                 keyboardActions = KeyboardActions(onDone = { commit() }),
                 modifier = Modifier
+                    .testTag(inputTag)
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
                     .onFocusChanged { focus ->
@@ -510,7 +518,8 @@ private fun DateRow(date: LocalDate, onChange: (LocalDate) -> Unit, enabled: Boo
                 fontSize = 16,
                 enabled = enabled,
                 keyboardType = KeyboardType.Number,
-                modifier = Modifier.weight(1f),
+                inputTag = "event_date_input",
+                modifier = Modifier.weight(1f).testTag("event_date"),
                 // `parse` 는 오류 메시지를 돌려준다. 성공이면 null 이다.
                 // `?.let { ...; null } ?: HINT` 로 쓰면 성공했을 때도 let 이
                 // null 을 반환해 엘비스가 발동한다. if 로 갈라 쓴다.
@@ -552,7 +561,8 @@ private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enable
                 fontSize = 24,
                 enabled = enabled,
                 keyboardType = KeyboardType.Number,
-                modifier = Modifier.weight(1f),
+                inputTag = "event_time_input",
+                modifier = Modifier.weight(1f).testTag("event_time"),
                 parse = { raw ->
                     val parsed = parseTime(raw)
                     if (parsed == null) TIME_HINT

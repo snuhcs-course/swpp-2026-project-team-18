@@ -283,6 +283,7 @@ private fun HomeHeader(
         }
         Box(
             modifier = Modifier
+                .testTag("open_settings")
                 .size(30.dp)
                 .clip(CircleShape)
                 .background(JitColor.Surface2)

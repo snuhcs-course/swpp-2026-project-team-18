@@ -21,6 +21,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -71,6 +72,7 @@ fun SignupScreen(
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
+            .testTag("signup_scroll")
             .padding(
                 start = JitSpace.ScreenHorizontal,
                 end = JitSpace.ScreenHorizontal,
@@ -113,6 +115,7 @@ fun SignupScreen(
 
         JitTextField(
             label = stringResource(R.string.auth_nickname),
+            inputTag = "signup_nickname",
             value = nickname,
             onValueChange = onNicknameChange,
             enabled = !loading
@@ -120,6 +123,7 @@ fun SignupScreen(
 
         JitTextField(
             label = stringResource(R.string.auth_email),
+            inputTag = "signup_email",
             value = email,
             onValueChange = onEmailChange,
             keyboardType = KeyboardType.Email,
@@ -128,6 +132,7 @@ fun SignupScreen(
 
         JitTextField(
             label = stringResource(R.string.auth_password),
+            inputTag = "signup_password",
             value = password,
             onValueChange = onPasswordChange,
             isPassword = true,
@@ -137,6 +142,7 @@ fun SignupScreen(
 
         JitTextField(
             label = stringResource(R.string.auth_password_confirm),
+            inputTag = "signup_password_confirm",
             value = passwordConfirm,
             onValueChange = onPasswordConfirmChange,
             isPassword = true,
@@ -168,6 +174,7 @@ fun SignupScreen(
 
         JitPrimaryButton(
             label = stringResource(R.string.signup_submit),
+            modifier = Modifier.testTag("signup_submit"),
             onClick = onSubmitClick,
             enabled = canSubmit,
             loading = loading

@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -85,6 +86,7 @@ fun PlacePicker(
         Row(verticalAlignment = Alignment.CenterVertically) {
             JitTextField(
                 label = label,
+                inputTag = "place_query",
                 value = state.query,
                 onValueChange = onQueryChange,
                 imeAction = ImeAction.Search,
@@ -427,6 +429,7 @@ private fun SquareButton(
 private fun SearchButton(onClick: () -> Unit, loading: Boolean, enabled: Boolean) {
     Box(
         modifier = Modifier
+            .testTag("place_search")
             .size(46.dp)
             .clip(RoundedCornerShape(JitRadius.Button))
             .background(JitColor.Surface2)

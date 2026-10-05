@@ -75,7 +75,7 @@ logger.lifecycle(
 )
 
 android {
-    // E2E는 개인 앱 데이터와 분리하고 일회용 로컬 백엔드에만 연결한다.
+    // QA 앱은 개인 앱 데이터와 분리한다. 공용 서버 확인은 명시적으로 선택한다.
     testBuildType = if (providers.gradleProperty("jitE2e").orNull == "true") "e2e" else "debug"
     namespace = "com.swpp.wakeup"
     compileSdk {
@@ -140,10 +140,11 @@ android {
             applicationIdSuffix = ".qa"
             versionNameSuffix = "-qa"
             matchingFallbacks += listOf("debug")
-            val qaUrl = "http://10.0.2.2:8765/"
+            val qaUrl = if (providers.gradleProperty("jitPublicUi").orNull == "true")
+                "https://justintime-api.onrender.com/" else "http://10.0.2.2:8765/"
             buildConfigField("String", "BASE_URL", "\"$qaUrl\"")
             buildConfigField("String", "EMULATOR_BASE_URL", "\"$qaUrl\"")
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
+            manifestPlaceholders["usesCleartextTraffic"] = (!qaUrl.startsWith("https://")).toString()
         }
     }
 

@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.Direction
+import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
@@ -42,19 +43,23 @@ class DemoFlowTest {
 
     @Test
     fun alarmToArrival() {
-        assertEquals("공용/개인 앱에서 QA를 실행할 수 없음", "com.swpp.wakeup.qa", context.packageName)
-        assertEquals("http://10.0.2.2:8765/", BuildConfig.BASE_URL)
+        assertEquals("QA 전용 앱에서만 실행해야 함", "com.swpp.wakeup.qa", context.packageName)
         config = JSONObject(File(context.filesDir, "demo-qa-config.json").readText())
+        val publicE2e = config.optBoolean("public_e2e", false)
+        assertEquals(if (publicE2e) "https://justintime-api.onrender.com/" else "http://10.0.2.2:8765/",
+            BuildConfig.BASE_URL)
         val eventId = config.getLong("event_id")
         started = System.currentTimeMillis()
         val locationManager = context.getSystemService(LocationManager::class.java)
         try {
             step("01_login") {
                 launch()
-                find(By.res("login_email")).text = config.getString("email")
-                find(By.res("login_password")).text = config.getString("password")
-                find(By.res("login_submit"), "login_scroll").click()
-                find(By.res("next_alarm"), timeout = 45_000)
+                if (!publicE2e) {
+                    find(By.res("login_email")).text = config.getString("email")
+                    find(By.res("login_password")).text = config.getString("password")
+                    find(By.res("login_submit"), "login_scroll").click()
+                } // 공용 E2E는 바로 앞 UI 준비 단계에서 로그인한 계정을 이어 쓴다.
+                find(By.res("next_alarm"), timeout = 90_000)
                 // FusedLocation의 저전력 요청도 에뮬레이터 GPS를 받을 수 있게 한다.
                 // fake Location/TripLiveState/관측을 주입하지 않는다.
                 instrumentation.runOnMainSync {
@@ -176,6 +181,7 @@ class DemoFlowTest {
         device.wakeUp()
         context.startActivity(Intent(context, LoginActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
+        device.waitForIdle()
     }
 
     private fun openPlan() {
@@ -192,9 +198,19 @@ class DemoFlowTest {
 
     private fun find(selector: BySelector, scrollTag: String? = null, timeout: Long = 30_000): UiObject2 {
         val deadline = System.currentTimeMillis() + timeout
+        var direction = Direction.DOWN
         while (System.currentTimeMillis() < deadline) {
             device.findObject(selector)?.let { return it }
-            if (scrollTag != null) device.findObject(By.res(scrollTag))?.scroll(Direction.DOWN, .55f)
+            if (scrollTag != null) {
+                try {
+                    val container = device.findObject(By.res(scrollTag))
+                    if (container != null && !container.scroll(direction, .55f)) {
+                        direction = if (direction == Direction.DOWN) Direction.UP else Direction.DOWN
+                    }
+                } catch (_: StaleObjectException) {
+                    // 비동기 응답으로 화면이 바뀌면 새 컨테이너를 찾는다.
+                }
+            }
             Thread.sleep(300)
         }
         throw AssertionError("화면 요소를 찾지 못함: $selector")

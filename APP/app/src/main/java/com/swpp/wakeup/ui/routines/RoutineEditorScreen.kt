@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -81,6 +82,7 @@ fun RoutineEditorScreen(
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
+            .testTag("routine_scroll")
             .padding(
                 start = JitSpace.ScreenHorizontal,
                 end = JitSpace.ScreenHorizontal,
@@ -167,6 +169,7 @@ fun RoutineEditorScreen(
         } else {
             JitPrimaryButton(
                 label = "항목 추가",
+                modifier = Modifier.testTag("routine_new"),
                 onClick = onNewBlock,
                 enabled = !state.saving,
                 loading = state.saving,
@@ -339,6 +342,7 @@ fun BlockDraftSheet(
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
+            .testTag("block_draft_scroll")
             .padding(
                 start = JitSpace.ScreenHorizontal,
                 end = JitSpace.ScreenHorizontal,
@@ -351,6 +355,7 @@ fun BlockDraftSheet(
 
         JitTextField(
             label = "이름",
+            inputTag = "block_name",
             value = draft.name,
             onValueChange = onName,
             imeAction = ImeAction.Next,
@@ -362,6 +367,7 @@ fun BlockDraftSheet(
             Column(modifier = Modifier.weight(1f)) {
                 JitTextField(
                     label = "최소 (분)",
+                    inputTag = "block_min",
                     value = draft.minText,
                     onValueChange = onMin,
                     keyboardType = KeyboardType.Number,
@@ -373,6 +379,7 @@ fun BlockDraftSheet(
             Column(modifier = Modifier.weight(1f)) {
                 JitTextField(
                     label = "최대 (분)",
+                    inputTag = "block_max",
                     value = draft.maxText,
                     onValueChange = onMax,
                     keyboardType = KeyboardType.Number,
@@ -440,6 +447,7 @@ fun BlockDraftSheet(
 
         JitPrimaryButton(
             label = "저장",
+            modifier = Modifier.testTag("block_save"),
             onClick = onSave,
             enabled = !saving,
             loading = saving,
