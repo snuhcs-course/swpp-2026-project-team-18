@@ -379,7 +379,8 @@ def main() -> int:
         return 1
     event_id = event["id"]
 
-    compare("일정", event_fields, event)
+    # BE-15는 추후 구현이다. 앱은 이 선택적 배지가 없으면 표시하지 않는다.
+    compare("일정", event_fields, event, ignore={"lateness_sensitivity"})
 
     plan = event.get("alarm_plan") or {}
     check("alarm_plan 이 있다", bool(plan), f"{str(plan)[:120]}")
