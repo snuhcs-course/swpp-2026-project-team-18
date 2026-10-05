@@ -1918,13 +1918,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val current = _routeChoice.value ?: return
         val choice = current.choice ?: return
         val option = choice.options.firstOrNull { it.key == choice.selectedKey }
+        // 집 버튼은 프로필 집을 사용한다는 뜻이다. 좌표를 별도 출발지로 보내면
+        // 서버가 집 밖의 일정으로 판단해 준비 루틴을 제외한다.
+        val eventOrigin = current.origin?.takeUnless { it == _state.value.homePlace }
         _add.update {
             it.copy(
                 routeKey = option?.key,
                 routeLabel = option?.let { o -> "${o.minutesLabel} · ${o.mode}" },
-                // 경로를 고른 출발지를 함께 들고 간다. 빠뜨리면 서버가 집 기준으로
-                // 계산해 화면에 보인 소요시간과 달라진다.
-                origin = current.origin,
+                // 집 외의 출발지는 경로 선택 때의 좌표를 그대로 보존한다.
+                origin = eventOrigin,
                 originLabel = current.origin?.name ?: choice.originLabel,
                 error = null,
             )
