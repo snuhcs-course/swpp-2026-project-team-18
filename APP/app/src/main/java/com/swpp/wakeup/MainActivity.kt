@@ -157,6 +157,7 @@ private fun MainHost(
     val routeMap by viewModel.routeMap.collectAsStateWithLifecycle()
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
+    val tripArrival by viewModel.tripArrival.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
@@ -359,7 +360,8 @@ private fun MainHost(
                     val progress = plan
                         ?.takeIf { it.hasRoutePath }
                         ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
-                    val stage = plan?.let { viewModel.stageOf(it) } ?: TripStage.BEFORE_ALARM
+                    val arrival = tripArrival?.takeIf { it.eventId == route.eventId }
+                    val stage = plan?.let { viewModel.stageOf(it, arrival) } ?: TripStage.BEFORE_ALARM
 
                     // 지각 전망. 진행 바의 색이 이것으로 정해진다.
                     //
@@ -372,8 +374,10 @@ private fun MainHost(
                             stage != TripStage.PAST &&
                             progress?.onRoute != false
                     }?.let { p ->
-                        if (stage == TripStage.ARRIVED && live != null) {
-                            ArrivalOutlook.arrived(live.atMillis, p.startAtMillis)
+                        if (stage == TripStage.ARRIVED) {
+                            (arrival?.atMillis ?: live?.atMillis)?.let {
+                                ArrivalOutlook.arrived(it, p.startAtMillis)
+                            }
                         } else {
                             val now = System.currentTimeMillis()
                             val onRoute = progress?.takeIf { it.onRoute }

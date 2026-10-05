@@ -469,6 +469,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 추적 중인 여정의 실시간 위치. 서비스가 [TripLiveState] 로 내보낸다 */
     val tripLive: StateFlow<TripLiveState.Snapshot?> = TripLiveState.snapshot
 
+    /** 추적 종료 후 화면에 표시할 도착 결과. 현재 위치를 재사용하지 않는다. */
+    val tripArrival: StateFlow<TripLiveState.Arrival?> = TripLiveState.arrival
+
     /**
      * 이번 실행에서 준비 시간 온보딩을 이미 띄웠는가.
      *
@@ -1992,6 +1995,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val cachedSnapshot = TripLiveState.liveRouteFor(plan.eventId)
         val cachedRoute = cachedSnapshot?.usableLiveRoute()
         val moving = when {
+            TripLiveState.arrivalFor(plan.eventId) != null -> false
             tracked != null -> tracked.phase == TripGeofence.Phase.IN_TRANSIT
             cachedRoute != null -> true
             else -> stageOf(plan) == TripStage.IN_TRANSIT
@@ -2147,7 +2151,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private fun clearLiveRoutePath(inTransit: Boolean? = null) {
         val map = _routeMap.value ?: return
         val tracked = TripLiveState.pointFor(map.eventId)
-        val moving = inTransit
+        val moving = if (TripLiveState.arrivalFor(map.eventId) != null) false else inTransit
             ?: tracked?.let { it.phase == TripGeofence.Phase.IN_TRANSIT }
             ?: map.inTransit
 
@@ -2367,7 +2371,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 지금 어느 단계인가.
      *
-     * 추적 중이면 판정기의 단계를 쓰고, 아니면 알람·일정 시각으로 가른다.
+     * 도착 결과가 있으면 유지하고, 추적 중이면 판정기의 단계를 쓴다.
+     * 둘 다 없으면 알람·일정 시각으로 가른다.
      * 판정기는 "알람 전" 과 "준비 중" 을 구분하지 않는다 — 판정에는 같지만
      * (둘 다 집에 있다) 사용자에게는 전혀 다른 상태다.
      *
@@ -2375,7 +2380,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 담고 있다. 여기서 시계를 다시 읽으면 화면에 보이는 문구("지난 알람")와
      * 단계가 서로 다른 시점을 근거로 삼게 된다.
      */
-    fun stageOf(plan: AlarmPlanView): TripStage = TripStage.of(
+    fun stageOf(
+        plan: AlarmPlanView,
+        arrival: TripLiveState.Arrival? = TripLiveState.arrivalFor(plan.eventId),
+    ): TripStage = if (arrival?.eventId == plan.eventId) TripStage.ARRIVED else TripStage.of(
         tracked = TripLiveState.pointFor(plan.eventId)?.let { live ->
             when (live.phase) {
                 TripGeofence.Phase.BEFORE_DEPARTURE -> TripStage.PREPARING

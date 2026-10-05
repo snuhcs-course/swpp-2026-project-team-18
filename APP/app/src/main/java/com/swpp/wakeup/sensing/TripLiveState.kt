@@ -31,6 +31,18 @@ import kotlinx.coroutines.flow.update
  */
 object TripLiveState {
 
+    /** 도착 결과는 추적 종료 뒤에도 필요하다. 현재 위치와 달리 좌표는 남기지 않는다. */
+    data class Arrival(val eventId: Long, val atMillis: Long)
+
+    private val _arrival = MutableStateFlow<Arrival?>(null)
+    val arrival: StateFlow<Arrival?> = _arrival.asStateFlow()
+
+    fun recordArrival(eventId: Long, atMillis: Long) {
+        _arrival.value = Arrival(eventId, atMillis)
+    }
+
+    fun arrivalFor(eventId: Long): Arrival? = _arrival.value?.takeIf { it.eventId == eventId }
+
     /**
      * 추적 중인 여정 하나의 상태.
      *
@@ -123,12 +135,18 @@ object TripLiveState {
     /**
      * 추적이 끝났다.
      *
-     * 도착했든 마감이든 중지든 **반드시 부른다.** 남겨 두면 화면이 옛 위치를
-     * 현재처럼 그리고, 사용자는 몇 시간 전 좌표를 보며 판단한다.
+     * 도착했든 마감이든 중지든 위치·경로는 지운다. 도착 시각은 별도로 남겨
+     * 서비스가 종료돼도 화면이 "준비 중"으로 돌아가지 않게 한다.
      */
-    fun clear() {
+    fun clearTracking() {
         _snapshot.value = null
         _liveRoute.value = null
+    }
+
+    /** 로그아웃·새 추적에서는 이전 도착 결과도 지운다. */
+    fun clear() {
+        clearTracking()
+        _arrival.value = null
     }
 
     /** 이 일정을 추적하는 중인 경우에만 위치를 준다. */

@@ -4,6 +4,7 @@ import com.swpp.wakeup.data.local.LiveRouteStore
 import com.swpp.wakeup.domain.model.LiveRoute
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class TripLiveStateTest {
@@ -34,6 +35,55 @@ class TripLiveStateTest {
         )
 
         assertEquals(newer, TripLiveState.liveRoute.value)
+    }
+
+    @Test
+    fun `도착 후 추적 종료는 위치와 경로를 지우고 도착 결과를 유지한다`() {
+        TripLiveState.publish(
+            TripLiveState.Snapshot(
+                eventId = EVENT_ID,
+                point = GeoPoint(37.5, 127.0),
+                accuracyM = 5f,
+                atMillis = 2_000L,
+                phase = TripGeofence.Phase.ARRIVED,
+            )
+        )
+        TripLiveState.publishLiveRoute(snapshot(1_000L))
+        TripLiveState.recordArrival(EVENT_ID, 2_000L)
+
+        TripLiveState.clearTracking()
+
+        assertNull(TripLiveState.snapshot.value)
+        assertNull(TripLiveState.liveRoute.value)
+        assertEquals(TripLiveState.Arrival(EVENT_ID, 2_000L), TripLiveState.arrivalFor(EVENT_ID))
+        assertNull(TripLiveState.arrivalFor(EVENT_ID + 1))
+    }
+
+    @Test
+    fun `도착하지 않은 추적을 종료하면 도착 결과를 만들지 않는다`() {
+        TripLiveState.publish(
+            TripLiveState.Snapshot(
+                eventId = EVENT_ID,
+                point = GeoPoint(37.5, 127.0),
+                accuracyM = 5f,
+                atMillis = 2_000L,
+                phase = TripGeofence.Phase.IN_TRANSIT,
+            )
+        )
+
+        TripLiveState.clearTracking()
+
+        assertNull(TripLiveState.snapshot.value)
+        assertNull(TripLiveState.arrival.value)
+    }
+
+    @Test
+    fun `로그아웃이나 새 추적은 이전 도착 결과도 지운다`() {
+        TripLiveState.recordArrival(EVENT_ID, 2_000L)
+
+        TripLiveState.clear()
+
+        assertNull(TripLiveState.arrival.value)
     }
 
     private fun snapshot(fetchedAtMillis: Long) = LiveRouteStore.Snapshot(
