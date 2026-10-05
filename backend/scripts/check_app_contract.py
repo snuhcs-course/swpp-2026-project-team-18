@@ -200,8 +200,6 @@ class Api:
 
 def register(api: Api) -> str:
     email = f"ctrchk_{uuid.uuid4().hex[:8]}@example.com"
-    # 이메일과 닮지 않은 비밀번호. 닮으면 UserAttributeSimilarityValidator 가
-    # 400 을 내고 검증이 무작위로 깜빡인다.
     st, body = api(
         "/api/auth/register",
         "POST",
@@ -210,6 +208,7 @@ def register(api: Api) -> str:
             "nickname": "계약확인",
             "password": "Jq4-amber-lantern-77",
             "password_confirm": "Jq4-amber-lantern-77",
+            "terms_agreed": True,
         },
         auth=False,
     )

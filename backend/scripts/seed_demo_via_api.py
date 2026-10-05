@@ -79,6 +79,7 @@ def main() -> int:
                 "nickname": NICKNAME,
                 "password": PASSWORD,
                 "password_confirm": PASSWORD,
+                "terms_agreed": True,
             },
         )
         if st == 201:

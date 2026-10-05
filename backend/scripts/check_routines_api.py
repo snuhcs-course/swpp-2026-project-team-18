@@ -98,6 +98,7 @@ def register(api: Api, tag: str) -> str:
         "nickname": "블록확인",
         "password": "Wp6-golden-thicket-54",
         "password_confirm": "Wp6-golden-thicket-54",
+        "terms_agreed": True,
     }, auth=False)
     if st != 201:
         raise SystemExit(f"계정 생성 실패 {st}: {body}")

@@ -83,6 +83,7 @@ res = requests.post(
         "nickname": "tz",
         "password": "tzcheck1234",
         "password_confirm": "tzcheck1234",
+        "terms_agreed": True,
     },
     timeout=20,
 )

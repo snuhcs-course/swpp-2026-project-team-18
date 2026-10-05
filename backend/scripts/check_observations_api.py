@@ -81,6 +81,7 @@ def signup(slug: str, nickname: str):
             "nickname": nickname,
             "password": "swpp2026Alarm!",
             "password_confirm": "swpp2026Alarm!",
+            "terms_agreed": True,
         },
     )
     assert st == 201, f"회원가입 실패 {st} {body}"

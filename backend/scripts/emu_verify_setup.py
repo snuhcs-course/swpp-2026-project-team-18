@@ -72,6 +72,7 @@ def create() -> dict:
             "nickname": "검증",
             "password": PASSWORD,
             "password_confirm": PASSWORD,
+            "terms_agreed": True,
         },
     )
     if st != 201:

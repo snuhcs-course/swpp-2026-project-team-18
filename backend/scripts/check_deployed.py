@@ -114,11 +114,6 @@ def main() -> int:
     # --- 2. 계정 ----------------------------------------------------------
     print("\n[2] 계정")
     email = f"depcheck_{uuid.uuid4().hex[:8]}@example.com"
-    # **이메일과 닮지 않은 비밀번호를 쓴다.** 전에는 "depcheck12345" 였는데
-    # Django 의 UserAttributeSimilarityValidator 가 이메일과 비교하므로
-    # 무작위 접미사에 따라 유사도가 임계값(0.7)을 넘을 때가 있었다. 그러면
-    # 회원가입이 400 이 되어 **검증이 깜빡인다** — 같은 코드가 어떤 날은
-    # 통과하고 어떤 날은 실패했다. 접두와 무관한 문자열로 고정한다.
     password = "Tf7-quiet-lantern-92"
     st, body = api(
         "/api/auth/register",
@@ -128,6 +123,7 @@ def main() -> int:
             "nickname": "배포확인",
             "password": password,
             "password_confirm": password,
+            "terms_agreed": True,
         },
         auth=False,
     )
@@ -563,6 +559,7 @@ def main() -> int:
             "nickname": "타인",
             "password": password,
             "password_confirm": password,
+            "terms_agreed": True,
         },
         auth=False,
     )

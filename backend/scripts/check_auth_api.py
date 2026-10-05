@@ -84,10 +84,29 @@ if st != 200:
     print("서버가 떠 있지 않다. runserver 를 먼저 실행한다.")
     raise SystemExit(1)
 
+# 가입과 같은 규칙을 공개 검사 API에서도 사용한다.
+st, body = call("POST", "/api/auth/password/check", {"password": PASSWORD})
+check("비밀번호 조건 검사", st == 200 and body.get("min_length") is True
+      and body.get("letters_and_digits") is True and body.get("messages") == [],
+      f"status={st}")
+st, body = call("POST", "/api/auth/password/check", {"password": "1234"})
+check("약한 비밀번호 조건 결과", st == 200 and body.get("min_length") is False
+      and body.get("letters_and_digits") is False and bool(body.get("messages")),
+      f"status={st}")
+for terms in ({}, {"terms_agreed": False}):
+    st, body = call("POST", "/api/auth/register", {
+        "email": f"terms_{suffix}@snu.ac.kr", "nickname": NICK,
+        "password": PASSWORD, "password_confirm": PASSWORD, **terms,
+    })
+    check("약관 누락·미동의 거절", st == 400 and
+          "terms_agreed" in (body.get("error", {}).get("details") or {}),
+          f"status={st}")
+
 # 1) 회원가입
 st, body = call("POST", "/api/auth/register", {
     "email": EMAIL, "nickname": NICK,
     "password": PASSWORD, "password_confirm": PASSWORD,
+    "terms_agreed": True,
 })
 ok = st == 201 and body.get("user_id") and body.get("access") and body.get("refresh")
 check("회원가입 201", ok,
@@ -100,6 +119,7 @@ refresh = body.get("refresh")
 st, body = call("POST", "/api/auth/register", {
     "email": EMAIL, "nickname": NICK,
     "password": PASSWORD, "password_confirm": PASSWORD,
+    "terms_agreed": True,
 })
 code, msg = err(body)
 check("중복 이메일 400", st == 400 and msg, f"status={st} code={code} message={msg!r}")
@@ -108,6 +128,7 @@ check("중복 이메일 400", st == 400 and msg, f"status={st} code={code} messa
 st, body = call("POST", "/api/auth/register", {
     "email": EMAIL.upper(), "nickname": NICK,
     "password": PASSWORD, "password_confirm": PASSWORD,
+    "terms_agreed": True,
 })
 code, msg = err(body)
 check("대소문자 다른 중복 400", st == 400, f"status={st} code={code} message={msg!r}")
@@ -116,6 +137,7 @@ check("대소문자 다른 중복 400", st == 400, f"status={st} code={code} mes
 st, body = call("POST", "/api/auth/register", {
     "email": f"x_{suffix}@snu.ac.kr", "nickname": NICK,
     "password": PASSWORD, "password_confirm": PASSWORD + "x",
+    "terms_agreed": True,
 })
 code, msg = err(body)
 check("비밀번호 확인 불일치 400", st == 400 and "일치" in (msg or ""),
@@ -125,6 +147,7 @@ check("비밀번호 확인 불일치 400", st == 400 and "일치" in (msg or "")
 st, body = call("POST", "/api/auth/register", {
     "email": f"y_{suffix}@snu.ac.kr", "nickname": NICK,
     "password": "1234", "password_confirm": "1234",
+    "terms_agreed": True,
 })
 code, msg = err(body)
 check("약한 비밀번호 400", st == 400, f"status={st} message={msg!r}")

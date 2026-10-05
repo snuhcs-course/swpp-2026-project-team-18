@@ -80,7 +80,8 @@ make the screen look finished while being untrue.
 - Replanning while moving ⑦ — colors, ETA and the live route; no checkpoints or causes
 - Route choice — one list; the per-mode tabs on the board (⑬) are not in the app
 - Weekly and detailed reports ⑧⑨ — part of the board is implemented
-- Sign-in — email and password only; the social buttons show a notice, no terms consent
+- Sign-in — email and password only; the social buttons show a notice
+- Sign-up consent and alarm switches — backend ready; app request and scheduler wiring pending
 - Route learning — corrections update only when someone runs
   `python manage.py train_models`; there is no scheduler on Render's free plan
 
@@ -88,7 +89,7 @@ make the screen look finished while being untrue.
 
 - Replanning before departure ⑥ and a "switch to this route" action
 - Group rooms ⑩⑪
-- Editing a saved event — the server's `PATCH /api/events/{id}` recomputes, but the
+- Editing a saved event — schedule changes via `PATCH /api/events/{id}` recompute, but the
   app has no edit screen
 - Adjusting τ directly, natural-language input, weather adjustment, push (FCM),
   bedtime suggestions
@@ -100,7 +101,7 @@ make the screen look finished while being untrue.
 
 1. "Fastest route" is the fastest within the chosen mode, not across modes — the scope
    is still to be decided
-2. The arrived state does not stay on screen
+2. Arrival restoration after app process restart is not implemented
 3. When the tracking service restarts, the moving state and the live route are lost
 4. Map panning can jump twice as far during consecutive gestures while a response is slow
 5. A small pinch (12%) snaps a whole zoom level
@@ -292,12 +293,12 @@ the 0.3.0 features and whether `routes/live` is deployed; it is being extended),
 ## API
 
 Everything is under `/api/`. Requests carry `Authorization: Bearer <access>` except
-health, sign-up, token and refresh.
+health, password check, sign-up, token and refresh.
 
 | Area | Endpoints |
 | --- | --- |
 | Health | `GET health` — version and real-time availability |
-| Auth | `POST auth/register` · `POST auth/token` · `POST auth/token/refresh` · `GET auth/me` |
+| Auth | `POST auth/password/check` · `POST auth/register` · `POST auth/token` · `POST auth/token/refresh` · `GET auth/me` |
 | Profile | `GET PATCH PUT profile` — home, prep time, default τ. A new home or prep time recomputes up to 50 future events |
 | Events | `GET POST events` · `GET PATCH DELETE events/{id}` · `POST events/{id}/recompute` · `POST events/import` · `GET events/tags` · `GET PUT events/{id}/blocks` |
 | Places | `GET places/search` · `GET places/staticmap` · `GET places/reverse` |
@@ -308,6 +309,8 @@ health, sign-up, token and refresh.
 
 - Errors look like `{"error": {"code", "message", "details"}}`. Another user's id
   returns **404, not 403**, so existence does not leak
+- Sign-up requires `terms_agreed: true`. Alarm enablement and password validation
+  contracts are documented in [backend setup](backend/README.md#프론트-연결-계약-be-16).
 - Batch uploads are idempotent on `(user, client_uuid)`. Detection happens mid-commute
   where there is often no network, so the app queues records and resends them; a retry
   must not create a second row

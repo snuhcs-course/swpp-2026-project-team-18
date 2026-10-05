@@ -43,6 +43,8 @@ backend/.venv/bin/python qa/demo/run.py --public-ui
 
 모든 모드는 별도 QA 앱만 초기화한다. 공용 QA 계정·데이터는 서버에 남는다.
 같은 QA 앱을 사용하므로 여러 모드를 동시에 실행하지 않는다.
+BE-4~6 서버를 배포하기 전 가입 UI의 `terms_agreed: true` 전송을 연결해야 한다.
+현재 공용 완주 기록은 이 계약을 배포하기 전의 결과다.
 
 ## 흐름과 데이터
 

@@ -47,6 +47,22 @@ Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정
 에뮬레이터 연결은 [앱 안내](../APP/README.md)를 따른다.
 실기기 LAN 연결은 `runserver 0.0.0.0:8000`을 사용하며 [기기 설정](../docs/device-setup.md)을 본다.
 
+## 프론트 연결 계약 (BE-1~6)
+
+- `POST /api/auth/password/check` `{password}` → `{min_length, letters_and_digits, messages}`.
+  가입과 같은 규칙(8자 이상·영문+숫자·흔한 비밀번호 검사), 이메일 유사성 검사 없음.
+  비로그인 호출, IP당 분당 600회 제한. 조건 미충족도 200이며 오류는 `messages`에 담긴다.
+- `POST /api/auth/register`에 JSON boolean `terms_agreed: true` 필수.
+  동의 시각은 `User.terms_agreed_at`에 저장하며 기존 계정은 null을 유지한다.
+- 일정 목록·상세의 `alarm_enabled`는 null(자동)/true/false, `alarm_on`은 최종 켬/끔,
+  `is_first_alarm`은 그날 켜진 첫 알람이다. 계산 완료된 일정을 사용자 시간대의 **일정 시작 날짜**로
+  묶고 알람 시각·ID 순으로 판정한다. 첫 비-OFF 일정만 자동 ON이며 명시적 ON은 함께 켤 수 있다.
+- `PATCH /api/events/{id}`의 `alarm_enabled`에 true/false/null을 보내 켬/끔/자동 복원.
+  수정된 일정 한 건을 반환하므로 **목록을 다시 조회**한다. 켬/끔만 바꾸면 경로 재조회는 없다.
+
+프론트 통합은 별도다. 가입 요청의 약관 값과 `AlarmScheduler.sync()`의 `alarm_on` 필터를
+연결한 뒤 배포·전체 QA를 진행한다. 서버 코드를 병합하는 것만으로 공용 서버가 갱신되지는 않는다.
+
 ## 검증과 학습
 
 `backend` 폴더에서 실행한다. 두 명령 모두 공용 DB와 분리된 테스트 DB를 사용한다.

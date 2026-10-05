@@ -102,6 +102,7 @@ res = requests.post(
         "nickname": "경로",
         "password": "routecheck1234",
         "password_confirm": "routecheck1234",
+        "terms_agreed": True,
     },
     timeout=20,
 )

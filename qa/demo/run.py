@@ -141,7 +141,7 @@ class Demo:
                 require(time.monotonic() < deadline, "공용 서버 깨우기 실패")
                 time.sleep(1)
         self.email = f"qa-ui-{secrets.token_hex(5)}@example.com"
-        self.password = secrets.token_urlsafe(18)
+        self.password = "Qa1-" + secrets.token_urlsafe(18)
         self.start_at = (now() + timedelta(hours=2)).astimezone(timezone(timedelta(hours=9))).replace(second=0, microsecond=0)
         # 재확인할 때 쓸 자격증명만 별도 비공개 파일에 보관한다. 증거·로그에는 넣지 않는다.
         path = self.output / "credentials.json"
@@ -209,10 +209,11 @@ class Demo:
 
     def seed(self):
         self.email = f"qa-{secrets.token_hex(5)}@example.com"
-        self.password = secrets.token_urlsafe(18)
+        self.password = "Qa1-" + secrets.token_urlsafe(18)
         self.token = self.api("POST", "auth/register", {
             "email": self.email, "nickname": self.scenario["nickname"],
-            "password": self.password, "password_confirm": self.password})["access"]
+            "password": self.password, "password_confirm": self.password,
+            "terms_agreed": True})["access"]
         home = self.scenario["home"]
         self.api("PATCH", "profile", {"home_lat": home["lat"], "home_lng": home["lng"],
                                      "home_label": home["label"], "onboarding_prep_min": 2,
