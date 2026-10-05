@@ -101,8 +101,9 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
         write.is_valid(raise_exception=True)
         event = write.save()
 
-        # 시각·장소가 바뀌면 알람도 달라진다. 다시 계산한다.
-        planning_services.compute_and_store(event)
+        # 켬/끔만 바꾸면 기존 계획을 쓴다. 카카오 경로를 다시 조회하지 않는다.
+        if set(write.validated_data) != {"alarm_enabled"}:
+            planning_services.compute_and_store(event)
         event.refresh_from_db()
 
         return Response(EventSerializer(event, context=self.get_serializer_context()).data)

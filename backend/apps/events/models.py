@@ -119,6 +119,11 @@ class Event(models.Model):
     title = models.CharField("제목", max_length=120)
     start_at = models.DateTimeField("시작 시각")
 
+    # null = 하루 첫 알람 규칙, true/false = 사용자 선택.
+    alarm_enabled = models.BooleanField(
+        "알람 켬/끔", null=True, blank=True, default=None, db_default=None
+    )
+
     # 장소를 모르면 알람을 계산할 수 없지만 일정은 적어둘 수 있어야 한다.
     place = models.ForeignKey(
         Place,
