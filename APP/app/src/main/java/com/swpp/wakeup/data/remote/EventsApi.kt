@@ -269,6 +269,17 @@ data class EventDto(
 
     @SerializedName("alarm_plan") val alarmPlan: AlarmPlanDto?,
     @SerializedName("created_at") val createdAt: String?,
+
+    /**
+     * 그날 켜진 알람 중 가장 이른 일정인지. 서버가 판정한다(task.md B-3).
+     * 서버가 아직 보내지 않으면 null 이다.
+     */
+    @SerializedName("is_first_alarm") val isFirstAlarm: Boolean? = null,
+    /**
+     * 지각 민감도 `high` / `normal` / `low`. 서버가 판정한다(task.md B-4).
+     * 서버가 아직 보내지 않으면 null 이다.
+     */
+    @SerializedName("lateness_sensitivity") val latenessSensitivity: String? = null,
 )
 
 /**
@@ -310,6 +321,17 @@ data class RouteCandidateDto(
     val summary: String?,
     /** "가장 빠름" / "환승 없음" / "가장 저렴". 없으면 빈 문자열 */
     val reason: String?,
+    /**
+     * 카드 배지 여러 개. 예 ["최단 시간", "최소 비용"]. 한 후보가 여러 기준을
+     * 동시에 만족할 수 있어 목록이다. 서버가 아직 보내지 않으면 null 이고
+     * 그때는 [reason] 하나를 쓴다(task.md B-4).
+     */
+    val badges: List<String>? = null,
+    /**
+     * 자전거만: 전체 거리 중 자전거도로 비율(0~100). 카카오 안내 문장으로 서버가
+     * 추정한다(task.md 13-0, B-4). 서버가 아직 보내지 않으면 null 이고 칸을 그리지 않는다.
+     */
+    @SerializedName("bike_road_percent") val bikeRoadPercent: Int? = null,
     val source: String?,
     /**
      * 구간 목록. 앱이 가로 막대로 그린다.
@@ -372,6 +394,17 @@ data class RouteSegmentDto(
     val arrivals: List<RouteArrivalDto>?,
     /** 버스의 평상시 배차간격. 지하철·미제공이면 null. */
     @SerializedName("headway_minutes") val headwayMinutes: Int?,
+    /**
+     * 같은 구간을 갈 수 있는 **다른 노선**(대체 버스). 카카오 `step.vehicles` 의
+     * 두 번째부터다. 서버가 아직 보내지 않으면 null(task.md B-4).
+     */
+    @SerializedName("alt_vehicles") val altVehicles: List<AltVehicleDto>? = null,
+)
+
+/** 대체 노선 하나. 버스 번호와 종류(색을 고른다). */
+data class AltVehicleDto(
+    val name: String?,
+    @SerializedName("vehicle_type") val vehicleType: String?,
 )
 
 /** 실시간 차량 도착 하나. */

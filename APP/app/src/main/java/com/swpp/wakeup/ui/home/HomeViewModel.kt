@@ -17,6 +17,7 @@ import com.swpp.wakeup.data.local.TokenStore
 import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.data.remote.BlockObservationInput
+import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.ServerVersion
@@ -666,7 +667,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 검색이 좌표 없이 나가고, 거리·거리순 정렬이 사라지고 결과가 전국에서
         // 온다. 실기기에서 "GS25" 를 검색했더니 전북 익산·남양주가 상위에 왔다.
         primeCurrentLocation()
+        loadEventTags()
         _nav.update { it.copy(stack = it.stack + AppRoute.AddEvent, forward = true) }
+    }
+
+    /**
+     * 일정 종류 목록(`GET /api/events/tags`). 이름과 τ 는 서버 값을 쓴다.
+     *
+     * 한 번 받으면 다시 부르지 않는다. 실패하면 비워 두고 다음에 일정 추가에
+     * 들어올 때 다시 시도한다 — 목록이 없어도 "기타" 로 일정은 만들 수 있다.
+     */
+    private val _eventTags = MutableStateFlow<List<EventTagDto>>(emptyList())
+    val eventTags: StateFlow<List<EventTagDto>> = _eventTags.asStateFlow()
+    private var eventTagsJob: Job? = null
+
+    private fun loadEventTags() {
+        if (_eventTags.value.isNotEmpty() || eventTagsJob?.isActive == true) return
+        eventTagsJob = viewModelScope.launch {
+            val result = repository.tags()
+            if (result is EventRepository.Result.Success) _eventTags.value = result.data
+        }
     }
 
     /** 설정 화면. 가입할 때 정한 집 주소·준비 시간을 여기서 고친다 */
@@ -1288,29 +1308,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 경로 선택 화면 상태.
      *
-     * 출발지 관련 필드가 붙어 있다. 집에서만 출발한다는 가정이 틀리기 때문이다 —
-     * 학교에서 다음 수업으로 가거나 외출 중에 일정을 넣는 경우가 있다.
-     *
-     * [origin] 이 null 이면 서버가 프로필 집을 쓴 상태다. [locating] 은 현재
-     * 위치를 측정하는 중, [originNotice] 는 그게 실패했을 때의 안내다 — 실패를
-     * 조용히 삼키면 사용자는 집이 출발지로 쓰인 걸 모른다.
+     * 출발지는 일정 추가 화면(⑫)에서 고른다. 여기서는 그 값으로 후보를 받기만
+     * 한다. [origin] 이 null 이면 서버가 프로필 집을 쓴 상태다.
      */
     data class RouteState(
         val loading: Boolean = true,
         val error: String? = null,
         val choice: RouteChoice? = null,
 
-        /** 사용자가 고른 출발지. null 이면 프로필 집 */
+        /** 일정 추가에서 고른 출발지. null 이면 프로필 집 */
         val origin: PlaceSearchItem? = null,
-        /** 현재 위치 측정 중 */
-        val locating: Boolean = false,
-        /** 출발지 기본값을 못 채운 이유 */
-        val originNotice: String? = null,
-
-        /** 출발지 검색 상태. 목적지 검색과 독립이지만 같은 구현을 쓴다 */
-        val originPlace: PlaceSearch = PlaceSearch(),
-        /** 출발지 검색창을 펼친 상태인지 */
-        val originEditing: Boolean = false,
     )
 
     private val _routeChoice = MutableStateFlow<RouteState?>(null)
@@ -1322,37 +1329,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 서버가 외부 API 를 최대 4번 부르므로 이미 받아 둔 후보가 있으면 다시
      * 부르지 않는다. 장소를 바꾸면 [onAddPlaceSelected] 가 캐시를 버린다.
      *
-     * 출발지 기본값은 **현재 위치**다. 집을 기본으로 두면 대부분의 경우 맞지만,
-     * 틀렸을 때 사용자가 알아채기 어렵다 — 집에서 출발하는 게 기본값이라는 걸
-     * 모르면 알람이 왜 이 시각인지 설명되지 않는다. 현재 위치를 못 구하면
-     * 집으로 돌아가고 [RouteState.originNotice] 로 알린다.
+     * 출발지는 일정 추가 화면에서 고른 값([AddState.origin], null 이면 집)을 그대로
+     * 쓴다. 출발지를 바꾸면 [onAddOriginSelected] 가 캐시를 버린다.
      */
     fun openRouteChoice() {
-        val place = _add.value.selectedPlace ?: return
-        // 출발지 검색도 거리를 쓴다. 아래 흐름이 현재 위치를 따로 구하지만
-        // 그것이 실패해도 검색은 좌표를 갖도록 여기서 한 번 더 선점한다.
-        primeCurrentLocation()
+        val add = _add.value
+        if (!add.canPickRoute(_state.value.hasHome)) return
+        val place = add.selectedPlace ?: return
         _nav.update { it.copy(stack = it.stack + AppRoute.RouteChoice, forward = true) }
 
         val cached = _routeChoice.value?.choice
         if (cached != null) return
 
-        _routeChoice.value = RouteState(loading = true, locating = true)
-        viewModelScope.launch {
-            val origin = detectCurrentPlace()
-            _routeChoice.update {
-                (it ?: RouteState()).copy(
-                    locating = false,
-                    origin = origin,
-                    originNotice = if (origin == null) {
-                        "현재 위치를 확인할 수 없어 집에서 출발하는 기준으로 계산함"
-                    } else {
-                        null
-                    },
-                )
-            }
-            loadCandidates(place, origin, keepSelection = true)
-        }
+        _routeChoice.value = RouteState(loading = true, origin = add.origin)
+        viewModelScope.launch { loadCandidates(place, add.origin, keepSelection = true) }
     }
 
     /**
@@ -1487,7 +1477,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val previouslySelected = when (target) {
             MapTarget.DESTINATION -> _add.value.selectedPlace
             MapTarget.HOME -> _homeSetup.value.selected
-            MapTarget.ORIGIN -> _routeChoice.value?.origin
+            MapTarget.ORIGIN -> _add.value.origin
         }
         val markers = (listOfNotNull(previouslySelected) + results)
             .distinctBy(::placeStableKey)
@@ -1663,7 +1653,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         when (state.target) {
             MapTarget.DESTINATION -> onAddPlaceSelected(picked)
             MapTarget.HOME -> onHomePlaceSelected(picked)
-            MapTarget.ORIGIN -> onOriginSelected(picked)
+            MapTarget.ORIGIN -> onAddOriginSelected(picked)
         }
         _mapPick.value = null
         goBack()
@@ -1780,13 +1770,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private fun placeSearchOf(target: MapTarget): PlaceSearch = when (target) {
         MapTarget.DESTINATION -> _add.value.place
         MapTarget.HOME -> _homeSetup.value.place
-        MapTarget.ORIGIN -> _routeChoice.value?.originPlace ?: PlaceSearch()
+        MapTarget.ORIGIN -> _add.value.originPlace
     }
 
     private fun setPlaceSearch(target: MapTarget, next: PlaceSearch) = when (target) {
         MapTarget.DESTINATION -> _add.update { it.copy(place = next) }
         MapTarget.HOME -> _homeSetup.update { it.copy(place = next) }
-        MapTarget.ORIGIN -> _routeChoice.update { (it ?: RouteState()).copy(originPlace = next) }
+        MapTarget.ORIGIN -> _add.update { it.copy(originPlace = next) }
     }
 
     /** 후보 조회 한 곳. 최초 진입·재시도·출발지 변경이 모두 이걸 쓴다. */
@@ -1826,91 +1816,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val place = _add.value.selectedPlace ?: return
         val origin = _routeChoice.value?.origin
         viewModelScope.launch { loadCandidates(place, origin, keepSelection = false) }
-    }
-
-    // --- 경로 선택: 출발지 -------------------------------------------------
-
-    /** 출발지 검색창을 펼치거나 접는다. */
-    fun onOriginEditToggle(editing: Boolean) {
-        _routeChoice.update { current ->
-            (current ?: RouteState()).copy(
-                originEditing = editing,
-                // 접으면 검색을 버린다. 남겨 두면 다시 펼쳤을 때 예전 검색어와
-                // 결과가 그대로 있어 방금 고친 출발지와 어긋나 보인다.
-                originPlace = if (editing) {
-                    current?.originPlace ?: PlaceSearch()
-                } else {
-                    PlaceSearch()
-                },
-            )
-        }
-    }
-
-    fun onOriginQueryChange(v: String) = _routeChoice.update {
-        (it ?: RouteState()).let { s -> s.copy(originPlace = s.originPlace.withQuery(v)) }
-    }
-
-    fun searchOriginPlaces() = searchOriginPlaces(page = 1)
-
-    fun loadMoreOriginPlaces() {
-        val place = _routeChoice.value?.originPlace ?: return
-        if (place.canLoadMore) searchOriginPlaces(page = place.page + 1)
-    }
-
-    fun onOriginSortChange(sort: String) = searchOriginPlaces(page = 1, sort = sort)
-
-    private fun searchOriginPlaces(page: Int, sort: String? = null) = runPlaceSearch(
-        get = { _routeChoice.value?.originPlace ?: PlaceSearch() },
-        set = { next ->
-            _routeChoice.update { (it ?: RouteState()).copy(originPlace = next) }
-        },
-        page = page,
-        sort = sort,
-    )
-
-    /**
-     * 출발지를 바꾼다. 후보를 다시 받아야 한다.
-     *
-     * 출발지가 달라지면 소요시간과 노선이 전부 달라지므로 이전 선택을 버린다.
-     * 남겨 두면 없는 노선 key 를 들고 일정을 만들어 `route_failed` 가 된다.
-     */
-    fun onOriginSelected(item: PlaceSearchItem?) {
-        val place = _add.value.selectedPlace ?: return
-        _routeChoice.update { current ->
-            (current ?: RouteState()).copy(
-                origin = item,
-                originEditing = false,
-                originPlace = PlaceSearch(),
-                originNotice = null,
-            )
-        }
-        _add.update { it.copy(routeKey = null, routeLabel = null) }
-        viewModelScope.launch { loadCandidates(place, item, keepSelection = false) }
-    }
-
-    /** 출발지를 현재 위치로 다시 잡는다. */
-    fun useCurrentLocationAsOrigin() {
-        val place = _add.value.selectedPlace ?: return
-        _routeChoice.update { (it ?: RouteState()).copy(locating = true, originNotice = null) }
-        viewModelScope.launch {
-            val origin = detectCurrentPlace()
-            _routeChoice.update { current ->
-                (current ?: RouteState()).copy(
-                    locating = false,
-                    origin = origin ?: current?.origin,
-                    originEditing = false,
-                    originNotice = if (origin == null) {
-                        "현재 위치를 확인할 수 없음. 출발지를 직접 검색할 것"
-                    } else {
-                        null
-                    },
-                )
-            }
-            if (origin != null) {
-                _add.update { it.copy(routeKey = null, routeLabel = null) }
-                loadCandidates(place, origin, keepSelection = false)
-            }
-        }
     }
 
     /** 고른 경로를 일정 추가 폼에 반영하고 돌아간다. */
@@ -2419,14 +2324,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val routeLabel: String? = null,
 
         /**
-         * ⑬ 에서 고른 출발지. null 이면 서버가 프로필 집을 쓴다.
+         * 출발지. **null 이면 집**이다 — 서버가 `origin_*` 이 비어 있으면 프로필 집을 쓴다.
+         *
+         * 기본값은 집이다. 일정은 대개 나중 일이라, 일정을 추가하는 지금 위치가 그때
+         * 출발지라는 보장이 없다. 현재 위치는 사용자가 고를 때만 쓴다.
          *
          * [routeKey] 와 **짝으로 움직여야 한다.** 경로는 이 출발지 기준으로 고른
-         * 것이므로 따로 보내면 서버가 다른 경로를 계산한다.
+         * 것이므로 출발지가 바뀌면 고른 경로를 버린다.
          */
         val origin: PlaceSearchItem? = null,
-        /** 출발지 표시명. 일정 추가 화면에 "○○에서 출발" 로 보여준다 */
+        /** 출발지 표시명. null 이면 집 */
         val originLabel: String? = null,
+        /** 출발지 검색. 목적지 검색과 독립이지만 같은 구현을 쓴다 */
+        val originPlace: PlaceSearch = PlaceSearch(),
+        /** "현재 위치 사용" 을 눌러 위치를 재는 중 */
+        val originLocating: Boolean = false,
+        /** 현재 위치를 못 구했을 때의 안내. 값은 바꾸지 않고 이유만 보여준다 */
+        val originNotice: String? = null,
 
         val submitting: Boolean = false,
         val error: String? = null,
@@ -2434,8 +2348,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         val canSubmit: Boolean get() = !submitting && title.isNotBlank()
 
-        /** 경로를 고를 수 있는 조건. 장소가 있어야 목적지가 정해진다 */
-        val canPickRoute: Boolean get() = !submitting && selectedPlace != null
+        /**
+         * 경로를 고를 수 있는 조건. 출발지와 도착지가 **둘 다** 있어야 한다.
+         * 출발지는 고른 곳이 있거나([origin]), 비어 있으면 저장된 집이다.
+         */
+        fun canPickRoute(hasHome: Boolean): Boolean =
+            !submitting && selectedPlace != null && (origin != null || hasHome)
     }
 
     private val _add = MutableStateFlow(AddState())
@@ -2466,13 +2384,75 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 place = it.place.copy(results = emptyList(), query = item?.name ?: ""),
                 routeKey = null,
                 routeLabel = null,
-                // 출발지도 함께 버린다. 경로를 다시 고를 때 현재 위치를 새로
-                // 잡아야 하고, 남겨 두면 어느 출발지로 고른 경로인지 흐려진다.
-                origin = null,
-                originLabel = null,
+                // 출발지는 이 화면에서 따로 고르므로 남긴다.
             )
         }
         _routeChoice.value = null
+    }
+
+    // --- 일정 추가: 출발지 -------------------------------------------------
+
+    fun onAddOriginQueryChange(v: String) =
+        _add.update { it.copy(originPlace = it.originPlace.withQuery(v), originNotice = null) }
+
+    fun searchAddOriginPlaces() = searchAddOriginPlaces(page = 1)
+
+    fun loadMoreAddOriginPlaces() {
+        if (_add.value.originPlace.canLoadMore) {
+            searchAddOriginPlaces(page = _add.value.originPlace.page + 1)
+        }
+    }
+
+    fun onAddOriginSortChange(sort: String) = searchAddOriginPlaces(page = 1, sort = sort)
+
+    private fun searchAddOriginPlaces(page: Int, sort: String? = null) = runPlaceSearch(
+        get = { _add.value.originPlace },
+        set = { next -> _add.update { it.copy(originPlace = next) } },
+        page = page,
+        sort = sort,
+    )
+
+    /**
+     * 출발지를 바꾼다. null 이면 집이다.
+     *
+     * 출발지가 달라지면 소요시간과 노선이 전부 달라지므로 고른 경로를 버린다.
+     * 남겨 두면 없는 노선 key 를 들고 일정을 만들어 `route_failed` 가 된다.
+     */
+    fun onAddOriginSelected(item: PlaceSearchItem?) {
+        _add.update {
+            it.copy(
+                origin = item,
+                originLabel = item?.name,
+                originPlace = PlaceSearch(),
+                originNotice = null,
+                routeKey = null,
+                routeLabel = null,
+            )
+        }
+        _routeChoice.value = null
+    }
+
+    /**
+     * 출발지를 현재 위치로 잡는다. 사용자가 출발지 검색의 "현재 위치 사용" 을
+     * 눌렀을 때만 부른다. 위치를 못 구하면 값을 바꾸지 않고 이유를 적는다.
+     */
+    fun useCurrentLocationForAddOrigin() {
+        if (_add.value.originLocating) return
+        _add.update { it.copy(originLocating = true, originNotice = null) }
+        viewModelScope.launch {
+            val here = detectCurrentPlace()
+            if (here == null) {
+                _add.update {
+                    it.copy(
+                        originLocating = false,
+                        originNotice = "현재 위치를 확인할 수 없음. 위치 권한과 GPS 를 확인하거나 직접 검색할 것",
+                    )
+                }
+            } else {
+                _add.update { it.copy(originLocating = false) }
+                onAddOriginSelected(here)
+            }
+        }
     }
 
     fun searchPlaces() = searchAddPlaces(page = 1)
@@ -2724,11 +2704,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun onHomeQueryChange(v: String) =
         _homeSetup.update { it.copy(place = it.place.withQuery(v)) }
 
+    /**
+     * 집 후보를 고른다. Figma ⑭ 처럼 **검색 결과 목록을 남겨 두고** 고른 줄에 ✓ 를
+     * 표시한다 — 다른 후보로 바로 바꿀 수 있어야 한다. 검색어도 그대로 둔다.
+     */
     fun onHomePlaceSelected(item: PlaceSearchItem?) = _homeSetup.update {
-        it.copy(
-            selected = item,
-            place = it.place.copy(results = emptyList(), query = item?.name ?: ""),
-        )
+        it.copy(selected = item)
     }
 
     /**

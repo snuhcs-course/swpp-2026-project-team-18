@@ -1,6 +1,5 @@
 package com.swpp.wakeup.ui.events
 
-import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,39 +20,39 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.lifecycle.repeatOnLifecycle
-import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.domain.model.RouteArrival
-import com.swpp.wakeup.domain.model.RouteCheckpoint
+import androidx.compose.ui.text.style.TextOverflow
 import com.swpp.wakeup.domain.model.RouteChoice
+import com.swpp.wakeup.domain.model.RouteMode
 import com.swpp.wakeup.domain.model.RouteOption
 import com.swpp.wakeup.domain.model.RouteSegment
 import com.swpp.wakeup.domain.model.RouteSegments
 import com.swpp.wakeup.ui.common.JitPrimaryButton
-import com.swpp.wakeup.ui.common.PlacePicker
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
 import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTextStyle
 import com.swpp.wakeup.ui.theme.JitTheme
-import kotlinx.coroutines.delay
 
 /**
  * 경로 선택. Figma "⑬ 경로 선택" (node 77:2).
@@ -77,17 +76,11 @@ fun RouteChoiceScreen(
     onRetry: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    /** 저장된 집. 출발지를 집으로 한 번에 넣는 데 쓴다 */
-    homePlace: com.swpp.wakeup.data.remote.PlaceSearchItem? = null,
-    onOriginEditToggle: (Boolean) -> Unit = {},
-    onOriginQueryChange: (String) -> Unit = {},
-    onOriginSearch: () -> Unit = {},
-    onOriginSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit = {},
-    onOriginLoadMore: () -> Unit = {},
-    onOriginSortChange: (String) -> Unit = {},
-    onOriginOpenMap: (() -> Unit)? = null,
-    onOpenPlaceUrl: ((String) -> Unit)? = null,
-    onUseCurrentLocation: () -> Unit = {},
+    /**
+     * 도착 목표 = 일정 시작 시각. 카드의 출발~도착 시각과 정류장 시각을 만든다.
+     * ⏳ B-4 이후에는 서버가 준 시각을 쓴다(지금은 임시 계산, `RouteTimeline.kt`).
+     */
+    arriveBy: java.time.LocalDateTime? = null,
 ) {
     Column(
         modifier = modifier
@@ -112,25 +105,12 @@ fun RouteChoiceScreen(
             fontWeight = FontWeight.Bold,
         )
 
+        // 출발지는 일정 추가 화면에서 고른다. 여기서는 무엇 기준인지만 밝힌다.
         val choice = state?.choice
         Text(
             text = choice?.let { "${it.originLabel} → ${it.destination}" } ?: "경로를 불러오는 중",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
-        )
-
-        OriginPicker(
-            state = state,
-            homePlace = homePlace,
-            onLoadMore = onOriginLoadMore,
-            onSortChange = onOriginSortChange,
-            onOpenMap = onOriginOpenMap,
-            onOpenPlaceUrl = onOpenPlaceUrl,
-            onEditToggle = onOriginEditToggle,
-            onQueryChange = onOriginQueryChange,
-            onSearch = onOriginSearch,
-            onSelect = onOriginSelect,
-            onUseCurrentLocation = onUseCurrentLocation,
         )
 
         when {
@@ -139,13 +119,38 @@ fun RouteChoiceScreen(
             state.error != null -> ErrorBlock(message = state.error, onRetry = onRetry)
 
             choice != null -> {
-                val now = rememberElapsedTicker()
-                choice.options.forEach { option ->
+
+                // 처음 열 탭: 고른 후보의 수단, 없으면 가장 빠른 후보의 수단.
+                var mode by rememberSaveable(choice.options.map { it.key }) {
+                    mutableStateOf(choice.defaultMode())
+                }
+                ModeTabs(
+                    selected = mode,
+                    counts = RouteMode.entries.associateWith { choice.optionsOf(it).size },
+                    onSelect = { next ->
+                        mode = next
+                        // 탭을 바꾸면 그 탭의 첫 후보(가장 빠른 것)를 고른다. 보이지 않는
+                        // 탭의 후보가 선택된 채로 "이 경로로 계산" 을 누르면 무엇으로
+                        // 계산했는지 화면에서 알 수 없다.
+                        val inTab = choice.optionsOf(next)
+                        if (inTab.none { it.key == choice.selectedKey }) {
+                            inTab.firstOrNull()?.let { onSelect(it.key) }
+                        }
+                    },
+                )
+
+                val inTab = choice.optionsOf(mode)
+                emptyTabNotice(choice)?.let {
+                    Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
+                }
+                inTab.forEach { option ->
                     RouteCard(
                         option = option,
                         selected = option.key == choice.selectedKey,
                         onClick = { onSelect(option.key) },
-                        now = now,
+                        depart = departAt(arriveBy, option.minutes),
+                        origin = choice.originLabel,
+                        destination = choice.destination,
                     )
                 }
 
@@ -165,165 +170,88 @@ fun RouteChoiceScreen(
 // ---------------------------------------------------------------------------
 
 /**
- * 출발지 선택.
+ * 수단 탭 4개(Figma 13-a ~ 13-d, node 77:2).
  *
- * **기본값은 현재 위치다.** 집을 기본으로 두면 대부분 맞지만, 틀렸을 때
- * 사용자가 알아채지 못한다 — 집이 기준이라는 걸 모르면 알람이 왜 그 시각인지
- * 설명되지 않는다. 현재 위치를 못 구하면 집으로 돌아가고 그 사실을 적는다.
- *
- * 접힌 상태에서는 출발지 한 줄과 "변경" 만 보인다. 경로 목록이 화면의 주인공이고
- * 출발지는 대개 손댈 필요가 없어서다. 펼치면 [PlacePicker] 를 그대로 쓴다 —
- * 목적지·집 설정과 같은 "좌표 있는 장소 하나 고르기" 이므로 화면을 따로 만들 이유가
- * 없다.
+ * 고른 탭은 한 단계 밝은 칸 + 주황 글씨 + 아래 주황 밑줄. 후보가 없는 탭은
+ * 흐리게 두고 누를 수 없다(왜 비었는지는 탭 아래 안내가 말한다).
  */
 @Composable
-private fun OriginPicker(
-    state: HomeViewModel.RouteState?,
-    homePlace: PlaceSearchItem?,
-    onLoadMore: () -> Unit,
-    onSortChange: (String) -> Unit,
-    onOpenMap: (() -> Unit)?,
-    onOpenPlaceUrl: ((String) -> Unit)?,
-    onEditToggle: (Boolean) -> Unit,
-    onQueryChange: (String) -> Unit,
-    onSearch: () -> Unit,
-    onSelect: (PlaceSearchItem?) -> Unit,
-    onUseCurrentLocation: () -> Unit,
+private fun ModeTabs(
+    selected: RouteMode,
+    counts: Map<RouteMode, Int>,
+    onSelect: (RouteMode) -> Unit,
 ) {
-    if (state == null) return
-
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Card))
             .background(JitColor.Surface)
-            .padding(13.dp),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
+            .padding(start = 6.dp, end = 6.dp, top = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "출발지",
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.weight(1f))
-            if (!state.originEditing) {
-                Text(
-                    text = "변경",
-                    color = JitColor.Accent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
+        RouteMode.entries.forEach { mode ->
+            val on = mode == selected
+            val available = (counts[mode] ?: 0) > 0
+            val tint = when {
+                on -> JitColor.Accent
+                available -> JitColor.TextSecondary
+                else -> JitColor.Track
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // Figma: 아이콘 위, 이름 아래.
+                Column(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onEditToggle(true) }
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                )
-            } else {
-                Text(
-                    text = "취소",
-                    color = JitColor.TextSecondary,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onEditToggle(false) }
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                )
-            }
-        }
-
-        when {
-            // 현재 위치를 재는 중. 좌표가 없으면 출발지를 정할 수 없으므로 기다린다.
-            state.locating -> Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(13.dp),
-                    color = JitColor.Accent,
-                    strokeWidth = 2.dp,
-                )
-                Spacer(Modifier.width(9.dp))
-                Text(
-                    text = "현재 위치를 확인하는 중",
-                    color = JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                )
-            }
-
-            state.originEditing -> PlacePicker(
-                label = "출발지 검색",
-                state = state.originPlace,
-                selected = null,
-                onQueryChange = onQueryChange,
-                onSearch = onSearch,
-                onSelect = onSelect,
-                onLoadMore = onLoadMore,
-                onSortChange = onSortChange,
-                onOpenMap = onOpenMap,
-                onOpenPlaceUrl = onOpenPlaceUrl,
-                homePlace = homePlace,
-            )
-
-            else -> {
-                val origin = state.origin
-                Text(
-                    text = origin?.name ?: state.choice?.originLabel ?: "집",
-                    color = JitColor.TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                origin?.address?.takeIf { it.isNotBlank() }?.let {
-                    Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
-                }
-            }
-        }
-
-        // 현재 위치를 못 구했으면 무엇을 기준으로 계산했는지 밝힌다. 조용히
-        // 집으로 넘어가면 사용자는 알람 시각을 설명할 수 없다.
-        state.originNotice?.let { notice ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Spacer(
-                    Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(JitColor.Amber)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(text = notice, color = JitColor.TextSecondary, fontSize = 11.sp)
-            }
-        }
-
-        if (!state.locating) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // 집은 출발지로 가장 잦은 값이다. 검색을 펼치지 않고 바로
-                // 넣을 수 있어야 가입할 때 받아 둔 주소가 실제로 쓰인다.
-                if (homePlace != null) {
-                    Text(
-                        text = "집에서 출발",
-                        color = JitColor.Accent,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onSelect(homePlace) }
-                            .padding(vertical = 3.dp, horizontal = 2.dp),
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(JitRadius.Hint))
+                        .background(if (on) JitColor.Surface2 else JitColor.Surface)
+                        .clickable(enabled = available && !on) { onSelect(mode) }
+                        .padding(vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(
+                        imageVector = ModeIcons.of(mode),
+                        contentDescription = null,
+                        tint = tint,
+                        modifier = Modifier.size(20.dp),
                     )
-                    Spacer(Modifier.width(14.dp))
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = mode.label,
+                        color = tint,
+                        fontSize = 11.sp,
+                        fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                    )
                 }
-                Text(
-                    text = "현재 위치로 다시 잡기",
-                    color = JitColor.Accent,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onUseCurrentLocation)
-                        .padding(vertical = 3.dp, horizontal = 2.dp),
+                Spacer(Modifier.height(4.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth(0.6f)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (on) JitColor.Accent else JitColor.Surface)
                 )
             }
         }
+    }
+}
+
+/**
+ * 빈 탭이 있을 때의 안내. 왜 비었는지 모르면 고장으로 읽는다.
+ *
+ * 짧은 거리(1.2km 이하)는 서버가 도보만 조회한다. 그 경우를 따로 말한다.
+ */
+private fun emptyTabNotice(choice: RouteChoice): String? {
+    val empty = RouteMode.entries.filter { choice.optionsOf(it).isEmpty() }
+    if (empty.isEmpty()) return null
+    val onlyWalk = choice.options.isNotEmpty() && choice.options.all { it.travelMode == RouteMode.WALK }
+    return if (onlyWalk) {
+        "가까운 거리라 도보 경로만 받아왔음"
+    } else {
+        "${empty.joinToString("·") { it.label }} 는 이 구간에 경로가 없음"
     }
 }
 
@@ -332,7 +260,10 @@ private fun RouteCard(
     option: RouteOption,
     selected: Boolean,
     onClick: () -> Unit,
-    now: () -> Long = { 0L },
+    /** 일정 시작에 맞춘 출발 시각(임시 계산). null 이면 시각을 쓰지 않는다 */
+    depart: java.time.LocalDateTime? = null,
+    origin: String = "출발",
+    destination: String = "도착",
 ) {
     Column(
         modifier = Modifier
@@ -341,10 +272,11 @@ private fun RouteCard(
             .clip(RoundedCornerShape(JitRadius.Card))
             .background(JitColor.Surface)
             .then(
+                // Figma: 고른 카드는 주황 테두리.
                 if (selected) {
                     Modifier.border(
                         width = 2.dp,
-                        color = JitColor.SnuNavyBorder,
+                        color = JitColor.Accent,
                         shape = RoundedCornerShape(JitRadius.Card),
                     )
                 } else {
@@ -365,20 +297,30 @@ private fun RouteCard(
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.width(9.dp))
-            Text(
-                text = option.mode,
-                color = if (selected) JitColor.TextPrimary else JitColor.TextSecondary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-            )
+            // "지하철+도보+버스" 같은 수단 이름은 쓰지 않는다. 탭과 구간 막대가 이미 말한다.
+            // 대신 일정 시작에 맞춘 출발~도착 시각을 총 시간 오른쪽에 쓴다(Figma 13-b).
+            depart?.let {
+                Spacer(Modifier.width(9.dp))
+                Text(
+                    text = timeRangeLabel(
+                        it.toLocalTime(),
+                        it.plusMinutes(option.minutes.toLong()).toLocalTime(),
+                    ),
+                    color = if (selected) JitColor.TextPrimary else JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
             Spacer(Modifier.weight(1f))
-            option.badge?.let { badge ->
+            // 배지는 여러 개일 수 있다("최단 시간", "최소 비용", "최소 환승"). 서버 문구 그대로.
+            option.badges.forEachIndexed { index, badge ->
+                if (index > 0) Spacer(Modifier.width(4.dp))
                 Text(
                     text = badge,
                     color = JitColor.Accent,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Medium,
+                    maxLines = 1,
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
                         .background(JitColor.Surface2)
@@ -386,48 +328,38 @@ private fun RouteCard(
                 )
             }
         }
-        if (option.detailLine.isNotBlank()) {
+        if (option.travelMode == RouteMode.BICYCLE) {
+            // Figma 13-d: 자전거는 요약 줄 대신 지표 칸. 서버가 주는 값만 칸으로 그리고
+            // 없는 칸은 그리지 않는다. 경사도 칸은 없다(카카오가 주지 않음).
+            // 거리·자전거도로 두 칸을 1:1 로 가로를 채운다. 자전거도로는 카카오가 정확한
+            // 값을 주지 않아 서버 값이 없으면 칸만 두고 비워 둔다(사용자 결정 10-05).
+            MetricCells(
+                listOf(
+                    "거리" to option.distanceM?.let { "%.1fkm".format(it / 1000.0) }.orEmpty(),
+                    "자전거도로" to option.bikeRoadPercent?.let { "$it%" }.orEmpty(),
+                ),
+            )
+        } else if (option.detailLine.isNotBlank()) {
+            // 요약 한 줄은 서버 문구 그대로("2호선 → 5513 · 5.1km · 환승 1회 · 1,550원").
+            // 도보는 "1.2km" 처럼 거리만 온다. 계단·경사는 쓰지 않는다(task.md 13-0).
             Text(text = option.detailLine, color = JitColor.TextSecondary, fontSize = 11.sp)
         }
+        // 막대는 대중교통의 구간 막대(노선·버스 색 + 구간별 분)만 그린다. 자동차·도보·
+        // 자전거의 빠르기 막대는 전하는 정보가 없어 뺐다(사용자 결정 10-05).
         if (option.hasSegmentBar) {
             SegmentBar(option.segments)
         }
         // 상세 목록은 선택한 카드에만 펼친다. 모든 후보에 열면 같은 정류장이
         // 반복돼 비교가 어려워지고 한 카드가 화면 여러 장을 차지한다.
-        if (selected && option.hasCheckpoints) {
-            RouteCheckpointList(option.checkpoints, now)
-        }
-    }
-}
-
-/**
- * 1초마다 갱신되는 단조 시계를 읽는 함수를 돌려준다.
- *
- * ## 왜 값이 아니라 함수인가
- *
- * `Long` 을 파라미터로 내려보내면 1초마다 후보 카드 전체가 다시 그려진다.
- * 함수로 내려보내면 그 함수를 **호출하는 컴포저블만** 구독하므로, 실제로
- * 숫자가 바뀌는 도착정보 행만 다시 그려진다.
- *
- * ## 왜 화면에 머무는 동안만인가
- *
- * `repeatOnLifecycle(STARTED)` 로 묶어 화면이 가려지면 멈춘다. 남은 시간은
- * 기준 시점에서 매번 다시 계산하므로, 멈춘 동안 흐른 시간도 돌아올 때 한 번에
- * 반영된다 — 따로 보정할 것이 없다.
- */
-@Composable
-private fun rememberElapsedTicker(): () -> Long {
-    val now = remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-    val owner = LocalLifecycleOwner.current
-    LaunchedEffect(owner) {
-        owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                now.longValue = SystemClock.elapsedRealtime()
-                delay(1_000L)
+        if (selected) {
+            val rows = timelineRows(option.segments, origin, destination, depart)
+            if (rows.isNotEmpty()) {
+                // Figma 13-b: 막대와 정류장 타임라인 사이 구분선.
+                HorizontalDivider(color = JitColor.Track, modifier = Modifier.padding(vertical = 2.dp))
+                RouteTimeline(rows)
             }
         }
     }
-    return remember { { now.longValue } }
 }
 
 /**
@@ -439,184 +371,224 @@ private fun rememberElapsedTicker(): () -> Long {
  * 경로와 12분을 걷는 경로는 같은 25분이지만 비 오는 날의 선택이 다르다.
  * 카카오맵이 같은 것을 가로 막대로 보여 주고, 그게 실제로 읽기 쉽다.
  *
- * ## 폭과 색
+ * ## 무엇을 그리는가
  *
- * 폭은 [RouteSegments.weights] 가 계산한다. 합이 정확히 1.0 이라 오른쪽에
- * 바탕색이 남지 않는다. 색은 [SegmentPalette] 가 고르고 지하철 노선색·버스
- * 종류색을 따른다 — 사용자가 이미 아는 색이라야 막대가 한 번에 읽힌다.
+ * 도보·버스·지하철처럼 **실제로 움직이는 구간만** 그린다. 차를 기다리는 대기
+ * 칸은 뺀다([barSegments]). 모든 칸에 "N분" 을 쓰므로, 짧은 구간도 글자가
+ * 들어갈 만큼은 넓혀 그린다([labeledWeights]) — 비율이 정확할 필요는 없다.
  *
- * 좁은 칸에는 글자를 넣지 않는다. 잘린 글자는 없는 것보다 읽기 어렵다.
+ * 색은 [SegmentPalette] 가 고르고 지하철 노선색·버스 종류색을 따른다 —
+ * 사용자가 이미 아는 색이라야 막대가 한 번에 읽힌다.
  */
 @Composable
 private fun SegmentBar(segments: RouteSegments) {
-    val weights = segments.weights()
+    val items = barSegments(segments)
+    val weights = labeledWeights(items)
     if (weights.isEmpty()) return
 
+    // Figma 13-b: 구간마다 따로 둥근 칸, 칸 사이에 틈.
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(18.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .background(Color(SegmentPalette.TRACK)),
+            .height(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        segments.items.forEachIndexed { index, segment ->
+        items.forEachIndexed { index, segment ->
             Box(
                 modifier = Modifier
                     .weight(weights[index])
                     .fillMaxHeight()
+                    .clip(RoundedCornerShape(4.dp))
                     .background(Color(SegmentPalette.fill(segment))),
                 contentAlignment = Alignment.Center,
             ) {
-                // 비율이 이만큼은 돼야 "12분" 이 잘리지 않는다. 화면 폭이
-                // 달라도 비율로 판단하므로 기기마다 같게 동작한다.
-                if (weights[index] >= SEGMENT_LABEL_MIN_WEIGHT) {
-                    Text(
-                        text = segment.minutesLabel,
-                        color = Color(SegmentPalette.onFill(segment)),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        // Box 의 Alignment.Center 만으로는 부족하다. 기본 Text 는
-                        // 폰트 여백을 줄 상자에 넣어 글리프를 아래로 밀어낸다.
-                        style = JitTextStyle.TightCentered,
-                    )
-                }
+                Text(
+                    text = segment.minutesLabel,
+                    color = Color(SegmentPalette.onFill(segment)),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    softWrap = false,
+                    // Box 의 Alignment.Center 만으로는 부족하다. 기본 Text 는
+                    // 폰트 여백을 줄 상자에 넣어 글리프를 아래로 밀어낸다.
+                    style = JitTextStyle.TightCentered,
+                )
             }
         }
     }
 }
 
-/** 이 비율보다 좁은 칸에는 분을 쓰지 않는다. 9sp 로 "12분" 이 들어갈 최소치다. */
-private const val SEGMENT_LABEL_MIN_WEIGHT = 0.11f
+/** 막대에 그릴 구간. 대기(차 기다리는 시간)는 빼고 움직이는 구간만. */
+internal fun barSegments(segments: RouteSegments): List<RouteSegment> =
+    segments.items.filter { it.kind != RouteSegment.Kind.WAIT }
 
 /**
- * 선택한 경로의 출발·승차·하차·도착과 실시간 차량 도착정보.
+ * 칸 폭 비율. 소요시간 비례가 기본이지만 모든 칸이 [minShare] 이상이 되게
+ * 넓힌다. 9sp "12분" 이 들어갈 최소치다. 칸이 많으면 1/n 까지 낮춘다.
+ * 합은 1 이다.
+ */
+internal fun labeledWeights(segments: List<RouteSegment>, minShare: Float = 0.14f): List<Float> {
+    if (segments.isEmpty()) return emptyList()
+    val total = segments.sumOf { it.seconds.coerceAtLeast(1) }.toFloat()
+    val raw = segments.map { it.seconds.coerceAtLeast(1) / total }
+    val floor = minOf(minShare, 1f / segments.size)
+
+    // 작은 칸을 floor 로 올리고 남은 폭을 나머지에 비율대로 나눈다. 나눈 뒤 다시
+    // floor 아래로 떨어진 칸이 생길 수 있어 고정될 때까지 반복한다(칸 수만큼이면 충분).
+    val pinned = BooleanArray(raw.size)
+    var result = raw
+    repeat(raw.size) {
+        raw.indices.forEach { if (result[it] < floor) pinned[it] = true }
+        val free = 1f - floor * pinned.count { p -> p }
+        val freeRaw = raw.indices.filter { !pinned[it] }.sumOf { raw[it].toDouble() }.toFloat()
+        result = raw.indices.map { i ->
+            if (pinned[i]) floor else if (freeRaw > 0f) raw[i] / freeRaw * free else floor
+        }
+    }
+    return result
+}
+
+/**
+ * 고른 카드의 정류장 타임라인(Figma 13-b, node 232:265).
  *
- * 승차 행에는 장소와 노선만 쓴다. 바로 다음 차량과 그다음 차량은 그 아래
- * 별도 행에 둔다. 승차 행 오른쪽에 "3분 20초 뒤" 를 쓰면 사용자가 그 지점에
- * 3분 뒤 도착한다는 뜻으로 오해하기 때문이다.
+ * 한 행: [점] 이름 [노선 칩] / 아래 작은 글자("승차"·"환승"·"하차") ··· 오른쪽 시각 / "○○ 도착".
+ * 점 색은 그 지점에서 타는 노선색이고, 출발·도착은 회색이다. 노선 번호는 이름 오른쪽 칩으로 둔다.
+ *
+ * 다음 차량·그다음 차량 "N분 뒤 도착" 은 보여 주지 않는다. 경로를 고르는 단계에서는
+ * 필요 없고 화면만 길어진다.
  */
 @Composable
-private fun RouteCheckpointList(
-    checkpoints: List<RouteCheckpoint>,
-    now: () -> Long = { 0L },
-) {
+private fun RouteTimeline(rows: List<TimelineRow>) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        checkpoints.forEach { checkpoint ->
-            when (checkpoint) {
-                is RouteCheckpoint.Stop -> CheckpointStopRow(checkpoint)
-                is RouteCheckpoint.VehicleArrival -> CheckpointArrivalRow(checkpoint, now)
+        rows.forEach { TimelineRowView(it) }
+    }
+}
+
+/**
+ * 자전거 카드의 지표 칸(Figma 13-d). "거리 / 4.8km" 처럼 이름 위, 값 아래.
+ * 칸들이 같은 폭으로 가로를 꽉 채운다. 값이 빈 칸도 높이는 같게 둔다.
+ */
+@Composable
+private fun MetricCells(cells: List<Pair<String, String>>) {
+    if (cells.isEmpty()) return
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        cells.forEach { (name, value) ->
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(JitRadius.Hint))
+                    .background(JitColor.Surface2)
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
+            ) {
+                Text(name, color = JitColor.TextSecondary, fontSize = 10.sp)
+                // 빈 값이어도 줄 높이를 지키려고 공백 한 칸을 쓴다.
+                Text(value.ifEmpty { " " }, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
-@Composable
-private fun CheckpointStopRow(checkpoint: RouteCheckpoint.Stop) {
-    val segment = checkpoint.segment
-    val dotColor = segment?.let { Color(SegmentPalette.fill(it)) } ?: JitColor.TextSecondary
-    val strong = checkpoint.role == RouteCheckpoint.Stop.Role.START ||
-        checkpoint.role == RouteCheckpoint.Stop.Role.END
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-    ) {
-        Spacer(
-            Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(dotColor)
-        )
-        Text(
-            text = checkpoint.label,
-            color = JitColor.TextPrimary,
-            fontSize = 11.sp,
-            fontWeight = if (strong) FontWeight.Medium else FontWeight.Normal,
-        )
-        checkpoint.lineLabel.takeIf(String::isNotBlank)?.let { line ->
-            Text(
-                text = line,
-                color = Color(SegmentPalette.ON_VEHICLE),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(dotColor)
-                    .padding(horizontal = 5.dp, vertical = 1.dp),
-            )
-        }
-    }
-}
+/** 이름 옆 노선 칩을 몇 개까지 그릴지. 넘치면 "+N" 으로 줄인다. */
+private const val MAX_LINE_CHIPS = 4
 
 /**
- * 차량이 승차 지점에 들어오기까지 남은 시간.
+ * 노선 칩 하나("5519", "2호선"). 색은 노선색·버스 종류색.
  *
- * [RouteCheckpoint.VehicleArrival.primary] 이면 다음 차량이라 노랑, 아니면
- * 그다음 차량이라 회색이다. 둘을 같은 열에 세로로 놓아 순서를 한눈에 읽는다.
+ * 기본 Text 는 폰트 위아래 여백 때문에 칩이 세로로 길어진다. TightCentered 로
+ * 여백을 걷어 칩을 글자 높이에 맞춘다.
  */
 @Composable
-private fun CheckpointArrivalRow(
-    checkpoint: RouteCheckpoint.VehicleArrival,
-    now: () -> Long = { 0L },
-) {
-    val color = if (checkpoint.primary) JitColor.ArrivalNext else JitColor.ArrivalLater
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        // 가중치 여백이 가운데에 있으므로 이 간격은 칩 주변에서만 눈에 띈다.
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            text = checkpoint.vehicleLabel,
-            color = color,
-            fontSize = 10.sp,
-        )
-        // 급행은 이득일 수도 있어 알림색(Amber), 막차는 놓치면 집에 못 가서
-        // 경고색(Red). 시각 문구가 10sp 라 회색 칩으로는 묻힌다.
-        checkpoint.arrival.trainKind.takeIf(String::isNotBlank)?.let { kind ->
-            ArrivalBadge(text = kind, background = JitColor.Amber)
-        }
-        if (checkpoint.arrival.lastTrain) {
-            ArrivalBadge(text = "막차", background = JitColor.Red)
-        }
-        Spacer(Modifier.weight(1f))
-        // now() 를 여기서 읽는다. 이 행만 1초마다 다시 그려지고 카드는 그대로다.
-        Text(
-            text = checkpoint.arrival.displayTextAt(now()),
-            color = color,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-        )
-    }
-}
-
-/**
- * 도착 행의 작은 배지. 급행·막차처럼 **그 열차에만 해당하는 사실**을 붙인다.
- *
- * 바탕이 [JitColor.Amber]·[JitColor.Red] 처럼 밝은 색이라 글자는 어두운
- * [JitColor.Bg] 를 쓴다. 흰 글씨를 얹으면 10sp 에서 대비가 모자라 읽히지 않는다.
- */
-@Composable
-private fun ArrivalBadge(text: String, background: Color) {
+private fun LineChip(segment: RouteSegment) {
     Text(
-        text = text,
-        color = JitColor.Bg,
+        text = segment.label,
+        color = Color(SegmentPalette.onFill(segment)),
         fontSize = 9.sp,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
+        style = JitTextStyle.TightCentered,
         modifier = Modifier
             .clip(RoundedCornerShape(3.dp))
-            .background(background)
-            .padding(horizontal = 4.dp),
+            .background(Color(SegmentPalette.fill(segment)))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
     )
+}
+
+@Composable
+private fun TimelineRowView(row: TimelineRow) {
+    val lineColor = row.line?.let { Color(SegmentPalette.fill(it)) }
+    val dotColor = lineColor ?: JitColor.Track
+    val end = row.kind == TimelineRow.Kind.END
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Spacer(
+            Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(dotColor)
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = row.name,
+                    color = JitColor.TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    // 이름과 아래 "승차" 사이가 벌어지지 않게 폰트 여백을 걷는다.
+                    style = JitTextStyle.TightCentered,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // 노선 번호는 이름 오른쪽 칩. 색은 노선색 그대로. 같은 구간을 가는
+                // 대체 버스가 있으면 그 칩도 나란히 붙인다(많으면 "+N").
+                row.line?.let { segment ->
+                    val chips = listOf(segment) + segment.alternatives
+                    val shown = chips.take(MAX_LINE_CHIPS)
+                    shown.forEach { chip ->
+                        Spacer(Modifier.width(4.dp))
+                        LineChip(chip)
+                    }
+                    if (chips.size > shown.size) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "+${chips.size - shown.size}",
+                            color = JitColor.TextSecondary,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            style = JitTextStyle.TightCentered,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = row.sub,
+                color = JitColor.TextSecondary,
+                fontSize = 10.sp,
+                style = JitTextStyle.TightCentered,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = row.time?.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")) ?: "",
+                // 시각 아래 "출발 / ○○ 도착" 글자는 뺐다. 마지막 도착 시각만 초록으로 구분한다.
+                color = if (end) JitColor.Green else JitColor.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
 }
 
 @Composable

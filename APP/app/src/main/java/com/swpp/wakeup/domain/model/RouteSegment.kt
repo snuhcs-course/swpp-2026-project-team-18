@@ -32,6 +32,11 @@ data class RouteSegment(
     val arrivals: List<RouteArrival> = emptyList(),
     /** 버스 배차간격. 실시간 도착이 없을 때 계획 정보로 쓸 수 있다. */
     val headwayMinutes: Int? = null,
+    /**
+     * 같은 구간을 갈 수 있는 다른 노선(대체 버스). 이 구간과 같은 종류·권역이고
+     * 번호([label]/[lineName])와 [busType] 만 다르다. 색은 각자의 것으로 칠한다.
+     */
+    val alternatives: List<RouteSegment> = emptyList(),
 ) {
 
     enum class Kind {

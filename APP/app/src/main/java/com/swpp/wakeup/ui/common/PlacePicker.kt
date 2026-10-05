@@ -109,8 +109,12 @@ fun PlacePicker(
             SearchButton(onClick = onSearch, loading = state.searching, enabled = enabled)
         }
 
+        // 고른 장소가 지금 결과 목록 안에 있으면 목록에서 ✓ 로 보여준다(Figma ⑭).
+        // 목록 밖(지도에서 고름, 결과를 비운 화면)이면 따로 한 줄로 남긴다.
+        val selectedInResults = selected != null && state.results.any { it.isSameSpot(selected) }
+
         // 선택된 장소를 확인할 수 있게 남긴다. 좌표가 알람 계산에 쓰인다.
-        selected?.let { place ->
+        selected?.takeIf { !selectedInResults }?.let { place ->
             SelectedPlaceRow(
                 place = place,
                 enabled = enabled,
@@ -140,18 +144,15 @@ fun PlacePicker(
         }
 
         if (state.results.isNotEmpty()) {
-            ResultToolbar(
-                state = state,
-                enabled = enabled,
-                onSortChange = onSortChange,
-                onOpenMap = onOpenMap,
-            )
             ResultList(
                 state = state,
+                selected = selected,
                 enabled = enabled,
                 onSelect = onSelect,
                 onLoadMore = onLoadMore,
                 onOpenPlaceUrl = onOpenPlaceUrl,
+                onSortChange = onSortChange,
+                onOpenMap = onOpenMap,
             )
         }
     }
@@ -204,41 +205,63 @@ private fun SelectedPlaceRow(
     }
 }
 
+/**
+ * 결과 카드의 머리(Figma ⑭): 왼쪽 "검색 결과"(+ 건수), 오른쪽 주황 "지도".
+ * 거리 정렬 칩은 거리를 받았을 때만 머리 아래 줄에 둔다.
+ */
 @Composable
-private fun ResultToolbar(
+private fun ResultHeader(
     state: HomeViewModel.PlaceSearch,
     enabled: Boolean,
     onSortChange: ((String) -> Unit)?,
     onOpenMap: (() -> Unit)?,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = "검색 결과", color = JitColor.TextSecondary, fontSize = 11.sp)
+            state.countLabel?.let {
+                Text(text = " · $it", color = JitColor.TextSecondary, fontSize = 10.sp)
+            }
+            Spacer(Modifier.weight(1f))
+            if (onOpenMap != null) {
+                Text(
+                    text = "지도",
+                    color = JitColor.Accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(enabled = enabled, onClick = onOpenMap)
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                )
+            }
+        }
         // 거리 정렬은 기준 좌표가 있어야 서버가 적용한다. 거리를 못 받은
         // 상태에서 칩을 보여 주면 눌러도 아무 변화가 없다.
         if (onSortChange != null && state.hasDistances) {
-            SortChip(
-                text = "정확도",
-                active = state.sort == PlaceSearchResponse.SORT_ACCURACY,
-                enabled = enabled,
-                onClick = { onSortChange(PlaceSearchResponse.SORT_ACCURACY) },
-            )
-            Spacer(Modifier.width(6.dp))
-            SortChip(
-                text = "거리순",
-                active = state.sort == PlaceSearchResponse.SORT_DISTANCE,
-                enabled = enabled,
-                onClick = { onSortChange(PlaceSearchResponse.SORT_DISTANCE) },
-            )
-        }
-        Spacer(Modifier.weight(1f))
-        state.countLabel?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
-        }
-        if (onOpenMap != null) {
-            Spacer(Modifier.width(8.dp))
-            SortChip(text = "지도", active = false, enabled = enabled, onClick = onOpenMap)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SortChip(
+                    text = "정확도",
+                    active = state.sort == PlaceSearchResponse.SORT_ACCURACY,
+                    enabled = enabled,
+                    onClick = { onSortChange(PlaceSearchResponse.SORT_ACCURACY) },
+                )
+                Spacer(Modifier.width(6.dp))
+                SortChip(
+                    text = "거리순",
+                    active = state.sort == PlaceSearchResponse.SORT_DISTANCE,
+                    enabled = enabled,
+                    onClick = { onSortChange(PlaceSearchResponse.SORT_DISTANCE) },
+                )
+            }
         }
     }
 }
@@ -246,10 +269,13 @@ private fun ResultToolbar(
 @Composable
 private fun ResultList(
     state: HomeViewModel.PlaceSearch,
+    selected: PlaceSearchItem?,
     enabled: Boolean,
     onSelect: (PlaceSearchItem?) -> Unit,
     onLoadMore: (() -> Unit)?,
     onOpenPlaceUrl: ((String) -> Unit)?,
+    onSortChange: ((String) -> Unit)?,
+    onOpenMap: (() -> Unit)?,
 ) {
     // **자체 스크롤을 두지 않는다.** 이 컴포저블을 쓰는 세 화면이 모두 바깥에서
     // `verticalScroll` 을 걸고 있어서, 여기에 또 스크롤과 높이 상한을 주면
@@ -265,10 +291,12 @@ private fun ResultList(
             .clip(RoundedCornerShape(JitRadius.Card))
             .background(JitColor.Surface),
     ) {
+        ResultHeader(state, enabled, onSortChange, onOpenMap)
         state.results.forEachIndexed { index, place ->
             if (index > 0) HorizontalDivider(color = JitColor.Bg)
             ResultRow(
                 place = place,
+                isSelected = selected != null && place.isSameSpot(selected),
                 enabled = enabled,
                 onClick = { onSelect(place) },
                 onOpenPlaceUrl = onOpenPlaceUrl,
@@ -306,44 +334,60 @@ private fun ResultList(
 @Composable
 private fun ResultRow(
     place: PlaceSearchItem,
+    isSelected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
     onOpenPlaceUrl: ((String) -> Unit)?,
 ) {
-    Column(
+    // Figma ⑭: 고른 줄은 이름 주황 + 오른쪽 ✓, 나머지는 오른쪽 ›.
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = place.name,
-                color = JitColor.TextPrimary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f, fill = false),
-            )
-            place.categoryGroup?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.width(7.dp))
-                CategoryChip(it)
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = place.name,
+                    color = if (isSelected) JitColor.Accent else JitColor.TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                place.categoryGroup?.takeIf { it.isNotBlank() }?.let {
+                    Spacer(Modifier.width(7.dp))
+                    CategoryChip(it)
+                }
+            }
+            MetaLine(place)
+
+            val url = place.placeUrl
+            if (onOpenPlaceUrl != null && !url.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "카카오맵에서 평점·사진 보기 ›",
+                    color = JitColor.Blue,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable(enabled = enabled) { onOpenPlaceUrl(url) },
+                )
             }
         }
-        MetaLine(place)
-
-        val url = place.placeUrl
-        if (onOpenPlaceUrl != null && !url.isNullOrBlank()) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "카카오맵에서 평점·사진 보기 ›",
-                color = JitColor.Blue,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable(enabled = enabled) { onOpenPlaceUrl(url) },
-            )
-        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = if (isSelected) "✓" else "›",
+            color = if (isSelected) JitColor.Accent else JitColor.TextSecondary,
+            fontSize = if (isSelected) 16.sp else 18.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+        )
     }
 }
+
+/** 같은 지점인지. 검색 결과와 고른 장소는 객체가 달라서 좌표로 비교한다(약 10m). */
+private fun PlaceSearchItem.isSameSpot(other: PlaceSearchItem): Boolean =
+    kotlin.math.abs(lat - other.lat) < 1e-4 && kotlin.math.abs(lng - other.lng) < 1e-4
 
 /** 거리 · 주소 한 줄. 둘 다 없으면 아무것도 그리지 않는다. */
 @Composable
