@@ -81,6 +81,8 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : ComponentActivity() {
 
+    private var openMorning by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -97,17 +99,28 @@ class MainActivity : ComponentActivity() {
         // 로그인 직후에만 환영 문구를 띄운다. 앱을 다시 열 때는 띄우지 않는다.
         val welcomeNickname = intent.getStringExtra(EXTRA_WELCOME_NICKNAME)
         // 알람을 해제하고 넘어온 경우. 아침 기록 화면으로 바로 들어간다.
-        val openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
+        openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
 
         setContent {
             JitTheme {
                 MainHost(
                     welcomeNickname = welcomeNickname,
                     openMorning = openMorning,
+                    onMorningOpened = {
+                        openMorning = false
+                        intent.removeExtra(EXTRA_OPEN_MORNING)
+                    },
                     onLoggedOut = ::backToLogin,
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // 알람 해제는 CLEAR_TOP + SINGLE_TOP으로 이미 열린 홈을 재사용한다.
+        openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
     }
 
     private fun backToLogin() {
@@ -148,6 +161,7 @@ class MainActivity : ComponentActivity() {
 private fun MainHost(
     welcomeNickname: String?,
     openMorning: Boolean,
+    onMorningOpened: () -> Unit,
     onLoggedOut: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel()
@@ -290,11 +304,10 @@ private fun MainHost(
 
     // 알람을 해제하고 넘어왔으면 아침 기록으로 바로 들어간다. 한 번만 한다 —
     // 사용자가 뒤로 나갔는데 다시 밀어 넣으면 화면을 벗어날 수 없다.
-    var morningOpened by remember { mutableStateOf(false) }
     LaunchedEffect(openMorning) {
-        if (openMorning && !morningOpened) {
-            morningOpened = true
+        if (openMorning) {
             viewModel.openMorning()
+            onMorningOpened()
         }
     }
 
