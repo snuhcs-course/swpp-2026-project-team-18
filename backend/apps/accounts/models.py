@@ -56,6 +56,9 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     email = models.EmailField("이메일", unique=True)
     nickname = models.CharField("닉네임", max_length=20)
+    terms_agreed_at = models.DateTimeField(
+        "약관 동의 시각", null=True, blank=True, default=None, db_default=None
+    )
 
     is_active = models.BooleanField("활성", default=True)
     is_staff = models.BooleanField("스태프", default=False)
