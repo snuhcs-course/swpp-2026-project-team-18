@@ -196,6 +196,8 @@ private fun AuthHost(
                     passwordConfirm = state.passwordConfirm,
                     passwordsMatch = state.passwordsMatch,
                     termsAgreed = state.termsAgreed,
+                    passwordCheck = state.passwordCheck,
+                    passwordCheckError = state.passwordCheckError,
                     loading = state.loading,
                     error = state.error,
                     canSubmit = state.canSubmitSignup,

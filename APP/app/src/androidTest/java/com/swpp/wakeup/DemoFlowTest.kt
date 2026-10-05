@@ -54,11 +54,7 @@ class DemoFlowTest {
         try {
             step("01_login") {
                 launch()
-                if (!publicE2e) {
-                    find(By.res("login_email")).text = config.getString("email")
-                    find(By.res("login_password")).text = config.getString("password")
-                    find(By.res("login_submit"), "login_scroll").click()
-                } // 공용 E2E는 바로 앞 UI 준비 단계에서 로그인한 계정을 이어 쓴다.
+                // 바로 앞 UI 준비 단계에서 로그인한 계정을 이어 쓴다.
                 find(By.res("next_alarm"), timeout = 90_000)
                 // FusedLocation의 저전력 요청도 에뮬레이터 GPS를 받을 수 있게 한다.
                 // fake Location/TripLiveState/관측을 주입하지 않는다.

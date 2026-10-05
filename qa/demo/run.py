@@ -17,7 +17,6 @@ import sys
 import threading
 import time
 from urllib.error import HTTPError
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -130,8 +129,8 @@ class Demo:
             detail = "" if path.startswith("auth/") else error.read().decode()[:500]
             raise RuntimeError(f"API {method} {path}: HTTP {error.code} {detail}") from error
 
-    def prepare_public_ui(self):
-        print("[1/5] 공용 서버 UI 확인 준비 (새 QA 계정·데이터를 화면에서 생성)", flush=True)
+    def prepare_ui(self):
+        print("[1/5] UI 확인 준비 (새 QA 계정·데이터를 화면에서 생성)", flush=True)
         deadline = time.monotonic() + 120
         while True:
             try:
@@ -149,7 +148,7 @@ class Demo:
             json.dump({"email": self.email, "password": self.password}, file)
         self.result.update(email=self.email, expected_start_at=iso(self.start_at))
 
-    def verify_public_ui(self):
+    def verify_ui(self):
         # 가입·프로필·블록·일정 쓰기는 모두 앱 UI가 수행했다. 여기서는 저장 결과만 조회한다.
         self.token = self.api("POST", "auth/token", {"email": self.email, "password": self.password})["access"]
         profile = self.api("GET", "profile")
@@ -169,24 +168,26 @@ class Demo:
                 "UI 목적지·경로 선택이 저장 값과 다릅니다.")
         require(event["origin_lat"] is None and event["origin_lng"] is None,
                 "UI 집 선택이 별도 출발지로 저장되어 준비 시간을 제외합니다.")
+        require(event["alarm_enabled"] is True and event["alarm_on"] is True and event["is_first_alarm"] is True,
+                "UI 알람 스위치 ON이 서버에 저장되지 않았습니다.")
         plan = event["alarm_plan"]
         require(plan["prep_minutes"] > 0 and plan["prep_source"] != "not_from_home" and
                 len(plan["prep_breakdown"]) == len(blocks), "UI에서 만든 준비 루틴이 알람 계산에 반영되지 않았습니다.")
         require(plan["status"] == "ok" and len(plan["route_path"]) >= 2 and plan["travel_time_source"] == "kakao_walk",
-                "공용 서버가 실제 카카오 도보 경로로 알람을 계산하지 못했습니다.")
+                "실제 카카오 도보 경로로 알람을 계산하지 못했습니다.")
         require(datetime.fromisoformat(plan["alarm_at"]) > now(), "UI 일정의 알람이 미래 시각이 아닙니다.")
         event_blocks = self.api("GET", f"events/{event['id']}/blocks")
         require(len(event_blocks["blocks"]) == len(blocks) and all(b["checked"] for b in event_blocks["blocks"]),
                 "UI에서 만든 루틴이 새 일정에 기본 포함되지 않았습니다.")
         evidence = {"status": "passed", "api": self.api_base, "profile": profile,
                     "blocks": blocks, "event": event, "event_blocks": event_blocks}
-        filename = "setup-server-evidence.json" if self.args.public_e2e else "server-evidence.json"
+        filename = "server-evidence.json" if self.args.public_ui else "setup-server-evidence.json"
         (self.output / filename).write_text(json.dumps(evidence, ensure_ascii=False, indent=2))
         # 이후 쓰기는 방금 UI로 만든 계정의 유일한 일정에만 수행한다.
         self.event, self.event_id, self.blocks = event, event["id"], blocks
         self.home = {"lat": profile["home_lat"], "lng": profile["home_lng"]}
         self.result.update(event_id=event["id"], alarm_at=plan["alarm_at"], server_verified=True)
-        print(f"      공용 서버 저장 확인: 루틴 {len(blocks)}개 · 일정 {event['id']} · {plan['travel_time_source']}", flush=True)
+        print(f"      서버 저장 확인: 루틴 {len(blocks)}개 · 일정 {event['id']} · {plan['travel_time_source']}", flush=True)
 
     def start_backend(self):
         print("[1/5] 일회용 DB · 로컬 백엔드 준비", flush=True)
@@ -206,39 +207,6 @@ class Demo:
             except (OSError, RuntimeError):
                 time.sleep(.5)
         raise RuntimeError("백엔드 연결 시간 초과")
-
-    def seed(self):
-        self.email = f"qa-{secrets.token_hex(5)}@example.com"
-        self.password = "Qa1-" + secrets.token_urlsafe(18)
-        self.token = self.api("POST", "auth/register", {
-            "email": self.email, "nickname": self.scenario["nickname"],
-            "password": self.password, "password_confirm": self.password,
-            "terms_agreed": True})["access"]
-        home = self.scenario["home"]
-        self.api("PATCH", "profile", {"home_lat": home["lat"], "home_lng": home["lng"],
-                                     "home_label": home["label"], "onboarding_prep_min": 2,
-                                     "default_tau": .9, "timezone": "Asia/Seoul"})
-        self.blocks = []
-        for index, name in enumerate(self.scenario["blocks"]):
-            self.blocks.append(self.api("POST", "routines/blocks", {
-                "name": name, "default_min_minutes": self.scenario["block_min_minutes"],
-                "default_max_minutes": self.scenario["block_max_minutes"],
-                "precondition": self.blocks[-1]["id"] if self.blocks else None,
-                "included_by_default": True, "parallelizable": False, "order": index}))
-        search = self.api("GET", "places/search?" + urlencode({
-            "q": self.scenario["destination_query"], "lat": home["lat"], "lng": home["lng"]}))
-        require(not search["degraded"] and search["results"], "실제 카카오 장소 검색 실패: backend/.env를 확인하세요.")
-        place = search["results"][0]
-        self.event = self.api("POST", "events", {"title": self.scenario["event_title"],
-            "start_at": iso(now() + timedelta(hours=2)), "route_key": self.scenario["route_key"],
-            "place": {key: place[key] for key in ("name", "lat", "lng", "address", "kakao_place_id") if key in place}})
-        self.event_id = self.event["id"]
-        plan = self.event["alarm_plan"]
-        require(plan["status"] == "ok" and len(plan["route_path"]) >= 2,
-                f"실제 경로 계산 실패 (status={plan['status']}). QA는 폴백을 통과 처리하지 않습니다.")
-        require(plan["travel_time_source"] == "kakao_walk", f"실제 도보 경로가 아닙니다: {plan['travel_time_source']}")
-        self.result.update(event_id=self.event_id, destination=self.event["place"], initial_plan=plan)
-        print(f"      실제 장소·경로 확인: {self.event['place']['name']} / {plan['travel_minutes']}분", flush=True)
 
     def arm(self):
         require(not self.armed, "알람은 한 번만 예약할 수 있습니다.")
@@ -373,13 +341,12 @@ class Demo:
                   "block_seconds": self.scenario["block_seconds"],
                   "control_url": f"http://10.0.2.2:{CONTROL_PORT}", "control_token": self.control_token,
                   "public_e2e": self.args.public_e2e}
-        if self.public_server:
-            config.update(nickname=self.scenario["nickname"], home_query=self.scenario["home_query"],
-                          prep_minutes=self.scenario["onboarding_prep_minutes"],
-                          block_min_minutes=self.scenario["block_min_minutes"],
-                          block_max_minutes=self.scenario["block_max_minutes"],
-                          destination_query=self.scenario["destination_query"], route_key=self.scenario["route_key"],
-                          event_date=self.start_at.date().isoformat(), event_time=self.start_at.strftime("%H:%M"))
+        config.update(nickname=self.scenario["nickname"], home_query=self.scenario["home_query"],
+                      prep_minutes=self.scenario["onboarding_prep_minutes"],
+                      block_min_minutes=self.scenario["block_min_minutes"],
+                      block_max_minutes=self.scenario["block_max_minutes"],
+                      destination_query=self.scenario["destination_query"], route_key=self.scenario["route_key"],
+                      event_date=self.start_at.date().isoformat(), event_time=self.start_at.strftime("%H:%M"))
         if hasattr(self, "event_id"):
             config["event_id"] = self.event_id
         # Android의 외부 저장소 소유권과 무관하게 앱 전용 내부 파일에 쓴다.
@@ -409,7 +376,7 @@ class Demo:
     def execute(self):
         print("[3/5] " + ("가입·설정 → 실제 알람 → 루틴 → GPS 도착 → 공용 서버 리포트" if self.args.public_e2e else
                           "가입 → 집·준비 시간 → 루틴 → 일정·경로 → 재로그인" if self.args.public_ui else
-                          "로그인 → 잠금화면 알람 → 루틴 → GPS 출발·도착 → 리포트"), flush=True)
+                          "가입·설정 → 알람 켬/끔 → 실제 알람 → GPS 도착 → 리포트"), flush=True)
         log = open(self.output / "logcat.txt", "w")
         self.files.append(log)
         self.logcat = subprocess.Popen(self.adb + ["logcat", "-v", "threadtime", "-T", "1",
@@ -417,18 +384,16 @@ class Demo:
             "BlockObservationQueue:I", "AndroidRuntime:E", "*:S"], stdout=log, stderr=log)
         self.start_video()
         started = time.monotonic()
-        if self.public_server:
-            filename = "setup-instrumentation.txt" if self.args.public_e2e else "instrumentation.txt"
-            self.result["setup_seconds"] = self.execute_test("PublicSetupTest", filename)
-            self.verify_public_ui()
-        if self.args.public_e2e:
+        filename = "instrumentation.txt" if self.args.public_ui else "setup-instrumentation.txt"
+        self.result["setup_seconds"] = self.execute_test("PublicSetupTest", filename)
+        self.verify_ui()
+        if not self.args.public_ui:
             # 준비 단계의 결과를 보존하고 같은 APK·계정·일정으로 완주한다.
             run(self.adb + ["pull", REMOTE + "/steps.json", str(self.output / "setup-steps.json")],
                 capture_output=True, timeout=30)
             self.start_control()
             self.write_config()
             self.gps(self.home["lat"], self.home["lng"])
-        if not self.args.public_ui:
             self.result["flow_seconds"] = self.execute_test("DemoFlowTest", "instrumentation.txt")
             require(self.closed, "백엔드 관측·리포트 검증이 실행되지 않았습니다.")
         self.result["status"] = "passed"
@@ -530,12 +495,9 @@ def main():
     demo = None
     try:
         demo = Demo(parser.parse_args())
-        if demo.public_server:
-            demo.prepare_public_ui()
-        else:
+        if not demo.public_server:
             demo.start_backend()
-            demo.seed()
-            demo.start_control()
+        demo.prepare_ui()
         demo.build_install()
         demo.execute()
     except (Exception, KeyboardInterrupt) as error:

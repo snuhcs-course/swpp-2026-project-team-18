@@ -19,7 +19,7 @@ your own mornings.
 
 | | |
 | --- | --- |
-| Version | **0.9.0** — server `APP_VERSION` and app `versionName` |
+| Version | **0.10.0** — server `APP_VERSION` and app `versionName` |
 | Shared server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
 | Stack | Android · Kotlin · Jetpack Compose — Django · DRF · Neon Postgres — Render |
 
@@ -34,9 +34,9 @@ your own mornings.
 
 ## Features
 
-What works end to end in 0.9.0:
+What the MVP supports:
 
-1. **Sign up and onboard** — email and password, home address, usual prep time
+1. **Sign up and onboard** — server-checked password, terms consent, home address, usual prep time
 2. **Add an event** — title, time, category (which sets τ), destination (Kakao place
    search or a pick on the map), origin (home by default), and a route chosen from
    Kakao's candidates: transit, walk, bicycle or car
@@ -45,7 +45,8 @@ What works end to end in 0.9.0:
    a route map. A faster alternative from the origin is drawn on the map
 4. **Wake up reliably** — `setAlarmClock` (survives Doze, shows the system next-alarm
    icon), full screen over the lock screen, re-registered after reboot, app update and
-   clock changes, 5-minute snooze. Alarms for the next 7 days are registered
+   clock changes, 5-minute snooze. Home switches save to the server; only enabled alarms
+   for the next 7 days are registered
 5. **Log the morning** — dismissing the alarm starts one-tap-per-block prep logging and
    GPS trip tracking
 6. **Commute** — departure and arrival are detected on the device (arrival = within
@@ -78,10 +79,9 @@ make the screen look finished while being untrue.
   variance evidence (above)
 - Risk choice ⑤ — an explanation screen only, no per-time probability options yet
 - Replanning while moving ⑦ — colors, ETA and the live route; no checkpoints or causes
-- Route choice — one list; the per-mode tabs on the board (⑬) are not in the app
+- Route choice — per-mode tabs work; extended route details and candidate variants remain
 - Weekly and detailed reports ⑧⑨ — part of the board is implemented
 - Sign-in — email and password only; the social buttons show a notice
-- Sign-up consent and alarm switches — backend ready; app request and scheduler wiring pending
 - Route learning — corrections update only when someone runs
   `python manage.py train_models`; there is no scheduler on Render's free plan
 
@@ -329,7 +329,7 @@ health, password check, sign-up, token and refresh.
 | Service | Render `justintime-api` — Docker, free plan, Singapore, deploys `main` |
 | Start | `backend/Dockerfile` runs `migrate`, then gunicorn with 2 workers |
 | Database | Neon Postgres, **direct** URL (the `-pooler` endpoint can break migrations) |
-| Health | `GET /api/health` → `{"ok": true, "version": "0.9.0", "realtime": {"subway": true, "bus": true}}`, independent of the database |
+| Health | `GET /api/health` → `{"ok": true, "version": "0.10.0", "realtime": {"subway": true, "bus": true}}`, independent of the database |
 | Idle | sleeps after 15 minutes; waking takes 30–60 seconds |
 
 Bump the server `APP_VERSION` and the app `versionName` / `versionCode` together in the

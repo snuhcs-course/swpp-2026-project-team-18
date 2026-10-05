@@ -133,8 +133,8 @@ fun AlarmDecisionScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // "첫 일정" 은 서버가 그날 가장 이른 켜진 알람이라고 판정한 일정에만
-                // 붙인다(B-3). 판정이 아직 오지 않으면(null) 지금처럼 보여준다.
-                val first = plan.isFirstAlarm != false
+                // 붙인다. 판정이 없으면 일반 일정으로 표시한다.
+                val first = plan.isFirstAlarm == true
                 JitDotLabel(
                     text = if (first) "첫 일정" else "일정",
                     dotColor = if (first) JitColor.Accent else JitColor.TextSecondary,

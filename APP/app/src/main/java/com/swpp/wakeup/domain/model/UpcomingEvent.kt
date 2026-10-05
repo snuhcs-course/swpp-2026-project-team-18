@@ -45,6 +45,9 @@ data class UpcomingEvent(
     val placeName: String? = null,
     /** 일정 시작 시각(12시간제). 예 "9:00AM" */
     val startClock: String = startTime,
+    /** 서버가 판정한 최종 켬/끔. 계산된 시각이 있어도 OFF일 수 있다. */
+    val alarmOn: Boolean = false,
+    val alarmAtEpochSecond: Long? = null,
 ) {
     val hasAlarm: Boolean get() = alarmAt != null
 

@@ -60,8 +60,8 @@ Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정
 - `PATCH /api/events/{id}`의 `alarm_enabled`에 true/false/null을 보내 켬/끔/자동 복원.
   수정된 일정 한 건을 반환하므로 **목록을 다시 조회**한다. 켬/끔만 바꾸면 경로 재조회는 없다.
 
-프론트 통합은 별도다. 가입 요청의 약관 값과 `AlarmScheduler.sync()`의 `alarm_on` 필터를
-연결한 뒤 배포·전체 QA를 진행한다. 서버 코드를 병합하는 것만으로 공용 서버가 갱신되지는 않는다.
+앱의 비밀번호 검사·약관 전송·스위치 저장·기기 예약 필터 연결을 완료했다.
+[데모 QA](../qa/demo/README.md)는 같은 UI 흐름으로 로컬·공용 서버를 검증한다.
 
 ## 검증과 학습
 

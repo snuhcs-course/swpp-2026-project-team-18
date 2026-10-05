@@ -3,7 +3,7 @@ package com.swpp.wakeup.ui.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,9 +28,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -68,6 +68,7 @@ fun HomeScreen(
     avatarInitials: String,
     onAvatarClick: () -> Unit,
     onEventClick: (UpcomingEvent) -> Unit,
+    onAlarmToggle: (Long, Boolean) -> Unit,
     onAddEventClick: () -> Unit,
     onSetHomeClick: () -> Unit,
     onRoutineClick: () -> Unit,
@@ -141,6 +142,8 @@ fun HomeScreen(
                         events = section.events,
                         highlightedId = state.nextAlarm?.id,
                         onEventClick = onEventClick,
+                        onAlarmToggle = onAlarmToggle,
+                        alarmsEnabled = !state.loading && !state.offline && state.alarmUpdatingId == null,
                     )
                 }
             }
@@ -600,7 +603,9 @@ private fun SectionHeader(label: String, dateLabel: String) {
 private fun EventGroupPanel(
     events: List<UpcomingEvent>,
     highlightedId: Long?,
+    alarmsEnabled: Boolean,
     onEventClick: (UpcomingEvent) -> Unit,
+    onAlarmToggle: (Long, Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -620,6 +625,8 @@ private fun EventGroupPanel(
                     event = event,
                     highlighted = event.id == highlightedId,
                     onClick = { onEventClick(event) },
+                    alarmEnabled = alarmsEnabled,
+                    onAlarmToggle = { onAlarmToggle(event.id, it) },
                 )
             }
         }
@@ -633,7 +640,10 @@ private fun EventGroupPanel(
  * 캘린더 격자를 쓰지 않는 이유다.
  */
 @Composable
-private fun EventPanel(event: UpcomingEvent, highlighted: Boolean, onClick: () -> Unit) {
+private fun EventPanel(
+    event: UpcomingEvent, highlighted: Boolean, onClick: () -> Unit,
+    alarmEnabled: Boolean, onAlarmToggle: (Boolean) -> Unit,
+) {
     val accent = riskColor(event.risk)
     val shape = RoundedCornerShape(JitRadius.Card)
 
@@ -701,7 +711,7 @@ private fun EventPanel(event: UpcomingEvent, highlighted: Boolean, onClick: () -
 
         // 오른쪽: 스위치 / 확률. 알람을 계산하지 못한 일정은 확률 자리에 사유를 둔다.
         Column(horizontalAlignment = Alignment.End) {
-            AlarmSwitch(event)
+            AlarmSwitch(event, alarmEnabled, onAlarmToggle)
             Text(
                 text = when {
                     event.planStatus != PLAN_STATUS_OK -> event.planStatusLabel ?: "알람 계산 불가"
@@ -716,37 +726,28 @@ private fun EventPanel(event: UpcomingEvent, highlighted: Boolean, onClick: () -
     }
 }
 
-/**
- * 일정 행의 알람 켬/끔 스위치(Figma: 행 오른쪽 위).
- *
- * 지금은 **보기 전용**이다. 켬/끔을 저장하고 "하루 첫 알람" 을 판정하는 일은
- * 서버(task.md B-3)가 하므로, 그 API 가 생기기 전에는 앱이 상태를 바꾸지 않는다.
- * 켜짐 = 이 일정에 알람 시각이 있어 실제로 등록된다([UpcomingEvent.hasAlarm]).
- * 알람을 계산하지 못한 일정(`planStatus != ok`)은 비활성으로 보인다.
- *
- * ⏳ B-3 이후: 서버의 `alarm_on` 으로 칠하고, onCheckedChange 로 저장 API 를 부른다.
- */
+/** 서버의 판정 결과를 표시하고 저장 요청 동안 중복 입력을 막는다. */
 @Composable
-private fun AlarmSwitch(event: UpcomingEvent) {
+private fun AlarmSwitch(event: UpcomingEvent, enabled: Boolean, onToggle: (Boolean) -> Unit) {
     // 기본 Switch(52x32dp)는 행에 비해 크다. scale 은 그리는 크기만 줄이고 차지하는
     // 자리는 그대로라, 바깥 Box 로 자리를 34x20dp 로 고정하고 그 안에서 줄여 그린다.
     Box(
         modifier = Modifier
             .size(width = 34.dp, height = 20.dp)
-            // 스위치 터치가 행 클릭(알람 결정 화면 이동)으로 새지 않게 여기서 먹는다.
-            // B-3 전에는 아무 동작도 하지 않는다.
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {},
+            .testTag("event_alarm_${event.id}")
+            .toggleable(
+                value = event.alarmOn,
+                enabled = enabled && event.hasAlarm && event.planStatus == PLAN_STATUS_OK,
+                role = Role.Switch,
+                onValueChange = onToggle,
             ),
         contentAlignment = Alignment.Center,
     ) {
         CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
             Switch(
-                checked = event.hasAlarm,
+                checked = event.alarmOn,
                 onCheckedChange = null,
-                enabled = event.planStatus == PLAN_STATUS_OK,
+                enabled = enabled && event.hasAlarm && event.planStatus == PLAN_STATUS_OK,
                 modifier = Modifier.scale(0.62f),
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = JitColor.TextPrimary,
@@ -809,6 +810,7 @@ private fun HomeEmptyPreview() {
             avatarInitials = "진호",
             onAvatarClick = {},
             onEventClick = {},
+            onAlarmToggle = { _, _ -> },
             onAddEventClick = {},
             onSetHomeClick = {},
             onRoutineClick = {},
@@ -853,6 +855,7 @@ private fun HomeFilledPreview() {
             avatarInitials = "진호",
             onAvatarClick = {},
             onEventClick = {},
+            onAlarmToggle = { _, _ -> },
             onAddEventClick = {},
             onSetHomeClick = {},
             onRoutineClick = {},

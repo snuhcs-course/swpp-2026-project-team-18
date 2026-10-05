@@ -269,6 +269,8 @@ data class EventDto(
 
     @SerializedName("alarm_plan") val alarmPlan: AlarmPlanDto?,
     @SerializedName("created_at") val createdAt: String?,
+    @SerializedName("alarm_enabled") val alarmEnabled: Boolean? = null,
+    @SerializedName("alarm_on") val alarmOn: Boolean? = null,
 
     /**
      * 그날 켜진 알람 중 가장 이른 일정인지. 서버가 판정한다(task.md B-3).
@@ -846,6 +848,7 @@ data class EventUpdateRequest(
     val place: PlaceInput? = null,
     @SerializedName("tag_key") val tagKey: String? = null,
     @SerializedName("route_key") val routeKey: String? = null,
+    @SerializedName("alarm_enabled") val alarmEnabled: Boolean? = null,
 )
 
 data class PlaceInput(

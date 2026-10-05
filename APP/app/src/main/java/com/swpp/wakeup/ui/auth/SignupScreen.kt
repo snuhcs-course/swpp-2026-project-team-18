@@ -74,6 +74,8 @@ fun SignupScreen(
     modifier: Modifier = Modifier,
     /** 잠든 공용 서버를 깨우는 중. 오래 걸릴 때만 true 가 된다. */
     waking: Boolean = false,
+    passwordCheck: com.swpp.wakeup.data.remote.PasswordCheckResponse? = null,
+    passwordCheckError: String? = null,
 ) {
     Column(
         modifier = modifier
@@ -149,7 +151,9 @@ fun SignupScreen(
         )
 
         // Figma 순서: 비밀번호 → 조건 카드 → 비밀번호 확인
-        PasswordRuleCard()
+        PasswordRuleCard(lengthPassed = passwordCheck?.minLength, mixPassed = passwordCheck?.lettersAndDigits)
+        passwordCheck?.messages.orEmpty().forEach { ErrorText(it) }
+        passwordCheckError?.let { ErrorText(it) }
 
         JitTextField(
             label = stringResource(R.string.auth_password_confirm),
@@ -272,7 +276,6 @@ private fun RuleRow(text: String, passed: Boolean?) {
 
 /**
  * 이용약관 및 개인정보처리방침 동의. 체크하지 않으면 가입 버튼이 꺼진다.
- * 동의 여부를 서버에 보내는 것은 B-2 이후.
  */
 @Composable
 private fun TermsAgreementRow(
@@ -283,6 +286,7 @@ private fun TermsAgreementRow(
 ) {
     Row(
         modifier = modifier
+            .testTag("signup_terms")
             .fillMaxWidth()
             .toggleable(
                 value = checked,

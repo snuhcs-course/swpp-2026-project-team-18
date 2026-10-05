@@ -699,7 +699,6 @@ private fun JitDatePickerDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(
-                modifier = Modifier.testTag("event_date_confirm"),
                 onClick = {
                     val picked = state.selectedDateMillis
                     if (picked != null) onPick(picked.toUtcLocalDate()) else onDismiss()
@@ -774,8 +773,7 @@ private fun JitTimePickerDialog(
                 horizontalArrangement = Arrangement.End,
             ) {
                 TextButton(onClick = onDismiss) { Text("취소", color = JitColor.TextSecondary) }
-                TextButton(modifier = Modifier.testTag("event_time_confirm"),
-                    onClick = { onPick(state.hour, state.minute) }) {
+                TextButton(onClick = { onPick(state.hour, state.minute) }) {
                     Text("확인", color = JitColor.Accent, fontWeight = FontWeight.Bold)
                 }
             }

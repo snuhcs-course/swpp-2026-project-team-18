@@ -14,6 +14,7 @@ import com.swpp.wakeup.data.remote.CalendarImportRequest
 import com.swpp.wakeup.data.remote.CalendarImportResponse
 import com.swpp.wakeup.data.remote.EventCreateRequest
 import com.swpp.wakeup.data.remote.EventDto
+import com.swpp.wakeup.data.remote.EventUpdateRequest
 import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.EventsApi
 import com.swpp.wakeup.data.remote.LiveRouteRequest
@@ -200,7 +201,8 @@ class EventRepository(
 
         return HomeData(
             sections = groupByDay(sorted, zone),
-            nextAlarm = sorted.firstOrNull { it.alarmAt != null },
+            nextAlarm = sorted.filter { it.alarmOn && it.hasAlarm }
+                .minByOrNull { it.alarmAtEpochSecond ?: Long.MAX_VALUE },
             totalCount = sorted.size,
             hasHome = profile.hasHome,
             homeLabel = profile.homeLabel?.takeIf { it.isNotBlank() },
@@ -212,6 +214,12 @@ class EventRepository(
             fromCache = fromCache,
             ageLabel = ageLabel,
         )
+    }
+
+    suspend fun setAlarmEnabled(id: Long, enabled: Boolean): Result<HomeData> = guard {
+        val response = api.update(id, EventUpdateRequest(alarmEnabled = enabled))
+        if (!response.isSuccessful) Result.Failure(errorMessage(response))
+        else loadHomeOnline() // 같은 날 다른 일정도 자동 ON/OFF가 바뀔 수 있다.
     }
 
     suspend fun createEvent(
@@ -862,7 +870,7 @@ private fun defaultLabel(kind: RouteSegment.Kind): String = when (kind) {
 }
 
 /** 서버는 ISO 8601 로 준다. 파싱 실패한 항목은 목록에서 뺀다. */
-private fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
+internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
     val local = start.atZoneSameInstant(zone)
     val plan = alarmPlan
@@ -905,6 +913,8 @@ private fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
         alarmMeridiem = alarmLocal?.let(::meridiem),
         placeName = place?.name?.takeIf(String::isNotBlank),
         startClock = local.format(CLOCK_12_FORMAT) + meridiem(local),
+        alarmOn = alarmOn == true,
+        alarmAtEpochSecond = alarmLocal?.toEpochSecond(),
     )
 }
 
@@ -1151,7 +1161,8 @@ private fun List<List<Double>>.toGeoPoints(): List<GeoPoint> =
  * 좌표는 판별 기준점이다 — 집은 출발, 일정 장소는 도착. 둘 다 없으면 알람은
  * 울리지만 추적은 하지 않는다([AlarmSchedule.canTrack]).
  */
-private fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedule? {
+internal fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedule? {
+    if (alarmOn != true) return null
     val plan = alarmPlan ?: return null
     if (plan.status != AlarmPlanDto.STATUS_OK) return null
 

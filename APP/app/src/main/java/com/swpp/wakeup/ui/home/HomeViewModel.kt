@@ -134,6 +134,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val nickname: String,
         val loading: Boolean = true,
         val error: String? = null,
+        val alarmUpdatingId: Long? = null,
 
         val sections: List<EventSection> = emptyList(),
         val nextAlarm: UpcomingEvent? = null,
@@ -523,27 +524,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() {
+        if (_state.value.alarmUpdatingId != null) return
         _state.update { it.copy(loading = true, error = null) }
         viewModelScope.launch {
             when (val result = repository.loadHome()) {
                 is EventRepository.Result.Success -> {
-                    _state.update {
-                        it.copy(
-                            loading = false,
-                            error = null,
-                            sections = result.data.sections,
-                            nextAlarm = result.data.nextAlarm,
-                            totalCount = result.data.totalCount,
-                            hasHome = result.data.hasHome,
-                            homeLabel = result.data.homeLabel,
-                            homePlace = result.data.toHomePlace(),
-                            unplannedCount = result.data.unplannedCount,
-                            offline = result.data.fromCache,
-                            offlineAgeLabel = result.data.ageLabel,
-                        )
-                    }
-                    maybeAskOnboarding(result.data)
-                    syncAlarms(result.data.schedules, fromCache = result.data.fromCache)
+                    applyHome(result.data)
                 }
 
                 is EventRepository.Result.Failure -> _state.update {
@@ -565,7 +551,39 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun applyHome(data: EventRepository.HomeData) {
+        _state.update {
+            it.copy(
+                loading = false,
+                error = null,
+                sections = data.sections,
+                nextAlarm = data.nextAlarm,
+                totalCount = data.totalCount,
+                hasHome = data.hasHome,
+                homeLabel = data.homeLabel,
+                homePlace = data.toHomePlace(),
+                unplannedCount = data.unplannedCount,
+                offline = data.fromCache,
+                offlineAgeLabel = data.ageLabel,
+            )
+        }
+        maybeAskOnboarding(data)
+        syncAlarms(data.schedules, fromCache = data.fromCache)
+    }
+
     fun clearError() = _state.update { it.copy(error = null) }
+
+    fun setAlarmEnabled(id: Long, enabled: Boolean) {
+        if (_state.value.loading || _state.value.offline || _state.value.alarmUpdatingId != null) return
+        _state.update { it.copy(alarmUpdatingId = id, error = null) }
+        viewModelScope.launch {
+            when (val result = repository.setAlarmEnabled(id, enabled)) {
+                is EventRepository.Result.Success -> applyHome(result.data)
+                is EventRepository.Result.Failure -> _state.update { it.copy(error = result.message) }
+            }
+            _state.update { it.copy(alarmUpdatingId = null) }
+        }
+    }
 
     /**
      * 서버 계획을 실제 알람 등록에 반영하고, 밀린 관측을 올린다.

@@ -352,6 +352,7 @@ private fun MainHost(
                     avatarInitials = viewModel.avatarInitials(),
                     onAvatarClick = viewModel::openSettings,
                     onEventClick = { viewModel.openAlarmDecision(it.id) },
+                    onAlarmToggle = viewModel::setAlarmEnabled,
                     onAddEventClick = {
                         viewModel.resetAdd()
                         viewModel.openAddEvent()

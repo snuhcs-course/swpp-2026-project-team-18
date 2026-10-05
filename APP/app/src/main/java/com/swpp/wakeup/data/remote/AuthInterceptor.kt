@@ -40,6 +40,7 @@ class AuthInterceptor(private val tokenStore: TokenStore) : Interceptor {
         val PUBLIC_PATHS = listOf(
             "/api/health",
             "/api/auth/register",
+            "/api/auth/password/check",
             "/api/auth/token",
             "/api/auth/token/refresh",
         )

@@ -15,7 +15,7 @@ backend/.venv/bin/python qa/demo/run.py
 ```
 
 여러 에뮬레이터가 연결됐으면 `--device emulator-5554`, 영상이 필요 없으면 `--no-video`를 추가한다.
-검증은 약 4~5분 걸린다. 최초 빌드는 의존성 다운로드 때문에 더 걸린다.
+검증은 약 5~7분 걸린다. 최초 빌드는 의존성 다운로드 때문에 더 걸린다.
 
 ### 공용 서버에서 완주
 
@@ -43,17 +43,16 @@ backend/.venv/bin/python qa/demo/run.py --public-ui
 
 모든 모드는 별도 QA 앱만 초기화한다. 공용 QA 계정·데이터는 서버에 남는다.
 같은 QA 앱을 사용하므로 여러 모드를 동시에 실행하지 않는다.
-BE-4~6 서버를 배포하기 전 가입 UI의 `terms_agreed: true` 전송을 연결해야 한다.
-현재 공용 완주 기록은 이 계약을 배포하기 전의 결과다.
+로컬·공용 모두 가입·약관·집·루틴·일정·알람 OFF/ON을 실제 UI로 확인한다.
 
 ## 흐름과 데이터
 
 [scenario.json](scenario.json)은 출발지·실제 장소 검색어·루틴·대기 시간을 담는다.
-[run.py](run.py)는 로컬 모드에서는 별도 SQLite DB에 **실제 API**로 새 계정·루틴·일정을 만든다.
-공용 모드의 준비 화면은 [PublicSetupTest.kt](../../APP/app/src/androidTest/java/com/swpp/wakeup/PublicSetupTest.kt)가 조작한다.
+[run.py](run.py)는 로컬 모드에서 일회용 SQLite 서버를 띄운다.
+준비 데이터 생성·알람 스위치는 모든 모드에서 [PublicSetupTest.kt](../../APP/app/src/androidTest/java/com/swpp/wakeup/PublicSetupTest.kt)가 조작한다.
 [DemoFlowTest.kt](../../APP/app/src/androidTest/java/com/swpp/wakeup/DemoFlowTest.kt)는 다음 흐름을 검증한다.
 
-로그인 → 경로·알람 근거 → 화면 잠금 → 실제 알람 → 해제·루틴 완료 → GPS 출발·이동
+준비 UI 검증 후 자동 로그인 → 경로·알람 근거 → 화면 잠금 → 실제 알람 → 해제·루틴 완료 → GPS 출발·이동
 → 목적지 체류 → 도착 완료 → 화면 재진입 → 관측 업로드·이번 주 리포트.
 
 준비 블록은 각각 1~2분으로 신고해 확률 계산의 근거를 만든다.
@@ -77,7 +76,7 @@ FCM, 재부팅·오프라인 복구, 앱 프로세스 재시작 후 도착 복�
 - `device/screen-*.mp4`: 화면 녹화. 3분 단위로 나뉜다.
 - `instrumentation.txt`, `logcat.txt`, `backend.log`, `build.log`: 실패 원인.
 
-공용 완주의 `device/setup-steps.json`, `setup-server-evidence.json`에는 준비 단계 결과가 들어간다.
+전체 완주의 `device/setup-steps.json`, `setup-server-evidence.json`에는 준비 단계 결과가 들어간다.
 `--public-ui`만 실행하면 준비 저장 결과가 `server-evidence.json`에 들어간다.
 `credentials.json`은 재확인용 비밀번호가 담긴 비공개 파일이므로 공유하지 않는다.
 

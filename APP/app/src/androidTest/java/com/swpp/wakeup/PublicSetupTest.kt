@@ -11,14 +11,23 @@ import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import com.swpp.wakeup.ui.auth.LoginActivity
+import com.swpp.wakeup.alarm.ScheduledAlarmStore
 import java.io.File
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
+import java.util.regex.Pattern
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** 공용 서버 준비 화면을 검사한다. run.py --public-ui 또는 --public-e2e. */
+/** 로컬·공용 서버의 실제 가입·설정·알람 스위치 화면을 검사한다. */
 @RunWith(AndroidJUnit4::class)
 class PublicSetupTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -31,7 +40,7 @@ class PublicSetupTest {
     @Test
     fun setupViaUi() {
         assertEquals("com.swpp.wakeup.qa", context.packageName)
-        assertEquals("https://justintime-api.onrender.com/", BuildConfig.BASE_URL)
+        assertTrue(BuildConfig.BASE_URL in setOf("https://justintime-api.onrender.com/", "http://10.0.2.2:8765/"))
         config = JSONObject(File(context.filesDir, "demo-qa-config.json").readText())
         started = System.currentTimeMillis()
         try {
@@ -42,6 +51,9 @@ class PublicSetupTest {
                 input("signup_email", config.getString("email"), "signup_scroll")
                 input("signup_password", config.getString("password"), "signup_scroll")
                 input("signup_password_confirm", config.getString("password"), "signup_scroll")
+                assertFalse("약관 미동의인데 가입 버튼이 켜짐", find(By.res("signup_submit"), "signup_scroll").isEnabled)
+                click(By.res("signup_terms"), "signup_scroll")
+                until("서버 비밀번호 검사", 90_000) { device.findObject(By.res("signup_submit"))?.isEnabled == true }
                 click(By.res("signup_submit"), "signup_scroll")
                 find(By.res("home_setup_scroll"), timeout = 150_000)
             }
@@ -72,17 +84,20 @@ class PublicSetupTest {
                 click(By.text("+  일정 추가"), "home_list")
                 input("event_title", config.getString("event_title"))
                 click(By.res("event_date"))
-                input("event_date_input", config.getString("event_date"))
-                click(By.res("event_time")) // 포커스를 옮겨 날짜 입력을 확정한다.
-                input("event_time_input", config.getString("event_time"))
-                // 장소 입력으로 포커스를 옮기면 시각도 확정된다.
+                val date = LocalDate.parse(config.getString("event_date"))
+                if (YearMonth.from(date) != YearMonth.now()) click(By.desc(Pattern.compile("Change to next month|다음 달.*")))
+                click(By.textContains(date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(Locale.getDefault()))))
+                click(By.text("확인"))
+                click(By.res("event_time"))
+                pickTime(config.getString("event_time"))
+                click(By.text("확인"))
                 click(By.res("place_query"), "add_event_scroll")
                 input("place_query", config.getString("destination_query"))
                 click(By.res("place_search"), "add_event_scroll")
-                click(By.text(config.getString("destination_query")).clazz("android.widget.TextView"),
+                click(By.res("place_result_${config.getString("destination_query")}"),
                     "add_event_scroll", 90_000)
                 click(By.textContains("경로 고르기"), "add_event_scroll")
-                click(By.text("집에서 출발"), "route_scroll", 90_000)
+                click(By.text("도보"), "route_scroll", 90_000)
                 click(By.res("route_${config.getString("route_key")}"), "route_scroll", 90_000)
                 click(By.res("route_confirm"), "route_scroll")
                 click(By.res("event_submit"), "add_event_scroll")
@@ -114,12 +129,55 @@ class PublicSetupTest {
                 device.pressBack()
                 find(By.res("next_alarm"), "home_list")
             }
+            step("08_alarm_switch") {
+                val store = ScheduledAlarmStore(context)
+                val eventId = store.all().single().eventId
+                val toggle = By.res("event_alarm_$eventId")
+                assertTrue(find(toggle, "home_list").isChecked)
+                click(toggle, "home_list")
+                until("OFF 기기 예약 해제") { store.find(eventId) == null }
+                launch()
+                assertFalse("OFF가 재진입 후 유지되지 않음", find(toggle, "home_list").isChecked)
+                click(toggle, "home_list")
+                until("ON 기기 예약 복원") { store.find(eventId) != null }
+                assertTrue(find(toggle, "home_list").isChecked)
+            }
             writeResult("passed")
         } catch (error: Throwable) {
             capture("failure")
             writeResult("failed", "${error.javaClass.simpleName}: ${error.message}")
             throw error
         }
+    }
+
+    private fun pickTime(time: String) {
+        val (hour, minute) = time.split(":").map(String::toInt)
+        click(By.text(Pattern.compile(if (hour >= 12) "PM|오후" else "AM|오전")))
+        val clockHour = if (hour % 12 == 0) 12 else hour % 12
+        click(By.desc(Pattern.compile("$clockHour (hours?|o'clock)|${clockHour}시")))
+        capture("05_time_picker")
+        val zero = By.desc(Pattern.compile("0 minutes?|0분"))
+        val thirty = By.desc(Pattern.compile("30 minutes?|30분"))
+        find(zero)
+        find(thirty)
+        // 상단 분 표시도 같은 설명을 쓴다. 아래쪽 다이얼의 숫자를 기준으로 잡는다.
+        val top = device.findObjects(zero).maxBy { it.visibleCenter.y }.visibleCenter
+        val bottom = device.findObjects(thirty).maxBy { it.visibleCenter.y }.visibleCenter
+        val x = (top.x + bottom.x) / 2.0
+        val y = (top.y + bottom.y) / 2.0
+        val radius = (bottom.y - top.y) / 2.0
+        val angle = Math.PI * 2 * minute / 60
+        device.click((x + radius * kotlin.math.sin(angle)).toInt(),
+            (y - radius * kotlin.math.cos(angle)).toInt())
+    }
+
+    private fun until(label: String, timeout: Long = 30_000, condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + timeout
+        while (System.currentTimeMillis() < deadline) {
+            if (condition()) return
+            Thread.sleep(300)
+        }
+        throw AssertionError("시간 초과: $label")
     }
 
     private fun launch() {
@@ -156,20 +214,25 @@ class PublicSetupTest {
     private fun searchPlace(query: String, scroll: String) {
         input("place_query", query, scroll)
         click(By.res("place_search"), scroll)
-        click(By.text(query).clazz("android.widget.TextView"), scroll, 90_000)
+        click(By.res("place_result_$query"), scroll, 90_000)
     }
 
     private fun find(selector: BySelector, scroll: String? = null, timeout: Long = 30_000): UiObject2 {
         val deadline = System.currentTimeMillis() + timeout
-        var direction = Direction.DOWN
+        var swipes = 0
         while (System.currentTimeMillis() < deadline) {
-            device.findObject(selector)?.let { return it }
+            device.findObject(selector)?.let {
+                val bounds = it.visibleBounds
+                val viewport = scroll?.let { tag -> device.findObject(By.res(tag))?.visibleBounds }
+                if (bounds.height() > 0 && (viewport == null ||
+                    (bounds.top >= viewport.top + 20 && bounds.bottom <= viewport.bottom - 20))) return it
+            }
             if (scroll != null) {
                 hideKeyboard()
                 try {
                     val container = device.findObject(By.res(scroll))
-                    if (container != null && !container.scroll(direction, .55f)) {
-                        direction = if (direction == Direction.DOWN) Direction.UP else Direction.DOWN
+                    if (container != null) {
+                        container.swipe(if (swipes++ / 5 % 2 == 0) Direction.UP else Direction.DOWN, .65f)
                     }
                 } catch (_: StaleObjectException) {
                     // 서버 응답으로 목록이 바뀌면 다음 반복에서 새 컨테이너를 찾는다.

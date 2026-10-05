@@ -342,6 +342,7 @@ private fun ResultRow(
     // Figma ⑭: 고른 줄은 이름 주황 + 오른쪽 ✓, 나머지는 오른쪽 ›.
     Row(
         modifier = Modifier
+            .testTag("place_result_${place.name}")
             .fillMaxWidth()
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 11.dp),

@@ -8,8 +8,10 @@ import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ServerWarmup
+import com.swpp.wakeup.data.remote.PasswordCheckResponse
 import com.swpp.wakeup.data.repository.AuthRepository
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,8 +63,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val password: String = "",
         val nickname: String = "",
         val passwordConfirm: String = "",
-        /** 이용약관 및 개인정보처리방침 동의. 서버 저장은 B-2 이후. */
+        /** 가입 요청에 함께 보내는 약관 동의. */
         val termsAgreed: Boolean = false,
+        val passwordCheck: PasswordCheckResponse? = null,
+        val passwordCheckError: String? = null,
 
         val loading: Boolean = false,
         /** 서버가 준 메시지를 그대로 담는다. */
@@ -89,24 +93,31 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val passwordsMatch: Boolean
             get() = passwordConfirm.isNotEmpty() && password == passwordConfirm
 
-        /**
-         * 가입 버튼 활성 조건.
-         *
-         * 비밀번호 규칙 통과 여부는 아직 넣지 않았다. B-1 검사 API 가 생기면 그
-         * 결과를 여기에 더한다. 앱에서 규칙을 따로 판정하지 않는다.
-         */
+        /** 서버 비밀번호 검사·확인 일치·약관 동의가 모두 필요하다. */
         val canSubmitSignup: Boolean
             get() = !loading && email.isNotBlank() && nickname.isNotBlank() &&
-                password.isNotBlank() && passwordsMatch && termsAgreed
+                password.isNotBlank() && passwordsMatch && termsAgreed && passwordCheck?.valid == true
     }
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
+    private var passwordCheckJob: Job? = null
 
     // --- 입력 -------------------------------------------------------------
 
     fun onEmailChange(value: String) = _state.update { it.copy(email = value, error = null) }
-    fun onPasswordChange(value: String) = _state.update { it.copy(password = value, error = null) }
+    fun onPasswordChange(value: String) {
+        passwordCheckJob?.cancel()
+        _state.update { it.copy(password = value, error = null, passwordCheck = null, passwordCheckError = null) }
+        if (_state.value.screen != Screen.SIGNUP || value.isEmpty()) return
+        passwordCheckJob = viewModelScope.launch {
+            val result = repository.checkPassword(value)
+            _state.update {
+                if (it.screen != Screen.SIGNUP || it.password != value) it
+                else it.copy(passwordCheck = result.getOrNull(), passwordCheckError = result.exceptionOrNull()?.message)
+            }
+        }
+    }
     fun onNicknameChange(value: String) = _state.update { it.copy(nickname = value, error = null) }
     fun onPasswordConfirmChange(value: String) =
         _state.update { it.copy(passwordConfirm = value, error = null) }
@@ -114,13 +125,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- 화면 이동 --------------------------------------------------------
 
-    fun goToSignup() = _state.update {
-        // 이메일은 넘겨준다. 로그인 시도 후 계정이 없어 가입으로 넘어오는 흐름이 흔하다.
-        UiState(screen = Screen.SIGNUP, email = it.email)
+    fun goToSignup() {
+        passwordCheckJob?.cancel()
+        _state.update { UiState(screen = Screen.SIGNUP, email = it.email) }
     }
 
-    fun goToLogin() = _state.update {
-        UiState(screen = Screen.LOGIN, email = it.email)
+    fun goToLogin() {
+        passwordCheckJob?.cancel()
+        _state.update { UiState(screen = Screen.LOGIN, email = it.email) }
     }
 
     fun consumeAuthenticated() = _state.update { it.copy(authenticatedNickname = null) }
@@ -143,6 +155,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 nickname = current.nickname,
                 password = current.password,
                 passwordConfirm = current.passwordConfirm,
+                termsAgreed = current.termsAgreed,
             )
         }
     }
