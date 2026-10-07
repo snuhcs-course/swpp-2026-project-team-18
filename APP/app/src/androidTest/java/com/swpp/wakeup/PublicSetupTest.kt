@@ -88,9 +88,15 @@ class PublicSetupTest {
                 if (YearMonth.from(date) != YearMonth.now()) click(By.desc(Pattern.compile("Change to next month|다음 달.*")))
                 click(By.textContains(date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(Locale.getDefault()))))
                 click(By.text("확인"))
-                click(By.res("event_time"))
-                pickTime(config.getString("event_time"))
-                click(By.text("확인"))
+                // 기본 9시와 같은 시각·오전/오후·경계 분도 같은 다이얼로 확인한다.
+                for (time in listOf("21:02", "09:00", "12:30", "00:59", config.getString("event_time"))) {
+                    click(By.res("event_time"))
+                    pickTime(time)
+                    click(By.text("확인"))
+                    val (hour, minute) = time.split(":").map(String::toInt)
+                    val display = "%02d:%02d".format(Locale.ROOT, if (hour % 12 == 0) 12 else hour % 12, minute)
+                    assertTrue("시각 선택 실패: $time", find(By.res("event_time")).findObject(By.text(display)) != null)
+                }
                 click(By.res("place_query"), "add_event_scroll")
                 input("place_query", config.getString("destination_query"))
                 click(By.res("place_search"), "add_event_scroll")
@@ -156,6 +162,8 @@ class PublicSetupTest {
         click(By.text(Pattern.compile(if (hour >= 12) "PM|오후" else "AM|오전")))
         val clockHour = if (hour % 12 == 0) 12 else hour % 12
         click(By.desc(Pattern.compile("$clockHour (hours?|o'clock)|${clockHour}시")))
+        // 현재 시각과 같으면 상단 시 표시를 누를 수 있으므로 분 선택을 명시한다.
+        click(By.desc(Pattern.compile("Select minutes|분 선택")))
         capture("05_time_picker")
         val zero = By.desc(Pattern.compile("0 minutes?|0분"))
         val thirty = By.desc(Pattern.compile("30 minutes?|30분"))
@@ -168,8 +176,10 @@ class PublicSetupTest {
         val y = (top.y + bottom.y) / 2.0
         val radius = (bottom.y - top.y) / 2.0
         val angle = Math.PI * 2 * minute / 60
-        device.click((x + radius * kotlin.math.sin(angle)).toInt(),
-            (y - radius * kotlin.math.cos(angle)).toInt())
+        // 탭은 5분 단위로 반올림된다. 드래그는 1분 단위로 선택한다.
+        device.swipe(x.toInt(), y.toInt(), (x + radius * kotlin.math.sin(angle)).toInt(),
+            (y - radius * kotlin.math.cos(angle)).toInt(), 30)
+        device.waitForIdle()
     }
 
     private fun until(label: String, timeout: Long = 30_000, condition: () -> Boolean) {

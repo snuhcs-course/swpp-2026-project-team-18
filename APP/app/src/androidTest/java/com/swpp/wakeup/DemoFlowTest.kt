@@ -9,7 +9,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
-import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
@@ -118,9 +117,7 @@ class DemoFlowTest {
                 until("실제 GPS 출발 판정", 100_000) {
                     TripLiveState.pointFor(eventId)?.phase == TripGeofence.Phase.IN_TRANSIT
                 }
-                until("이동 중 UI", 15_000) {
-                    device.findObject(By.res("trip_status"))?.text?.startsWith("이동 중") == true
-                }
+                find(By.res("trip_status").textStartsWith("이동 중"), "plan_scroll", 15_000)
             }
 
             step("07_destination_dwell") {
@@ -128,7 +125,7 @@ class DemoFlowTest {
                     TripLiveState.pointFor(eventId)?.awaitingDwell == true
                 }
                 assertNull("2분 체류 전에 도착 완료됨", TripLiveState.arrivalFor(eventId))
-                assertNotEquals("도착 완료", find(By.res("trip_status")).text)
+                assertNotEquals("도착 완료", find(By.res("trip_status"), "plan_scroll").text)
             }
 
             step("08_arrival_after_service_stop") {
@@ -186,22 +183,33 @@ class DemoFlowTest {
     }
 
     private fun assertArrival(eventId: Long) {
-        until("도착 완료 UI", 15_000) { device.findObject(By.res("trip_status"))?.text == "도착 완료" }
+        find(By.res("trip_status").text("도착 완료"), "plan_scroll", 15_000)
         val arrival = TripLiveState.arrivalFor(eventId)!!
         val clock = SimpleDateFormat("HH:mm", Locale.KOREA).format(Date(arrival.atMillis))
-        assertEquals("실제 도착 시각 UI", clock, find(By.res("trip_arrival_time")).text)
+        assertEquals("실제 도착 시각 UI", clock, find(By.res("trip_arrival_time"), "plan_scroll").text)
     }
 
     private fun find(selector: BySelector, scrollTag: String? = null, timeout: Long = 30_000): UiObject2 {
         val deadline = System.currentTimeMillis() + timeout
-        var direction = Direction.DOWN
+        var swipes = 0
         while (System.currentTimeMillis() < deadline) {
-            device.findObject(selector)?.let { return it }
+            device.findObject(selector)?.let {
+                val bounds = it.visibleBounds
+                val viewport = scrollTag?.let { tag -> device.findObject(By.res(tag))?.visibleBounds }
+                if (bounds.height() > 0 && (viewport == null ||
+                    (bounds.top >= viewport.top + 20 && bounds.bottom <= viewport.bottom - 20))) return it
+            }
             if (scrollTag != null) {
                 try {
                     val container = device.findObject(By.res(scrollTag))
-                    if (container != null && !container.scroll(direction, .55f)) {
-                        direction = if (direction == Direction.DOWN) Direction.UP else Direction.DOWN
+                    if (container != null) {
+                        val bounds = container.visibleBounds
+                        val x = bounds.left + 12 // 지도 대신 부모 목록을 스크롤한다.
+                        val top = bounds.top + bounds.height() / 4
+                        val bottom = bounds.bottom - bounds.height() / 4
+                        val up = swipes++ / 5 % 2 == 0
+                        device.swipe(x, if (up) bottom else top, x, if (up) top else bottom, 80)
+                        device.waitForIdle()
                     }
                 } catch (_: StaleObjectException) {
                     // 비동기 응답으로 화면이 바뀌면 새 컨테이너를 찾는다.

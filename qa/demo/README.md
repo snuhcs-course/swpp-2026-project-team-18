@@ -49,6 +49,7 @@ backend/.venv/bin/python qa/demo/run.py --public-ui
 
 [scenario.json](scenario.json)은 출발지·실제 장소 검색어·루틴·대기 시간을 담는다.
 집은 도로명 주소로, 목적지는 상호명으로 검색해 두 검색 방식과 집 저장을 함께 검증한다.
+일정은 실행 시각 기준으로 생성하고 GPS는 테스트 출발지로 설정한다. 시각 선택은 오전·오후·자정과 1분 단위도 검증한다.
 [run.py](run.py)는 로컬 모드에서 일회용 SQLite 서버를 띄운다.
 준비 데이터 생성·알람 스위치는 모든 모드에서 [PublicSetupTest.kt](../../APP/app/src/androidTest/java/com/swpp/wakeup/PublicSetupTest.kt)가 조작한다.
 [DemoFlowTest.kt](../../APP/app/src/androidTest/java/com/swpp/wakeup/DemoFlowTest.kt)는 다음 흐름을 검증한다.
