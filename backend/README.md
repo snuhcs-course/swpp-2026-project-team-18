@@ -63,6 +63,14 @@ Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정
 앱의 비밀번호 검사·약관 전송·스위치 저장·기기 예약 필터 연결을 완료했다.
 [데모 QA](../qa/demo/README.md)는 같은 UI 흐름으로 로컬·공용 서버를 검증한다.
 
+## 주소·장소 검색
+
+`GET /api/places/search?q=...`는 도로명·지번 주소를 먼저 찾고, 없으면 기존 장소명 검색을 사용한다.
+응답 형식은 동일하며 주소 결과의 `kakao_place_id`는 null이다. 주소는 정확도순으로 반환하고,
+기준 좌표가 있으면 직선 거리를 표시한다. 지역·도로 중심점은 집 주소 후보에서 제외한다.
+주소 조회가 실패해도 정상 장소 결과는 제공한다. 조회 실패 후 대체 결과도 없으면 `degraded: true`다.
+[카카오 주소 검색](https://developers.kakao.com/docs/ko/local/dev-guide)을 사용하며 새 키·DB 변경은 없다.
+
 ## 검증과 학습
 
 `backend` 폴더에서 실행한다. 두 명령 모두 공용 DB와 분리된 테스트 DB를 사용한다.

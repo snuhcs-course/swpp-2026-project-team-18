@@ -6,7 +6,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
-import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
@@ -59,6 +58,7 @@ class PublicSetupTest {
             }
             step("02_home_setup") {
                 searchHomePlace(config.getString("home_query"))
+                capture("02_home_address")
                 click(By.res("home_setup_submit"), "home_setup_scroll")
                 find(By.res("prep_minutes"), timeout = 90_000)
             }
@@ -242,7 +242,13 @@ class PublicSetupTest {
                 try {
                     val container = device.findObject(By.res(scroll))
                     if (container != null) {
-                        container.swipe(if (swipes++ / 5 % 2 == 0) Direction.UP else Direction.DOWN, .45f, 1000)
+                        // 가운데 지도 대신 화면 가장자리에서 부모 목록을 스크롤한다.
+                        val bounds = container.visibleBounds
+                        val x = bounds.left + 12
+                        val top = bounds.top + bounds.height() / 4
+                        val bottom = bounds.bottom - bounds.height() / 4
+                        val up = swipes++ / 5 % 2 == 0
+                        device.swipe(x, if (up) bottom else top, x, if (up) top else bottom, 80)
                         device.waitForIdle()
                     }
                 } catch (_: StaleObjectException) {

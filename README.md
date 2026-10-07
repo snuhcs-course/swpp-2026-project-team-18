@@ -317,6 +317,8 @@ health, password check, sign-up, token and refresh.
 - `places/search` reports `reachable_count` rather than Kakao's `total_count`: Kakao
   answers "카페" with 142,759 matches but serves only 45, and the larger number next to a
   list that ends at 45 reads as a bug
+- Place search prioritizes complete road/lot addresses, then falls back to place names.
+  The response shape is unchanged; address results have a null `kakao_place_id`.
 - `places/staticmap` returns a PNG cached for an hour, within a daily budget (900 by
   default) of the 1,000 free Kakao requests. Failures are not cached
 
