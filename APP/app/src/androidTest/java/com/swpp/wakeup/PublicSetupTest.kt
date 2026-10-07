@@ -6,9 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
-import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.UiObject2
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
 import java.io.File
@@ -31,6 +29,7 @@ import org.junit.runner.RunWith
 class PublicSetupTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+    private val ui = DemoUi(device)
     private val directory = File(context.getExternalFilesDir(null), "demo-qa")
     private val steps = JSONArray()
     private lateinit var config: JSONObject
@@ -50,9 +49,9 @@ class PublicSetupTest {
                 input("signup_email", config.getString("email"), "signup_scroll")
                 input("signup_password", config.getString("password"), "signup_scroll")
                 input("signup_password_confirm", config.getString("password"), "signup_scroll")
-                assertFalse("약관 미동의인데 가입 버튼이 켜짐", find(By.res("signup_submit"), "signup_scroll").isEnabled)
+                assertFalse("약관 미동의인데 가입 버튼이 켜짐", ui.withNode(By.res("signup_submit"), "signup_scroll") { it.isEnabled })
                 click(By.res("signup_terms"), "signup_scroll")
-                until("서버 비밀번호 검사", 90_000) { device.findObject(By.res("signup_submit"))?.isEnabled == true }
+                until("서버 비밀번호 검사", 90_000) { ui.withNode(By.res("signup_submit"), "signup_scroll") { it.isEnabled } }
                 click(By.res("signup_submit"), "signup_scroll")
                 find(By.res("home_setup_scroll"), timeout = 150_000)
             }
@@ -95,7 +94,7 @@ class PublicSetupTest {
                     click(By.text("확인"))
                     val (hour, minute) = time.split(":").map(String::toInt)
                     val display = "%02d:%02d".format(Locale.ROOT, if (hour % 12 == 0) 12 else hour % 12, minute)
-                    assertTrue("시각 선택 실패: $time", find(By.res("event_time")).findObject(By.text(display)) != null)
+                    assertTrue("시각 선택 실패: $time", ui.withNode(By.res("event_time")) { it.findObject(By.text(display)) != null })
                 }
                 click(By.res("place_query"), "add_event_scroll")
                 input("place_query", config.getString("destination_query"))
@@ -140,14 +139,14 @@ class PublicSetupTest {
                 val store = ScheduledAlarmStore(context)
                 val eventId = store.all().single().eventId
                 val toggle = By.res("event_alarm_$eventId")
-                assertTrue(find(toggle, "home_list").isChecked)
+                assertTrue(ui.withNode(toggle, "home_list") { it.isChecked })
                 click(toggle, "home_list")
                 until("OFF 기기 예약 해제") { store.find(eventId) == null }
                 launch()
-                assertFalse("OFF가 재진입 후 유지되지 않음", find(toggle, "home_list").isChecked)
+                assertFalse("OFF가 재진입 후 유지되지 않음", ui.withNode(toggle, "home_list") { it.isChecked })
                 click(toggle, "home_list")
                 until("ON 기기 예약 복원") { store.find(eventId) != null }
-                assertTrue(find(toggle, "home_list").isChecked)
+                assertTrue(ui.withNode(toggle, "home_list") { it.isChecked })
             }
             writeResult("passed")
         } catch (error: Throwable) {
@@ -170,8 +169,8 @@ class PublicSetupTest {
         find(zero)
         find(thirty)
         // 상단 분 표시도 같은 설명을 쓴다. 아래쪽 다이얼의 숫자를 기준으로 잡는다.
-        val top = device.findObjects(zero).maxBy { it.visibleCenter.y }.visibleCenter
-        val bottom = device.findObjects(thirty).maxBy { it.visibleCenter.y }.visibleCenter
+        val top = ui.withNode(zero) { device.findObjects(zero).maxBy { it.visibleCenter.y }.visibleCenter }
+        val bottom = ui.withNode(thirty) { device.findObjects(thirty).maxBy { it.visibleCenter.y }.visibleCenter }
         val x = (top.x + bottom.x) / 2.0
         val y = (top.y + bottom.y) / 2.0
         val radius = (bottom.y - top.y) / 2.0
@@ -199,29 +198,11 @@ class PublicSetupTest {
     }
 
     private fun input(tag: String, value: String, scroll: String? = null, timeout: Long = 30_000) {
-        freshNode { find(By.res(tag), scroll, timeout).text = value }
-        hideKeyboard()
+        ui.input(tag, value, scroll, timeout)
     }
 
     private fun click(selector: BySelector, scroll: String? = null, timeout: Long = 30_000) {
-        freshNode {
-            device.waitForIdle()
-            find(selector, scroll, timeout)
-            device.waitForIdle()
-            find(selector, scroll, timeout).click()
-        }
-    }
-
-    private fun freshNode(action: () -> Unit) {
-        repeat(3) { attempt ->
-            try {
-                action()
-                return
-            } catch (error: StaleObjectException) {
-                if (attempt == 2) throw error
-                device.waitForIdle()
-            }
-        }
+        ui.click(selector, scroll, timeout)
     }
 
     private fun searchHomePlace(query: String) {
@@ -232,48 +213,13 @@ class PublicSetupTest {
         repeat(3) {
             click(row, scroll, 90_000)
             device.waitForIdle()
-            if (device.findObject(row)?.findObject(By.text("✓")) != null) return
+            if (ui.withNode(row, scroll) { it.findObject(By.text("✓")) != null }) return
         }
         throw AssertionError("장소 선택 표시가 없음: $query")
     }
 
-    private fun find(selector: BySelector, scroll: String? = null, timeout: Long = 30_000): UiObject2 {
-        val deadline = System.currentTimeMillis() + timeout
-        var swipes = 0
-        while (System.currentTimeMillis() < deadline) {
-            device.findObject(selector)?.let {
-                val bounds = it.visibleBounds
-                val viewport = scroll?.let { tag -> device.findObject(By.res(tag))?.visibleBounds }
-                if (bounds.height() > 0 && (viewport == null ||
-                    (bounds.top >= viewport.top + 20 && bounds.bottom <= viewport.bottom - 20))) return it
-            }
-            if (scroll != null) {
-                hideKeyboard()
-                try {
-                    val container = device.findObject(By.res(scroll))
-                    if (container != null) {
-                        // 가운데 지도 대신 화면 가장자리에서 부모 목록을 스크롤한다.
-                        val bounds = container.visibleBounds
-                        val x = bounds.left + 12
-                        val top = bounds.top + bounds.height() / 4
-                        val bottom = bounds.bottom - bounds.height() / 4
-                        val up = swipes++ / 5 % 2 == 0
-                        device.swipe(x, if (up) bottom else top, x, if (up) top else bottom, 80)
-                        device.waitForIdle()
-                    }
-                } catch (_: StaleObjectException) {
-                    // 서버 응답으로 목록이 바뀌면 다음 반복에서 새 컨테이너를 찾는다.
-                }
-            }
-            Thread.sleep(300)
-        }
-        throw AssertionError("화면 요소를 찾지 못함: $selector")
-    }
-
-    private fun hideKeyboard() {
-        // Back을 무조건 누르면 화면 자체가 닫힐 수 있다. 실제 IME가 있을 때만 닫는다.
-        freshNode { device.findObject(By.res("android:id/input_method_nav_back"))?.click() }
-    }
+    private fun find(selector: BySelector, scroll: String? = null, timeout: Long = 30_000) =
+        ui.await(selector, scroll, timeout)
 
     private fun step(name: String, action: () -> Unit) {
         Log.i("DemoFlowQA", "START $name")
@@ -304,6 +250,7 @@ class PublicSetupTest {
         directory.mkdirs()
         File(directory, "steps.json").writeText(JSONObject().put("status", status)
             .put("duration_ms", System.currentTimeMillis() - started).put("steps", steps)
+            .put("stale_retries", ui.staleRetries)
             .put("error", error).toString(2))
     }
 }

@@ -9,9 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
-import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
-import androidx.test.uiautomator.UiObject2
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
 import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.sensing.TripLiveState
@@ -34,6 +32,7 @@ class DemoFlowTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
+    private val ui = DemoUi(device)
     private val directory = File(context.getExternalFilesDir(null), "demo-qa")
     private val steps = JSONArray()
     private lateinit var config: JSONObject
@@ -91,7 +90,7 @@ class DemoFlowTest {
             }
 
             step("05_dismiss_and_routines") {
-                find(By.res("alarm_dismiss")).click()
+                ui.click(By.res("alarm_dismiss"))
                 device.wakeUp()
                 device.executeShellCommand("wm dismiss-keyguard")
                 find(By.text("아침 기록"))
@@ -103,9 +102,9 @@ class DemoFlowTest {
                     val label = "\"${blocks.getString(index)}\" 마침"
                     find(By.text(label), "morning_scroll")
                     Thread.sleep(config.getLong("block_seconds") * 1_000)
-                    find(By.res("morning_action"), "morning_scroll").click()
+                    ui.click(By.res("morning_action"), "morning_scroll")
                 }
-                find(By.text("기록 끝내기"), "morning_scroll").click()
+                ui.click(By.text("기록 끝내기"), "morning_scroll")
                 find(By.res("home_list"))
             }
 
@@ -125,7 +124,7 @@ class DemoFlowTest {
                     TripLiveState.pointFor(eventId)?.awaitingDwell == true
                 }
                 assertNull("2분 체류 전에 도착 완료됨", TripLiveState.arrivalFor(eventId))
-                assertNotEquals("도착 완료", find(By.res("trip_status"), "plan_scroll").text)
+                assertNotEquals("도착 완료", ui.text(By.res("trip_status"), "plan_scroll"))
             }
 
             step("08_arrival_after_service_stop") {
@@ -155,8 +154,8 @@ class DemoFlowTest {
             step("10_upload_and_weekly_report") {
                 assertTrue(control("/verify").getBoolean("verified"))
                 device.pressBack()
-                find(By.res("open_report"), "home_list").click()
-                find(By.res("report_next_week")).click()
+                ui.click(By.res("open_report"), "home_list")
+                ui.click(By.res("report_next_week"))
                 find(By.text("1 / 1건"), timeout = 45_000)
                 assertTrue(device.hasObject(By.text("정시 도착 100%")))
             }
@@ -178,7 +177,7 @@ class DemoFlowTest {
     }
 
     private fun openPlan() {
-        find(By.res("next_alarm"), "home_list").click()
+        ui.click(By.res("next_alarm"), "home_list")
         find(By.text("알람 결정"))
     }
 
@@ -186,39 +185,11 @@ class DemoFlowTest {
         find(By.res("trip_status").text("도착 완료"), "plan_scroll", 15_000)
         val arrival = TripLiveState.arrivalFor(eventId)!!
         val clock = SimpleDateFormat("HH:mm", Locale.KOREA).format(Date(arrival.atMillis))
-        assertEquals("실제 도착 시각 UI", clock, find(By.res("trip_arrival_time"), "plan_scroll").text)
+        assertEquals("실제 도착 시각 UI", clock, ui.text(By.res("trip_arrival_time"), "plan_scroll"))
     }
 
-    private fun find(selector: BySelector, scrollTag: String? = null, timeout: Long = 30_000): UiObject2 {
-        val deadline = System.currentTimeMillis() + timeout
-        var swipes = 0
-        while (System.currentTimeMillis() < deadline) {
-            device.findObject(selector)?.let {
-                val bounds = it.visibleBounds
-                val viewport = scrollTag?.let { tag -> device.findObject(By.res(tag))?.visibleBounds }
-                if (bounds.height() > 0 && (viewport == null ||
-                    (bounds.top >= viewport.top + 20 && bounds.bottom <= viewport.bottom - 20))) return it
-            }
-            if (scrollTag != null) {
-                try {
-                    val container = device.findObject(By.res(scrollTag))
-                    if (container != null) {
-                        val bounds = container.visibleBounds
-                        val x = bounds.left + 12 // 지도 대신 부모 목록을 스크롤한다.
-                        val top = bounds.top + bounds.height() / 4
-                        val bottom = bounds.bottom - bounds.height() / 4
-                        val up = swipes++ / 5 % 2 == 0
-                        device.swipe(x, if (up) bottom else top, x, if (up) top else bottom, 80)
-                        device.waitForIdle()
-                    }
-                } catch (_: StaleObjectException) {
-                    // 비동기 응답으로 화면이 바뀌면 새 컨테이너를 찾는다.
-                }
-            }
-            Thread.sleep(300)
-        }
-        throw AssertionError("화면 요소를 찾지 못함: $selector")
-    }
+    private fun find(selector: BySelector, scrollTag: String? = null, timeout: Long = 30_000) =
+        ui.await(selector, scrollTag, timeout)
 
     private fun until(label: String, timeout: Long, predicate: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeout
@@ -275,6 +246,7 @@ class DemoFlowTest {
         directory.mkdirs()
         File(directory, "steps.json").writeText(JSONObject().put("status", status)
             .put("duration_ms", System.currentTimeMillis() - started).put("steps", steps)
+            .put("stale_retries", ui.staleRetries)
             .put("error", error).toString(2))
     }
 }
