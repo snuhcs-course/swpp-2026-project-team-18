@@ -152,7 +152,9 @@ fun SignupScreen(
 
         // Figma 순서: 비밀번호 → 조건 카드 → 비밀번호 확인
         PasswordRuleCard(lengthPassed = passwordCheck?.minLength, mixPassed = passwordCheck?.lettersAndDigits)
-        passwordCheck?.messages.orEmpty().forEach { ErrorText(it) }
+        // 검사 API 의 `messages`("이 비밀번호는 너무 짧습니다…" 등)는 그리지 않는다.
+        // 조건 카드의 점 색이 같은 내용을 이미 말한다(사용자 결정 10-06).
+        // 검사 자체가 실패한 경우(네트워크 등)만 알린다.
         passwordCheckError?.let { ErrorText(it) }
 
         JitTextField(

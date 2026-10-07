@@ -489,9 +489,10 @@ BE-1~6 구현과 앱 연결 완료(0.10.0). 남은 항목은 BE-7부터다.
   - 관측이 없어 옵션을 만들 수 없을 때의 응답 형태도 정한다(예 `options: []`).
   - 서버 코드: 분포 계산은 이미 `backend/apps/planning`(`test_distributions.py`)에 있다. 이걸 이 응답 모양으로 묶어 내보내면 된다.
   - 앱 상태: **앱 화면 준비 완료**(옵션 카드 3개·자동 조정 카드·히스토그램·빈 상태). API 가 생기면 호출해서 `RiskOptionsView` 로 바꾸는 연결만 남는다.
-- [ ] **BE-17. 리스크 선택 저장**
+- [x] **BE-17. 리스크 선택 저장**
   - API: `PATCH /api/events/{id}` 의 `tau_override`(0.5 ~ 0.999)로 저장할지, `option_key` 전용 필드를 둘지 정해 알려 줄 것. 저장 후 알람 재계산.
   - 앱 상태: "보통으로 계속하기" 버튼 있음. 저장 방식이 정해지면 연결한다.
+  - ✅ 확인(2026-10-06, `main`): 새 필드 없이 **기존 `tau_override`(0.5~0.999, DB 제약 `events_event_tau_override_range`)로 저장**한다. `alarm_enabled` 만 바꾼 경우가 아니면 PATCH 후 알람을 다시 계산한다(`events/views.py` `EventDetailView.update`). 앱 연결은 옵션 목록(BE-16)이 생겨야 할 수 있다 — 옵션별 τ 를 서버가 알려 줘야 하기 때문이다.
 
 ### 🔴 우선순위 5 — 일정 추가 (B-6, B-7)
 
