@@ -1,136 +1,90 @@
-# JustInTime — Backend (Django)
+# JustInTime — 백엔드 실행
 
-설계 문서는 Wiki 의 `back-spec` 을 본다. 이 파일은 실행과 현재 상태만 다룬다.
+Django·DRF 서버이며 팀 공용 Neon Postgres를 사용한다.
+앱만 테스트할 때는 [공용 서버로 앱을 실행](../APP/README.md)하면 된다.
+[구성·API](../README.md) · [환경변수 목록](../README.md#configuration)
 
-## 실행
+## 개발 환경
+
+Python 3.12를 사용한다. 저장소 루트에서 시작하며 기존 `.venv`는 재사용한다.
+
+### macOS / Linux
+
+```bash
+cd backend
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements/dev.txt
+```
+
+### Windows PowerShell
 
 ```powershell
 cd backend
-
-# 최초 1회
-python -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements\dev.txt
-Copy-Item .env.example .env      # 그리고 값 채우기
-.\.venv\Scripts\python.exe manage.py migrate
-
-# 실행 — 반드시 0.0.0.0 이어야 에뮬레이터가 접근한다
-.\.venv\Scripts\python.exe manage.py runserver 0.0.0.0:8000
 ```
 
-`127.0.0.1:8000` 으로 띄우면 호스트에서는 되지만 **에뮬레이터에서 연결 실패**한다.
+이후 Windows에서는 `python` 대신 `.\.venv\Scripts\python.exe`를 사용한다.
 
-데모 계정 `demo@demo.com` / `demo1234` (`DEBUG=True` 일 때만 마이그레이션으로 생성).
-관리자 화면 `http://127.0.0.1:8000/admin/`.
+## 설정과 실행
 
-## 구성
+서버는 **`backend/.env`**를 읽는다. 받은 파일을 이 위치에 두고 기존 값을 덮어쓰지 않는다.
+`DATABASE_URL`에는 팀 Neon direct 주소를 넣는다. 셸 환경변수는 `.env`보다 우선한다.
 
-| 항목 | 값 |
-| --- | --- |
-| Python | 3.12.10 |
-| Django | 5.2.16 |
-| DRF | 3.18.1 |
-| SimpleJWT | 5.3.1 — access 30분 / refresh 14일 |
-| DB | SQLite. `DATABASE_URL` 로 Postgres 전환 |
-| Celery | 없음. P2 에 도입 |
+**로컬 서버도 같은 공용 DB에 쓴다.** 마이그레이션은 팀과 적용 시점을 맞추고,
+삭제·정리·되돌리기 전에는 `python scripts/backup_db.py`로 저장소 밖에 백업한다.
 
-```
-apps/
-├── accounts/    커스텀 User(email 로그인) + Profile(집 위치·준비시간·기본 τ)
-├── events/      Place(전역 공유) · EventTag(6종 시드) · Event(사용자별)
-├── planning/    AlarmPlan — 알람 계산 결과
-├── routing/     카카오 클라이언트 (경로·장소검색)
-└── common/      health, 공통 에러 포맷
+가상 환경을 활성화한 `backend` 폴더에서 실행한다.
+
+```bash
+python manage.py runserver 127.0.0.1:8000
 ```
 
-미작성: `routines`, `observations`, `weather`, `prediction`, `rooms`, `reports`,
-`nlp`, `push`. 해당 페이즈에서 추가한다.
+다른 터미널에서 `curl http://127.0.0.1:8000/api/health`로 연결·버전을 확인한다.
+Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정상 여부까지 검사하지 않는다.
 
-## 엔드포인트
+에뮬레이터 연결은 [앱 안내](../APP/README.md)를 따른다.
+실기기 LAN 연결은 `runserver 0.0.0.0:8000`을 사용하며 [기기 설정](../docs/device-setup.md)을 본다.
 
-```
-GET   /api/health                     인증 없음. 연결 진단용
+## 프론트 연결 계약 (BE-1~6)
 
-POST  /api/auth/register              회원가입 (201, access+refresh+user)
-POST  /api/auth/token                 로그인
-POST  /api/auth/token/refresh         갱신
-GET   /api/auth/me                    토큰 유효성 확인
+- `POST /api/auth/password/check` `{password}` → `{min_length, letters_and_digits, messages}`.
+  가입과 같은 규칙(8자 이상·영문+숫자·흔한 비밀번호 검사), 이메일 유사성 검사 없음.
+  비로그인 호출, IP당 분당 600회 제한. 조건 미충족도 200이며 오류는 `messages`에 담긴다.
+- `POST /api/auth/register`에 JSON boolean `terms_agreed: true` 필수.
+  동의 시각은 `User.terms_agreed_at`에 저장하며 기존 계정은 null을 유지한다.
+- 일정 목록·상세의 `alarm_enabled`는 null(자동)/true/false, `alarm_on`은 최종 켬/끔,
+  `is_first_alarm`은 그날 켜진 첫 알람이다. 계산 완료된 일정을 사용자 시간대의 **일정 시작 날짜**로
+  묶고 알람 시각·ID 순으로 판정한다. 첫 비-OFF 일정만 자동 ON이며 명시적 ON은 함께 켤 수 있다.
+- `PATCH /api/events/{id}`의 `alarm_enabled`에 true/false/null을 보내 켬/끔/자동 복원.
+  수정된 일정 한 건을 반환하므로 **목록을 다시 조회**한다. 켬/끔만 바꾸면 경로 재조회는 없다.
 
-GET   PATCH  /api/profile             집 위치 변경 시 알람 자동 재계산
+앱의 비밀번호 검사·약관 전송·스위치 저장·기기 예약 필터 연결을 완료했다.
+[데모 QA](../qa/demo/README.md)는 같은 UI 흐름으로 로컬·공용 서버를 검증한다.
 
-GET   POST   /api/events              목록은 LimitOffsetPagination
-GET   PATCH  DELETE  /api/events/{id}
-POST  /api/events/{id}/recompute
-GET   /api/events/tags
+## 주소·장소 검색
 
-GET   /api/places/search?q=           카카오 프록시
-GET   /api/routes/candidates?dest_lat=&dest_lng=
-```
+`GET /api/places/search?q=...`는 도로명·지번 주소를 먼저 찾고, 없으면 기존 장소명 검색을 사용한다.
+응답 형식은 동일하며 주소 결과의 `kakao_place_id`는 null이다. 주소는 정확도순으로 반환하고,
+기준 좌표가 있으면 직선 거리를 표시한다. 지역·도로 중심점은 집 주소 후보에서 제외한다.
+주소 조회가 실패해도 정상 장소 결과는 제공한다. 조회 실패 후 대체 결과도 없으면 `degraded: true`다.
+[카카오 주소 검색](https://developers.kakao.com/docs/ko/local/dev-guide)을 사용하며 새 키·DB 변경은 없다.
 
-**목록 응답은 배열이 아니라 페이지 객체다** (`{count, next, previous, results}`).
-`DEFAULT_PAGINATION_CLASS` 가 전역 설정이기 때문이다. `APIView` 로 직접 쓴
-`/api/events/tags` 와 `/api/places/search` 는 페이지네이션을 타지 않는다.
+## 검증과 학습
 
-**남의 일정 접근은 403 이 아니라 404 다.** 403 은 "그 id 의 일정이 존재한다" 는 사실을
-알려준다. `_UserScopedMixin.get_queryset()` 한 곳에서 걸러 목록과 상세가 같은 규칙을
-쓰게 했다.
+`backend` 폴더에서 실행한다. 두 명령 모두 공용 DB와 분리된 테스트 DB를 사용한다.
 
-## 알람 계산
-
-```
-alarm_at  = start_at − buffer − travel − prep
-buffer    = 10분 (고정)
-prep      = profile.onboarding_prep_min ?? 30 (고정)
-travel    = 카카오 실측
-            event.route_key 있으면 resolve_route(key)   ← 사용자가 고른 경로
-            없으면          best_route()               ← 도보·대중교통 중 최단
+```bash
+python -m pytest
+python scripts/run_local_suite.py
 ```
 
-`on_time_probability` 는 **null 이다.** 관측이 없고 카카오 응답에도 변동성 정보가
-없어서 분포를 만들 재료가 없다. 임의값을 넣지 않는다.
+HTTP 스위트는 서버를 자동 실행한다. 기존 서버가 8000 포트를 사용하면 종료하고 다시 실행한다.
+카카오 키가 없으면 관련 항목은 건너뛰므로 실패 수와 건너뜀을 함께 확인한다.
+결과는 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다.
 
-`AlarmPlan.status` 는 `ok` / `no_home` / `no_place` / `route_failed` 중 하나이며,
-`ok` 가 아니면 시각·분 필드가 전부 null 이다. 이 규칙은 `CheckConstraint` 로 DB 에
-박혀 있다.
-
-## 검증
-
-전부 실제 HTTP 호출이다. 서버를 띄운 상태에서 돌린다.
-
-```powershell
-.\.venv\Scripts\python.exe scripts\check_auth_api.py          # 18 케이스
-.\.venv\Scripts\python.exe scripts\check_events_api.py        # 20 케이스
-.\.venv\Scripts\python.exe scripts\check_route_api.py         # 30 케이스
-.\.venv\Scripts\python.exe scripts\check_timezone.py          # KST 오프셋 처리
-.\.venv\Scripts\python.exe scripts\check_external_apis.py     # 외부 API 도달
-.\.venv\Scripts\python.exe scripts\db_status.py               # DB 요약
-```
-
-## 설정
-
-```
-config/settings/
-├── base.py   공통
-├── dev.py    DEBUG=True, ALLOWED_HOSTS
-└── prod.py   자리만
-```
-
-기본값은 `config.settings.dev` (`manage.py`).
-
-### ALLOWED_HOSTS 주의
-
-```python
-ALLOWED_HOSTS = ["10.0.2.2", "localhost", "127.0.0.1"]
-```
-
-`ALLOWED_HOSTS` 가 **비어 있을 때만** Django 가 DEBUG 에서 localhost 를 자동 허용한다.
-`10.0.2.2` 를 넣는 순간 자동 허용이 사라지므로 localhost 와 127.0.0.1 을 함께 적어야
-한다. 이걸 빼면 호스트에서 `curl` 이 400 을 받는다.
-
-`testserver` 는 넣지 않았다. 그래서 `django.test.Client` 를 쓸 수 없고 검증
-스크립트는 `requests` 로 `127.0.0.1:8000` 을 부른다.
-
-### DATABASE_URL 주의
-
-`.env` 에 `DATABASE_URL=` 을 빈 값으로 두면 `dj_database_url.config()` 가 이를 유효한
-설정으로 착각해 `DATABASES = {}` 를 만든다. DB 가 조용히 죽는다. `base.py` 는
-`parse()` + 빈 문자열 필터를 쓴다.
+`check_deployed.py`·`check_same_db.py`는 검증 데이터를 만들고,
+`train_models`는 DB에 이동 보정값을 저장한다. 공용 DB에서 실행할 때 팀과 시점을 맞춘다.
+준비 관측은 다음 계산에 직접 반영되며, 이동 보정 학습은 수동 실행 후 일정 재계산이 필요하다.
+변동성 근거가 부족하면 도착 확률은 null이고 앱은 “학습 중”으로 표시한다.

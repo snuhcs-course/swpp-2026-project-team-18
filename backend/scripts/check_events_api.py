@@ -115,6 +115,7 @@ def signup(slug: str, nickname: str):
     st, body = call("POST", "/api/auth/register", {
         "email": email, "nickname": nickname,
         "password": "swpp2026Alarm!", "password_confirm": "swpp2026Alarm!",
+        "terms_agreed": True,
     })
     assert st == 201, f"회원가입 실패 {st} {body}"
     return email, body["access"]
@@ -245,6 +246,17 @@ check("일정 생성 201", st == 201 and event_id,
       f"place={(created.get('place') or {}).get('name')} tag={(created.get('tag') or {}).get('label')}")
 check("집 위치 없으면 NO_HOME", plan.get("status") == "no_home",
       f"status={plan.get('status')} label={plan.get('status_label')!r} alarm_at={plan.get('alarm_at')}")
+
+check("알람 상태 필드", created.get("alarm_enabled") is None and
+      created.get("alarm_on") is False and created.get("is_first_alarm") is False,
+      f"enabled={created.get('alarm_enabled')} on={created.get('alarm_on')}")
+st, toggled = call("PATCH", f"/api/events/{event_id}", {"alarm_enabled": True}, token=token_a)
+check("계산 불가 알람은 켬 설정을 저장해도 미등록", st == 200 and
+      toggled.get("alarm_enabled") is True and toggled.get("alarm_on") is False,
+      f"status={st}")
+st, reset = call("PATCH", f"/api/events/{event_id}", {"alarm_enabled": None}, token=token_a)
+check("알람 자동 규칙으로 초기화", st == 200 and reset.get("alarm_enabled") is None,
+      f"status={st}")
 
 # 6) 목록에 반영
 st, body = call("GET", "/api/events", token=token_a)

@@ -1,202 +1,80 @@
-# Running on a physical device
+# 기기 설정과 테스트
 
-The emulator gets you most of the way, but three things can only be checked on real
-hardware. Each one can sink the product on its own, so this is not optional polish.
+기본 테스트는 [공용 서버로 앱을 실행](../APP/README.md)하고
+[MVP 체크리스트](demo-checklist.md)에 결과를 기록한다.
 
-| What | Why an emulator cannot answer it |
+## 연결
+
+에뮬레이터는 Android Studio → Device Manager에서 켠다. 준비된 Mac 기기는 `JIT_API_34`다.
+ADB 경로는 [앱 안내](../APP/README.md)의 터미널 설정을 사용한다.
+
+- **USB:** 빌드 번호를 7번 눌러 개발자 옵션을 켜고, USB 디버깅을 허용한 뒤 케이블을 연결한다.
+  기기에 뜨는 디버깅 승인 창을 허용한다.
+- **무선:** PC와 기기를 같은 네트워크에 연결한다. 무선 디버깅의 페어링 주소로
+  `adb pair <IP:포트>`를 실행한 뒤, 기본 화면의 연결 주소로 `adb connect <IP:포트>`를 실행한다.
+  페어링과 연결 포트는 다르다.
+
+`adb devices -l`에서 `device` 상태를 확인한다. 여러 기기가 있으면 ADB에 `-s <기기-ID>`를 붙인다.
+아래는 macOS/Bash 예시이며 ID는 연결 목록에 맞게 바꾼다.
+
+```bash
+JIT_DEVICE=emulator-5554
+adb -s "$JIT_DEVICE" shell cmd alarm set-timezone Asia/Seoul
+adb -s "$JIT_DEVICE" shell settings put secure show_ime_with_hard_keyboard 1
+# 신림역. 경도 → 위도 순서이며 프로필 집 위치에 맞춘다.
+adb -s "$JIT_DEVICE" emu geo fix 126.929745 37.484267
+```
+
+Windows에서는 `$JIT_DEVICE` 대신 실제 기기 ID를 넣는다.
+한글 입력은 Android 설정에서 한국어 키보드를 추가한다.
+
+## 권한과 GPS
+
+알림·정확한 위치·전체 화면 알림을 허용하고 기기·PC 음량을 확인한다.
+추적은 알람 해제 시 시작하며, 위치는 앱 사용 중 허용으로 테스트할 수 있다.
+[Android 14 전체 화면 알림 안내](https://developer.android.com/about/versions/14/behavior-changes-14).
+
+1. 출발 전 GPS를 프로필 집 위치로 보내고 알람을 해제한다.
+2. 에뮬레이터 **⋯ → Location → Routes → Play route**로 집에서 목적지까지 1배속 이동한다.
+   메뉴가 없으면 에뮬레이터를 별도 창으로 연다.
+3. 목적지 위치를 Single points로 보내 **반경 50m 안에서 2분 이상** 유지한다.
+   지도 중심이나 장소명 검색 결과 대신 **일정에 저장된 목적지 좌표**를 사용한다.
+   알림의 "도착 확인 중"과 남은 체류 시간을 확인한다.
+4. 이동 상태와 서버 관측 업로드를 확인한다.
+
+출발은 집 반경 150m 밖 연속 2회 또는 누적 80m·60초 이상 이동으로 판정한다.
+위치 갱신은 출발 전 30초·이동 중 10초 간격이며 오차 50m 초과 위치는 제외한다.
+[Android 가상 GPS 안내](https://developer.android.com/studio/run/emulator-extended-controls).
+
+## 상태와 로그
+
+홈 아바타 메뉴에서 서버 주소, 실제 등록된 알람 수·다음 시각, 미전송 이동 기록 수를 확인한다.
+
+```bash
+adb -s "$JIT_DEVICE" logcat -s AlarmScheduler AlarmReceiver TripTrackingService TripObservationQueue
+adb -s "$JIT_DEVICE" shell dumpsys alarm
+```
+
+예약 목록에서 `com.swpp.wakeup`을 찾는다. 공유 로그에는 토큰·키·개인 위치를 넣지 않는다.
+
+| 문제 | 확인할 것 |
 | --- | --- |
-| **Alarm delivery under battery optimization** | The emulator runs stock AOSP. One UI and other vendor skins defer background work aggressively, and our product fails completely if a single alarm does not fire. |
-| **Reported GPS accuracy** | Departure and arrival decisions reject any fix worse than 50 m. The emulator reports a clean 5–9 m; a phone in a pocket does not. If real accuracy is consistently worse, the radii need adjusting. |
-| **Location updates with the screen off** | Tracking runs in a foreground service for a whole commute. How long a vendor skin keeps it alive is not observable on an emulator. |
+| 로그인 실패 | 앱 서버 주소 → health → 인증 오류 메시지 |
+| 알람 미발화·화면 미표시 | 미래 시각·기기 예약 → 시간대·알림/전체 화면 권한 → 소리·절전 설정 |
+| 위치 기록 없음 | 알람 해제로 추적 시작 → 정확한 위치 권한 → GPS·판정 시간 → 미전송 큐 |
+| 도착 판정 안 됨 | 저장된 목적지 좌표와 GPS의 거리 50m 이내 → 2분 체류 → 추적 알림 확인 |
+| 앱 재시작 후 상태 초기화 | [알려진 제한](demo-checklist.md) 확인 |
 
-Everything else — registration, firing over the lock screen, reboot recovery, the
-departure/arrival state machine, observation upload — is already verified on an
-emulator. See `Spec/checklist.md`.
+실제 GPS 오차, 절전 중 알람, 화면을 끈 채 이동 추적은 실기기에서 별도로 검증한다.
 
----
+## 선택 사항: 실기기에서 로컬 서버 사용
 
-## The address problem
+1. [백엔드](../backend/README.md)를 `runserver 0.0.0.0:8000`으로 띄운다.
+2. PC·기기를 같은 LAN에 연결하고 `APP/local.properties`에 `devServerHost=<PC의 LAN 주소>`를 넣는다.
+3. 기기 브라우저에서 `http://<PC의 LAN 주소>:8000/api/health`를 확인한다.
+   연결되지 않으면 방화벽의 Private 네트워크 8000 포트와 `ALLOWED_HOSTS`를 확인한다.
+   자동 감지가 놓친 주소는 `backend/.env`의 `DEV_EXTRA_HOSTS`에 추가한다.
+4. 앱을 다시 빌드·설치한다. 공용 서버로 돌아갈 때는 `devServerHost` 줄을 제거하고 다시 빌드한다.
 
-An emulator reaches the host at the fixed address `10.0.2.2`. A phone cannot use that;
-it needs your machine's LAN IP, which differs per person and changes when you switch
-networks. So the address must not be hardcoded.
-
-`local.properties` (git-ignored) holds it:
-
-```properties
-devServerHost=192.168.0.12
-```
-
-Gradle bakes that into `BuildConfig.BASE_URL`. **You do not have to undo it to go back
-to the emulator** — `ApiClient` detects an emulator at runtime and substitutes
-`10.0.2.2`, so one build works on both. The account dialog shows the address actually
-in use, which is the fastest way to confirm which one you got.
-
----
-
-## 1. Open the firewall (once)
-
-The dev server listens on 8000. Windows blocks inbound connections to it by default,
-and this is the single most common reason a phone cannot reach the server.
-
-Run in an **administrator** PowerShell:
-
-```powershell
-New-NetFirewallRule -DisplayName "JustInTime dev server 8000" `
-  -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8000 `
-  -Profile Private
-```
-
-`-Profile Private` keeps the port closed on public networks. Do not widen it.
-
-## 2. Point the app at your machine
-
-```powershell
-cd APP
-.\scripts\use_device.ps1
-```
-
-The script finds your IPv4 addresses, prefers the Wi-Fi one, writes `devServerHost`
-into `local.properties`, checks the firewall rule, and lists connected devices with
-their API level. To choose a different address:
-
-```powershell
-.\scripts\use_device.ps1 -ServerHost 192.168.0.12
-.\scripts\use_device.ps1 -Emulator          # back to 10.0.2.2
-```
-
-The server already accepts whichever address you pick — `config/settings/dev.py`
-detects the machine's local addresses and adds them to `ALLOWED_HOSTS`.
-
-## 3. Connect the phone
-
-**Requirement: Android 14 (API 34) or newer.** `minSdk` is 34, so the install simply
-fails on older builds. A Galaxy S23 shipped with Android 13 and must be updated first.
-
-```powershell
-$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
-& $adb shell getprop ro.build.version.sdk     # must be >= 34
-```
-
-### USB
-
-Easier for the first run, because you want logs.
-
-1. Phone: **Settings → About phone → Software information → tap Build number 7 times**
-2. **Settings → Developer options → USB debugging** ON
-3. Plug in, then accept *Allow USB debugging?* on the phone
-
-### Wireless (Android 11+, no cable)
-
-1. Phone: **Developer options → Wireless debugging** ON → *Pair device with pairing code*
-2. On the PC:
-
-```powershell
-& $adb pair <ip:port shown on the phone>      # then enter the pairing code
-& $adb connect <phone-ip:port>                # the port outside the pairing dialog
-```
-
-The pairing dialog and the connect listing show **different ports**. Use the one from
-the main Wireless debugging screen for `connect`.
-
-## 4. Check the path before installing
-
-```
-http://<your-ip>:8000/api/health
-```
-
-Open that in the phone's browser. `{"ok":true,"version":"..."}` means the route is
-clear. Anything else is the firewall or the two devices being on different networks —
-fix it here, not after the app is installed and failing for unclear reasons.
-
-## 5. Install and run
-
-```powershell
-# terminal 1 — server. 0.0.0.0 is required; 127.0.0.1 is unreachable from the phone.
-cd backend
-.\.venv\Scripts\python.exe manage.py runserver 0.0.0.0:8000
-
-# terminal 2 — app
-cd APP
-$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
-.\gradlew.bat installDebug
-```
-
-`JAVA_HOME` is usually not set on the machine, so export it per shell.
-
----
-
-## Permissions and power settings
-
-| Setting | Why |
-| --- | --- |
-| **Notifications: allow** | Not cosmetic. Android blocks a background `startActivity`, so the alarm screen is launched by the notification's full-screen intent. Deny this and the alarm never appears over the lock screen. |
-| **Location: precise** | Coarse location has hundreds of metres of error, so almost no fix would pass the 50 m filter and nothing would ever be detected. "Allow all the time" is **not** needed — tracking starts from the visible alarm screen. |
-| **Battery optimization** | Excluding the app makes alarms reliable, but leaving it on is itself the thing under test. Run a few nights without the exemption first; a missed alarm is a finding, not a setup mistake. |
-
----
-
-## Testing a commute, when the server is at home
-
-Departure and arrival only happen if you walk out of the house — at which point the
-phone leaves your Wi-Fi and cannot reach the dev server. This still works:
-
-1. At home, open the app and let it refresh. The alarm is now registered **on the
-   device**; the server is not needed again.
-2. Leave. Detections are written to a local queue on disk as they happen.
-3. Come back and open the app. The queue uploads, and the server ignores anything it
-   already has, so a retry cannot create duplicates.
-
-If you would rather watch it happen live, put both the phone and the PC on a mesh VPN
-(Tailscale, ZeroTier) and pass that interface's address:
-
-```powershell
-.\scripts\use_device.ps1 -ServerHost <vpn-address-of-this-pc>
-```
-
-Then the phone reaches the server from any network, and observations arrive while you
-are still walking.
-
----
-
-## Checking state on the device
-
-Tap the avatar on the home screen:
-
-```
-Alarms registered: 2 · next 7:40
-Server = http://192.168.0.12:8000/
-Unsent trip records: 3
-```
-
-The status bar also shows an alarm-clock icon whenever an alarm is registered — the
-quickest confirmation that registration reached the system rather than just the app.
-
-For logs:
-
-```powershell
-& $adb logcat -s AlarmScheduler:V AlarmReceiver:V TripTrackingService:V TripObservationQueue:V
-```
-
-Registered alarms as the system sees them:
-
-```powershell
-& $adb shell dumpsys alarm | Select-String "swpp" -Context 0,3
-```
-
-An entry under **Next wake from idle** is what you want. That means it was registered
-as an alarm clock and will survive Doze.
-
----
-
-## Troubleshooting
-
-| Symptom | Cause |
-| --- | --- |
-| Login fails with "cannot reach the server" | Firewall rule missing, phone on another network, or the server bound to `127.0.0.1`. Check `/api/health` from the phone's browser first. |
-| Login fails but `/api/health` works in the browser | The APK still has the old address. Re-run `use_device.ps1`, then `installDebug`. Confirm with the address in the account dialog. |
-| `INSTALL_FAILED_OLDER_SDK` | Phone is below API 34. Update Android. |
-| Alarm fires but no screen appears | Notification permission denied. The full-screen intent is the only path that works from the background. |
-| Alarm never fires | Battery optimization deferred it. Expected on a first run — that is the finding. Exclude the app and compare. |
-| Nothing detected after walking out | Location set to coarse instead of precise, or you never got 150 m from the saved home location. Check `Unsent trip records` in the account dialog. |
-| `adb devices` shows `unauthorized` | Accept the *Allow USB debugging?* dialog on the phone. |
+로컬 모드의 에뮬레이터는 자동으로 `10.0.2.2:8000`을 사용하며 PC 루프백 서버에도 접근한다.
+[Android 네트워크 주소 안내](https://developer.android.com/studio/run/emulator-networking-address).

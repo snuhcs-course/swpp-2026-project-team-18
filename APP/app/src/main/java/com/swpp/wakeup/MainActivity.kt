@@ -20,8 +20,10 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -34,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
@@ -81,6 +85,8 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : ComponentActivity() {
 
+    private var openMorning by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -97,17 +103,28 @@ class MainActivity : ComponentActivity() {
         // 로그인 직후에만 환영 문구를 띄운다. 앱을 다시 열 때는 띄우지 않는다.
         val welcomeNickname = intent.getStringExtra(EXTRA_WELCOME_NICKNAME)
         // 알람을 해제하고 넘어온 경우. 아침 기록 화면으로 바로 들어간다.
-        val openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
+        openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
 
         setContent {
             JitTheme {
                 MainHost(
                     welcomeNickname = welcomeNickname,
                     openMorning = openMorning,
+                    onMorningOpened = {
+                        openMorning = false
+                        intent.removeExtra(EXTRA_OPEN_MORNING)
+                    },
                     onLoggedOut = ::backToLogin,
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // 알람 해제는 CLEAR_TOP + SINGLE_TOP으로 이미 열린 홈을 재사용한다.
+        openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
     }
 
     private fun backToLogin() {
@@ -148,6 +165,7 @@ class MainActivity : ComponentActivity() {
 private fun MainHost(
     welcomeNickname: String?,
     openMorning: Boolean,
+    onMorningOpened: () -> Unit,
     onLoggedOut: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel()
@@ -157,7 +175,9 @@ private fun MainHost(
     val routeMap by viewModel.routeMap.collectAsStateWithLifecycle()
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
+    val tripArrival by viewModel.tripArrival.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
+    val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
@@ -289,11 +309,10 @@ private fun MainHost(
 
     // 알람을 해제하고 넘어왔으면 아침 기록으로 바로 들어간다. 한 번만 한다 —
     // 사용자가 뒤로 나갔는데 다시 밀어 넣으면 화면을 벗어날 수 없다.
-    var morningOpened by remember { mutableStateOf(false) }
     LaunchedEffect(openMorning) {
-        if (openMorning && !morningOpened) {
-            morningOpened = true
+        if (openMorning) {
             viewModel.openMorning()
+            onMorningOpened()
         }
     }
 
@@ -304,8 +323,11 @@ private fun MainHost(
     ) { granted -> viewModel.onCalendarPermissionResult(granted) }
 
     Scaffold(
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         containerColor = JitColor.Bg,
-        contentWindowInsets = WindowInsets.systemBars,
+        // 키보드(ime)도 포함한다. edge-to-edge 에서는 adjustResize 가 창을 줄여 주지
+        // 않으므로, 빼면 키보드가 아래 칸을 덮고 스크롤로도 닿지 않는다.
+        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         AnimatedContent(
@@ -330,6 +352,7 @@ private fun MainHost(
                     avatarInitials = viewModel.avatarInitials(),
                     onAvatarClick = viewModel::openSettings,
                     onEventClick = { viewModel.openAlarmDecision(it.id) },
+                    onAlarmToggle = viewModel::setAlarmEnabled,
                     onAddEventClick = {
                         viewModel.resetAdd()
                         viewModel.openAddEvent()
@@ -359,7 +382,8 @@ private fun MainHost(
                     val progress = plan
                         ?.takeIf { it.hasRoutePath }
                         ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
-                    val stage = plan?.let { viewModel.stageOf(it) } ?: TripStage.BEFORE_ALARM
+                    val arrival = tripArrival?.takeIf { it.eventId == route.eventId }
+                    val stage = plan?.let { viewModel.stageOf(it, arrival) } ?: TripStage.BEFORE_ALARM
 
                     // 지각 전망. 진행 바의 색이 이것으로 정해진다.
                     //
@@ -372,8 +396,10 @@ private fun MainHost(
                             stage != TripStage.PAST &&
                             progress?.onRoute != false
                     }?.let { p ->
-                        if (stage == TripStage.ARRIVED && live != null) {
-                            ArrivalOutlook.arrived(live.atMillis, p.startAtMillis)
+                        if (stage == TripStage.ARRIVED) {
+                            (arrival?.atMillis ?: live?.atMillis)?.let {
+                                ArrivalOutlook.arrived(it, p.startAtMillis)
+                            }
                         } else {
                             val now = System.currentTimeMillis()
                             val onRoute = progress?.takeIf { it.onRoute }
@@ -431,6 +457,7 @@ private fun MainHost(
                     state = addState,
                     hasHome = state.hasHome,
                     homePlace = state.homePlace,
+                    tags = eventTags,
                     onTitleChange = viewModel::onAddTitleChange,
                     onDateChange = viewModel::onAddDateChange,
                     onTimeChange = viewModel::onAddTimeChange,
@@ -444,6 +471,19 @@ private fun MainHost(
                         viewModel.openMapPick(HomeViewModel.MapTarget.DESTINATION)
                     },
                     onOpenPlaceUrl = openPlaceUrl,
+                    onOriginQueryChange = viewModel::onAddOriginQueryChange,
+                    onOriginSearch = viewModel::searchAddOriginPlaces,
+                    onOriginSelect = viewModel::onAddOriginSelected,
+                    onOriginLoadMore = viewModel::loadMoreAddOriginPlaces,
+                    onOriginSortChange = viewModel::onAddOriginSortChange,
+                    onOriginOpenMap = {
+                        viewModel.openMapPick(HomeViewModel.MapTarget.ORIGIN)
+                    },
+                    onUseCurrentLocation = viewModel::useCurrentLocationForAddOrigin,
+                    onSetHome = {
+                        viewModel.resetHomeSetup()
+                        viewModel.openHomeSetup()
+                    },
                     onPickRoute = viewModel::openRouteChoice,
                     onSubmit = viewModel::submitAdd,
                     onBack = viewModel::goBack,
@@ -457,18 +497,8 @@ private fun MainHost(
                     onRetry = viewModel::retryRouteChoice,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
-                    homePlace = state.homePlace,
-                    onOriginEditToggle = viewModel::onOriginEditToggle,
-                    onOriginQueryChange = viewModel::onOriginQueryChange,
-                    onOriginSearch = viewModel::searchOriginPlaces,
-                    onOriginSelect = viewModel::onOriginSelected,
-                    onOriginLoadMore = viewModel::loadMoreOriginPlaces,
-                    onOriginSortChange = viewModel::onOriginSortChange,
-                    onOriginOpenMap = {
-                        viewModel.openMapPick(HomeViewModel.MapTarget.ORIGIN)
-                    },
-                    onOpenPlaceUrl = openPlaceUrl,
-                    onUseCurrentLocation = viewModel::useCurrentLocationAsOrigin,
+                    // 일정 시작 시각 = 도착 목표. 카드의 출발~도착 시각을 만든다.
+                    arriveBy = addState.date.atTime(addState.hour, addState.minute),
                 )
 
                 AppRoute.MapPick -> mapPickState?.let { map ->

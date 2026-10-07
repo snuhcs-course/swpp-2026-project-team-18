@@ -8,6 +8,7 @@ back-spec.md 7절 규칙 — **예외를 밖으로 던지지 않는다.** 모든
     대중교통  GET https://dapi.kakao.com/v2/routing/publictraffic
     도보      GET https://dapi.kakao.com/v2/routing/walk
     로컬검색  GET https://dapi.kakao.com/v2/local/search/keyword.json
+    주소검색  GET https://dapi.kakao.com/v2/local/search/address.json
 
 **좌표 파라미터 이름이 수단별로 다르다.** 경로 API 는 start_x/start_y/end_x/end_y,
 자동차(모빌리티)만 origin/destination 이다. 여기서는 경로 API 만 쓴다.
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 5
 LOCAL_SEARCH_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
+ADDRESS_SEARCH_URL = "https://dapi.kakao.com/v2/local/search/address.json"
 COORD_TO_ADDRESS_URL = "https://dapi.kakao.com/v2/local/geo/coord2address.json"
 TRANSIT_URL = "https://dapi.kakao.com/v2/routing/publictraffic"
 WALK_URL = "https://dapi.kakao.com/v2/routing/walk"
@@ -141,6 +143,8 @@ def _place_item(d: dict) -> dict | None:
     except (KeyError, TypeError, ValueError):
         # 좌표가 없는 항목은 장소로 쓸 수 없다.
         return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
 
     # 거리는 x/y 를 함께 보냈을 때만 온다. 없으면 빈 문자열이다.
     raw_distance = (d.get("distance") or "").strip()
@@ -169,6 +173,61 @@ def _place_item(d: dict) -> dict | None:
     }
 
 
+def _address_items(
+    data: dict,
+    lat: float | None,
+    lng: float | None,
+    rect: str | None,
+) -> list[dict]:
+    """번지까지 확인된 주소만 장소 형식으로 변환한다. 지역 중심점은 제외한다."""
+    bounds = tuple(map(float, rect.split(","))) if rect else None
+    items = {}
+    for doc in data.get("documents", []):
+        if doc.get("address_type") not in {"ROAD_ADDR", "REGION_ADDR"}:
+            continue
+        road = doc.get("road_address") or {}
+        jibun = doc.get("address") or {}
+        address = (
+            road.get("address_name") or jibun.get("address_name") or doc.get("address_name")
+        )
+        if not address:
+            continue
+        item = _place_item(
+            {
+                "place_name": road.get("building_name") or address,
+                "road_address_name": address,
+                "address_name": jibun.get("address_name") or "",
+                "x": road.get("x") or doc.get("x"),
+                "y": road.get("y") or doc.get("y"),
+                "category_group_name": "주소",
+            }
+        )
+        if item is None:
+            continue
+        if bounds and not (
+            bounds[0] <= item["lng"] <= bounds[2] and bounds[1] <= item["lat"] <= bounds[3]
+        ):
+            continue
+        if lat is not None and lng is not None:
+            item["distance_m"] = round(
+                _haversine_meters(lat, lng, item["lat"], item["lng"])
+            )
+        items.setdefault((address, round(item["lat"], 6), round(item["lng"], 6)), item)
+    return list(items.values())
+
+
+def _search_response(data: dict, items: list[dict], page: int, sort: str) -> dict:
+    meta = data.get("meta") or {}
+    return {
+        "results": items,
+        "page": page,
+        "total_count": int(meta.get("total_count") or 0),
+        "reachable_count": int(meta.get("pageable_count") or 0),
+        "is_end": bool(meta.get("is_end", True)),
+        "sort": sort,
+    }
+
+
 def search_places(
     query: str,
     size: int = 15,
@@ -178,11 +237,12 @@ def search_places(
     sort: str = SORT_ACCURACY,
     rect: str | None = None,
 ) -> tuple[dict, bool]:
-    """장소 검색. 일정 추가·집 주소·출발지 선택이 모두 이 경로를 쓴다.
+    """주소 우선 검색, 주소가 없으면 장소 키워드 검색. 앱 응답 형식은 같다.
 
-    **[lat]·[lng] 를 주면 결과에 거리가 붙는다.** 카카오는 기준 좌표를 함께
-    받았을 때만 `distance` 를 채운다. 사용자가 "여기서 얼마나 먼가" 를 볼 수
-    있어야 어느 장소인지 고를 수 있으므로 가능하면 항상 보낸다.
+    주소와 장소의 페이지를 섞지 않는다. 주소는 정확도순이며, 다음 페이지도
+    첫 페이지와 같은 검색을 쓴다. 주소 조회 실패 시 장소 결과는 계속 제공한다.
+
+    [lat]·[lng]를 주면 거리가 붙는다. 주소의 거리는 서버가 직선 거리로 계산한다.
 
     [rect] 는 지도 영역 재검색이다. `minLng,minLat,maxLng,maxLat` 순서이고,
     **순서를 틀리면 카카오가 에러 없이 0건을 준다.** 그래서 여기서 검사한다.
@@ -203,6 +263,27 @@ def search_places(
 
     size = max(1, min(int(size), MAX_PAGE_SIZE))
     page = max(1, min(int(page), MAX_PAGE))
+    valid_rect = _valid_rect(rect) if rect else None
+
+    # 현재 페이지가 비어도 장소 검색으로 바뀌지 않도록 첫 페이지로 판별한다.
+    address_params = {"query": query.strip(), "size": size, "page": 1}
+    address_data, address_failed = _get(
+        f"{ADDRESS_SEARCH_URL}?{urllib.parse.urlencode(address_params)}"
+    )
+    addresses = _address_items(address_data or {}, lat, lng, None)
+    if addresses:
+        if page > 1:
+            address_params["page"] = page
+            address_data, address_failed = _get(
+                f"{ADDRESS_SEARCH_URL}?{urllib.parse.urlencode(address_params)}"
+            )
+        if address_failed or not address_data:
+            return empty, True
+        addresses = _address_items(address_data, lat, lng, valid_rect)
+        response = _search_response(address_data, addresses, page, SORT_ACCURACY)
+        if page == 1 and response["is_end"]:
+            response["total_count"] = response["reachable_count"] = len(addresses)
+        return response, False
 
     params: dict[str, object] = {"query": query.strip(), "size": size, "page": page}
 
@@ -221,34 +302,17 @@ def search_places(
         applied_sort = SORT_DISTANCE
 
     if rect:
-        valid = _valid_rect(rect)
-        if valid is None:
+        if valid_rect is None:
             logger.warning("rect 형식이 올바르지 않아 무시한다: %r", rect)
         else:
-            params["rect"] = valid
+            params["rect"] = valid_rect
 
     data, degraded = _get(f"{LOCAL_SEARCH_URL}?{urllib.parse.urlencode(params)}")
     if degraded or not data:
         return empty, True
 
     places = [item for d in data.get("documents", []) if (item := _place_item(d))]
-    meta = data.get("meta") or {}
-
-    return (
-        {
-            "results": places,
-            "page": page,
-            # 카카오가 말하는 전체 건수. "카페" 는 14만이 나온다.
-            "total_count": int(meta.get("total_count") or 0),
-            # **실제로 받아 볼 수 있는 건수.** total_count 와 다르다 — 카카오는
-            # 45건까지만 페이지로 내려 준다. 화면에 total_count 를 그대로 쓰면
-            # 45건에서 멈추는 목록 옆에 14만이 적혀 거짓말이 된다.
-            "reachable_count": int(meta.get("pageable_count") or 0),
-            "is_end": bool(meta.get("is_end", True)),
-            "sort": applied_sort,
-        },
-        False,
-    )
+    return _search_response(data, places, page, applied_sort), address_failed and not places
 
 
 def _valid_rect(rect: str) -> str | None:

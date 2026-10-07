@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -97,6 +98,7 @@ fun AlarmDecisionScreen(
 ) {
     Column(
         modifier = modifier
+            .testTag("plan_scroll")
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
@@ -130,15 +132,25 @@ fun AlarmDecisionScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // "첫 일정" 은 서버가 그날 가장 이른 켜진 알람이라고 판정한 일정에만
+                // 붙인다. 판정이 없으면 일반 일정으로 표시한다.
+                val first = plan.isFirstAlarm == true
                 JitDotLabel(
-                    text = "첫 일정",
-                    dotColor = JitColor.Accent,
+                    text = if (first) "첫 일정" else "일정",
+                    dotColor = if (first) JitColor.Accent else JitColor.TextSecondary,
                     textColor = JitColor.TextSecondary,
                     fontSize = 11,
                     bold = false,
                     dotSize = 6.dp,
                 )
-                plan.sensitivityTag?.let { JitChip(it, JitColor.Accent) }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    plan.sensitivityTag?.let { JitChip(it, JitColor.Accent) }
+                    // 판정은 서버가 한다(B-4). 앱에서 τ 기준으로 따로 정하지 않는다.
+                    if (plan.latenessSensitive) JitChip("지각 민감도 높음", JitColor.Red)
+                }
             }
             Text(
                 text = plan.eventTitle,
@@ -189,7 +201,9 @@ fun AlarmDecisionScreen(
         BlocksEntryCard(plan, onEditBlocks)
 
         if (plan.isComputed) {
-            JitPrimaryButton(label = "이 알람으로 설정", onClick = onBack)
+            // 알람은 이미 자동으로 등록돼 있고 켬/끔은 홈의 스위치가 맡는다.
+            // 이 버튼은 근거를 확인하고 닫는 용도라 "확인" 으로 쓴다.
+            JitPrimaryButton(label = "확인", onClick = onBack)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,

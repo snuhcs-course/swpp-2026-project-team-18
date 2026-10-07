@@ -26,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +83,7 @@ fun MorningProgressScreen(
 ) {
     Column(
         modifier = modifier
+            .testTag("morning_scroll")
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
@@ -126,7 +128,7 @@ fun MorningProgressScreen(
         Spacer(Modifier.height(4.dp))
 
         if (session.isComplete) {
-            JitPrimaryButton(label = "기록 끝내기", onClick = onFinish)
+            JitPrimaryButton(label = "기록 끝내기", onClick = onFinish, modifier = Modifier.testTag("morning_action"))
             Text(
                 text = "기록은 서버로 올라가 다음 알람 계산에 반영됨. 네트워크가 없으면 " +
                     "연결될 때 자동으로 올라감",
@@ -135,6 +137,7 @@ fun MorningProgressScreen(
             )
         } else {
             JitPrimaryButton(
+                modifier = Modifier.testTag("morning_action"),
                 label = session.current?.let { "\"${it.name}\" 마침" } ?: "기록 끝내기",
                 onClick = { session.current?.let { onMarkDone(it.blockId) } ?: onFinish() },
             )

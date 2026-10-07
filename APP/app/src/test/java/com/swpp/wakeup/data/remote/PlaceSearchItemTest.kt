@@ -24,6 +24,36 @@ class PlaceSearchItemTest {
     private val gson = Gson()
 
     @Test
+    fun `카카오 장소 ID가 없는 주소 결과를 읽는다`() {
+        val json = """
+            {
+              "results": [{
+                "kakao_place_id": null,
+                "name": "서울 용산구 한강대로14길 12",
+                "address": "서울 용산구 한강대로14길 12",
+                "jibun_address": "서울 용산구 한강로3가 65-157",
+                "lat": 37.5249091192599,
+                "lng": 126.964825583084,
+                "category": "",
+                "category_group": "주소",
+                "distance_m": 66,
+                "place_url": ""
+              }],
+              "page": 1, "reachable_count": 1, "is_end": true, "degraded": false
+            }
+        """.trimIndent()
+        val response = gson.fromJson(json, PlaceSearchResponse::class.java)
+        val address = response.results.single()
+        assertNull(address.kakaoPlaceId)
+        assertEquals(address.name, address.address)
+        assertEquals("주소", address.categoryGroup)
+        assertEquals("66m", address.distanceLabel)
+        assertTrue(address.placeUrl.isNullOrBlank())
+        assertTrue(response.isEnd)
+        assertFalse(response.degraded)
+    }
+
+    @Test
     fun `서버가 주는 전체 필드를 읽는다`() {
         val json = """
             {

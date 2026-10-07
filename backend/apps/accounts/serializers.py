@@ -8,6 +8,7 @@ from __future__ import annotations
 from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -28,7 +29,7 @@ class RegisterSerializer(serializers.Serializer):
     """회원가입.
 
     Figma ⑩ 회원가입 화면의 입력과 1:1로 맞춘다.
-    닉네임 / 이메일 / 비밀번호 / 비밀번호 확인.
+    닉네임 / 이메일 / 비밀번호 / 비밀번호 확인 / 약관 동의.
     """
 
     email = serializers.EmailField()
@@ -36,6 +37,7 @@ class RegisterSerializer(serializers.Serializer):
     # trim_whitespace=False — 비밀번호 앞뒤 공백도 사용자가 의도한 문자다.
     password = serializers.CharField(write_only=True, trim_whitespace=False)
     password_confirm = serializers.CharField(write_only=True, trim_whitespace=False)
+    terms_agreed = serializers.BooleanField(write_only=True)
 
     def validate_email(self, value: str) -> str:
         email = value.strip().lower()
@@ -49,6 +51,11 @@ class RegisterSerializer(serializers.Serializer):
             raise serializers.ValidationError("닉네임을 입력해야 한다.")
         return nickname
 
+    def validate_terms_agreed(self, value: bool) -> bool:
+        if self.initial_data.get("terms_agreed") is not True:
+            raise serializers.ValidationError("약관에 동의해야 가입할 수 있다.")
+        return value
+
     def validate(self, attrs):
         if attrs["password"] != attrs["password_confirm"]:
             # 어느 필드의 문제인지 클라이언트가 알 수 있게 필드에 붙인다.
@@ -56,11 +63,8 @@ class RegisterSerializer(serializers.Serializer):
                 {"password_confirm": "비밀번호가 일치하지 않는다."}
             )
 
-        # Django 검증기를 태운다. UserAttributeSimilarityValidator 가 이메일·닉네임과
-        # 비슷한 비밀번호를 걸러내므로 저장하지 않은 인스턴스를 넘겨준다.
-        probe = User(email=attrs["email"], nickname=attrs["nickname"])
         try:
-            password_validation.validate_password(attrs["password"], user=probe)
+            password_validation.validate_password(attrs["password"])
         except DjangoValidationError as exc:
             raise serializers.ValidationError({"password": list(exc.messages)}) from exc
         return attrs
@@ -72,12 +76,19 @@ class RegisterSerializer(serializers.Serializer):
             email=validated_data["email"],
             password=validated_data["password"],
             nickname=validated_data["nickname"],
+            terms_agreed_at=timezone.now(),
         )
         # 프로필은 `signals.create_profile_for_new_user` 가 같은 트랜잭션 안에서
         # 만든다. 여기서 또 만들지 않는다. 시그널로 옮긴 이유는
         # createsuperuser·admin·shell 등 이 경로를 타지 않는 생성에서도 프로필이
         # 보장돼야 하기 때문이다. signals.py 주석에 근거를 적어 두었다.
         return user
+
+
+class PasswordCheckSerializer(serializers.Serializer):
+    password = serializers.CharField(
+        write_only=True, trim_whitespace=False, allow_blank=True
+    )
 
 
 class LoginSerializer(TokenObtainPairSerializer):

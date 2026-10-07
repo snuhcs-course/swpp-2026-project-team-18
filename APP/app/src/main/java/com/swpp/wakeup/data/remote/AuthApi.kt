@@ -19,6 +19,9 @@ import retrofit2.http.POST
  */
 interface AuthApi {
 
+    @POST("api/auth/password/check")
+    suspend fun checkPassword(@Body body: PasswordCheckRequest): Response<PasswordCheckResponse>
+
     @POST("api/auth/register")
     suspend fun register(@Body body: RegisterRequest): Response<AuthResponse>
 
@@ -39,7 +42,19 @@ data class RegisterRequest(
     val nickname: String,
     val password: String,
     @SerializedName("password_confirm") val passwordConfirm: String,
+    @SerializedName("terms_agreed") val termsAgreed: Boolean,
 )
+
+data class PasswordCheckRequest(val password: String)
+
+data class PasswordCheckResponse(
+    @SerializedName("min_length") val minLength: Boolean?,
+    @SerializedName("letters_and_digits") val lettersAndDigits: Boolean?,
+    val messages: List<String>?,
+) {
+    val valid: Boolean
+        get() = minLength == true && lettersAndDigits == true && messages?.isEmpty() == true
+}
 
 data class LoginRequest(
     val email: String,

@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+from django.contrib.auth import password_validation
+from django.core.exceptions import ValidationError
 from rest_framework import status
-from rest_framework.generics import CreateAPIView, RetrieveAPIView
+from rest_framework.generics import CreateAPIView, GenericAPIView, RetrieveAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .serializers import LoginSerializer, RegisterSerializer, UserSerializer
+from .serializers import (
+    LoginSerializer,
+    PasswordCheckSerializer,
+    RegisterSerializer,
+    UserSerializer,
+)
 
 
 class RegisterView(CreateAPIView):
@@ -47,6 +55,33 @@ class LoginView(TokenObtainPairView):
     permission_classes = [AllowAny]
     authentication_classes = []
     serializer_class = LoginSerializer
+
+
+class PasswordCheckView(GenericAPIView):
+    """POST /api/auth/password/check — 가입과 같은 검증기를 사용한다."""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    serializer_class = PasswordCheckSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "password_check"
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        errors = []
+        try:
+            password_validation.validate_password(serializer.validated_data["password"])
+        except ValidationError as exc:
+            errors = exc.error_list
+        codes = {error.code for error in errors}
+        return Response(
+            {
+                "min_length": "password_too_short" not in codes,
+                "letters_and_digits": "password_no_letters_and_digits" not in codes,
+                "messages": [message for error in errors for message in error.messages],
+            }
+        )
 
 
 class MeView(RetrieveAPIView):

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+from functools import cached_property
 
 from django.db import transaction
 from rest_framework import serializers
+
+from .alarms import alarm_states
 
 # 서비스 범위 판정. `views.py` 가 아니라 `geo.py` 에서 가져온다 — 시리얼라이저가
 # 뷰를 import 하면 순환이 된다.
@@ -174,6 +177,8 @@ class EventSerializer(serializers.ModelSerializer):
     place = PlaceSerializer(read_only=True)
     tag = EventTagSerializer(read_only=True)
     alarm_plan = serializers.SerializerMethodField()
+    alarm_on = serializers.SerializerMethodField()
+    is_first_alarm = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
@@ -193,10 +198,24 @@ class EventSerializer(serializers.ModelSerializer):
             "origin_lat",
             "origin_lng",
             "origin_label",
+            "alarm_enabled",
+            "alarm_on",
+            "is_first_alarm",
             "alarm_plan",
             "created_at",
         )
         read_only_fields = ("id", "source", "external_id", "created_at")
+
+    @cached_property
+    def _alarm_states(self):
+        # 한 응답에서 한 번만 조회한다. 목록 필터·페이지 밖 일정도 판정에 포함한다.
+        return alarm_states(self.context["request"].user)
+
+    def get_alarm_on(self, obj):
+        return self._alarm_states.get(obj.pk, (False, False))[0]
+
+    def get_is_first_alarm(self, obj):
+        return self._alarm_states.get(obj.pk, (False, False))[1]
 
     def get_alarm_plan(self, obj):
         plan = getattr(obj, "alarm_plan", None)
@@ -283,6 +302,7 @@ class EventWriteSerializer(serializers.ModelSerializer):
             "place",
             "tag_key",
             "tau_override",
+            "alarm_enabled",
             "route_key",
             "origin_lat",
             "origin_lng",

@@ -1,7 +1,6 @@
 package com.swpp.wakeup.ui.events
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,31 +14,36 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BasicAlertDialog
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDefaults
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.TimePickerDefaults
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.ui.common.JitCard
@@ -55,25 +59,23 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
 /**
- * 종류 선택지. 서버 `EventTag.key` 와 값이 맞아야 한다.
+ * 종류 선택지. 서버 `GET /api/events/tags` 응답으로 만든다 — 이름과 τ 를 앱에
+ * 복사해 두면 서버 값을 바꿨을 때 화면만 낡은 값을 보여준다.
  *
- * τ 는 마이그레이션 `0002_seed_event_tags` 의 값이다. 화면에 함께 보여주는
- * 이유는 종류를 고르는 행위가 곧 안전 여유를 정하는 행위이기 때문이다.
- * "시험을 고르면 더 일찍 깨운다" 는 걸 알 수 있어야 한다.
+ * τ 를 함께 보여주는 이유는 종류를 고르는 행위가 곧 안전 여유를 정하는
+ * 행위이기 때문이다. "시험을 고르면 더 일찍 깨운다" 는 걸 알 수 있어야 한다.
  *
- * **마지막 "기타" 는 `key = null` 이다.** 태그를 비우면 서버가
- * `profile.default_tau` 로 내려간다(`Event.effective_tau`). τ 숫자를 여기
- * 복사해 두면 프로필 기본값을 바꿀 때 낡은 값이 남으므로 복사하지 않는다.
+ * 목록 끝에는 "기타" 대신 "+ 추가" 를 둔다(명세 12-a, [TagDropdown]). 사용자가
+ * 만든 종류를 저장하는 일은 서버(B-8)가 하므로 그 전까지 "+ 추가" 는 안내만 띄운다.
  */
-private val TAG_OPTIONS: List<TagOption> = listOf(
-    TagOption("class", "수업", "τ 0.90"),
-    TagOption("exam", "시험", "τ 0.99"),
-    TagOption("presentation", "발표", "τ 0.98"),
-    TagOption("train", "기차·비행", "τ 0.99"),
-    TagOption("parttime", "알바", "τ 0.95"),
-    TagOption("meetup", "약속", "τ 0.85"),
-    TagOption(null, "기타", "프로필 기본"),
-)
+internal fun tagOptionsOf(tags: List<com.swpp.wakeup.data.remote.EventTagDto>): List<TagOption> =
+    tags.map { tag ->
+        TagOption(
+            key = tag.key,
+            label = tag.label,
+            tau = tag.defaultTau?.let { "τ ${"%.2f".format(java.util.Locale.ROOT, it)}" } ?: "",
+        )
+    }
 
 internal data class TagOption(val key: String?, val label: String, val tau: String)
 
@@ -86,9 +88,9 @@ private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
  * 돌려주고 알람 시각이 나오지 않는다. 그래서 장소 검색을 폼 가운데 두고
  * 비워두면 어떻게 되는지 화면에서 미리 알린다.
  *
- * 날짜·시각 입력은 시스템 피커를 띄우지 않고 직접 조작한다. Material3 의
- * `DatePicker` 는 라이트 테마 기본값이 강해서 이 앱의 어두운 팔레트와 충돌하고,
- * 필요한 조작이 "며칠 뒤 / 몇 시" 두 가지뿐이라 버튼이 더 빠르다.
+ * 날짜는 달력 팝업, 시각은 시계 다이얼 팝업으로 고른다(Material3 `DatePicker`,
+ * `TimePicker`). 두 피커 모두 기본 색이 밝아 어두운 팔레트와 충돌하므로 색을
+ * 앱 팔레트로 지정해서 쓴다.
  */
 @Composable
 fun AddEventScreen(
@@ -101,6 +103,8 @@ fun AddEventScreen(
      * 조용히 사라진 것을 아무도 모른다.
      */
     homePlace: com.swpp.wakeup.data.remote.PlaceSearchItem?,
+    /** 서버가 준 일정 종류 목록(`GET /api/events/tags`). 비어 있으면 "기타" 만 보인다 */
+    tags: List<com.swpp.wakeup.data.remote.EventTagDto>,
     onTitleChange: (String) -> Unit,
     onDateChange: (LocalDate) -> Unit,
     onTimeChange: (Int, Int) -> Unit,
@@ -112,16 +116,32 @@ fun AddEventScreen(
     onSortChange: (String) -> Unit,
     onOpenMap: () -> Unit,
     onOpenPlaceUrl: (String) -> Unit,
+    onOriginQueryChange: (String) -> Unit,
+    onOriginSearch: () -> Unit,
+    /** 출발지 선택. null 이면 집(서버가 프로필 집을 쓴다) */
+    onOriginSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit,
+    onOriginLoadMore: () -> Unit,
+    onOriginSortChange: (String) -> Unit,
+    onOriginOpenMap: () -> Unit,
+    onUseCurrentLocation: () -> Unit,
+    /** 집이 없을 때 집 버튼을 누르면 ⑭ 집 주소로 보낸다 */
+    onSetHome: () -> Unit,
     onPickRoute: () -> Unit,
     onSubmit: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // 검색 칸은 "검색" 을 눌렀을 때만 펼친다. 고르면 접는다.
+    // 도착지는 아직 아무것도 없으면 처음부터 펼쳐 둔다 — 무엇을 할지 바로 보이게.
+    var originSearching by rememberSaveable { mutableStateOf(false) }
+    var destinationSearching by rememberSaveable { mutableStateOf(state.selectedPlace == null) }
+    val enabled = !state.submitting
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
+            .testTag("add_event_scroll")
             .padding(
                 start = JitSpace.ScreenHorizontal,
                 end = JitSpace.ScreenHorizontal,
@@ -146,6 +166,7 @@ fun AddEventScreen(
 
         JitTextField(
             label = "일정 제목",
+            inputTag = "event_title",
             value = state.title,
             onValueChange = onTitleChange,
             imeAction = ImeAction.Next,
@@ -153,53 +174,128 @@ fun AddEventScreen(
         )
 
         DateRow(state.date, onDateChange, enabled = !state.submitting)
+        // Figma 순서: 날짜 → 반복 → 시작 시각
+        RepeatRow(selected = emptySet(), onToggle = {}, available = REPEAT_AVAILABLE)
         TimeRow(state.hour, state.minute, onTimeChange, enabled = !state.submitting)
 
-        PlacePicker(
-            label = "장소 검색",
-            state = state.place,
-            selected = state.selectedPlace,
-            onQueryChange = onQueryChange,
-            onSearch = onSearch,
-            onSelect = onPlaceSelect,
-            enabled = !state.submitting,
-            onLoadMore = onLoadMore,
-            onSortChange = onSortChange,
-            onOpenMap = onOpenMap,
-            onOpenPlaceUrl = onOpenPlaceUrl,
-            // 목적지가 집인 경우도 있다 — 퇴근·귀가 일정이 그렇다.
-            homePlace = homePlace,
-        )
+        // Figma 13-a 출발·도착 지정: 각 줄 [값] [집] [검색].
+        JitCard(gap = 10.dp) {
+            // 출발지: null 이면 집. 집이 저장돼 있으면 처음부터 집이 선택된 상태다.
+            val originIsHome = state.origin == null && homePlace != null
+            EndpointRow(
+                label = "출발지",
+                value = when {
+                    state.originLocating -> "현재 위치를 확인하는 중"
+                    state.origin != null -> state.origin.name
+                    homePlace != null -> "집 · ${homePlace.name}"
+                    else -> "출발지를 정해 주세요"
+                },
+                hasValue = state.origin != null || homePlace != null,
+                isHome = originIsHome,
+                homeAvailable = homePlace != null,
+                searching = originSearching,
+                enabled = enabled && !state.originLocating,
+                onHome = {
+                    if (homePlace == null) onSetHome()
+                    else {
+                        onOriginSelect(null)
+                        originSearching = false
+                    }
+                },
+                onSearchToggle = { originSearching = !originSearching },
+            )
+            state.originNotice?.let { NoticeLine(it) }
+            if (originSearching) {
+                // 현재 위치는 버튼을 늘리지 않고 검색 맨 위에 한 줄로 둔다.
+                Text(
+                    text = "📍 현재 위치 사용",
+                    color = JitColor.Accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(JitRadius.Hint))
+                        .background(JitColor.Surface2)
+                        .clickable(enabled = enabled) {
+                            onUseCurrentLocation()
+                            originSearching = false
+                        }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+                PlacePicker(
+                    label = "출발지 검색",
+                    state = state.originPlace,
+                    selected = null,
+                    onQueryChange = onOriginQueryChange,
+                    onSearch = onOriginSearch,
+                    onSelect = { item ->
+                        onOriginSelect(item)
+                        originSearching = false
+                    },
+                    enabled = enabled,
+                    onLoadMore = onOriginLoadMore,
+                    onSortChange = onOriginSortChange,
+                    onOpenMap = onOriginOpenMap,
+                    onOpenPlaceUrl = onOpenPlaceUrl,
+                )
+            }
 
-        TagDropdown(state.tagKey, onTagChange, enabled = !state.submitting)
+            HorizontalDivider(color = JitColor.Track)
 
-        // 집이 없어도 경로를 고를 수 있다. 경로 선택 화면이 현재 위치를 출발지로
-        // 잡으므로 집이 없다고 막으면 쓸 수 있는 길을 닫는다.
+            // 도착지: 집 버튼을 누르면 저장된 집이 들어간다(퇴근·귀가 일정).
+            val destination = state.selectedPlace
+            EndpointRow(
+                label = "도착지",
+                value = destination?.name ?: "도착지를 검색해 주세요",
+                hasValue = destination != null,
+                isHome = destination != null && homePlace != null && destination.isSameSpot(homePlace),
+                homeAvailable = homePlace != null,
+                searching = destinationSearching,
+                enabled = enabled,
+                onHome = {
+                    if (homePlace == null) onSetHome()
+                    else {
+                        onPlaceSelect(homePlace)
+                        destinationSearching = false
+                    }
+                },
+                onSearchToggle = { destinationSearching = !destinationSearching },
+            )
+            if (destinationSearching) {
+                PlacePicker(
+                    label = "도착지 검색",
+                    state = state.place,
+                    selected = null,
+                    onQueryChange = onQueryChange,
+                    onSearch = onSearch,
+                    onSelect = { item ->
+                        onPlaceSelect(item)
+                        if (item != null) destinationSearching = false
+                    },
+                    enabled = enabled,
+                    onLoadMore = onLoadMore,
+                    onSortChange = onSortChange,
+                    onOpenMap = onOpenMap,
+                    onOpenPlaceUrl = onOpenPlaceUrl,
+                )
+            }
+        }
+
+        // Figma 순서: 출발지 → 도착지 → 경로 → 종류 → "일정 추가"
+        val canPickRoute = state.canPickRoute(hasHome)
         RouteRow(
             routeLabel = state.routeLabel,
-            originLabel = state.originLabel,
-            enabled = state.canPickRoute,
-            hasPlace = state.selectedPlace != null,
+            enabled = canPickRoute,
+            ready = state.selectedPlace != null && (state.origin != null || hasHome),
             onClick = onPickRoute,
         )
 
-        // 알람이 계산되지 않을 조건을 미리 알린다. 추가한 뒤에 "왜 알람이
-        // 없지" 하고 헤매지 않게 하려는 것이다.
-        if (state.selectedPlace == null) {
-            NoticeCard(
-                dot = JitColor.Amber,
-                title = "장소를 넣지 않으면 알람이 계산되지 않음",
-                body = "이동 시간을 구할 수 없어서다. 일정은 저장되고 나중에 장소를 넣으면 계산됨",
-            )
-        } else if (!hasHome && state.origin == null) {
-            // 집도 없고 출발지도 고르지 않은 상태에서만 경고한다. 경로 선택에서
-            // 출발지를 잡았으면 집이 없어도 계산되므로 경고가 거짓이 된다.
-            NoticeCard(
-                dot = JitColor.Amber,
-                title = "출발지가 없어 알람이 계산되지 않음",
-                body = "경로 고르기에서 출발지를 정하거나, 홈 화면 안내에서 집 위치를 설정",
-            )
-        }
+        TagDropdown(
+            options = tagOptionsOf(tags),
+            selected = state.tagKey,
+            onChange = onTagChange,
+            enabled = !state.submitting,
+        )
 
         state.error?.let {
             Text(
@@ -214,6 +310,7 @@ fun AddEventScreen(
 
         JitPrimaryButton(
             label = "일정 추가",
+            modifier = Modifier.testTag("event_submit"),
             onClick = onSubmit,
             enabled = state.canSubmit,
             loading = state.submitting,
@@ -252,6 +349,7 @@ fun HomeSetupScreen(
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
+            .testTag("home_setup_scroll")
             .padding(
                 start = JitSpace.ScreenHorizontal,
                 end = JitSpace.ScreenHorizontal,
@@ -269,13 +367,13 @@ fun HomeSetupScreen(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "집에서 나서는 시각을 이 위치로 계산함",
+            text = "출발지 설정",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
 
         PlacePicker(
-            label = "집 주변 검색",
+            label = "주소 검색",
             state = state.place,
             selected = state.selected,
             onQueryChange = onQueryChange,
@@ -288,12 +386,6 @@ fun HomeSetupScreen(
             onOpenPlaceUrl = onOpenPlaceUrl,
         )
 
-        NoticeCard(
-            dot = JitColor.Blue,
-            title = "저장하는 정보",
-            body = "고른 지점의 좌표와 이름만 저장함. 이동 중 실시간 위치는 서버에 보내지 않음",
-        )
-
         state.error?.let {
             Text(text = it, color = JitColor.Red, fontSize = 12.sp, modifier = Modifier.fillMaxWidth())
         }
@@ -302,6 +394,7 @@ fun HomeSetupScreen(
 
         JitPrimaryButton(
             label = "이 주소로 저장",
+            modifier = Modifier.testTag("home_setup_submit"),
             onClick = onSubmit,
             enabled = state.canSubmit,
             loading = state.submitting,
@@ -353,127 +446,47 @@ internal fun ScreenHeader(title: String, onBack: () -> Unit, enabled: Boolean = 
 }
 
 /**
- * 스테퍼 가운데의 값. 누르면 직접 입력으로 바뀐다.
+ * 날짜·시각 카드 가운데의 값. 누르면 피커 팝업을 띄운다.
  *
- * **스테퍼만으로는 부족하다.** 09:00 에서 14:30 으로 가려면 +1시간을 다섯 번,
- * +10분을 세 번 눌러야 한다. 그렇다고 입력 필드만 두면 "10분 뒤" 같은 잔손질이
- * 번거롭다. 둘을 같이 둔다.
- *
- * 편집을 마치면 [parse] 로 검증한다. **형식이 틀리면 이전 값을 유지한다.**
- * 잘못된 입력을 0시로 떨어뜨리면 사용자가 눈치채지 못한 채 알람이 어긋난다.
- *
- * @param display 평소에 보여줄 문자열
- * @param editSeed 편집을 시작할 때 입력칸에 넣을 문자열
- * @param parse 입력 문자열을 해석한다. 실패하면 오류 메시지를 돌려준다
+ * 밑줄은 "눌러서 바꿀 수 있음" 을 알리는 표시다.
  */
 @Composable
-private fun TappableValue(
+private fun PickerValue(
     display: String,
-    editSeed: String,
     fontSize: Int,
     enabled: Boolean,
-    keyboardType: KeyboardType,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    parse: (String) -> String?,
 ) {
-    var editing by remember { mutableStateOf(false) }
-    var buffer by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-    var hadFocus by remember { mutableStateOf(false) }
-    val focusRequester = remember { FocusRequester() }
-
-    /** 완료를 눌렀을 때. 형식이 틀리면 편집 상태를 유지하고 이유를 보여준다. */
-    val commit: () -> Unit = {
-        error = parse(buffer.trim())
-        if (error == null) editing = false
-    }
-
-    /**
-     * 포커스를 잃었을 때. 반영을 시도하고 **실패해도 조용히 빠져나온다.**
-     *
-     * 입력을 그냥 버리면 1430 을 치고 다른 곳을 누른 사용자가 값을 잃는다.
-     * 반대로 오류를 띄운 채 편집 상태로 두면 포커스도 없는 칸에 빨간 글씨가
-     * 남는다. 둘 다 나쁘므로 반영되면 반영하고 아니면 이전 값을 유지한다.
-     */
-    val commitQuietly: () -> Unit = {
-        parse(buffer.trim())
-        error = null
-        editing = false
-    }
-
-    if (editing) {
-        LaunchedEffect(Unit) { focusRequester.requestFocus() }
-        Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-            BasicTextField(
-                value = buffer,
-                onValueChange = { buffer = it; error = null },
-                singleLine = true,
-                textStyle = TextStyle(
-                    color = JitColor.TextPrimary,
-                    fontSize = fontSize.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                ),
-                cursorBrush = SolidColor(JitColor.Accent),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = keyboardType,
-                    imeAction = ImeAction.Done,
-                ),
-                keyboardActions = KeyboardActions(onDone = { commit() }),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { focus ->
-                        // 처음 requestFocus 가 도착하기 전에도 한 번 불린다.
-                        // hasFocus 를 이미 얻은 뒤 잃은 경우만 커밋한다.
-                        if (hadFocus && !focus.isFocused) commitQuietly()
-                        if (focus.isFocused) hadFocus = true
-                    }
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(JitColor.Bg)
-                    .border(1.dp, JitColor.Accent, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-            )
-            error?.let {
-                Spacer(Modifier.height(4.dp))
-                Text(it, color = JitColor.Red, fontSize = 10.sp)
-            }
-        }
-    } else {
-        Column(
-            modifier = modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(enabled = enabled) {
-                    buffer = editSeed
-                    error = null
-                    hadFocus = false
-                    editing = true
-                }
-                .padding(vertical = 2.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = display,
-                color = JitColor.TextPrimary,
-                fontSize = fontSize.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(3.dp))
-            // 눌러서 편집할 수 있음을 알리는 밑줄.
-            Spacer(
-                Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(JitColor.Track)
-            )
-        }
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = display,
+            color = JitColor.TextPrimary,
+            fontSize = fontSize.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(3.dp))
+        Spacer(
+            Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(JitColor.Track)
+        )
     }
 }
 
 @Composable
 private fun DateRow(date: LocalDate, onChange: (LocalDate) -> Unit, enabled: Boolean) {
+    var picking by remember { mutableStateOf(false) }
     val today = LocalDate.now()
     val label = "${date.format(DateTimeFormatter.ofPattern("M월 d일"))} " +
         DAY_NAMES[date.dayOfWeek.value - 1]
@@ -492,40 +505,29 @@ private fun DateRow(date: LocalDate, onChange: (LocalDate) -> Unit, enabled: Boo
         ) {
             Text("날짜", color = JitColor.TextSecondary, fontSize = 11.sp)
             Text(
-                "$relative · 눌러서 입력",
+                "$relative · 눌러서 선택",
                 color = JitColor.Accent,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StepButton("−1일", enabled) { onChange(date.minusDays(1)) }
-            TappableValue(
-                display = label,
-                editSeed = date.toString(),
-                fontSize = 16,
-                enabled = enabled,
-                keyboardType = KeyboardType.Number,
-                modifier = Modifier.weight(1f),
-                // `parse` 는 오류 메시지를 돌려준다. 성공이면 null 이다.
-                // `?.let { ...; null } ?: HINT` 로 쓰면 성공했을 때도 let 이
-                // null 을 반환해 엘비스가 발동한다. if 로 갈라 쓴다.
-                parse = { raw ->
-                    val parsed = parseDate(raw, date)
-                    if (parsed == null) DATE_HINT else { onChange(parsed); null }
-                },
-            )
-            StepButton("+1일", enabled) { onChange(date.plusDays(1)) }
-        }
+        PickerValue(display = label, fontSize = 16, enabled = enabled,
+            onClick = { picking = true }, modifier = Modifier.testTag("event_date"))
+    }
+
+    if (picking) {
+        JitDatePickerDialog(
+            initial = date,
+            onPick = { picked -> onChange(picked); picking = false },
+            onDismiss = { picking = false },
+        )
     }
 }
 
 @Composable
 private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enabled: Boolean) {
+    var picking by remember { mutableStateOf(false) }
+
     JitCard(gap = 9.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -533,166 +535,257 @@ private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enable
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("시작 시각", color = JitColor.TextSecondary, fontSize = 11.sp)
+            // 오전/오후는 다이얼을 열지 않고도 바로 바꿀 수 있게 세그먼트로 둔다.
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf(false, true).forEach { pm ->
+                    val on = (hour >= 12) == pm
+                    Text(
+                        text = if (pm) "오후" else "오전",
+                        color = if (on) JitColor.Bg else JitColor.TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (on) JitColor.Accent else JitColor.Surface2)
+                            .clickable(enabled = enabled && !on) { onChange(withMeridiem(hour, pm), minute) }
+                            .padding(horizontal = 9.dp, vertical = 3.dp),
+                    )
+                }
+            }
+        }
+        // 화면은 12시간제로 보여준다. 오전/오후는 오른쪽 위에 따로 적는다.
+        PickerValue(
+            modifier = Modifier.testTag("event_time"),
+            display = "%02d:%02d".format(to12Hour(hour), minute),
+            fontSize = 24,
+            enabled = enabled,
+            onClick = { picking = true },
+        )
+    }
+
+    if (picking) {
+        JitTimePickerDialog(
+            hour = hour,
+            minute = minute,
+            onPick = { h, m -> onChange(h, m); picking = false },
+            onDismiss = { picking = false },
+        )
+    }
+}
+
+/**
+ * 반복 일정을 서버가 받을 수 있는지.
+ *
+ * 반복 저장은 서버 작업(task.md B-6)이다. 그 전에 칩을 누를 수 있게 두면
+ * 사용자는 반복이 저장된 줄 알지만 실제로는 한 번짜리 일정만 생긴다. 그래서
+ * B-6 전까지는 칩을 비활성으로 두고 "준비 중" 이라고 적는다.
+ *
+ * ⏳ B-6 이후: true 로 바꾸고, 고른 요일을 `AddState` 에 담아 생성 요청에 보낸다.
+ */
+private const val REPEAT_AVAILABLE = false
+
+/**
+ * 반복 카드. Figma "⑫ 반복": 오른쪽 위 선택 요약("월 · 수"), 아래 월~일 칩 7개.
+ *
+ * @param selected 고른 요일. 0 = 월 … 6 = 일 ([DAY_NAMES] 의 인덱스)
+ * @param available false 면 칩을 비활성으로 그리고 요약 자리에 "준비 중"
+ */
+@Composable
+private fun RepeatRow(selected: Set<Int>, onToggle: (Int) -> Unit, available: Boolean) {
+    JitCard(gap = 10.dp) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("반복", color = JitColor.TextSecondary, fontSize = 11.sp)
             Text(
-                (if (hour < 12) "오전" else "오후") + " · 눌러서 입력",
-                color = JitColor.Accent,
+                text = if (available) repeatSummary(selected) else "준비 중",
+                color = if (available) JitColor.Accent else JitColor.TextSecondary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            StepButton("−1시간", enabled) { onChange((hour + 23) % 24, minute) }
-            TappableValue(
-                display = "%02d:%02d".format(hour, minute),
-                editSeed = "%02d:%02d".format(hour, minute),
-                fontSize = 24,
-                enabled = enabled,
-                keyboardType = KeyboardType.Number,
-                modifier = Modifier.weight(1f),
-                parse = { raw ->
-                    val parsed = parseTime(raw)
-                    if (parsed == null) TIME_HINT
-                    else { onChange(parsed.first, parsed.second); null }
-                },
-            )
-            StepButton("+1시간", enabled) { onChange((hour + 1) % 24, minute) }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StepButton("−10분", enabled) {
-                val total = (hour * 60 + minute - 10 + 1440) % 1440
-                onChange(total / 60, total % 60)
-            }
-            StepButton("+10분", enabled) {
-                val total = (hour * 60 + minute + 10) % 1440
-                onChange(total / 60, total % 60)
+            DAY_NAMES.forEachIndexed { index, name ->
+                val on = available && index in selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(JitRadius.Hint))
+                        .background(if (on) JitColor.Accent else JitColor.Surface2)
+                        .clickable(enabled = available) { onToggle(index) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = name,
+                        color = when {
+                            on -> JitColor.Bg
+                            available -> JitColor.TextPrimary
+                            else -> JitColor.Track
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
         }
     }
 }
 
-private const val TIME_HINT = "1430 또는 14:30 으로 입력한다"
-private const val DATE_HINT = "0918 또는 2026-09-18 로 입력한다"
+/** 고른 요일 요약. 월요일부터 순서대로 "월 · 수", 하나도 없으면 "반복 안 함". */
+internal fun repeatSummary(selected: Set<Int>): String =
+    if (selected.isEmpty()) "반복 안 함"
+    else selected.sorted().filter { it in DAY_NAMES.indices }.joinToString(" · ") { DAY_NAMES[it] }
 
-/** 시각 구분자. 숫자 키보드에서 치기 쉬운 것부터 넣었다. */
-private val TIME_SEPARATORS = charArrayOf(':', '.', ' ', '시')
+/** 0~23 시 → 12시간제 시. 0시와 12시는 12 로 보인다. */
+internal fun to12Hour(hour: Int): Int = if (hour % 12 == 0) 12 else hour % 12
 
-/** 날짜 구분자. */
-private val DATE_SEPARATORS = charArrayOf('-', '.', '/', ' ')
+/** 시(0~23)는 그대로 두고 오전/오후만 바꾼다. 오전 9시 → 오후 9시 = 21시, 오후 12시 → 오전 12시 = 0시. */
+internal fun withMeridiem(hour: Int, pm: Boolean): Int = hour % 12 + if (pm) 12 else 0
 
-/**
- * 시각 문자열 해석.
- *
- * 구분자를 강제하지 않는다. 숫자 키보드에서 콜론을 넣으려면 자판을 한 번 더
- * 바꿔야 하므로 **`1430` 처럼 붙여 쓴 네 자리를 기본으로 본다.**
- *
- * | 입력 | 결과 | 판단 근거 |
- * | --- | --- | --- |
- * | `1430`, `14:30`, `14.30`, `14 30`, `14시30분` | 14:30 | |
- * | `930` | 9:30 | 세 자리는 앞 한 자리가 시 |
- * | `9`, `09` | 9:00 | 분을 생략한 것으로 본다 |
- * | `9:5` | 9:05 | 구분자가 있으면 자리수로 자르지 않는다 |
- * | `2530`, `1470`, `abc`, `` | null | 범위·형식 위반 |
- *
- * 구분자가 있으면 그 앞뒤를 시·분으로 읽는다. `9:5` 를 자리수로 자르면
- * 95 → 9시 5분이 아니라 이상한 값이 되기 때문이다.
- */
-internal fun parseTime(raw: String): Pair<Int, Int>? {
-    val text = raw.trim()
-    if (text.isEmpty()) return null
-
-    val separator = TIME_SEPARATORS.firstOrNull { it in text }
-
-    val (hourPart, minutePart) = if (separator != null) {
-        val parts = text.split(separator, limit = 2)
-        parts[0].filter(Char::isDigit) to parts[1].filter(Char::isDigit)
-    } else {
-        val digits = text.filter(Char::isDigit)
-        // 숫자만 남긴 뒤 자리수로 자른다. 원문에 숫자가 아닌 글자가 섞여 있으면
-        // 형식 위반으로 본다 — "1a4b3c0" 을 14:30 으로 읽어 주면 오타를 덮는다.
-        if (digits.length != text.length) return null
-        when (digits.length) {
-            4 -> digits.take(2) to digits.drop(2)
-            3 -> digits.take(1) to digits.drop(1)
-            1, 2 -> digits to "0"
-            else -> return null
-        }
-    }
-
-    val hour = hourPart.toIntOrNull() ?: return null
-    val minute = if (minutePart.isEmpty()) 0 else (minutePart.toIntOrNull() ?: return null)
-    if (hour !in 0..23 || minute !in 0..59) return null
-    return hour to minute
-}
+/** 0~11 시 = 오전, 12~23 시 = 오후. 오전 12시 = 0시, 오후 12시 = 12시. */
+internal fun meridiemLabel(hour: Int): String = if (hour < 12) "오전" else "오후"
 
 /**
- * 날짜 문자열 해석.
+ * 달력 팝업. 오늘 이전 날짜는 고를 수 없다.
  *
- * | 입력 | 결과 |
- * | --- | --- |
- * | `20260918`, `2026-09-18`, `2026.9.18` | 2026-09-18 |
- * | `0918`, `9-18`, `9/18`, `9.18` | 참조 연도의 9월 18일 |
- *
- * 연도를 생략하면 [reference](지금 고른 날짜)의 연도를 쓴다. 대부분 같은 해다.
+ * Material3 `DatePicker` 는 기본 색이 밝아 어두운 팔레트와 충돌하므로 색을 전부
+ * 앱 팔레트로 지정한다. 날짜는 UTC 자정 밀리초로 주고받는다(`DatePickerState` 규약).
  */
-internal fun parseDate(raw: String, reference: LocalDate): LocalDate? {
-    val text = raw.trim()
-    if (text.isEmpty()) return null
-
-    val parts = text
-        .split(*DATE_SEPARATORS)
-        .map { it.filter(Char::isDigit) }
-        .filter { it.isNotEmpty() }
-
-    return runCatching {
-        when {
-            // 연-월-일
-            parts.size >= 3 ->
-                LocalDate.of(parts[0].toInt(), parts[1].toInt(), parts[2].toInt())
-
-            // 월-일 (연도 생략)
-            parts.size == 2 ->
-                LocalDate.of(reference.year, parts[0].toInt(), parts[1].toInt())
-
-            // 구분자 없이 붙여 쓴 경우
-            parts.size == 1 && parts[0].length == 8 -> LocalDate.of(
-                parts[0].take(4).toInt(),
-                parts[0].substring(4, 6).toInt(),
-                parts[0].substring(6, 8).toInt(),
-            )
-
-            parts.size == 1 && parts[0].length == 4 -> LocalDate.of(
-                reference.year,
-                parts[0].take(2).toInt(),
-                parts[0].drop(2).toInt(),
-            )
-
-            else -> null
-        }
-    }.getOrNull()
-}
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun StepButton(label: String, enabled: Boolean, onClick: () -> Unit) {
-    Text(
-        text = label,
-        color = if (enabled) JitColor.TextPrimary else JitColor.Track,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier
-            .clip(RoundedCornerShape(JitRadius.Hint))
-            .background(JitColor.Surface2)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+private fun JitDatePickerDialog(
+    initial: LocalDate,
+    onPick: (LocalDate) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val today = remember { LocalDate.now() }
+    val state = rememberDatePickerState(
+        initialSelectedDateMillis = initial.toUtcMillis(),
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                !utcTimeMillis.toUtcLocalDate().isBefore(today)
+
+            override fun isSelectableYear(year: Int): Boolean = year >= today.year
+        },
     )
+    val colors = DatePickerDefaults.colors(
+        containerColor = JitColor.Surface,
+        titleContentColor = JitColor.TextSecondary,
+        headlineContentColor = JitColor.TextPrimary,
+        weekdayContentColor = JitColor.TextSecondary,
+        subheadContentColor = JitColor.TextSecondary,
+        navigationContentColor = JitColor.TextPrimary,
+        yearContentColor = JitColor.TextPrimary,
+        disabledYearContentColor = JitColor.Track,
+        currentYearContentColor = JitColor.Accent,
+        selectedYearContentColor = JitColor.Bg,
+        selectedYearContainerColor = JitColor.Accent,
+        dayContentColor = JitColor.TextPrimary,
+        disabledDayContentColor = JitColor.Track,
+        selectedDayContentColor = JitColor.Bg,
+        selectedDayContainerColor = JitColor.Accent,
+        todayContentColor = JitColor.Accent,
+        todayDateBorderColor = JitColor.Accent,
+        dividerColor = JitColor.Track,
+    )
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val picked = state.selectedDateMillis
+                    if (picked != null) onPick(picked.toUtcLocalDate()) else onDismiss()
+                },
+            ) { Text("확인", color = JitColor.Accent, fontWeight = FontWeight.Bold) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소", color = JitColor.TextSecondary) }
+        },
+        colors = colors,
+    ) {
+        DatePicker(
+            state = state,
+            colors = colors,
+            // 기본 제목과 직접 입력 전환 버튼은 영어 문구라 뺀다.
+            title = null,
+            showModeToggle = false,
+        )
+    }
 }
+
+/**
+ * 시계 다이얼 팝업. 시를 고르면 분 다이얼로 넘어가고 오전/오후 토글이 함께 있다.
+ * 내부 값은 0~23 시 그대로다(`TimePickerState.hour`).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun JitTimePickerDialog(
+    hour: Int,
+    minute: Int,
+    onPick: (Int, Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val state = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = false)
+
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .clip(RoundedCornerShape(JitRadius.Card))
+                .background(JitColor.Surface)
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = "시작 시각",
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TimePicker(
+                state = state,
+                colors = TimePickerDefaults.colors(
+                    clockDialColor = JitColor.Surface2,
+                    clockDialSelectedContentColor = JitColor.Bg,
+                    clockDialUnselectedContentColor = JitColor.TextPrimary,
+                    selectorColor = JitColor.Accent,
+                    containerColor = JitColor.Surface,
+                    periodSelectorBorderColor = JitColor.Track,
+                    periodSelectorSelectedContainerColor = JitColor.Accent,
+                    periodSelectorUnselectedContainerColor = JitColor.Surface2,
+                    periodSelectorSelectedContentColor = JitColor.Bg,
+                    periodSelectorUnselectedContentColor = JitColor.TextSecondary,
+                    timeSelectorSelectedContainerColor = JitColor.Accent,
+                    timeSelectorUnselectedContainerColor = JitColor.Surface2,
+                    timeSelectorSelectedContentColor = JitColor.Bg,
+                    timeSelectorUnselectedContentColor = JitColor.TextPrimary,
+                ),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss) { Text("취소", color = JitColor.TextSecondary) }
+                TextButton(onClick = { onPick(state.hour, state.minute) }) {
+                    Text("확인", color = JitColor.Accent, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+private fun LocalDate.toUtcMillis(): Long =
+    atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+
+private fun Long.toUtcLocalDate(): LocalDate =
+    java.time.Instant.ofEpochMilli(this).atZone(java.time.ZoneOffset.UTC).toLocalDate()
 
 /**
  * 종류 드롭다운. Figma "⑫-a 종류 드롭다운".
@@ -704,9 +797,20 @@ private fun StepButton(label: String, enabled: Boolean, onClick: () -> Unit) {
  * 어두운 팔레트에서 눈에 튀기 때문이다.
  */
 @Composable
-private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled: Boolean) {
+private fun TagDropdown(
+    options: List<TagOption>,
+    selected: String?,
+    onChange: (String?) -> Unit,
+    enabled: Boolean,
+) {
     var expanded by remember { mutableStateOf(false) }
-    val current = TAG_OPTIONS.firstOrNull { it.key == selected } ?: TAG_OPTIONS.last()
+    // "+ 추가" 를 눌렀을 때의 안내. B-8 전까지는 저장할 곳이 없다.
+    var addNotice by remember { mutableStateOf(false) }
+    // 서버 목록을 아직 못 받았으면 고른 key 의 이름을 모른다. 따로 표시한다.
+    // 종류를 비우면(null) 서버가 프로필 기본 τ 를 쓴다.
+    val current = options.firstOrNull { it.key == selected }
+        ?: if (selected == null) TagOption(null, "선택 안 함", "프로필 기본")
+        else TagOption(selected, "불러오는 중", "")
 
     JitCard(gap = 9.dp) {
         Row(
@@ -716,7 +820,7 @@ private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled:
         ) {
             Text("종류", color = JitColor.TextSecondary, fontSize = 11.sp)
             Text(
-                text = "고르면 안전 여유(τ)가 정해짐",
+                text = "시험·발표는 τ 를 높게",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
@@ -754,7 +858,7 @@ private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled:
                 containerColor = JitColor.Surface2,
                 modifier = Modifier.fillMaxWidth(0.82f),
             ) {
-                TAG_OPTIONS.forEach { option ->
+                options.forEach { option ->
                     val on = option.key == current.key
                     DropdownMenuItem(
                         onClick = {
@@ -789,7 +893,32 @@ private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled:
                         },
                     )
                 }
+                // 명세 12-a: 맨 끝은 "기타" 가 아니라 "+ 추가".
+                // ⏳ B-8 이후: 이름을 입력받아 서버에 저장하고 목록에 붙인다.
+                // 앱에만 저장하는 임시 구현은 하지 않는다 — 다른 기기·재설치에서 사라진다.
+                DropdownMenuItem(
+                    onClick = {
+                        expanded = false
+                        addNotice = true
+                    },
+                    text = {
+                        Text(
+                            text = "+ 추가",
+                            color = JitColor.Accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    },
+                )
             }
+        }
+
+        if (addNotice) {
+            Text(
+                text = "종류 직접 추가는 준비 중",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+            )
         }
     }
 }
@@ -804,13 +933,13 @@ private fun TagDropdown(selected: String?, onChange: (String?) -> Unit, enabled:
 @Composable
 private fun RouteRow(
     routeLabel: String?,
-    originLabel: String?,
     enabled: Boolean,
-    hasPlace: Boolean,
+    /** 출발지와 도착지가 둘 다 정해졌는지 */
+    ready: Boolean,
     onClick: () -> Unit,
 ) {
     val hint = when {
-        !hasPlace -> "장소를 먼저 고름"
+        !ready -> "출발지·도착지를 먼저 고름"
         routeLabel != null -> "선택함"
         else -> "선택 안 함 · 최단 경로 사용"
     }
@@ -838,7 +967,7 @@ private fun RouteRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = routeLabel ?: "경로 고르기",
+                text = routeLabel ?: "경로 고르기 ›",
                 color = when {
                     !enabled -> JitColor.Track
                     routeLabel != null -> JitColor.TextPrimary
@@ -847,37 +976,107 @@ private fun RouteRow(
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = if (routeLabel != null) "변경 ›" else "›",
-                color = if (enabled) JitColor.TextSecondary else JitColor.Track,
-                fontSize = if (routeLabel != null) 12.sp else 16.sp,
-            )
+            if (routeLabel != null) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "변경 ›",
+                    color = if (enabled) JitColor.TextSecondary else JitColor.Track,
+                    fontSize = 12.sp,
+                )
+            }
         }
+    }
+}
 
-        // 어디서 출발하는 기준인지 적는다. 출발지가 집이 아닐 수 있으므로
-        // 숨기면 알람 시각을 설명할 수 없다.
-        originLabel?.takeIf { it.isNotBlank() }?.let {
+/**
+ * 출발지·도착지 한 줄. Figma 13-a: `[값] [집] [검색]`.
+ *
+ * 집 버튼은 값이 집이면 주황(활성), 아니면 회색이다. 집이 저장되지 않았으면
+ * 흐리게 그리고, 누르면 ⑭ 집 주소로 보낸다([onHome] 이 처리).
+ */
+@Composable
+private fun EndpointRow(
+    label: String,
+    value: String,
+    hasValue: Boolean,
+    isHome: Boolean,
+    homeAvailable: Boolean,
+    searching: Boolean,
+    enabled: Boolean,
+    onHome: () -> Unit,
+    onSearchToggle: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, color = JitColor.TextSecondary, fontSize = 11.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "$it 에서 출발",
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                text = value,
+                color = if (hasValue) JitColor.TextPrimary else JitColor.TextSecondary,
+                fontSize = 14.sp,
+                fontWeight = if (hasValue) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            EndpointButton(
+                text = "집",
+                active = isHome,
+                dimmed = !homeAvailable,
+                enabled = enabled,
+                onClick = onHome,
+            )
+            Spacer(Modifier.width(6.dp))
+            EndpointButton(
+                text = if (searching) "닫기" else "검색",
+                active = searching,
+                dimmed = false,
+                enabled = enabled,
+                onClick = onSearchToggle,
             )
         }
     }
 }
 
 @Composable
-private fun NoticeCard(dot: androidx.compose.ui.graphics.Color, title: String, body: String) {
-    Column(
+private fun EndpointButton(
+    text: String,
+    active: Boolean,
+    dimmed: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Text(
+        text = text,
+        color = when {
+            active -> JitColor.Bg
+            dimmed -> JitColor.Track
+            else -> JitColor.TextPrimary
+        },
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
         modifier = Modifier
-            .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Hint))
-            .background(JitColor.Surface2)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        JitDotLabel(text = title, dotColor = dot, fontSize = 12, dotSize = 6.dp)
-        Text(text = body, color = JitColor.TextSecondary, fontSize = 11.sp)
-    }
+            .background(if (active) JitColor.Accent else JitColor.Surface2)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
 }
+
+/** 행 아래 짧은 안내. 예: 현재 위치를 못 구했을 때 */
+@Composable
+private fun NoticeLine(text: String) {
+    JitDotLabel(
+        text = text,
+        dotColor = JitColor.Amber,
+        textColor = JitColor.TextSecondary,
+        fontSize = 11,
+        bold = false,
+        dotSize = 6.dp,
+    )
+}
+
+/** 같은 지점인지. 검색 결과와 저장된 집은 객체가 달라서 좌표로 비교한다(약 10m). */
+internal fun com.swpp.wakeup.data.remote.PlaceSearchItem.isSameSpot(
+    other: com.swpp.wakeup.data.remote.PlaceSearchItem,
+): Boolean = kotlin.math.abs(lat - other.lat) < 1e-4 && kotlin.math.abs(lng - other.lng) < 1e-4

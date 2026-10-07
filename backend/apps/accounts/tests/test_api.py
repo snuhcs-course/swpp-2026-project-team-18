@@ -12,6 +12,7 @@ from django.db import IntegrityError, transaction
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Profile
+from apps.accounts.serializers import RegisterSerializer
 
 pytestmark = pytest.mark.django_db
 
@@ -53,6 +54,7 @@ class TestRegister:
                 "nickname": "신규",
                 "password": PASSWORD,
                 "password_confirm": PASSWORD,
+                "terms_agreed": True,
             },
             format="json",
         )
@@ -70,6 +72,7 @@ class TestRegister:
                 "nickname": "중복",
                 "password": PASSWORD,
                 "password_confirm": PASSWORD,
+                "terms_agreed": True,
             },
             format="json",
         )
@@ -84,30 +87,26 @@ class TestRegister:
                 "nickname": "불일치",
                 "password": PASSWORD,
                 "password_confirm": PASSWORD + "z",
+                "terms_agreed": True,
             },
             format="json",
         )
         assert res.status_code == 400
         assert "password_confirm" in error_fields(res)
 
-    def test_rejects_password_similar_to_email(self):
-        """Django 검증기를 태우는지 확인한다.
-
-        이 검증기 때문에 검증 스크립트가 간헐적으로 실패한 적이 있다.
-        동작 자체는 옳으므로 테스트로 고정한다.
-        """
+    def test_accepts_password_similar_to_email_and_nickname(self):
         res = APIClient().post(
             "/api/auth/register",
             {
-                "email": "similar_password@example.com",
-                "nickname": "유사",
-                "password": "similar_password",
-                "password_confirm": "similar_password",
+                "email": "similar_password7@example.com",
+                "nickname": "similar_password7",
+                "password": "similar_password7",
+                "password_confirm": "similar_password7",
+                "terms_agreed": True,
             },
             format="json",
         )
-        assert res.status_code == 400
-        assert "password" in error_fields(res)
+        assert res.status_code == 201
 
     def test_rejects_short_password(self):
         res = APIClient().post(
@@ -117,6 +116,7 @@ class TestRegister:
                 "nickname": "짧음",
                 "password": "ab1",
                 "password_confirm": "ab1",
+                "terms_agreed": True,
             },
             format="json",
         )
@@ -130,6 +130,7 @@ class TestRegister:
                 "nickname": "해시",
                 "password": PASSWORD,
                 "password_confirm": PASSWORD,
+                "terms_agreed": True,
             },
             format="json",
         )
@@ -145,10 +146,83 @@ class TestRegister:
                 "nickname": "   ",
                 "password": PASSWORD,
                 "password_confirm": PASSWORD,
+                "terms_agreed": True,
             },
             format="json",
         )
         assert res.status_code == 400
+
+    @pytest.mark.parametrize(
+        "terms",
+        [
+            {},
+            {"terms_agreed": False},
+            {"terms_agreed": None},
+            {"terms_agreed": "true"},
+            {"terms_agreed": 1},
+        ],
+    )
+    def test_requires_explicit_agreement(self, django_user_model, terms):
+        res = APIClient().post(
+            "/api/auth/register",
+            {
+                "email": "terms@example.com",
+                "nickname": "약관",
+                "password": PASSWORD,
+                "password_confirm": PASSWORD,
+                **terms,
+            },
+            format="json",
+        )
+        assert res.status_code == 400
+        assert "terms_agreed" in error_fields(res)
+        assert not django_user_model.objects.filter(email="terms@example.com").exists()
+
+    def test_records_agreement_time(self, django_user_model):
+        from django.utils import timezone
+
+        before = timezone.now()
+        res = APIClient().post(
+            "/api/auth/register",
+            {
+                "email": "agreed@example.com",
+                "nickname": "약관",
+                "password": PASSWORD,
+                "password_confirm": PASSWORD,
+                "terms_agreed": True,
+            },
+            format="json",
+        )
+        assert res.status_code == 201
+        agreed_at = django_user_model.objects.get(
+            email="agreed@example.com"
+        ).terms_agreed_at
+        assert before <= agreed_at <= timezone.now()
+
+    def test_does_not_infer_agreement_for_existing_users(self, user):
+        assert user.terms_agreed_at is None
+
+    def test_profile_failure_rolls_back_registration(
+        self, monkeypatch, django_user_model
+    ):
+        serializer = RegisterSerializer(
+            data={
+                "email": "rollback@example.com",
+                "nickname": "실패",
+                "password": PASSWORD,
+                "password_confirm": PASSWORD,
+                "terms_agreed": True,
+            }
+        )
+        serializer.is_valid(raise_exception=True)
+
+        def fail(**kwargs):
+            raise IntegrityError("profile creation failed")
+
+        monkeypatch.setattr(Profile.objects, "get_or_create", fail)
+        with pytest.raises(IntegrityError):
+            serializer.save()
+        assert not django_user_model.objects.filter(email="rollback@example.com").exists()
 
 
 class TestLogin:
@@ -215,6 +289,7 @@ class TestLogin:
                 "nickname": "대소문자",
                 "password": PASSWORD,
                 "password_confirm": PASSWORD,
+                "terms_agreed": True,
             },
             format="json",
         )

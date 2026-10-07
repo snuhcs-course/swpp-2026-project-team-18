@@ -101,8 +101,9 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
         write.is_valid(raise_exception=True)
         event = write.save()
 
-        # 시각·장소가 바뀌면 알람도 달라진다. 다시 계산한다.
-        planning_services.compute_and_store(event)
+        # 켬/끔만 바꾸면 기존 계획을 쓴다. 카카오 경로를 다시 조회하지 않는다.
+        if set(write.validated_data) != {"alarm_enabled"}:
+            planning_services.compute_and_store(event)
         event.refresh_from_db()
 
         return Response(EventSerializer(event, context=self.get_serializer_context()).data)
@@ -369,7 +370,10 @@ def _resolve_origin(request, profile) -> tuple[dict | None, Response | None]:
 
 
 class PlaceSearchView(APIView):
-    """GET /api/places/search — 카카오 로컬 검색 프록시.
+    """GET /api/places/search — 카카오 주소·장소 검색 프록시.
+
+    번지까지 확인된 주소가 있으면 우선 반환하고, 없으면 장소 키워드로 검색한다.
+    주소 결과는 정확도순이며 카카오 장소 ID가 없다. 앱 응답 형식은 동일하다.
 
     클라이언트가 카카오를 직접 부르지 않는다. API 키를 앱에 넣으면 APK 를
     뜯어 꺼낼 수 있다. back-spec.md 5.3 의 프록시 규정이다.
@@ -378,7 +382,7 @@ class PlaceSearchView(APIView):
       `q`         검색어 (필수)
       `lat`,`lng` 기준 좌표. **주면 결과에 거리가 붙는다.** 카카오는 기준
                   좌표를 함께 받았을 때만 `distance` 를 채운다
-      `page`      1부터. 한 페이지 15건, 3페이지에서 끝난다(총 45건)
+      `page`      1부터. 한 페이지 15건, 검색별 `is_end`까지
       `sort`      `accuracy`(기본) / `distance`. 거리순은 좌표가 있어야 한다
       `rect`      지도 영역 재검색. `minLng,minLat,maxLng,maxLat`
     """

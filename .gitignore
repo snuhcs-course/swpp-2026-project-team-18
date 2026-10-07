@@ -48,5 +48,7 @@ build/
 .gradle/
 local.properties
 
-# 실기기 UIAutomator 덤프·스크린샷 등 로컬 검증 산출물
+# UIAutomator 화면·영상·로그·일회용 DB 등 로컬 검증 산출물
 /.artifacts/
+
+.idea/

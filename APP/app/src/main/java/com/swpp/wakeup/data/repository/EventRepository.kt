@@ -14,6 +14,7 @@ import com.swpp.wakeup.data.remote.CalendarImportRequest
 import com.swpp.wakeup.data.remote.CalendarImportResponse
 import com.swpp.wakeup.data.remote.EventCreateRequest
 import com.swpp.wakeup.data.remote.EventDto
+import com.swpp.wakeup.data.remote.EventUpdateRequest
 import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.EventsApi
 import com.swpp.wakeup.data.remote.LiveRouteRequest
@@ -200,7 +201,8 @@ class EventRepository(
 
         return HomeData(
             sections = groupByDay(sorted, zone),
-            nextAlarm = sorted.firstOrNull { it.alarmAt != null },
+            nextAlarm = sorted.filter { it.alarmOn && it.hasAlarm }
+                .minByOrNull { it.alarmAtEpochSecond ?: Long.MAX_VALUE },
             totalCount = sorted.size,
             hasHome = profile.hasHome,
             homeLabel = profile.homeLabel?.takeIf { it.isNotBlank() },
@@ -212,6 +214,12 @@ class EventRepository(
             fromCache = fromCache,
             ageLabel = ageLabel,
         )
+    }
+
+    suspend fun setAlarmEnabled(id: Long, enabled: Boolean): Result<HomeData> = guard {
+        val response = api.update(id, EventUpdateRequest(alarmEnabled = enabled))
+        if (!response.isSuccessful) Result.Failure(errorMessage(response))
+        else loadHomeOnline() // 같은 날 다른 일정도 자동 ON/OFF가 바뀔 수 있다.
     }
 
     suspend fun createEvent(
@@ -771,6 +779,11 @@ internal fun RouteCandidateDto.toOption(fetchedAtElapsedMs: Long = 0L): RouteOpt
         minutesLabel = "${minutes}분",
         detailLine = detailLine.ifBlank { summary.orEmpty() },
         badge = reason?.takeIf { it.isNotBlank() },
+        // 서버가 배지 목록을 주면 그걸, 아니면 reason 하나를 쓴다. 문구는 서버 값 그대로.
+        badges = badges.orEmpty().map(String::trim).filter(String::isNotEmpty).distinct()
+            .ifEmpty { listOfNotNull(reason?.trim()?.takeIf { it.isNotEmpty() }) },
+        distanceM = distanceM?.takeIf { it > 0 },
+        bikeRoadPercent = bikeRoadPercent?.takeIf { it in 0..100 },
         // segments 가 null 인 경우가 정상이다 — 구버전 서버 응답과 Gson 의
         // 기본값 무시가 겹치는 자리다. 근거는 RouteCandidateDto.segments 주석.
         segments = RouteSegments(
@@ -804,6 +817,21 @@ private fun RouteSegmentDto.toSegment(fetchedAtElapsedMs: Long = 0L): RouteSegme
         guidance = guidance?.trim().orEmpty(),
         arrivals = arrivals.orEmpty().mapNotNull { it.toArrival(fetchedAtElapsedMs) }.take(2),
         headwayMinutes = headwayMinutes?.takeIf { it > 0 },
+        // 대체 노선은 이 구간을 복제하고 번호·종류만 바꾼다. 같은 번호는 뺀다.
+        alternatives = altVehicles.orEmpty()
+            .mapNotNull { alt -> alt.name?.trim()?.takeIf { it.isNotEmpty() }?.let { it to alt } }
+            .filter { (name, _) -> name != vehicle?.trim() }
+            .distinctBy { (name, _) -> name }
+            .map { (name, alt) ->
+                RouteSegment(
+                    kind = kind,
+                    seconds = seconds,
+                    label = name,
+                    lineName = name,
+                    busType = alt.vehicleType?.trim().orEmpty(),
+                    region = region?.trim().orEmpty(),
+                )
+            },
     )
 }
 
@@ -842,7 +870,7 @@ private fun defaultLabel(kind: RouteSegment.Kind): String = when (kind) {
 }
 
 /** 서버는 ISO 8601 로 준다. 파싱 실패한 항목은 목록에서 뺀다. */
-private fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
+internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
     val local = start.atZoneSameInstant(zone)
     val plan = alarmPlan
@@ -881,8 +909,19 @@ private fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
         planStatusLabel = plan?.statusLabel,
         startAtEpochSecond = start.toEpochSecond(),
         startDate = local.toLocalDate(),
+        alarmClock = alarmLocal?.format(CLOCK_12_FORMAT),
+        alarmMeridiem = alarmLocal?.let(::meridiem),
+        placeName = place?.name?.takeIf(String::isNotBlank),
+        startClock = local.format(CLOCK_12_FORMAT) + meridiem(local),
+        alarmOn = alarmOn == true,
+        alarmAtEpochSecond = alarmLocal?.toEpochSecond(),
     )
 }
+
+/** 홈 행의 12시간제 시각. 예 "7:40" (AM/PM 은 따로 붙인다) */
+private val CLOCK_12_FORMAT = DateTimeFormatter.ofPattern("h:mm")
+
+private fun meridiem(time: java.time.ZonedDateTime): String = if (time.hour < 12) "AM" else "PM"
 
 /**
  * 준비 시간 한 줄의 근거 문구.
@@ -1058,6 +1097,8 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
             listOfNotNull(p.name, p.address?.takeIf(String::isNotBlank)).joinToString(" · ")
         } ?: "장소 없음",
         sensitivityTag = tag?.label,
+        isFirstAlarm = isFirstAlarm,
+        latenessSensitive = latenessSensitivity == "high",
         alarmAt = alarmLocal?.format(ALARM_FORMAT),
         meridiem = alarmLocal?.let { if (it.hour < 12) "AM" else "PM" } ?: "",
         remaining = remaining,
@@ -1120,7 +1161,8 @@ private fun List<List<Double>>.toGeoPoints(): List<GeoPoint> =
  * 좌표는 판별 기준점이다 — 집은 출발, 일정 장소는 도착. 둘 다 없으면 알람은
  * 울리지만 추적은 하지 않는다([AlarmSchedule.canTrack]).
  */
-private fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedule? {
+internal fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedule? {
+    if (alarmOn != true) return null
     val plan = alarmPlan ?: return null
     if (plan.status != AlarmPlanDto.STATUS_OK) return null
 

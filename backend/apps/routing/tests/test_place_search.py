@@ -49,6 +49,8 @@ def captured(monkeypatch):
     seen: list[str] = []
 
     def fake_get(url):
+        if url.startswith(clients.ADDRESS_SEARCH_URL):
+            return {"documents": [], "meta": {}}, False
         seen.append(url)
         return {"documents": [DOC], "meta": META}, False
 
@@ -58,6 +60,175 @@ def captured(monkeypatch):
 
 def params_of(url: str) -> dict:
     return dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+
+
+ADDRESS = {
+    "address_type": "ROAD_ADDR",
+    "address_name": "서울 용산구 한강대로14길 12",
+    "x": "126.964825583084",
+    "y": "37.5249091192599",
+    "address": {"address_name": "서울 용산구 한강로3가 65-157"},
+    "road_address": {
+        "address_name": "서울 용산구 한강대로14길 12",
+        "building_name": "",
+        "x": "126.964825583084",
+        "y": "37.5249091192599",
+    },
+}
+
+
+@pytest.fixture
+def address_search(monkeypatch):
+    calls = []
+
+    def install(documents, *, meta=None, address_failed=False, places=None, place_failed=False):
+        def get(url):
+            calls.append(url)
+            if url.startswith(clients.ADDRESS_SEARCH_URL):
+                if address_failed:
+                    return None, True
+                return {"documents": documents, "meta": meta or {
+                    "total_count": len(documents), "pageable_count": len(documents), "is_end": True,
+                }}, False
+            if place_failed:
+                return None, True
+            return {"documents": places or [], "meta": META if places else {}}, False
+        monkeypatch.setattr(clients, "_get", get)
+        return calls
+
+    return install
+
+
+class TestAddressSearch:
+    def test_address_wins_over_unrelated_keyword_matches(self, address_search):
+        calls = address_search([ADDRESS], places=[DOC])
+        payload, degraded = clients.search_places(ADDRESS["address_name"])
+        item = payload["results"][0]
+        assert degraded is False
+        assert len(calls) == 1
+        assert item["name"] == item["address"] == ADDRESS["address_name"]
+        assert item["jibun_address"] == ADDRESS["address"]["address_name"]
+        assert item["lat"] == pytest.approx(37.5249091192599)
+        assert item["lng"] == pytest.approx(126.964825583084)
+        assert item["kakao_place_id"] is None
+        assert item["category_group"] == "주소"
+        assert item["place_url"] == ""
+        assert item["distance_m"] is None
+        assert payload["reachable_count"] == payload["total_count"] == 1
+
+    def test_building_name_is_used_when_available(self, address_search):
+        road = {**ADDRESS["road_address"], "building_name": "용산역"}
+        address_search([{**ADDRESS, "road_address": road}])
+        payload, _ = clients.search_places("서울 용산구 한강대로23길 55")
+        assert payload["results"][0]["name"] == "용산역"
+
+    def test_jibun_without_road_address_is_supported(self, address_search):
+        jibun = "전북특별자치도 익산시 부송동 100"
+        address_search([{
+            "address_type": "REGION_ADDR", "address_name": jibun,
+            "x": "126.99597495347", "y": "35.9766482774572",
+            "address": {"address_name": jibun}, "road_address": None,
+        }])
+        payload, _ = clients.search_places(jibun)
+        item = payload["results"][0]
+        assert item["name"] == item["address"] == item["jibun_address"] == jibun
+
+    def test_road_and_jibun_matches_for_same_building_are_deduplicated(self, address_search):
+        address_search([ADDRESS, {**ADDRESS, "address_type": "REGION_ADDR"}])
+        payload, _ = clients.search_places(ADDRESS["address_name"])
+        assert len(payload["results"]) == payload["reachable_count"] == 1
+
+    @pytest.mark.parametrize("address_type", ["REGION", "ROAD", None])
+    def test_region_or_street_center_is_not_a_home(self, address_search, address_type):
+        address_search([{**ADDRESS, "address_type": address_type}], places=[DOC])
+        payload, degraded = clients.search_places("서울")
+        assert degraded is False
+        assert payload["results"][0]["kakao_place_id"] == DOC["id"]
+
+    @pytest.mark.parametrize("x,y", [(None, None), ("nan", "37"), ("126", "91"), ("inf", "37")])
+    def test_invalid_coordinates_fall_back_to_places(self, address_search, x, y):
+        address_search([{**ADDRESS, "road_address": None, "x": x, "y": y}], places=[DOC])
+        payload, _ = clients.search_places("주소")
+        assert payload["results"][0]["kakao_place_id"] == DOC["id"]
+
+    def test_distance_is_measured_but_address_sort_remains_accuracy(self, address_search):
+        calls = address_search([ADDRESS])
+        payload, _ = clients.search_places("주소", lat=37.5255, lng=126.9648, sort="distance")
+        assert 60 < payload["results"][0]["distance_m"] < 70
+        assert payload["sort"] == "accuracy"
+        assert set(params_of(calls[0])) == {"query", "size", "page"}
+
+    @pytest.mark.parametrize("rect,count", [
+        ("126.94,37.46,126.96,37.49", 0),
+        ("126.96,37.52,126.97,37.53", 1),
+        ("잘못된 영역", 1),
+    ])
+    def test_map_rect_filters_addresses_and_ignores_invalid_bounds(self, address_search, rect, count):
+        calls = address_search([ADDRESS], places=[DOC])
+        payload, degraded = clients.search_places("주소", rect=rect)
+        assert len(payload["results"]) == payload["reachable_count"] == count
+        assert degraded is False
+        assert len(calls) == 1
+
+    def test_next_address_page_returns_its_own_results(self, monkeypatch):
+        second = {**ADDRESS, "road_address": {
+            **ADDRESS["road_address"], "address_name": "서울 용산구 한강대로14길 16",
+        }}
+        def get(url):
+            assert url.startswith(clients.ADDRESS_SEARCH_URL)
+            params = params_of(url)
+            assert params["size"] == "1"
+            page = int(params["page"])
+            return {"documents": [[ADDRESS], [second]][page - 1], "meta": {
+                "total_count": 2, "pageable_count": 2, "is_end": page == 2,
+            }}, False
+        monkeypatch.setattr(clients, "_get", get)
+        payload, degraded = clients.search_places("주소", page=2, size=1)
+        assert degraded is False
+        assert payload["page"] == 2 and payload["is_end"] is True
+        assert payload["results"][0]["name"] == second["road_address"]["address_name"]
+        assert payload["reachable_count"] == 2
+
+    def test_empty_later_page_does_not_switch_to_keyword_search(self, monkeypatch):
+        calls = []
+        def get(url):
+            calls.append(url)
+            assert url.startswith(clients.ADDRESS_SEARCH_URL)
+            documents = [ADDRESS] if params_of(url)["page"] == "1" else []
+            return {"documents": documents, "meta": {
+                "total_count": 1, "pageable_count": 1, "is_end": True,
+            }}, False
+        monkeypatch.setattr(clients, "_get", get)
+        payload, degraded = clients.search_places("주소", page=2)
+        assert degraded is False
+        assert payload["page"] == 2
+        assert payload["results"] == []
+        assert payload["is_end"] is True
+        assert [params_of(url)["page"] for url in calls] == ["1", "2"]
+
+    def test_address_page_failure_is_not_hidden_by_keyword_results(self, monkeypatch):
+        def get(url):
+            assert url.startswith(clients.ADDRESS_SEARCH_URL)
+            if params_of(url)["page"] == "1":
+                return {"documents": [ADDRESS], "meta": {}}, False
+            return None, True
+        monkeypatch.setattr(clients, "_get", get)
+        payload, degraded = clients.search_places("주소", page=2)
+        assert degraded is True
+        assert payload["results"] == []
+
+    def test_address_failure_preserves_working_place_search(self, address_search):
+        address_search([], address_failed=True, places=[DOC])
+        payload, degraded = clients.search_places("카페")
+        assert degraded is False
+        assert payload["results"][0]["name"] == DOC["place_name"]
+
+    @pytest.mark.parametrize("place_failed", [False, True])
+    def test_address_failure_and_no_places_is_not_reported_as_no_matches(self, address_search, place_failed):
+        address_search([], address_failed=True, place_failed=place_failed)
+        payload, degraded = clients.search_places("주소")
+        assert degraded is True
+        assert payload["results"] == []
 
 
 class TestRequestAssembly:

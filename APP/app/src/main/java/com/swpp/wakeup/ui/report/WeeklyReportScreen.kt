@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -169,6 +170,7 @@ private fun ArrowButton(glyph: String, enabled: Boolean, onClick: () -> Unit) {
         fontSize = 20.sp,
         fontWeight = FontWeight.Medium,
         modifier = Modifier
+            .testTag(if (glyph == "›") "report_next_week" else "report_previous_week")
             .clip(RoundedCornerShape(8.dp))
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 4.dp),

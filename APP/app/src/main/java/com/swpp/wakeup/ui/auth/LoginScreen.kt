@@ -22,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -57,9 +58,13 @@ import com.swpp.wakeup.ui.theme.JitTheme
  * Figma 와 의도적으로 다른 점.
  *  1) 목업 상단의 "6:12 / LTE 87%" 줄은 넣지 않았다. 실제 기기에서는 시스템
  *     상태바가 그 자리를 차지하므로 가짜 상태바는 중복이다.
- *  2) 약관 문구를 9sp 대신 11sp 로 올렸다. Figma 쪽도 11 로 맞춰 두었다.
- *  3) 키보드가 올라오면 화면이 좁아지므로 스크롤을 붙였다. 목업은 고정 800dp
+ *  2) 키보드가 올라오면 화면이 좁아지므로 스크롤을 붙였다. 목업은 고정 800dp
  *     기준이라 이 상황이 없다.
+ *
+ * "카카오로 계속하기" 아래 약관 문구와 "로그인 없이 둘러보기" 버튼은 Figma에
+ * 없어 지웠다(front-spec 1번). 둘러보기가 유일한 비로그인 진입 경로였으므로
+ * 앱을 로그인 없이 볼 방법이 없어졌다 — 시연/테스트 용도로 쓰고 있었다면 팀에
+ * 알릴 것.
  *
  * 목업의 스페이서(node 23:6)는 원래 남는 공간을 채우도록(`layoutGrow=1`) 돼 있어서
  * 카드를 지우면 **로고가 아래로 내려갔다.** 여기 `Spacer(28.dp)` 는 고정이라 앱은
@@ -79,13 +84,13 @@ fun LoginScreen(
     onSignupClick: () -> Unit,
     onGoogleClick: () -> Unit,
     onKakaoClick: () -> Unit,
-    onBrowseClick: () -> Unit,
     modifier: Modifier = Modifier,
     /** 잠든 공용 서버를 깨우는 중. 오래 걸릴 때만 true 가 된다. */
     waking: Boolean = false,
 ) {
     Column(
         modifier = modifier
+            .testTag("login_scroll")
             .fillMaxSize()
             .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
@@ -123,6 +128,7 @@ fun LoginScreen(
             value = email,
             onValueChange = onEmailChange,
             keyboardType = KeyboardType.Email,
+            inputTag = "login_email",
             enabled = !loading
         )
 
@@ -132,6 +138,7 @@ fun LoginScreen(
             onValueChange = onPasswordChange,
             isPassword = true,
             keyboardType = KeyboardType.Password,
+            inputTag = "login_password",
             imeAction = ImeAction.Done,
             enabled = !loading
         )
@@ -153,6 +160,7 @@ fun LoginScreen(
 
         JitPrimaryButton(
             label = stringResource(R.string.auth_login),
+            modifier = Modifier.testTag("login_submit"),
             onClick = onLoginClick,
             enabled = canSubmit,
             loading = loading
@@ -195,26 +203,6 @@ fun LoginScreen(
             symbol = JitColor.KakaoSymbol,
             onClick = onKakaoClick
         )
-
-        Text(
-            text = stringResource(R.string.login_terms),
-            modifier = Modifier.fillMaxWidth(),
-            color = JitColor.TextSecondary,
-            fontSize = 11.sp,
-            textAlign = TextAlign.Center
-        )
-
-        TextButton(
-            onClick = onBrowseClick,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = stringResource(R.string.login_browse),
-                color = JitColor.TextSecondary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
     }
 }
 
@@ -282,7 +270,6 @@ private fun LoginScreenPreview() {
             onSignupClick = {},
             onGoogleClick = {},
             onKakaoClick = {},
-            onBrowseClick = {},
         )
     }
 }

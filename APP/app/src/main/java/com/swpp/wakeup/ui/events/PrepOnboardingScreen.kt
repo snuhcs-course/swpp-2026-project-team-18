@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -90,7 +91,7 @@ fun PrepOnboardingScreen(
         )
 
         Text(
-            text = "깨서부터 문을 나서기까지 걸리는 시간",
+            text = "기상 후 문을 나서기까지 걸리는 시간",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
@@ -109,6 +110,7 @@ fun PrepOnboardingScreen(
 
         JitPrimaryButton(
             label = "저장하고 시작하기",
+            modifier = Modifier.testTag("prep_submit"),
             onClick = onSubmit,
             enabled = state.canSubmit,
             loading = state.submitting,
@@ -168,6 +170,7 @@ private fun PrepInputCard(
             Box(modifier = Modifier.weight(1f)) {
                 JitTextField(
                     label = "분",
+                    inputTag = "prep_minutes",
                     value = state.minutes,
                     onValueChange = onMinutesChange,
                     keyboardType = KeyboardType.Number,

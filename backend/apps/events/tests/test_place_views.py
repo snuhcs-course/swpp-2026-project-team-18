@@ -19,6 +19,7 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from apps.events import views as event_views
+from apps.events.serializers import PlaceInputSerializer
 from apps.routing import clients
 
 pytestmark = pytest.mark.django_db
@@ -88,6 +89,38 @@ def fake_search(monkeypatch):
 
 
 class TestSearchView:
+    def test_address_result_can_be_saved_as_home_and_destination(self, client, monkeypatch):
+        address = "서울 용산구 한강대로14길 12"
+        document = {
+            "address_type": "ROAD_ADDR", "address_name": address,
+            "x": "126.964825583084", "y": "37.5249091192599",
+            "road_address": {"address_name": address},
+        }
+        monkeypatch.setattr(clients, "_get", lambda url: (
+            {"documents": [document], "meta": {"is_end": True}}, False,
+        ))
+        response = client.get(SEARCH_URL, {"q": address})
+        assert response.status_code == 200
+        assert response.json()["degraded"] is False
+        item = response.json()["results"][0]
+        assert item["kakao_place_id"] is None
+        saved = client.patch("/api/profile", {
+            "home_label": item["name"], "home_lat": item["lat"], "home_lng": item["lng"],
+        }, format="json")
+        assert saved.status_code == 200
+        profile = client.get("/api/profile").json()
+        assert profile["has_home"] is True
+        assert profile["home_label"] == address
+        assert profile["home_lat"] == item["lat"]
+        assert profile["home_lng"] == item["lng"]
+        destination = PlaceInputSerializer(data=item)
+        assert destination.is_valid(), destination.errors
+        place = destination.resolve()
+        assert place.kakao_place_id is None
+        assert place.address == item["address"]
+        assert place.lat == item["lat"] and place.lng == item["lng"]
+        assert destination.resolve().pk == place.pk
+
     def test_blank_query_returns_empty_envelope(self, client, fake_search):
         """빈 검색어로 카카오를 부르지 않는다. 쿼터가 있다."""
         res = client.get(f"{SEARCH_URL}?q=")

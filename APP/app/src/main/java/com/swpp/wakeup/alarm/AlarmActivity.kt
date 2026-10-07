@@ -30,6 +30,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -199,6 +202,7 @@ private fun AlarmRingingScreen(
 
     Box(
         Modifier
+            .semantics { testTagsAsResourceId = true }
             .fillMaxSize()
             // **배경을 직접 칠한다.** 다른 화면은 MainActivity 의
             // Scaffold(containerColor = JitColor.Bg) 안에 있어서 배경이
@@ -284,7 +288,7 @@ private fun AlarmRingingScreen(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("alarm_dismiss"),
                     shape = RoundedCornerShape(JitRadius.Button),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = JitColor.Accent,

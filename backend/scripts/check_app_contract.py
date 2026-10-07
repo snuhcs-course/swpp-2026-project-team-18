@@ -200,8 +200,6 @@ class Api:
 
 def register(api: Api) -> str:
     email = f"ctrchk_{uuid.uuid4().hex[:8]}@example.com"
-    # 이메일과 닮지 않은 비밀번호. 닮으면 UserAttributeSimilarityValidator 가
-    # 400 을 내고 검증이 무작위로 깜빡인다.
     st, body = api(
         "/api/auth/register",
         "POST",
@@ -210,6 +208,7 @@ def register(api: Api) -> str:
             "nickname": "계약확인",
             "password": "Jq4-amber-lantern-77",
             "password_confirm": "Jq4-amber-lantern-77",
+            "terms_agreed": True,
         },
         auth=False,
     )
@@ -380,7 +379,8 @@ def main() -> int:
         return 1
     event_id = event["id"]
 
-    compare("일정", event_fields, event)
+    # BE-15는 추후 구현이다. 앱은 이 선택적 배지가 없으면 표시하지 않는다.
+    compare("일정", event_fields, event, ignore={"lateness_sensitivity"})
 
     plan = event.get("alarm_plan") or {}
     check("alarm_plan 이 있다", bool(plan), f"{str(plan)[:120]}")

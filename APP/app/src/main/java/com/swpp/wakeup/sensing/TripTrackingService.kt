@@ -153,7 +153,7 @@ class TripTrackingService : Service() {
             TripLiveState.restoreLiveRoute(liveRouteStore.current(parsed.eventId))
         } else {
             liveRouteStore.clear()
-            TripLiveState.clearLiveRoute()
+            TripLiveState.clear()
         }
         movingSinceMillis = null
 
@@ -212,7 +212,7 @@ class TripTrackingService : Service() {
         // 있다고 판단한다. 도착·마감·사용자 중지 모두 여기를 지나간다.
         schedule?.eventId?.let(liveRouteStore::clear)
         liveRouteGate.reset()
-        TripLiveState.clear()
+        TripLiveState.clearTracking()
         Log.i(TAG, "추적 종료 (대기 관측 ${pending}건)")
         super.onDestroy()
     }
@@ -624,6 +624,8 @@ class TripTrackingService : Service() {
      * 시스템이 그 알림을 함께 치워서 **아무도 결과를 보지 못했다.**
      */
     private fun postArrivalResult(current: AlarmSchedule, fix: LocationFix) {
+        // 알림 권한과 무관하게 결과를 보존한다. onDestroy는 현재 위치만 지운다.
+        TripLiveState.recordArrival(current.eventId, fix.atMillis)
         val verdict = ArrivalVerdict(
             arrivedAtMillis = fix.atMillis,
             // 약속 시각은 일정 시작 시각이다. 계획이 추정한 도착 예정

@@ -37,6 +37,17 @@ data class UpcomingEvent(
     val startAtEpochSecond: Long,
     /** 날짜 묶기용 */
     val startDate: LocalDate,
+    /** 홈 행 왼쪽의 알람 시각(12시간제). 예 "7:40". 계산 못 했으면 null */
+    val alarmClock: String? = null,
+    /** [alarmClock] 의 "AM" / "PM". 계산 못 했으면 null */
+    val alarmMeridiem: String? = null,
+    /** 장소 이름만. 예 "서울대 302동". 장소가 없으면 null */
+    val placeName: String? = null,
+    /** 일정 시작 시각(12시간제). 예 "9:00AM" */
+    val startClock: String = startTime,
+    /** 서버가 판정한 최종 켬/끔. 계산된 시각이 있어도 OFF일 수 있다. */
+    val alarmOn: Boolean = false,
+    val alarmAtEpochSecond: Long? = null,
 ) {
     val hasAlarm: Boolean get() = alarmAt != null
 

@@ -8,8 +8,10 @@ import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ServerWarmup
+import com.swpp.wakeup.data.remote.PasswordCheckResponse
 import com.swpp.wakeup.data.repository.AuthRepository
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,6 +63,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val password: String = "",
         val nickname: String = "",
         val passwordConfirm: String = "",
+        /** 가입 요청에 함께 보내는 약관 동의. */
+        val termsAgreed: Boolean = false,
+        val passwordCheck: PasswordCheckResponse? = null,
+        val passwordCheckError: String? = null,
 
         val loading: Boolean = false,
         /** 서버가 준 메시지를 그대로 담는다. */
@@ -80,31 +86,53 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val canSubmitLogin: Boolean
             get() = !loading && email.isNotBlank() && password.isNotBlank()
 
+        /**
+         * 비밀번호 확인 일치. 화면 표시(✓)용 비교라 앱에서 한다.
+         * 서버도 `password_confirm` 으로 다시 확인한다.
+         */
+        val passwordsMatch: Boolean
+            get() = passwordConfirm.isNotEmpty() && password == passwordConfirm
+
+        /** 서버 비밀번호 검사·확인 일치·약관 동의가 모두 필요하다. */
         val canSubmitSignup: Boolean
             get() = !loading && email.isNotBlank() && nickname.isNotBlank() &&
-                password.isNotBlank() && passwordConfirm.isNotBlank()
+                password.isNotBlank() && passwordsMatch && termsAgreed && passwordCheck?.valid == true
     }
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
+    private var passwordCheckJob: Job? = null
 
     // --- 입력 -------------------------------------------------------------
 
     fun onEmailChange(value: String) = _state.update { it.copy(email = value, error = null) }
-    fun onPasswordChange(value: String) = _state.update { it.copy(password = value, error = null) }
+    fun onPasswordChange(value: String) {
+        passwordCheckJob?.cancel()
+        _state.update { it.copy(password = value, error = null, passwordCheck = null, passwordCheckError = null) }
+        if (_state.value.screen != Screen.SIGNUP || value.isEmpty()) return
+        passwordCheckJob = viewModelScope.launch {
+            val result = repository.checkPassword(value)
+            _state.update {
+                if (it.screen != Screen.SIGNUP || it.password != value) it
+                else it.copy(passwordCheck = result.getOrNull(), passwordCheckError = result.exceptionOrNull()?.message)
+            }
+        }
+    }
     fun onNicknameChange(value: String) = _state.update { it.copy(nickname = value, error = null) }
     fun onPasswordConfirmChange(value: String) =
         _state.update { it.copy(passwordConfirm = value, error = null) }
+    fun onTermsAgreedChange(value: Boolean) = _state.update { it.copy(termsAgreed = value) }
 
     // --- 화면 이동 --------------------------------------------------------
 
-    fun goToSignup() = _state.update {
-        // 이메일은 넘겨준다. 로그인 시도 후 계정이 없어 가입으로 넘어오는 흐름이 흔하다.
-        UiState(screen = Screen.SIGNUP, email = it.email)
+    fun goToSignup() {
+        passwordCheckJob?.cancel()
+        _state.update { UiState(screen = Screen.SIGNUP, email = it.email) }
     }
 
-    fun goToLogin() = _state.update {
-        UiState(screen = Screen.LOGIN, email = it.email)
+    fun goToLogin() {
+        passwordCheckJob?.cancel()
+        _state.update { UiState(screen = Screen.LOGIN, email = it.email) }
     }
 
     fun consumeAuthenticated() = _state.update { it.copy(authenticatedNickname = null) }
@@ -119,18 +147,15 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     fun signup() {
         val current = _state.value
+        // 확인 일치·약관 동의는 canSubmitSignup 이 막는다(일치는 확인 칸의 ✓ 로 보인다).
         if (!current.canSubmitSignup) return
-        // 서버도 같은 검사를 하지만, 왕복 없이 즉시 알려주는 편이 낫다.
-        if (current.password != current.passwordConfirm) {
-            _state.update { it.copy(error = "비밀번호가 일치하지 않는다.") }
-            return
-        }
         submit {
             repository.register(
                 email = current.email,
                 nickname = current.nickname,
                 password = current.password,
                 passwordConfirm = current.passwordConfirm,
+                termsAgreed = current.termsAgreed,
             )
         }
     }

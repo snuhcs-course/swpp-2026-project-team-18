@@ -1,7 +1,9 @@
 package com.swpp.wakeup.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,22 +16,30 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.EventSection
@@ -58,6 +68,7 @@ fun HomeScreen(
     avatarInitials: String,
     onAvatarClick: () -> Unit,
     onEventClick: (UpcomingEvent) -> Unit,
+    onAlarmToggle: (Long, Boolean) -> Unit,
     onAddEventClick: () -> Unit,
     onSetHomeClick: () -> Unit,
     onRoutineClick: () -> Unit,
@@ -69,6 +80,7 @@ fun HomeScreen(
 ) {
     LazyColumn(
         modifier = modifier
+            .testTag("home_list")
             .fillMaxSize()
             .background(JitColor.Bg),
         contentPadding = PaddingValues(
@@ -121,12 +133,19 @@ fun HomeScreen(
             item(key = "next-alarm") { NextAlarmCard(next, onClick = { onEventClick(next) }) }
         }
 
+        // 날짜마다 헤더 아래 둥근 패널 하나에 행들을 담는다(Figma).
         state.sections.forEach { section ->
             item(key = "section-${section.label}") {
-                SectionHeader(section.label, section.dateLabel)
-            }
-            items(section.events, key = { "event-${it.id}" }) { event ->
-                EventPanel(event = event, onClick = { onEventClick(event) })
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionHeader(section.label, section.dateLabel)
+                    EventGroupPanel(
+                        events = section.events,
+                        highlightedId = state.nextAlarm?.id,
+                        onEventClick = onEventClick,
+                        onAlarmToggle = onAlarmToggle,
+                        alarmsEnabled = !state.loading && !state.offline && state.alarmUpdatingId == null,
+                    )
+                }
             }
         }
 
@@ -157,6 +176,7 @@ fun HomeScreen(
 private fun ReportShortcut(onClick: () -> Unit) {
     Row(
         modifier = Modifier
+            .testTag("open_report")
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Button))
             .background(JitColor.Surface)
@@ -280,6 +300,7 @@ private fun HomeHeader(
         }
         Box(
             modifier = Modifier
+                .testTag("open_settings")
                 .size(30.dp)
                 .clip(CircleShape)
                 .background(JitColor.Surface2)
@@ -489,7 +510,7 @@ private fun EmptyState(onAddEventClick: () -> Unit) {
  */
 @Composable
 private fun NextAlarmCard(event: UpcomingEvent, onClick: () -> Unit) {
-    JitCard(modifier = Modifier.clickable(onClick = onClick), accented = true, gap = 8.dp) {
+    JitCard(modifier = Modifier.testTag("next_alarm").clickable(onClick = onClick), accented = true, gap = 8.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -574,37 +595,84 @@ private fun SectionHeader(label: String, dateLabel: String) {
 }
 
 /**
+ * 하루치 일정을 담는 둥근 패널 하나. 행 사이는 얇은 구분선으로 나눈다.
+ *
+ * 주황 테두리는 맨 위 카드와 같은 일정 행([highlightedId])에만 준다(Figma).
+ */
+@Composable
+private fun EventGroupPanel(
+    events: List<UpcomingEvent>,
+    highlightedId: Long?,
+    alarmsEnabled: Boolean,
+    onEventClick: (UpcomingEvent) -> Unit,
+    onAlarmToggle: (Long, Boolean) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Card))
+            .background(JitColor.Surface),
+    ) {
+        events.forEachIndexed { index, event ->
+            if (index > 0) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    color = JitColor.Track,
+                )
+            }
+            key(event.id) {
+                EventPanel(
+                    event = event,
+                    highlighted = event.id == highlightedId,
+                    onClick = { onEventClick(event) },
+                    alarmEnabled = alarmsEnabled,
+                    onAlarmToggle = { onAlarmToggle(event.id, it) },
+                )
+            }
+        }
+    }
+}
+
+/**
  * Figma panel-* — 목록의 기본 단위.
  *
  * 한 패널에 시각·제목·장소·이동수단·알람·확률을 모두 담는다. 이 정보 밀도가
  * 캘린더 격자를 쓰지 않는 이유다.
  */
 @Composable
-private fun EventPanel(event: UpcomingEvent, onClick: () -> Unit) {
+private fun EventPanel(
+    event: UpcomingEvent, highlighted: Boolean, onClick: () -> Unit,
+    alarmEnabled: Boolean, onAlarmToggle: (Boolean) -> Unit,
+) {
     val accent = riskColor(event.risk)
+    val shape = RoundedCornerShape(JitRadius.Card)
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(JitRadius.Card))
-            .background(JitColor.Surface)
+            .clip(shape)
+            .then(if (highlighted) Modifier.border(1.dp, JitColor.Accent, shape) else Modifier)
             .clickable(onClick = onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.width(44.dp)) {
+        // 왼쪽: 알람 시각 + AM/PM. 알람을 계산하지 못했으면 "—".
+        Column(modifier = Modifier.width(52.dp)) {
             Text(
-                text = event.startTime,
-                color = JitColor.TextPrimary,
+                text = event.alarmClock ?: "—",
+                color = if (event.hasAlarm) JitColor.TextPrimary else JitColor.TextSecondary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.height(2.dp))
-            Text(text = event.dayLabel, color = JitColor.TextSecondary, fontSize = 10.sp)
+            if (event.alarmMeridiem != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(text = event.alarmMeridiem, color = JitColor.TextSecondary, fontSize = 10.sp)
+            }
         }
 
         Spacer(Modifier.width(12.dp))
 
+        // 가운데: 색 점 + 제목 (+ 태그 칩) / "장소 · 9:00AM 시작"
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -614,43 +682,41 @@ private fun EventPanel(event: UpcomingEvent, onClick: () -> Unit) {
                         .background(accent)
                 )
                 Spacer(Modifier.width(7.dp))
+                // 긴 제목이 칩을 밀어내지 않도록 제목만 줄여 말줄임한다.
                 Text(
                     text = event.title,
+                    modifier = Modifier.weight(1f, fill = false),
                     color = JitColor.TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                if (event.tag != null) {
+                    Spacer(Modifier.width(6.dp))
+                    JitChip(event.tag, JitColor.Accent)
+                }
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                text = event.placeAndRoute,
+                text = listOfNotNull(event.placeName, "${event.startClock} 시작").joinToString(" · "),
                 color = JitColor.TextSecondary,
                 fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
 
         Spacer(Modifier.width(12.dp))
 
-        // 태그는 제목 옆이 아니라 이 열의 맨 위에 둔다. 제목 옆에 두면 긴 제목이
-        // 폭을 먹어 칩이 눌리고 글자가 세로로 접혔다. 여기서는 제목 길이와 무관하다.
-        Column(
-            modifier = Modifier.widthIn(min = 64.dp),
-            horizontalAlignment = Alignment.End,
-        ) {
-            if (event.tag != null) {
-                JitChip(event.tag, JitColor.Accent)
-                Spacer(Modifier.height(4.dp))
-            }
+        // 오른쪽: 스위치 / 확률. 알람을 계산하지 못한 일정은 확률 자리에 사유를 둔다.
+        Column(horizontalAlignment = Alignment.End) {
+            AlarmSwitch(event, alarmEnabled, onAlarmToggle)
             Text(
-                text = event.alarmAt?.let { "알람 $it" } ?: "알람 —",
-                color = if (event.hasAlarm) JitColor.Accent else JitColor.TextSecondary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.End,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = event.onTimeProbability?.let { "$it%" } ?: "학습 중",
+                text = when {
+                    event.planStatus != PLAN_STATUS_OK -> event.planStatusLabel ?: "알람 계산 불가"
+                    else -> event.onTimeProbability?.let { "$it%" } ?: "학습 중"
+                },
                 color = if (event.onTimeProbability == null) JitColor.TextSecondary else accent,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
@@ -659,6 +725,48 @@ private fun EventPanel(event: UpcomingEvent, onClick: () -> Unit) {
         }
     }
 }
+
+/** 서버의 판정 결과를 표시하고 저장 요청 동안 중복 입력을 막는다. */
+@Composable
+private fun AlarmSwitch(event: UpcomingEvent, enabled: Boolean, onToggle: (Boolean) -> Unit) {
+    // 기본 Switch(52x32dp)는 행에 비해 크다. scale 은 그리는 크기만 줄이고 차지하는
+    // 자리는 그대로라, 바깥 Box 로 자리를 34x20dp 로 고정하고 그 안에서 줄여 그린다.
+    Box(
+        modifier = Modifier
+            .size(width = 34.dp, height = 20.dp)
+            .testTag("event_alarm_${event.id}")
+            .toggleable(
+                value = event.alarmOn,
+                enabled = enabled && event.hasAlarm && event.planStatus == PLAN_STATUS_OK,
+                role = Role.Switch,
+                onValueChange = onToggle,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+            Switch(
+                checked = event.alarmOn,
+                onCheckedChange = null,
+                enabled = enabled && event.hasAlarm && event.planStatus == PLAN_STATUS_OK,
+                modifier = Modifier.scale(0.62f),
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = JitColor.TextPrimary,
+                    checkedTrackColor = JitColor.Accent,
+                    checkedBorderColor = JitColor.Accent,
+                    uncheckedThumbColor = JitColor.TextSecondary,
+                    uncheckedTrackColor = JitColor.Surface2,
+                    uncheckedBorderColor = JitColor.TextSecondary,
+                    disabledUncheckedThumbColor = JitColor.TextSecondary.copy(alpha = 0.4f),
+                    disabledUncheckedTrackColor = JitColor.Surface2,
+                    disabledUncheckedBorderColor = JitColor.TextSecondary.copy(alpha = 0.4f),
+                ),
+            )
+        }
+    }
+}
+
+/** [UpcomingEvent.planStatus] 의 "알람 계산 완료" 값 */
+private const val PLAN_STATUS_OK = "ok"
 
 @Composable
 private fun AddEventButton(onClick: () -> Unit) {
@@ -702,6 +810,7 @@ private fun HomeEmptyPreview() {
             avatarInitials = "진호",
             onAvatarClick = {},
             onEventClick = {},
+            onAlarmToggle = { _, _ -> },
             onAddEventClick = {},
             onSetHomeClick = {},
             onRoutineClick = {},
@@ -729,6 +838,10 @@ private fun HomeFilledPreview() {
         planStatusLabel = "계산 완료",
         startAtEpochSecond = 0,
         startDate = java.time.LocalDate.now(),
+        alarmClock = "7:32",
+        alarmMeridiem = "AM",
+        placeName = "서울대 302동",
+        startClock = "9:00AM",
     )
     JitTheme {
         HomeScreen(
@@ -742,6 +855,7 @@ private fun HomeFilledPreview() {
             avatarInitials = "진호",
             onAvatarClick = {},
             onEventClick = {},
+            onAlarmToggle = { _, _ -> },
             onAddEventClick = {},
             onSetHomeClick = {},
             onRoutineClick = {},

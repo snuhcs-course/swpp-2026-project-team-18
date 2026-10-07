@@ -139,10 +139,12 @@ DATABASES = {
 AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
+    },
+    {"NAME": "apps.accounts.validators.LettersAndDigitsValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -184,6 +186,8 @@ REST_FRAMEWORK = {
         "route_live": "80/hour",
         "nlp": "30/hour",
         "observation": "600/hour",
+        # 글자마다 호출하는 비로그인 검사. 빠른 입력을 허용하되 IP별로 제한한다.
+        "password_check": "600/min",
     },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
@@ -305,4 +309,4 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 # 버전만으로 판별하지 않는 것이 더 확실하다. `scripts/check_deployed.py` 와
 # 같은 방식으로 **새 엔드포인트의 404 여부**를 보면 버전을 올리는 것을
 # 잊었더라도 드러난다 — 인증이 필요한 경로는 배포됐으면 401, 미배포면 404 다.
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.10.0"

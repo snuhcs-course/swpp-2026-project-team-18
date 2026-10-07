@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -162,6 +163,7 @@ private fun ProgressRow(
                 )
                 Text(
                     text = statusLine(stage, progress),
+                    modifier = Modifier.testTag("trip_status"),
                     color = if (accent == JitColor.Track) JitColor.TextSecondary else accent,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Medium,
@@ -179,6 +181,7 @@ private fun ProgressRow(
                     // 도착 시각을 모르면 자리만 비운다. 지어낸 시각을 넣으면
                     // 사용자가 그 시각을 기준으로 움직인다.
                     text = arrivalAt ?: "—",
+                    modifier = Modifier.testTag("trip_arrival_time"),
                     color = JitColor.TextPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,

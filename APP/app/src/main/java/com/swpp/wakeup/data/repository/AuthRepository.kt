@@ -4,9 +4,12 @@ import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.AuthApi
 import com.swpp.wakeup.data.remote.LoginRequest
+import com.swpp.wakeup.data.remote.PasswordCheckRequest
+import com.swpp.wakeup.data.remote.PasswordCheckResponse
 import com.swpp.wakeup.data.remote.RegisterRequest
 import com.swpp.wakeup.data.remote.UserDto
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 
 /**
  * 인증 저장소. back-spec.md 5.1.
@@ -40,6 +43,7 @@ class AuthRepository(
         nickname: String,
         password: String,
         passwordConfirm: String,
+        termsAgreed: Boolean,
     ): AuthResult = call {
         api.register(
             RegisterRequest(
@@ -47,8 +51,22 @@ class AuthRepository(
                 nickname = nickname.trim(),
                 password = password,
                 passwordConfirm = passwordConfirm,
+                termsAgreed = termsAgreed,
             )
         )
+    }
+
+    suspend fun checkPassword(password: String): Result<PasswordCheckResponse> = try {
+        val response = api.checkPassword(PasswordCheckRequest(password))
+        val body = response.body()
+        if (response.isSuccessful && body?.minLength != null &&
+            body.lettersAndDigits != null && body.messages != null
+        ) Result.success(body)
+        else Result.failure(IOException("비밀번호 조건을 확인하지 못했다. 잠시 후 다시 입력한다."))
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(IOException(MESSAGE_NETWORK))
     }
 
     suspend fun login(email: String, password: String): AuthResult = call {
