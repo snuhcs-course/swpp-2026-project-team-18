@@ -49,6 +49,7 @@ backend/.venv/bin/python qa/demo/run.py --public-ui
 
 [scenario.json](scenario.json)은 출발지·실제 장소 검색어·루틴·대기 시간을 담는다.
 집은 도로명 주소로, 목적지는 상호명으로 검색해 두 검색 방식과 집 저장을 함께 검증한다.
+일정은 실행 시각 기준으로 생성하고 GPS는 테스트 출발지로 설정한다. 시각 선택은 오전·오후·자정과 1분 단위도 검증한다.
 [run.py](run.py)는 로컬 모드에서 일회용 SQLite 서버를 띄운다.
 준비 데이터 생성·알람 스위치는 모든 모드에서 [PublicSetupTest.kt](../../APP/app/src/androidTest/java/com/swpp/wakeup/PublicSetupTest.kt)가 조작한다.
 [DemoFlowTest.kt](../../APP/app/src/androidTest/java/com/swpp/wakeup/DemoFlowTest.kt)는 다음 흐름을 검증한다.
@@ -69,6 +70,7 @@ FCM, 재부팅·오프라인 복구, 앱 프로세스 재시작 후 도착 복�
 ## 결과 확인
 
 마지막 `PASSED`와 종료 코드 `0`이 성공이다. 실패는 종료 코드 `1`이며 통과로 처리하지 않는다.
+실패 시 터미널에 예외 원인을 요약한다. 화면 갱신으로 무효화된 요소는 다시 조회하고, `device/steps.json`의 `stale_retries`에 횟수를 기록한다.
 출력된 `.artifacts/demo-qa/<실행 시각>/`에서 확인한다.
 공용 모드는 `public-e2e-<실행 시각>/` 또는 `public-ui-<실행 시각>/`에 저장한다.
 

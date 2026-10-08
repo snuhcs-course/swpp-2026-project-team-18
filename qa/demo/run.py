@@ -419,8 +419,13 @@ class Demo:
             time.sleep(1)
         test_log.flush()
         output = (self.output / filename).read_text()
+        error = f"Android UI 테스트 실패: {filename}와 실패 스크린샷을 확인하세요."
+        for line in output.splitlines():
+            if line.startswith("INSTRUMENTATION_STATUS: stack="):
+                error += "\n원인: " + line.split("stack=", 1)[1]
+                break
         require(self.instrument.returncode == 0 and "OK (1 test)" in output,
-                f"Android UI 테스트 실패: {filename}와 실패 스크린샷을 확인하세요.")
+                error)
         return round(time.monotonic() - started, 1)
 
     def stop_video(self):
