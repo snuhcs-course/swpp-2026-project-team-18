@@ -1,5 +1,6 @@
 package com.swpp.wakeup.domain.model
 
+// Partly AI-generated (Claude)
 /**
  * 이동 구간 하나. 경로 카드의 가로 막대 한 칸이다.
  *

@@ -56,6 +56,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     /** 어떤 화면을 보여줄지. 네비게이션 라이브러리 없이 두 화면만 오간다. */
     enum class Screen { LOGIN, SIGNUP }
 
+    // Partly AI-generated (Claude)
     data class UiState(
         val screen: Screen = Screen.LOGIN,
 
@@ -121,6 +122,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun onNicknameChange(value: String) = _state.update { it.copy(nickname = value, error = null) }
     fun onPasswordConfirmChange(value: String) =
         _state.update { it.copy(passwordConfirm = value, error = null) }
+    // AI-generated (Claude)
     fun onTermsAgreedChange(value: Boolean) = _state.update { it.copy(termsAgreed = value) }
 
     // --- 화면 이동 --------------------------------------------------------

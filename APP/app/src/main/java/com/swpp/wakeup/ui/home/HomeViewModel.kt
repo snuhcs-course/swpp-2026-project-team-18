@@ -682,6 +682,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _nav.update { it.copy(stack = it.stack + AppRoute.RiskChoice(eventId), forward = true) }
     }
 
+    // Partly AI-generated (Claude)
     fun openAddEvent() {
         // 장소 검색이 있는 화면은 들어올 때 좌표를 미리 잡는다. 이것을 빼먹으면
         // 검색이 좌표 없이 나가고, 거리·거리순 정렬이 사라지고 결과가 전국에서
@@ -691,6 +692,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _nav.update { it.copy(stack = it.stack + AppRoute.AddEvent, forward = true) }
     }
 
+    // AI-generated (Claude)
     /**
      * 일정 종류 목록(`GET /api/events/tags`). 이름과 τ 는 서버 값을 쓴다.
      *
@@ -698,9 +700,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 들어올 때 다시 시도한다 — 목록이 없어도 "기타" 로 일정은 만들 수 있다.
      */
     private val _eventTags = MutableStateFlow<List<EventTagDto>>(emptyList())
+    // AI-generated (Claude)
     val eventTags: StateFlow<List<EventTagDto>> = _eventTags.asStateFlow()
+    // AI-generated (Claude)
     private var eventTagsJob: Job? = null
 
+    // AI-generated (Claude)
     private fun loadEventTags() {
         if (_eventTags.value.isNotEmpty() || eventTagsJob?.isActive == true) return
         eventTagsJob = viewModelScope.launch {
@@ -1343,6 +1348,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _routeChoice = MutableStateFlow<RouteState?>(null)
     val routeChoice: StateFlow<RouteState?> = _routeChoice.asStateFlow()
 
+    // Partly AI-generated (Claude)
     /**
      * 경로 후보를 받아 ⑬ 으로 이동한다.
      *
@@ -1484,6 +1490,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private var mapPickGeneration = 0L
     private var mapImageJob: Job? = null
 
+    // Partly AI-generated (Claude)
     /**
      * 지도 화면을 연다.
      *
@@ -1666,6 +1673,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    // Partly AI-generated (Claude)
     /** 지도에서 고른 것을 원래 검색으로 되돌리고 닫는다. */
     fun confirmMapPick() {
         val state = _mapPick.value ?: return
@@ -1787,12 +1795,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private var lastRouteMapSignature: String? = null
     private var routeMapImageJob: Job? = null
 
+    // Partly AI-generated (Claude)
     private fun placeSearchOf(target: MapTarget): PlaceSearch = when (target) {
         MapTarget.DESTINATION -> _add.value.place
         MapTarget.HOME -> _homeSetup.value.place
         MapTarget.ORIGIN -> _add.value.originPlace
     }
 
+    // Partly AI-generated (Claude)
     private fun setPlaceSearch(target: MapTarget, next: PlaceSearch) = when (target) {
         MapTarget.DESTINATION -> _add.update { it.copy(place = next) }
         MapTarget.HOME -> _homeSetup.update { it.copy(place = next) }
@@ -2327,6 +2337,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- 일정 추가 --------------------------------------------------------
 
+    // Partly AI-generated (Claude)
     data class AddState(
         val title: String = "",
         val date: LocalDate = LocalDate.now().plusDays(1),
@@ -2412,19 +2423,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- 일정 추가: 출발지 -------------------------------------------------
 
+    // AI-generated (Claude)
     fun onAddOriginQueryChange(v: String) =
         _add.update { it.copy(originPlace = it.originPlace.withQuery(v), originNotice = null) }
 
+    // AI-generated (Claude)
     fun searchAddOriginPlaces() = searchAddOriginPlaces(page = 1)
 
+    // AI-generated (Claude)
     fun loadMoreAddOriginPlaces() {
         if (_add.value.originPlace.canLoadMore) {
             searchAddOriginPlaces(page = _add.value.originPlace.page + 1)
         }
     }
 
+    // AI-generated (Claude)
     fun onAddOriginSortChange(sort: String) = searchAddOriginPlaces(page = 1, sort = sort)
 
+    // AI-generated (Claude)
     private fun searchAddOriginPlaces(page: Int, sort: String? = null) = runPlaceSearch(
         get = { _add.value.originPlace },
         set = { next -> _add.update { it.copy(originPlace = next) } },
@@ -2432,6 +2448,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         sort = sort,
     )
 
+    // Partly AI-generated (Claude)
     /**
      * 출발지를 바꾼다. null 이면 집이다.
      *
@@ -2452,6 +2469,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _routeChoice.value = null
     }
 
+    // AI-generated (Claude)
     /**
      * 출발지를 현재 위치로 잡는다. 사용자가 출발지 검색의 "현재 위치 사용" 을
      * 눌렀을 때만 부른다. 위치를 못 구하면 값을 바꾸지 않고 이유를 적는다.
@@ -2728,6 +2746,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun onHomeQueryChange(v: String) =
         _homeSetup.update { it.copy(place = it.place.withQuery(v)) }
 
+    // Partly AI-generated (Claude)
     /**
      * 집 후보를 고른다. Figma ⑭ 처럼 **검색 결과 목록을 남겨 두고** 고른 줄에 ✓ 를
      * 표시한다 — 다른 후보로 바로 바꿀 수 있어야 한다. 검색어도 그대로 둔다.

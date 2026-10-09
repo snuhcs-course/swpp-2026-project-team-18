@@ -188,6 +188,7 @@ class EventRepository(
         )
     }
 
+    // Partly AI-generated (Claude)
     /** 온라인·오프라인이 **같은 매핑**을 타게 한 곳으로 모은다. */
     private fun buildHome(
         events: List<EventDto>,
@@ -756,6 +757,7 @@ private fun importWhenLabel(startAtMillis: Long, zone: ZoneId): String {
         local.format(TIME_FORMAT)
 }
 
+// Partly AI-generated (Claude)
 /**
  * 경로 후보를 화면용으로 바꾼다.
  *
@@ -797,6 +799,7 @@ internal fun RouteCandidateDto.toOption(fetchedAtElapsedMs: Long = 0L): RouteOpt
     )
 }
 
+// Partly AI-generated (Claude)
 /**
  * 구간 DTO 를 화면용으로.
  *
@@ -874,6 +877,7 @@ private fun defaultLabel(kind: RouteSegment.Kind): String = when (kind) {
     RouteSegment.Kind.UNKNOWN -> "이동"
 }
 
+// Partly AI-generated (Claude)
 /** 서버는 ISO 8601 로 준다. 파싱 실패한 항목은 목록에서 뺀다. */
 internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
@@ -923,9 +927,11 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
     )
 }
 
+// AI-generated (Claude)
 /** 홈 행의 12시간제 시각. 예 "7:40" (AM/PM 은 따로 붙인다) */
 private val CLOCK_12_FORMAT = DateTimeFormatter.ofPattern("h:mm")
 
+// AI-generated (Claude)
 private fun meridiem(time: java.time.ZonedDateTime): String = if (time.hour < 12) "AM" else "PM"
 
 /**
@@ -1038,6 +1044,7 @@ private fun AlarmPlanDto.toConfidence(): ConfidenceView {
     )
 }
 
+// Partly AI-generated (Claude)
 private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     val plan = alarmPlan ?: return null
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null

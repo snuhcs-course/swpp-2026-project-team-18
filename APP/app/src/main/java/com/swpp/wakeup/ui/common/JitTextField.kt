@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
 
+// Partly AI-generated (Claude)
 /**
  * Figma ⑦·⑩ 의 입력 필드.
  *

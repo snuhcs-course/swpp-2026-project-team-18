@@ -2,6 +2,7 @@ package com.swpp.wakeup.domain.model
 
 import java.time.LocalDate
 
+// Partly AI-generated (Claude)
 /**
  * 홈 화면 목록에 뜨는 일정 하나.
  *

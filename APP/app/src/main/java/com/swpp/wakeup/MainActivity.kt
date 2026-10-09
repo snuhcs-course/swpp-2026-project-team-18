@@ -160,6 +160,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// Partly AI-generated (Claude)
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun MainHost(

@@ -1,3 +1,4 @@
+// AI-generated (Claude)
 package com.swpp.wakeup.ui.events
 
 import androidx.compose.ui.graphics.Color

@@ -44,6 +44,7 @@ import com.swpp.wakeup.ui.theme.JitRadius
 import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTheme
 
+// Partly AI-generated (Claude)
 /**
  * 회원가입 화면. Figma "10. 회원가입" (node 61:2).
  *
@@ -232,6 +233,7 @@ fun SignupScreen(
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * Figma card-비밀번호규칙 — 서버 검증기 규칙을 미리 알려준다.
  *
@@ -256,6 +258,7 @@ private fun PasswordRuleCard(
         RuleRow(stringResource(R.string.signup_rule_mix), mixPassed)    }
 }
 
+// Partly AI-generated (Claude)
 /** 점 색: 통과 = 초록, 미통과 = 빨강, 아직 결과 없음(null) = 회색. */
 @Composable
 private fun RuleRow(text: String, passed: Boolean?) {
@@ -276,6 +279,7 @@ private fun RuleRow(text: String, passed: Boolean?) {
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 이용약관 및 개인정보처리방침 동의. 체크하지 않으면 가입 버튼이 꺼진다.
  */
@@ -318,6 +322,7 @@ private fun TermsAgreementRow(
     }
 }
 
+// Partly AI-generated (Claude)
 @Preview(widthDp = 360, heightDp = 1000, showBackground = true, backgroundColor = 0xFF0E1320)
 @Composable
 private fun SignupScreenPreview() {

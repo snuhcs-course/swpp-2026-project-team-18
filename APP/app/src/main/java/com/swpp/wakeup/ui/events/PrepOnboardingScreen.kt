@@ -35,6 +35,7 @@ import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTextStyle
 import com.swpp.wakeup.ui.theme.JitTheme
 
+// Partly AI-generated (Claude)
 /**
  * 준비 시간 온보딩. Figma ⑭ (node 134:2).
  *

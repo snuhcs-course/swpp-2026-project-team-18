@@ -1,3 +1,4 @@
+// AI-generated (Claude)
 package com.swpp.wakeup.ui.events
 
 import org.junit.Assert.assertEquals

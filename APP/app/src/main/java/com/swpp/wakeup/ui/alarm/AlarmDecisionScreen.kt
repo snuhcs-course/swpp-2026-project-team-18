@@ -50,6 +50,7 @@ import com.swpp.wakeup.ui.theme.JitRadius
 import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTheme
 
+// Partly AI-generated (Claude)
 /**
  * 알람 결정. Figma "4. 알람 결정" (node 1:2).
  *
