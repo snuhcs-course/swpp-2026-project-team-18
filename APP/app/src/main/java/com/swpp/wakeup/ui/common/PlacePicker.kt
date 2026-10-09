@@ -32,6 +32,7 @@ import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
 
+// Partly AI-generated (Claude)
 /**
  * 장소 검색·선택.
  *
@@ -205,6 +206,7 @@ private fun SelectedPlaceRow(
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 결과 카드의 머리(Figma ⑭): 왼쪽 "검색 결과"(+ 건수), 오른쪽 주황 "지도".
  * 거리 정렬 칩은 거리를 받았을 때만 머리 아래 줄에 둔다.
@@ -266,6 +268,7 @@ private fun ResultHeader(
     }
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun ResultList(
     state: HomeViewModel.PlaceSearch,
@@ -331,6 +334,7 @@ private fun ResultList(
     }
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun ResultRow(
     place: PlaceSearchItem,
@@ -386,6 +390,7 @@ private fun ResultRow(
     }
 }
 
+// Partly AI-generated (Claude)
 /** 같은 지점인지. 검색 결과와 고른 장소는 객체가 달라서 좌표로 비교한다(약 10m). */
 private fun PlaceSearchItem.isSameSpot(other: PlaceSearchItem): Boolean =
     kotlin.math.abs(lat - other.lat) < 1e-4 && kotlin.math.abs(lng - other.lng) < 1e-4

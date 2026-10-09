@@ -237,6 +237,7 @@ interface ProfileApi {
 
 // --- 응답 -------------------------------------------------------------------
 
+// Partly AI-generated (Claude)
 data class EventDto(
     val id: Long,
     val title: String,
@@ -303,6 +304,7 @@ data class RouteOriginDto(
     val lng: Double?,
 )
 
+// Partly AI-generated (Claude)
 data class RouteCandidateDto(
     /** `walk` / `bicycle` / `car` / `transit:<노선 체인>` */
     val key: String,
@@ -355,6 +357,7 @@ data class RouteCandidateDto(
     val segments: List<RouteSegmentDto>? = null,
 )
 
+// Partly AI-generated (Claude)
 /**
  * 이동 구간 하나.
  *
@@ -403,6 +406,7 @@ data class RouteSegmentDto(
     @SerializedName("alt_vehicles") val altVehicles: List<AltVehicleDto>? = null,
 )
 
+// Partly AI-generated (Claude)
 /** 대체 노선 하나. 버스 번호와 종류(색을 고른다). */
 data class AltVehicleDto(
     val name: String?,

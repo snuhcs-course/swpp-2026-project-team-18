@@ -46,6 +46,7 @@ import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTheme
 
+// Partly AI-generated (Claude)
 /**
  * 리스크 선택. Figma "5. 리스크 선택" (node 1:53).
  *
@@ -80,6 +81,7 @@ fun RiskChoiceScreen(
     }
 }
 
+// Partly AI-generated (Claude)
 /** 서버가 옵션을 준 경우의 선택 화면(Figma ⑤). */
 @Composable
 private fun RiskChooser(
@@ -145,6 +147,7 @@ private fun RiskChooser(
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 옵션 카드 한 장: 알람 시각 · 라벨 칩 · 확률 · 막대 · 수면 줄.
  * 고른 카드는 주황 테두리와 "선택됨" 으로 표시한다.
@@ -207,6 +210,7 @@ private fun RiskOptionCard(option: RiskOptionView, selected: Boolean, onClick: (
     }
 }
 
+// Partly AI-generated (Claude)
 /** "● 자동 조정: 시험·발표 일정은 기본적으로 안전 모드" */
 @Composable
 private fun AutoAdjustCard(reason: String?) {
@@ -225,6 +229,7 @@ private fun AutoAdjustCard(reason: String?) {
     }
 }
 
+// AI-generated (Claude)
 /**
  * 총 소요시간 분포 히스토그램. 막대 높이는 구간별 기록 수에 비례한다.
  * 축은 처음 · 중앙값 · 끝 세 값만 적는다(Figma "62분 / 80분 / 98분").
@@ -277,8 +282,10 @@ private fun DistributionCard(distribution: DurationDistributionView) {
     }
 }
 
+// AI-generated (Claude)
 private val HISTOGRAM_HEIGHT = 64.dp
 
+// AI-generated (Claude)
 /** 옵션 key → 색. 라벨과 확률은 서버 값을 그대로 쓰고 색만 화면이 정한다. */
 private fun optionColor(key: String): Color = when (key) {
     RiskOptionView.KEY_SAFE -> JitColor.Green
@@ -286,6 +293,7 @@ private fun optionColor(key: String): Color = when (key) {
     else -> JitColor.Accent
 }
 
+// AI-generated (Claude)
 /** "안전" → "으로", "자동" → "으로", "느긋" → "으로", "여유" → "로". 받침(ㄹ 제외) 있으면 "으로". */
 internal fun josaRo(word: String): String {
     val last = word.lastOrNull() ?: return "로"
@@ -294,6 +302,7 @@ internal fun josaRo(word: String): String {
     return if (jong == 0 || jong == 8) "로" else "으로"
 }
 
+// Partly AI-generated (Claude)
 /** 관측이 없어 서버가 옵션을 주지 못할 때. 왜 아직 고를 수 없는지 설명한다. */
 @Composable
 private fun RiskEmptyState(
@@ -442,6 +451,7 @@ private fun ProgressRow(label: String, fraction: Float, right: String) {
     }
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun FutureRow(name: String, body: String, color: Color) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -457,6 +467,7 @@ private fun FutureRow(name: String, body: String, color: Color) {
     }
 }
 
+// Partly AI-generated (Claude)
 @Preview(widthDp = 360, heightDp = 900, showBackground = true, backgroundColor = 0xFF0E1320)
 @Composable
 private fun RiskChoicePreview() {
@@ -491,6 +502,7 @@ private fun RiskChoicePreview() {
     }
 }
 
+// AI-generated (Claude)
 /** 서버(B-5)가 옵션을 준 경우의 모습. 값은 Figma 예시다. */
 @Preview(widthDp = 360, heightDp = 1100, showBackground = true, backgroundColor = 0xFF0E1320)
 @Composable

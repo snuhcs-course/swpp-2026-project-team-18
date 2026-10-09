@@ -52,6 +52,7 @@ import com.swpp.wakeup.ui.theme.JitRadius
 import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTheme
 
+// Partly AI-generated (Claude)
 /**
  * 홈 화면. Figma "3. 홈 · 일정 목록" (node 65:2).
  *
@@ -577,6 +578,7 @@ private fun ProbabilityLabel(event: UpcomingEvent) {
     }
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun SectionHeader(label: String, dateLabel: String) {
     Row(
@@ -594,6 +596,7 @@ private fun SectionHeader(label: String, dateLabel: String) {
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 하루치 일정을 담는 둥근 패널 하나. 행 사이는 얇은 구분선으로 나눈다.
  *
@@ -633,6 +636,7 @@ private fun EventGroupPanel(
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * Figma panel-* — 목록의 기본 단위.
  *
@@ -726,6 +730,7 @@ private fun EventPanel(
     }
 }
 
+// Partly AI-generated (Claude)
 /** 서버의 판정 결과를 표시하고 저장 요청 동안 중복 입력을 막는다. */
 @Composable
 private fun AlarmSwitch(event: UpcomingEvent, enabled: Boolean, onToggle: (Boolean) -> Unit) {
@@ -765,6 +770,7 @@ private fun AlarmSwitch(event: UpcomingEvent, enabled: Boolean, onToggle: (Boole
     }
 }
 
+// Partly AI-generated (Claude)
 /** [UpcomingEvent.planStatus] 의 "알람 계산 완료" 값 */
 private const val PLAN_STATUS_OK = "ok"
 
@@ -822,6 +828,7 @@ private fun HomeEmptyPreview() {
     }
 }
 
+// Partly AI-generated (Claude)
 @Preview(widthDp = 360, heightDp = 800, showBackground = true, backgroundColor = 0xFF0E1320)
 @Composable
 private fun HomeFilledPreview() {

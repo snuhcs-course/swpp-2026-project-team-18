@@ -188,6 +188,7 @@ class EventRepository(
         )
     }
 
+    // Partly AI-generated (Claude)
     /** 온라인·오프라인이 **같은 매핑**을 타게 한 곳으로 모은다. */
     private fun buildHome(
         events: List<EventDto>,
@@ -196,7 +197,12 @@ class EventRepository(
         ageLabel: String?,
     ): HomeData {
         val zone = ZoneId.systemDefault()
+        // 시작 시각이 지난 일정은 홈 목록에서 뺀다(사용자 결정 10-09). 서버에서
+        // 지우지는 않는다 — 주간 리포트·관측 학습이 지난 일정을 쓴다. 알람 등록
+        // ([schedules])은 원래 미래 알람만 걸므로 그대로 둔다.
+        val nowSecond = System.currentTimeMillis() / 1000
         val sorted = events.mapNotNull { it.toUpcoming(zone) }
+            .filter { it.startAtEpochSecond > nowSecond }
             .sortedBy { it.startAtEpochSecond }
 
         return HomeData(
@@ -751,6 +757,7 @@ private fun importWhenLabel(startAtMillis: Long, zone: ZoneId): String {
         local.format(TIME_FORMAT)
 }
 
+// Partly AI-generated (Claude)
 /**
  * 경로 후보를 화면용으로 바꾼다.
  *
@@ -792,6 +799,7 @@ internal fun RouteCandidateDto.toOption(fetchedAtElapsedMs: Long = 0L): RouteOpt
     )
 }
 
+// Partly AI-generated (Claude)
 /**
  * 구간 DTO 를 화면용으로.
  *
@@ -869,6 +877,7 @@ private fun defaultLabel(kind: RouteSegment.Kind): String = when (kind) {
     RouteSegment.Kind.UNKNOWN -> "이동"
 }
 
+// Partly AI-generated (Claude)
 /** 서버는 ISO 8601 로 준다. 파싱 실패한 항목은 목록에서 뺀다. */
 internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
@@ -918,9 +927,11 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
     )
 }
 
+// AI-generated (Claude)
 /** 홈 행의 12시간제 시각. 예 "7:40" (AM/PM 은 따로 붙인다) */
 private val CLOCK_12_FORMAT = DateTimeFormatter.ofPattern("h:mm")
 
+// AI-generated (Claude)
 private fun meridiem(time: java.time.ZonedDateTime): String = if (time.hour < 12) "AM" else "PM"
 
 /**
@@ -1033,6 +1044,7 @@ private fun AlarmPlanDto.toConfidence(): ConfidenceView {
     )
 }
 
+// Partly AI-generated (Claude)
 private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     val plan = alarmPlan ?: return null
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null

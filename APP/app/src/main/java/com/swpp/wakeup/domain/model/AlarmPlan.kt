@@ -2,6 +2,7 @@ package com.swpp.wakeup.domain.model
 
 import com.swpp.wakeup.sensing.GeoPoint
 
+// Partly AI-generated (Claude)
 /**
  * 알람 결정 화면(Figma ④)이 필요한 값.
  *

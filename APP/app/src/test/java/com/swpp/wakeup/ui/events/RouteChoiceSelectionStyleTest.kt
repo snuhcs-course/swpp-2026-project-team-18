@@ -17,6 +17,7 @@ class RouteChoiceSelectionStyleTest {
 
     private val source by lazy { readSource("ui/events/RouteChoiceScreen.kt") }
 
+    // Partly AI-generated (Claude)
     @Test
     fun `선택 경로는 주황 점 없이 주황 테두리만 쓴다`() {
         val start = source.indexOf("private fun RouteCard")
@@ -36,6 +37,7 @@ class RouteChoiceSelectionStyleTest {
         )
     }
 
+    // Partly AI-generated (Claude)
     @Test
     fun `상세 체크포인트는 선택한 카드에만 펼친다`() {
         assertTrue(
@@ -45,6 +47,7 @@ class RouteChoiceSelectionStyleTest {
         )
     }
 
+    // Partly AI-generated (Claude)
     @Test
     fun `다음 차량 도착정보와 수단 이름은 그리지 않는다`() {
         assertFalse("차량 도착 행이 다시 생겼다", source.contains("CheckpointArrivalRow"))
@@ -54,6 +57,7 @@ class RouteChoiceSelectionStyleTest {
         assertFalse("\"지하철+도보+버스\" 수단 이름이 다시 생겼다", source.substring(start, end).contains("text = option.mode"))
     }
 
+    // Partly AI-generated (Claude)
     @Test
     fun `구간 막대 라벨은 글리프를 수직 중앙에 세운다`() {
         val start = source.indexOf("private fun SegmentBar")

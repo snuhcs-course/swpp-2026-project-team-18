@@ -58,6 +58,7 @@ import com.swpp.wakeup.ui.theme.JitSpace
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
+// AI-generated (Claude)
 /**
  * 종류 선택지. 서버 `GET /api/events/tags` 응답으로 만든다 — 이름과 τ 를 앱에
  * 복사해 두면 서버 값을 바꿨을 때 화면만 낡은 값을 보여준다.
@@ -81,6 +82,7 @@ internal data class TagOption(val key: String?, val label: String, val tau: Stri
 
 private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 
+// Partly AI-generated (Claude)
 /**
  * 일정 추가. Figma "⑫ 일정 추가".
  *
@@ -318,6 +320,7 @@ fun AddEventScreen(
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 집 주소 설정 (Figma ⑭).
  *
@@ -445,6 +448,7 @@ internal fun ScreenHeader(title: String, onBack: () -> Unit, enabled: Boolean = 
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 날짜·시각 카드 가운데의 값. 누르면 피커 팝업을 띄운다.
  *
@@ -484,6 +488,7 @@ private fun PickerValue(
     }
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun DateRow(date: LocalDate, onChange: (LocalDate) -> Unit, enabled: Boolean) {
     var picking by remember { mutableStateOf(false) }
@@ -524,6 +529,7 @@ private fun DateRow(date: LocalDate, onChange: (LocalDate) -> Unit, enabled: Boo
     }
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enabled: Boolean) {
     var picking by remember { mutableStateOf(false) }
@@ -573,6 +579,7 @@ private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enable
     }
 }
 
+// AI-generated (Claude)
 /**
  * 반복 일정을 서버가 받을 수 있는지.
  *
@@ -584,6 +591,7 @@ private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enable
  */
 private const val REPEAT_AVAILABLE = false
 
+// Partly AI-generated (Claude)
 /**
  * 반복 카드. Figma "⑫ 반복": 오른쪽 위 선택 요약("월 · 수"), 아래 월~일 칩 7개.
  *
@@ -637,20 +645,25 @@ private fun RepeatRow(selected: Set<Int>, onToggle: (Int) -> Unit, available: Bo
     }
 }
 
+// AI-generated (Claude)
 /** 고른 요일 요약. 월요일부터 순서대로 "월 · 수", 하나도 없으면 "반복 안 함". */
 internal fun repeatSummary(selected: Set<Int>): String =
     if (selected.isEmpty()) "반복 안 함"
     else selected.sorted().filter { it in DAY_NAMES.indices }.joinToString(" · ") { DAY_NAMES[it] }
 
+// AI-generated (Claude)
 /** 0~23 시 → 12시간제 시. 0시와 12시는 12 로 보인다. */
 internal fun to12Hour(hour: Int): Int = if (hour % 12 == 0) 12 else hour % 12
 
+// AI-generated (Claude)
 /** 시(0~23)는 그대로 두고 오전/오후만 바꾼다. 오전 9시 → 오후 9시 = 21시, 오후 12시 → 오전 12시 = 0시. */
 internal fun withMeridiem(hour: Int, pm: Boolean): Int = hour % 12 + if (pm) 12 else 0
 
+// AI-generated (Claude)
 /** 0~11 시 = 오전, 12~23 시 = 오후. 오전 12시 = 0시, 오후 12시 = 12시. */
 internal fun meridiemLabel(hour: Int): String = if (hour < 12) "오전" else "오후"
 
+// AI-generated (Claude)
 /**
  * 달력 팝업. 오늘 이전 날짜는 고를 수 없다.
  *
@@ -720,6 +733,7 @@ private fun JitDatePickerDialog(
     }
 }
 
+// AI-generated (Claude)
 /**
  * 시계 다이얼 팝업. 시를 고르면 분 다이얼로 넘어가고 오전/오후 토글이 함께 있다.
  * 내부 값은 0~23 시 그대로다(`TimePickerState.hour`).
@@ -781,12 +795,15 @@ private fun JitTimePickerDialog(
     }
 }
 
+// AI-generated (Claude)
 private fun LocalDate.toUtcMillis(): Long =
     atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
 
+// Partly AI-generated (Claude)
 private fun Long.toUtcLocalDate(): LocalDate =
     java.time.Instant.ofEpochMilli(this).atZone(java.time.ZoneOffset.UTC).toLocalDate()
 
+// Partly AI-generated (Claude)
 /**
  * 종류 드롭다운. Figma "⑫-a 종류 드롭다운".
  *
@@ -923,6 +940,7 @@ private fun TagDropdown(
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 경로 선택 행.
  *
@@ -988,6 +1006,7 @@ private fun RouteRow(
     }
 }
 
+// AI-generated (Claude)
 /**
  * 출발지·도착지 한 줄. Figma 13-a: `[값] [집] [검색]`.
  *
@@ -1038,6 +1057,7 @@ private fun EndpointRow(
     }
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun EndpointButton(
     text: String,
@@ -1063,6 +1083,7 @@ private fun EndpointButton(
     )
 }
 
+// AI-generated (Claude)
 /** 행 아래 짧은 안내. 예: 현재 위치를 못 구했을 때 */
 @Composable
 private fun NoticeLine(text: String) {
@@ -1076,6 +1097,7 @@ private fun NoticeLine(text: String) {
     )
 }
 
+// AI-generated (Claude)
 /** 같은 지점인지. 검색 결과와 저장된 집은 객체가 달라서 좌표로 비교한다(약 10m). */
 internal fun com.swpp.wakeup.data.remote.PlaceSearchItem.isSameSpot(
     other: com.swpp.wakeup.data.remote.PlaceSearchItem,

@@ -54,6 +54,7 @@ import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTextStyle
 import com.swpp.wakeup.ui.theme.JitTheme
 
+// Partly AI-generated (Claude)
 /**
  * 경로 선택. Figma "⑬ 경로 선택" (node 77:2).
  *
@@ -169,6 +170,7 @@ fun RouteChoiceScreen(
 
 // ---------------------------------------------------------------------------
 
+// Partly AI-generated (Claude)
 /**
  * 수단 탭 4개(Figma 13-a ~ 13-d, node 77:2).
  *
@@ -239,6 +241,7 @@ private fun ModeTabs(
     }
 }
 
+// AI-generated (Claude)
 /**
  * 빈 탭이 있을 때의 안내. 왜 비었는지 모르면 고장으로 읽는다.
  *
@@ -255,6 +258,7 @@ private fun emptyTabNotice(choice: RouteChoice): String? {
     }
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun RouteCard(
     option: RouteOption,
@@ -362,6 +366,7 @@ private fun RouteCard(
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 구간 막대. "도보 4분 | 2호선 7분 | 도보 2분 | 5511 8분 | 도보 2분"
  *
@@ -418,10 +423,12 @@ private fun SegmentBar(segments: RouteSegments) {
     }
 }
 
+// AI-generated (Claude)
 /** 막대에 그릴 구간. 대기(차 기다리는 시간)는 빼고 움직이는 구간만. */
 internal fun barSegments(segments: RouteSegments): List<RouteSegment> =
     segments.items.filter { it.kind != RouteSegment.Kind.WAIT }
 
+// AI-generated (Claude)
 /**
  * 칸 폭 비율. 소요시간 비례가 기본이지만 모든 칸이 [minShare] 이상이 되게
  * 넓힌다. 9sp "12분" 이 들어갈 최소치다. 칸이 많으면 1/n 까지 낮춘다.
@@ -448,6 +455,7 @@ internal fun labeledWeights(segments: List<RouteSegment>, minShare: Float = 0.14
     return result
 }
 
+// Partly AI-generated (Claude)
 /**
  * 고른 카드의 정류장 타임라인(Figma 13-b, node 232:265).
  *
@@ -467,6 +475,7 @@ private fun RouteTimeline(rows: List<TimelineRow>) {
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 자전거 카드의 지표 칸(Figma 13-d). "거리 / 4.8km" 처럼 이름 위, 값 아래.
  * 칸들이 같은 폭으로 가로를 꽉 채운다. 값이 빈 칸도 높이는 같게 둔다.
@@ -494,9 +503,11 @@ private fun MetricCells(cells: List<Pair<String, String>>) {
     }
 }
 
+// AI-generated (Claude)
 /** 이름 옆 노선 칩을 몇 개까지 그릴지. 넘치면 "+N" 으로 줄인다. */
 private const val MAX_LINE_CHIPS = 4
 
+// Partly AI-generated (Claude)
 /**
  * 노선 칩 하나("5519", "2호선"). 색은 노선색·버스 종류색.
  *
@@ -519,6 +530,7 @@ private fun LineChip(segment: RouteSegment) {
     )
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun TimelineRowView(row: TimelineRow) {
     val lineColor = row.line?.let { Color(SegmentPalette.fill(it)) }

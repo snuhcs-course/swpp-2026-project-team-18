@@ -123,6 +123,7 @@ class LoginActivity : ComponentActivity() {
     }
 }
 
+// Partly AI-generated (Claude)
 @Composable
 private fun AuthHost(
     onAuthenticated: (String?) -> Unit,
