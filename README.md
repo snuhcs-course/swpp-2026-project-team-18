@@ -12,14 +12,42 @@ alarm = event start − 10-min buffer − τ-quantile of (prep + travel)
 | | |
 | --- | --- |
 | Iteration | 1 · due 2026-10-09 |
-| Snapshot | `main` at `8583f6f` (2026-10-07). Refreshed from `main` until the deadline |
+| Snapshot | `main` at `e7c0b1e` (2026-10-08), the final Iteration 1 snapshot |
 | Version | 0.10.0 — server and app |
 | Server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
-| Demo video | to be added |
+| Demo video | [`iteration1_demo.mp4`](iteration1_demo.mp4) · 1 min 50 s ([what it shows](#demo-video)) |
 
 Everything needed to run the demo is on this page. The full project README
 (architecture, API, deployment, configuration) is on
 [`main`](https://github.com/snuhcs-course/swpp-2026-project-team-18/blob/main/README.md).
+
+**Contents:** [Demo video](#demo-video) · [What the demo shows](#what-the-demo-shows) ·
+[Tech stack and test environment](#tech-stack-and-test-environment) · [How to run](#how-to-run) ·
+[Automated run](#automated-run) · [Known limitations and todos](#known-limitations-and-todos) ·
+[Verification](#verification)
+
+---
+
+## Demo video
+
+**[▶ iteration1_demo.mp4](iteration1_demo.mp4)** — 1 min 50 s, no audio. Recorded on
+2026-10-09 on a Galaxy S24 (Android 16) with the 0.10.0 app against the shared server.
+
+| Time | What it shows |
+| --- | --- |
+| 0:00 | Log in with email and password |
+| 0:12 | First-run onboarding: home found through place search, then the usual prep time (15 min) |
+| 0:24 | Home, still empty for this account |
+| 0:28 | Add an event: title, date picker (past days can't be picked), time picker with AM/PM, origin = home, destination through place search |
+| 1:08 | Route choice by mode, all from Kakao: car (16 min, fastest) and transit options with segment bars, stop times and badges (cheapest, no transfer, subway); no walking route for this trip |
+| 1:24 | Pick the 26-min bus with no transfer, keep the category "class" (τ = 0.90) and add the event |
+| 1:32 | The alarm computed by the server: 14:39 = 15:30 start − 10-min buffer − 26-min bus − 15-min prep, each item labeled fixed or measured. The on-time probability says "learning" and why. The route map shows a faster alternative (2 min) |
+| 1:48 | Home: the next alarm, and the event with its alarm switch on |
+
+The video covers steps 1–4 below; it logs in to an existing account instead of signing up.
+Steps 5–8 — the alarm ringing, the morning routine, trip tracking and the weekly report — need
+the real alarm time and a trip, so they are not in the video; the
+[automated run](#automated-run) goes through them on an emulator.
 
 ---
 
@@ -51,9 +79,40 @@ is [docs/demo-checklist.md](docs/demo-checklist.md) (Korean).
 
 ---
 
+## Tech stack and test environment
+
+| Part | Stack |
+| --- | --- |
+| App | Kotlin, Jetpack Compose (Material 3), Retrofit + OkHttp, Room, WorkManager, Google Play services Location · minSdk 34, targetSdk 37 |
+| Server | Python 3.12, Django 5.2, Django REST Framework, SimpleJWT, gunicorn · Docker on Render (free plan, Singapore) |
+| Database | Neon Postgres |
+| External APIs | Kakao (routes, place search, static maps) and Seoul real-time subway and bus arrivals, called by the server only |
+
+Tested on:
+
+- **Demo video:** Galaxy S24 (SM-S921N), Android 16, app 0.10.0, shared server 0.10.0
+- **Build and manual runs:** Windows 11 Pro, Android Studio with its bundled JBR 25.0.2,
+  Android SDK Platform 37; emulator on API 36 (Google Play image)
+- **Automated run:** macOS with an API 34 emulator
+
+The design behind it is in the Wiki's
+[Design Documentation](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter1%E2%80%90design).
+
+---
+
 ## How to run
 
 No backend setup is needed: every build talks to the shared server above.
+
+### Quick start
+
+1. `git clone -b iteration-1-demo https://github.com/snuhcs-course/swpp-2026-project-team-18.git`
+2. In Android Studio, open the **`APP`** folder and wait for Gradle Sync.
+3. Start an emulator (Google Play image) or connect a phone, on Android 14 (API 34) or newer.
+4. Press **Run ▶**, allow notifications and precise location, then sign up and add an event.
+
+The first request after 15 idle minutes wakes the server and takes 30–60 seconds. Steps 1–9
+below cover each part in detail, including a phone, permissions and troubleshooting.
 
 ### 1. Requirements
 
@@ -262,13 +321,12 @@ password, so don't share it. Each public run leaves its QA account on the shared
 
 ## Known limitations and todos
 
-**Still open for Iteration 1**
+**Not finished in Iteration 1**
 
 - Record the wake-up time when the alarm is dismissed (departure and arrival are recorded)
 - Edit a saved event — the server recomputes on `PATCH`, but the app has no edit screen
-- Physical-device run: locked screen, power saving, reboot, network loss. Checked on the
-  emulator only so far
-- Write-up of test results
+- Alarm checks on a phone: locked screen, power saving, reboot, network loss. The app runs
+  on a Galaxy S24 (demo video), but these were checked on the emulator only
 
 **Partial**
 
@@ -303,9 +361,10 @@ cd backend && .venv/bin/python scripts/run_local_suite.py  # 8 HTTP suites again
 cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 528 unit tests + lint + build
 ```
 
-CI runs all three on every push to `main` and every pull request. The latest recorded
-results are in [docs/demo-checklist.md](docs/demo-checklist.md); backend setup is in
-[backend/README.md](backend/README.md).
+CI runs all three on every push to `main` and every pull request. Results, the test
+strategy and how each acceptance test is checked are in the Wiki's
+[Testing Documentation](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter1%E2%80%90testing);
+backend setup is in [backend/README.md](backend/README.md).
 
 ---
 
