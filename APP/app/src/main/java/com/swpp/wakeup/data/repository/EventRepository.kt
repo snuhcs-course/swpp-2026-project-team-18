@@ -196,7 +196,12 @@ class EventRepository(
         ageLabel: String?,
     ): HomeData {
         val zone = ZoneId.systemDefault()
+        // 시작 시각이 지난 일정은 홈 목록에서 뺀다(사용자 결정 10-09). 서버에서
+        // 지우지는 않는다 — 주간 리포트·관측 학습이 지난 일정을 쓴다. 알람 등록
+        // ([schedules])은 원래 미래 알람만 걸므로 그대로 둔다.
+        val nowSecond = System.currentTimeMillis() / 1000
         val sorted = events.mapNotNull { it.toUpcoming(zone) }
+            .filter { it.startAtEpochSecond > nowSecond }
             .sortedBy { it.startAtEpochSecond }
 
         return HomeData(
