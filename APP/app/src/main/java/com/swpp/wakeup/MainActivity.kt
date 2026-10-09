@@ -551,10 +551,7 @@ private fun MainHost(
                         viewModel.resetHomeSetup()
                         viewModel.openHomeSetup()
                     },
-                    onChangePrep = {
-                        viewModel.resetPrepOnboarding()
-                        viewModel.openPrepOnboarding()
-                    },
+                    onChangePrep = viewModel::openPrepOnboarding,
                     onLogout = {
                         viewModel.logout()
                         onLoggedOut()

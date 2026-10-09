@@ -143,6 +143,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /** 집 위치 미설정이면 알람을 계산할 수 없다. 안내를 띄운다 */
         val hasHome: Boolean = true,
         val homeLabel: String? = null,
+        val onboardingPrepMin: Int? = null,
         /**
          * 저장된 집을 장소 하나로 본 것. 설정하지 않았으면 null.
          *
@@ -561,6 +562,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 totalCount = data.totalCount,
                 hasHome = data.hasHome,
                 homeLabel = data.homeLabel,
+                onboardingPrepMin = data.onboardingPrepMin,
                 homePlace = data.toHomePlace(),
                 unplannedCount = data.unplannedCount,
                 offline = data.fromCache,
@@ -2567,6 +2569,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 사용자가 고치겠다고 들어온 것이라 막을 이유가 없다.
      */
     fun openPrepOnboarding() {
+        _prepOnboarding.value = PrepOnboardingState(
+            minutes = _state.value.onboardingPrepMin?.toString().orEmpty(),
+        )
         _nav.update { it.copy(stack = it.stack + AppRoute.PrepOnboarding, forward = true) }
     }
 
@@ -2595,6 +2600,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = repository.setOnboardingPrep(minutes)) {
                 is EventRepository.Result.Success -> {
+                    _state.update { it.copy(onboardingPrepMin = result.data.onboardingPrepMin) }
                     _prepOnboarding.update { it.copy(submitting = false, done = true) }
                     // 준비 시간이 바뀌면 서버가 알람을 다시 계산한다. 홈의 시각을
                     // 갱신하지 않으면 방금 답한 값이 반영되지 않은 화면이 남는다.
@@ -2615,7 +2621,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * null 이기 때문이고, 별도 플래그를 두지 않는 이유다.
      */
     fun skipPrepOnboarding() {
-        _prepOnboarding.update { it.copy(done = true) }
+        _prepOnboarding.value = PrepOnboardingState(done = true)
     }
 
     /**

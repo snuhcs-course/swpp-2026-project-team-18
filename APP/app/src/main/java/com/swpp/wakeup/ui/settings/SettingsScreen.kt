@@ -101,8 +101,8 @@ fun SettingsScreen(
 
         SettingRow(
             label = "평소 준비 시간",
-            value = "관측이 쌓이면 학습값으로 대체됨",
-            action = "변경",
+            value = state.onboardingPrepMin?.let { "${it}분" } ?: "아직 설정하지 않음",
+            action = if (state.onboardingPrepMin == null) "설정" else "변경",
             onClick = onChangePrep,
         )
 

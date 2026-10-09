@@ -62,9 +62,34 @@ class PublicSetupTest {
                 find(By.res("prep_minutes"), timeout = 90_000)
             }
             step("03_prep_setup") {
-                input("prep_minutes", config.getInt("prep_minutes").toString())
+                val prep = config.getInt("prep_minutes")
+                val changedPrep = if (prep == 15) 30 else 15
+                assertEquals("", ui.text(By.res("prep_minutes")))
+                input("prep_minutes", prep.toString())
                 click(By.res("prep_submit"))
                 find(By.res("home_list"), timeout = 90_000)
+                click(By.res("open_settings"), "home_list")
+                find(By.text("${prep}분"), "settings_scroll")
+                click(By.text("평소 준비 시간"), "settings_scroll")
+                assertEquals(prep.toString(), ui.text(By.res("prep_minutes")))
+                input("prep_minutes", changedPrep.toString())
+                click(By.res("prep_submit"))
+                find(By.res("settings_scroll"), timeout = 90_000)
+                find(By.text("${changedPrep}분"), "settings_scroll", 90_000)
+                click(By.text("평소 준비 시간"), "settings_scroll")
+                assertEquals(changedPrep.toString(), ui.text(By.res("prep_minutes")))
+                input("prep_minutes", prep.toString())
+                click(By.text("나중에 입력"))
+                find(By.res("settings_scroll"))
+                find(By.text("${changedPrep}분"), "settings_scroll")
+                click(By.text("평소 준비 시간"), "settings_scroll")
+                assertEquals(changedPrep.toString(), ui.text(By.res("prep_minutes")))
+                input("prep_minutes", prep.toString())
+                click(By.res("prep_submit"))
+                find(By.res("settings_scroll"), timeout = 90_000)
+                find(By.text("${prep}분"), "settings_scroll", 90_000)
+                capture("03_prep_settings")
+                device.pressBack()
             }
             step("04_create_routines") {
                 click(By.text("아침 루틴 설정"), "home_list")
@@ -123,6 +148,7 @@ class PublicSetupTest {
                 find(By.res("next_alarm"), timeout = 90_000) // 토큰으로 자동 로그인.
                 click(By.res("open_settings"), "home_list")
                 find(By.text(config.getString("home_query")), "settings_scroll")
+                find(By.text("${config.getInt("prep_minutes")}분"), "settings_scroll")
                 click(By.text("로그아웃"), "settings_scroll")
                 input("login_email", config.getString("email"), timeout = 90_000)
                 input("login_password", config.getString("password"))
