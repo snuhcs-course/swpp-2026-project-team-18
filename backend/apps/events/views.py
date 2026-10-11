@@ -27,6 +27,7 @@ from rest_framework.views import APIView
 from apps.planning import services as planning_services
 from apps.routing import clients
 
+from .geo import validate_route_distance
 from .models import Event, EventTag
 from .serializers import (
     CalendarImportSerializer,
@@ -778,6 +779,7 @@ class RouteCandidateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        validate_route_distance(origin["lat"], origin["lng"], dest_lat, dest_lng)
         candidates, degraded = clients.route_candidates(
             start_lat=origin["lat"],
             start_lng=origin["lng"],

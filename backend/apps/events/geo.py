@@ -22,8 +22,21 @@
 
 from __future__ import annotations
 
+from rest_framework.exceptions import ValidationError
+
+from apps.common.geo import distance_meters
+
 KOREA_LAT_RANGE = (32.5, 39.0)
 KOREA_LNG_RANGE = (124.0, 132.5)
+MIN_ROUTE_DISTANCE_M = 50
+
+
+def validate_route_distance(origin_lat, origin_lng, dest_lat, dest_lng) -> None:
+    """도착 판정 반경(50m) 안의 장소는 새 이동 일정으로 받지 않는다."""
+    if distance_meters(origin_lat, origin_lng, dest_lat, dest_lng) < MIN_ROUTE_DISTANCE_M:
+        raise ValidationError(
+            {"destination": [f"출발지와 도착지는 {MIN_ROUTE_DISTANCE_M}m 이상 떨어져 있어야 한다."]}
+        )
 
 
 def in_service_area(lat: float, lng: float) -> bool:

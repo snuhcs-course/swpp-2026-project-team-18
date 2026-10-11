@@ -12,7 +12,7 @@ from .alarms import alarm_states
 
 # 서비스 범위 판정. `views.py` 가 아니라 `geo.py` 에서 가져온다 — 시리얼라이저가
 # 뷰를 import 하면 순환이 된다.
-from .geo import in_service_area
+from .geo import in_service_area, validate_route_distance
 from .models import Event, EventTag, Place
 
 
@@ -310,6 +310,15 @@ class EventWriteSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id",)
 
+    def validate_place(self, value):
+        # PATCH의 partial=True가 중첩 serializer에도 적용되지만 장소는 좌표를
+        # 포함한 완전한 객체로 교체한다. 빠진 필드를 거리 검사 전에 400으로 돌린다.
+        if value is None:
+            return None
+        place = PlaceInputSerializer(data=value)
+        place.is_valid(raise_exception=True)
+        return place.validated_data
+
     def validate(self, attrs):
         """출발지 좌표는 둘 다 있거나 둘 다 없어야 한다.
 
@@ -334,6 +343,20 @@ class EventWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"origin_lat": "국내 좌표만 출발지로 쓸 수 있다."}
             )
+
+        # 장소 수정은 저장된 출발지와 합쳐 검증한다. 켬/끔이나 제목만 바꾸는
+        # 요청은 기존 가까운 일정도 계속 관리할 수 있게 허용한다.
+        if self.instance is None or {"place", "origin_lat", "origin_lng"} & attrs.keys():
+            profile = self.context["request"].user.profile
+            origin = Event(origin_lat=lat, origin_lng=lng).resolve_origin(profile)
+            if "place" in attrs:
+                place = attrs["place"]
+                destination = (place["lat"], place["lng"]) if place else None
+            else:
+                place = getattr(self.instance, "place", None)
+                destination = (place.lat, place.lng) if place else None
+            if origin is not None and destination is not None:
+                validate_route_distance(*origin[:2], *destination)
         return attrs
 
     def validate_route_key(self, value):
