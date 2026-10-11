@@ -50,6 +50,9 @@ def run(command, **kwargs):
 class Demo:
     def __init__(self, args):
         self.args = args
+        self.replay_routing = bool(getattr(args, "replay_routing", False))
+        require(not (self.replay_routing and (args.public_ui or args.public_e2e)),
+                "--replay-routing은 일회용 로컬 서버에서만 사용할 수 있습니다.")
         self.scenario = json.loads(args.scenario.read_text(encoding="utf-8"))
         require(20 <= self.scenario["alarm_wait_seconds"] <= 120, "알람 대기는 20~120초여야 합니다.")
         require(self.scenario["travel_seconds"] >= 45, "출발 판정을 위해 이동은 45초 이상이어야 합니다.")
@@ -110,6 +113,8 @@ class Demo:
         mode = "public_e2e" if args.public_e2e else "public_ui" if args.public_ui else "local_e2e"
         self.result = {"scenario": self.scenario["name"], "mode": mode,
                        "api": self.api_base, "status": "failed", "device": self.device}
+        if self.replay_routing:
+            self.result["external_response_mode"] = "recorded_walk_map_and_fixed_transit_cases"
 
     def shell(self, *args):
         return run(self.adb + ["shell", *args], capture_output=True, timeout=30).stdout.strip()
@@ -174,7 +179,8 @@ class Demo:
         require(plan["prep_minutes"] > 0 and plan["prep_source"] != "not_from_home" and
                 len(plan["prep_breakdown"]) == len(blocks), "UI에서 만든 준비 루틴이 알람 계산에 반영되지 않았습니다.")
         require(plan["status"] == "ok" and len(plan["route_path"]) >= 2 and plan["travel_time_source"] == "kakao_walk",
-                "실제 카카오 도보 경로로 알람을 계산하지 못했습니다.")
+                "재생 도보 경로로 알람을 계산하지 못했습니다." if self.replay_routing
+                else "실제 카카오 도보 경로로 알람을 계산하지 못했습니다.")
         require(datetime.fromisoformat(plan["alarm_at"]) > now(), "UI 일정의 알람이 미래 시각이 아닙니다.")
         event_blocks = self.api("GET", f"events/{event['id']}/blocks")
         require(len(event_blocks["blocks"]) == len(blocks) and all(b["checked"] for b in event_blocks["blocks"]),
@@ -195,8 +201,11 @@ class Demo:
         self.files.append(log)
         run([str(self.python), "manage.py", "migrate", "--noinput"], cwd=ROOT / "backend",
             env=self.env, stdout=log, stderr=subprocess.STDOUT, timeout=120)
-        self.backend = subprocess.Popen([str(self.python), "manage.py", "runserver",
-                                         f"127.0.0.1:{API_PORT}", "--noreload", "--nothreading"],
+        command = ([str(self.python), str(ROOT / "qa/demo/replay_backend.py"), str(API_PORT)]
+                   if self.replay_routing else
+                   [str(self.python), "manage.py", "runserver", f"127.0.0.1:{API_PORT}",
+                    "--noreload", "--nothreading"])
+        self.backend = subprocess.Popen(command,
                                         cwd=ROOT / "backend", env=self.env, stdout=log, stderr=log)
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
@@ -386,6 +395,10 @@ class Demo:
         started = time.monotonic()
         filename = "instrumentation.txt" if self.args.public_ui else "setup-instrumentation.txt"
         self.result["setup_seconds"] = self.execute_test("PublicSetupTest", filename)
+        if self.replay_routing:
+            self.result["route_display_seconds"] = self.execute_test(
+                "RouteDisplayTest", "route-display-instrumentation.txt"
+            )
         self.verify_ui()
         if not self.args.public_ui:
             # 준비 단계의 결과를 보존하고 같은 APK·계정·일정으로 완주한다.
@@ -494,6 +507,8 @@ def main():
     parser.add_argument("--device", help="예: emulator-5554")
     parser.add_argument("--scenario", type=Path, default=Path(__file__).with_name("scenario.json"))
     parser.add_argument("--no-video", action="store_true", help="스크린샷·로그만 남김")
+    parser.add_argument("--replay-routing", action="store_true",
+                        help="로컬 서버에서 저장된 도보·지도 응답과 고정 대중교통 시나리오를 재생")
     public = parser.add_mutually_exclusive_group()
     public.add_argument("--public-ui", action="store_true", help="공용 서버에 새 QA 계정·루틴·일정을 실제 UI로 생성·검증")
     public.add_argument("--public-e2e", action="store_true", help="공용 UI 준비 후 같은 계정으로 실제 알람·GPS 도착·리포트까지 완주")

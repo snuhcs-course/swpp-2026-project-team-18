@@ -17,6 +17,19 @@ backend/.venv/bin/python qa/demo/run.py
 여러 에뮬레이터가 연결됐으면 `--device emulator-5554`, 영상이 필요 없으면 `--no-video`를 추가한다.
 검증은 약 5~7분 걸린다. 최초 빌드는 의존성 다운로드 때문에 더 걸린다.
 
+### 카카오 키 없이 로컬 변경 검증
+
+```bash
+backend/.venv/bin/python qa/demo/run.py --replay-routing --no-video
+```
+
+일회용 로컬 DB와 현재 백엔드 코드를 사용한다. 외부 응답만
+[`replay/route.json`](replay/route.json)의 실제 도보 경로 기록·고정 대중교통 사례와
+저장된 지도 이미지로 재생한다. 가입·저장·실제 알람·GPS·관측·리포트 검증은
+그대로 실행하며, `RouteDisplayTest`가 배지 3개와 대체 버스 2개의 실제 카드 표시도 확인한다.
+결과에는 `external_response_mode`와 `route_display_seconds`를 기록한다.
+이 모드는 공용 서버 옵션과 함께 사용할 수 없으며 실시간 카카오 응답 검증을 대신하지 않는다.
+
 ### 공용 서버에서 완주
 
 ```bash
