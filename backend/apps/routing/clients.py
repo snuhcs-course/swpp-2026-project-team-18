@@ -26,6 +26,8 @@ import urllib.request
 
 from django.conf import settings
 
+from apps.common.geo import distance_meters as _haversine_meters
+
 logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 5
@@ -743,6 +745,26 @@ def path_length_m(points: list[list[float]]) -> int:
     return round(total)
 
 
+def _vehicle_info(vehicle) -> dict:
+    vehicle = vehicle if isinstance(vehicle, dict) else {}
+    return {
+        "name": str(vehicle.get("name") or vehicle.get("busNo") or "").strip(),
+        "vehicle_type": str(vehicle.get("type") or "").strip(),
+    }
+
+
+def _alternative_vehicles(vehicles: list) -> list[dict]:
+    """같은 구간의 대체 노선. 대표·중복·이름 없는 항목은 제외한다."""
+    seen = {_vehicle_info(vehicles[0])["name"]} if vehicles else set()
+    alternatives = []
+    for raw in vehicles[1:]:
+        item = _vehicle_info(raw)
+        if item["name"] and item["name"] not in seen:
+            seen.add(item["name"])
+            alternatives.append(item)
+    return alternatives
+
+
 def _segments(
     route: dict,
     total_seconds: int,
@@ -822,11 +844,12 @@ def _segments(
             seg["label"] = "도보"
         else:
             vehicles = props.get("vehicles") or []
-            first = vehicles[0] if vehicles else {}
-            name = str(first.get("name") or first.get("busNo") or "").strip()
+            first = _vehicle_info(vehicles[0] if vehicles else {})
+            name = first["name"]
             seg["vehicle"] = name
             # 지하철은 "2호선" 이 곧 색이고, 버스는 "지선" 같은 종류가 색이다.
-            seg["vehicle_type"] = str(first.get("type") or "").strip()
+            seg["vehicle_type"] = first["vehicle_type"]
+            seg["alt_vehicles"] = _alternative_vehicles(vehicles)
             seg["label"] = name or ("지하철" if kind == "subway" else "버스")
             # "2호선 (신림 > 강남)" 형태. 사람이 읽는 한 줄이라 그대로 넘긴다.
             guidance = props.get("guidance")
@@ -876,22 +899,6 @@ def _segments(
     return out
 
 
-def _haversine_meters(a_lat: float, a_lng: float, b_lat: float, b_lng: float) -> float:
-    """두 점 사이 거리(m).
-
-    앱의 `TripGeofence.distanceMeters` 와 같은 식이다. 수 백 m 범위의 도보
-    거리에 쓰므로 정밀도는 충분하다.
-    """
-    import math
-
-    radius = 6_371_008.8
-    p1, p2 = math.radians(a_lat), math.radians(b_lat)
-    d_lat = p2 - p1
-    d_lng = math.radians(b_lng - a_lng)
-    h = math.sin(d_lat / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(d_lng / 2) ** 2
-    return 2 * radius * math.asin(min(1.0, math.sqrt(h)))
-
-
 def _vehicle_chain(route: dict) -> tuple[list[str], int]:
     """탑승 구간별 대표 노선과 대체 노선 수.
 
@@ -908,11 +915,10 @@ def _vehicle_chain(route: dict) -> tuple[list[str], int]:
         vehicles = (step.get("properties") or {}).get("vehicles") or []
         if not vehicles:
             continue
-        first = vehicles[0]
-        name = first.get("name") or first.get("busNo") or ""
+        name = _vehicle_info(vehicles[0])["name"]
         if name:
-            chain.append(str(name))
-            alternatives += max(0, len(vehicles) - 1)
+            chain.append(name)
+        alternatives += len(_alternative_vehicles(vehicles))
     return chain, alternatives
 
 
@@ -968,6 +974,7 @@ def _transit_candidates(
 
     # 1) 정규화 + 같은 교통수단 조합은 가장 빠른 것 하나로 합친다.
     by_chain: dict[str, dict] = {}
+    durations: dict[str, float] = {}
     for route in data.get("routes") or []:
         props = route.get("properties") or {}
         seconds = props.get("totalTime")
@@ -1009,42 +1016,59 @@ def _transit_candidates(
             minutes, item["distance_m"], item["transfers"], item["fare"]
         )
         prev = by_chain.get(chain_key)
-        if prev is None or minutes < prev["minutes"]:
+        if prev is None or seconds < durations[prev["key"]]:
             by_chain[chain_key] = item
+            durations[item["key"]] = seconds
 
     pool = list(by_chain.values())
     if not pool:
         return [], True
 
+    # 배지는 대표 선택과 별개다. 같은 경로가 여러 기준을 만족하거나 동률이면
+    # 해당 배지를 모두 준다. 요금 미상(None)은 최소 비용 비교에서 제외한다.
+    fastest_seconds = min(durations[c["key"]] for c in pool)
+    fewest_transfers = min(c["transfers"] for c in pool)
+    priced = [c for c in pool if c["fare"] is not None]
+    cheapest_fare = min((c["fare"] for c in priced), default=None)
+    for item in pool:
+        badges = []
+        if durations[item["key"]] == fastest_seconds:
+            badges.append("최단 시간")
+        if item["fare"] is not None and item["fare"] == cheapest_fare:
+            badges.append("최소 비용")
+        if item["transfers"] == fewest_transfers:
+            badges.append("최소 환승")
+        item["badges"] = badges
+        item["reason"] = badges[0] if badges else ""
+
+    def fastest(item):
+        return durations[item["key"]], item["key"]
+
     # 2) 축별 대표를 뽑는다. 같은 항목이 여러 축에서 뽑히면 한 번만 담는다.
     picked: list[dict] = []
     seen: set[str] = set()
 
-    def take(item: dict | None, reason: str) -> None:
+    def take(item: dict | None) -> None:
         if item is None or item["key"] in seen:
             return
         seen.add(item["key"])
-        picked.append({**item, "reason": reason})
+        picked.append(item)
 
-    take(min(pool, key=lambda c: c["minutes"]), "가장 빠름")
-
-    no_transfer = [c for c in pool if c["transfers"] == 0]
-    if no_transfer:
-        take(min(no_transfer, key=lambda c: c["minutes"]), "환승 없음")
+    take(min(pool, key=fastest))
+    take(min(pool, key=lambda c: (c["transfers"], *fastest(c))))
 
     subway = [c for c in pool if "지하철" in c["mode"]]
     if subway:
-        take(min(subway, key=lambda c: c["minutes"]), "지하철 이용")
+        take(min(subway, key=fastest))
 
-    priced = [c for c in pool if c["fare"]]
     if priced:
-        take(min(priced, key=lambda c: (c["fare"], c["minutes"])), "가장 저렴")
+        take(min(priced, key=lambda c: (c["fare"], *fastest(c))))
 
     # 3) 자리가 남으면 빠른 순으로 채운다.
-    for c in sorted(pool, key=lambda c: c["minutes"]):
+    for c in sorted(pool, key=fastest):
         if len(picked) >= CANDIDATE_LIMIT - 1:  # 도보·자전거·자동차 자리를 남긴다
             break
-        take(c, "")
+        take(c)
 
     return picked, False
 
@@ -1206,20 +1230,20 @@ def route_candidates(
     candidates.sort(key=lambda c: (c["minutes"], c["transfers"]))
     candidates = candidates[:CANDIDATE_LIMIT]
 
-    # 이유 라벨을 전체 목록 기준으로 다시 매긴다. `_transit_candidates` 는
-    # 대중교통끼리만 비교했으므로 도보·자전거·자동차가 섞이면 "가장 빠름" 이
-    # 틀릴 수 있다.
+    # 대중교통 배지는 같은 수단 내 비교 결과를 유지한다. 다른 수단의 기존
+    # reason 라벨만 전체 목록 기준으로 매긴다.
     for c in candidates:
-        if c["reason"] == "가장 빠름":
+        if c["kind"] != "transit" and c["reason"] == "가장 빠름":
             c["reason"] = ""
-    candidates[0]["reason"] = "가장 빠름"
+    if candidates[0]["kind"] != "transit":
+        candidates[0]["reason"] = "가장 빠름"
 
     # 돈이 드는 수단 중 가장 싼 것에 표시. 도보·자전거(0원)는 제외한다 —
     # "가장 저렴" 이 늘 도보가 되면 정보가 없다.
     priced = [c for c in candidates if c["fare"]]
     if len(priced) > 1:
         cheapest = min(priced, key=lambda c: (c["fare"], c["minutes"]))
-        if not cheapest["reason"]:
+        if cheapest["kind"] != "transit" and not cheapest["reason"]:
             cheapest["reason"] = "가장 저렴"
 
     # 실시간 정보는 경로 자체와 수명이 다르다. 최종 목록을 고른 뒤에만 붙여야
