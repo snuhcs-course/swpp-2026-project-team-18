@@ -899,18 +899,15 @@ def _segments(
     return out
 
 
-def _vehicle_chain(route: dict) -> tuple[list[str], int]:
-    """탑승 구간별 대표 노선과 대체 노선 수.
+def _vehicle_chain(route: dict) -> list[str]:
+    """탑승 구간별 대표 노선.
 
     **`step.properties.vehicles` 는 이동 순서가 아니라 같은 구간을 지나는 대체
     노선 목록이다.** 처음에는 전부 이어 붙였다가 "5516 → 6514 → N75 → 5511"
     처럼 환승 1회인데 노선이 4개인 표기가 나왔다. 구간마다 첫 노선만 대표로
-    쓰고, 나머지는 개수만 센다.
-
-    반환: `(["2호선", "5513"], 3)` — 대표 노선 순서와 대체 노선 총 개수.
+    쓴다. 대체 노선 수는 실제 표시되는 segments에서 계산한다.
     """
     chain: list[str] = []
-    alternatives = 0
     for step in route.get("steps") or []:
         vehicles = (step.get("properties") or {}).get("vehicles") or []
         if not vehicles:
@@ -918,8 +915,7 @@ def _vehicle_chain(route: dict) -> tuple[list[str], int]:
         name = _vehicle_info(vehicles[0])["name"]
         if name:
             chain.append(name)
-        alternatives += len(_alternative_vehicles(vehicles))
-    return chain, alternatives
+    return chain
 
 
 def _mode_labels(route: dict) -> list[str]:
@@ -980,12 +976,14 @@ def _transit_candidates(
         seconds = props.get("totalTime")
         if not seconds:
             continue
-        chain, alt_count = _vehicle_chain(route)
+        chain = _vehicle_chain(route)
         if not chain:
             continue
         chain_key = ">".join(chain)
         labels = _mode_labels(route)
         minutes = max(1, round(seconds / 60))
+        segments = _segments(route, seconds, start_lat, start_lng, end_lat, end_lng)
+        alt_count = sum(len(segment.get("alt_vehicles", [])) for segment in segments)
         detail = " → ".join(chain)
         if alt_count:
             detail += f" (대체 {alt_count}개)"
@@ -1001,9 +999,7 @@ def _transit_candidates(
             "detail": detail,
             "source": "kakao_transit",
             # 앱이 가로 막대로 그린다. 합은 totalTime 과 같다.
-            "segments": _segments(
-                route, seconds, start_lat, start_lng, end_lat, end_lng
-            ),
+            "segments": segments,
         }
         if with_path:
             path = transit_route_path(route)

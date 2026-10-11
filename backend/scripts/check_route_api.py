@@ -89,6 +89,18 @@ def brief(res) -> str:
     return res.text[:200]
 
 
+def valid_transit_badges(candidate: dict) -> bool:
+    badges = candidate.get("badges")
+    if not isinstance(badges, list):
+        return False
+    allowed = {"최단 시간", "최소 비용", "최소 환승"}
+    if any(not isinstance(badge, str) or badge not in allowed for badge in badges):
+        return False
+    return len(badges) == len(set(badges)) and candidate.get("reason") == (
+        badges[0] if badges else ""
+    )
+
+
 # 이전 실행이 남긴 계정 정리
 stale = get_user_model().objects.filter(email__startswith="rt_")
 if stale.exists():
@@ -181,11 +193,18 @@ if HAS_KAKAO:
         "모든 후보에 mode·minutes·key 있음",
         all(c.get("mode") and c.get("minutes") and c.get("key") for c in candidates),
     )
+    first = candidates[0] if candidates else None
+    fastest_marks = [c for c in candidates if c.get("reason") == "가장 빠름"]
     check(
-        "가장 빠름 라벨이 첫 항목에만",
-        sum(1 for c in candidates if c.get("reason") == "가장 빠름") == 1
-        and candidates[0].get("reason") == "가장 빠름",
+        "수단별 최단 라벨",
+        first is not None and fastest_marks == (
+            [] if first.get("kind") == "transit" else [first]
+        ),
         str([c.get("reason") for c in candidates]),
+    )
+    check(
+        "대중교통 배지·이유 계약",
+        all(valid_transit_badges(c) for c in candidates if c.get("kind") == "transit"),
     )
 else:
     for label in (
@@ -193,7 +212,8 @@ else:
         "후보 key 중복 없음",
         "소요시간 오름차순",
         "모든 후보에 mode·minutes·key 있음",
-        "가장 빠름 라벨이 첫 항목에만",
+        "수단별 최단 라벨",
+        "대중교통 배지·이유 계약",
     ):
         skip(label)
     # 키가 없어도 **빈 목록으로 200** 이어야 한다. 500 을 내면 앱의 경로 선택
