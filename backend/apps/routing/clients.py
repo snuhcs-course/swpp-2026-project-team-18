@@ -42,6 +42,10 @@ CAR_URL = "https://apis-navi.kakaomobility.com/v1/directions"
 # 도보만으로 갈 만한 거리 기준. 이보다 짧으면 대중교통이 오히려 느리다.
 WALK_ONLY_METERS = 1200
 
+# 도보 카드의 거리 기반 추정. 개인별 보폭·체중을 반영하지 않는 고정 기준이다.
+METERS_PER_STEP = 0.75
+KCAL_PER_KM = 50
+
 # --- 장소 검색 한계 (실측: jit-tools/probe_local2.py) -----------------------
 #
 # 카카오 로컬 키워드 검색은 한 번에 15건, 45페이지까지만 받는다. 그보다 크게
@@ -1100,22 +1104,36 @@ def _single_route_candidate(
         return None
 
     minutes = max(1, round(seconds / 60))
+    distance_m = props.get("totalDistance")
+    if key == "walk" and not (
+        isinstance(distance_m, (int, float))
+        and not isinstance(distance_m, bool)
+        and math.isfinite(distance_m)
+        and distance_m > 0
+    ):
+        distance_m = None
     item = {
         "key": key,
         "kind": key,
         "mode": mode,
         "minutes": minutes,
-        "distance_m": props.get("totalDistance"),
+        "distance_m": distance_m,
         "transfers": 0,
         "fare": 0,
         "detail": "",
-        "summary": _summary_bits(minutes, props.get("totalDistance"), 0, None),
+        "summary": _summary_bits(minutes, distance_m, 0, None),
         "source": f"kakao_{key}",
         "reason": "",
         # 처음부터 끝까지 한 수단이다. 구간이 하나여도 내려 준다 — 앱이
         # "구간이 있는 후보" 와 "없는 후보" 를 따로 그리지 않아도 되게.
         "segments": [{"kind": key, "seconds": int(seconds), "label": mode}],
     }
+    if key == "walk":
+        item.update(steps=None, kcal=None)
+        if distance_m is not None:
+            item["steps"] = round(distance_m / METERS_PER_STEP)
+            item["kcal"] = round(distance_m / 1000 * KCAL_PER_KM)
+            item["summary"] += f" · {item['steps']:,}걸음 · {item['kcal']}kcal (거리 기반 추정)"
     if with_path:
         path = legs_route_path(data)
         item["path"] = path
