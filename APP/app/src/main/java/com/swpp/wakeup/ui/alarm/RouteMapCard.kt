@@ -97,6 +97,7 @@ fun RouteMapCard(
     onGestureEnd: (pan: Offset, zoom: Float, metersPerPixel: Double) -> Unit,
     onRecenter: () -> Unit,
     modifier: Modifier = Modifier,
+    showCurrentLocation: Boolean = true,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -291,13 +292,15 @@ fun RouteMapCard(
                     modifier = Modifier.align(Alignment.TopStart).padding(14.dp),
                 )
 
-                CurrentLocationButton(
-                    loading = state.locating,
-                    onClick = onRecenter,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 14.dp, bottom = 14.dp),
-                )
+                if (showCurrentLocation) {
+                    CurrentLocationButton(
+                        loading = state.locating,
+                        onClick = onRecenter,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 14.dp, bottom = 14.dp),
+                    )
+                }
                 state.image?.let {
                     KakaoMapAttribution(
                         bitmap = it,

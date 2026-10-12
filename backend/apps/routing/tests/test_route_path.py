@@ -151,10 +151,10 @@ def test_돌아가는_경로는_직선거리보다_길다():
     assert clients.path_length_m(detour) > clients.path_length_m(straight) * 2
 
 
-# --- 목록 응답을 무겁게 만들지 않는다 -----------------------------------------
+# --- 대중교통 목록은 폴리라인을 담지 않는다 ------------------------------------
 
 
-def test_후보_목록은_폴리라인을_담지_않는다(monkeypatch):
+def test_대중교통_후보_목록은_폴리라인을_담지_않는다(monkeypatch):
     """`with_path` 기본값이 False 여야 한다.
 
     후보는 최대 15개이고 하나가 300점을 넘는다. 목록에 전부 실으면 경로를
@@ -224,3 +224,62 @@ def test_보관한_좌표의_길이를_쓴다_카카오_신고값이_아니다(m
     assert items[0]["distance_m"] == 99999      # 표시용은 카카오 값 그대로
     assert items[0]["path_distance_m"] != 99999  # 분모는 실제 좌표 길이
     assert abs(items[0]["path_distance_m"] - 1113) < 3
+
+
+def test_도보_자전거_후보는_기존_호출에서_경로를_담는다(monkeypatch):
+    raw = {
+        "status": "OK",
+        "route": {
+            "properties": {"totalTime": 1200, "totalDistance": 2500},
+            "legs": [{"steps": [
+                {"path": {"points": [[126.90, 37.40], [126.91, 37.41]]}},
+            ]}],
+        },
+    }
+    responses = {
+        clients.WALK_URL: raw,
+        clients.TRANSIT_URL: {"status": "OK", "routes": []},
+        clients.BICYCLE_URL: raw,
+        clients.CAR_URL: {"routes": []},
+    }
+    calls = []
+
+    def get(url):
+        base = url.split("?")[0]
+        calls.append(base)
+        return responses[base], False
+
+    monkeypatch.setattr(clients, "_get", get)
+    candidates, _ = clients.route_candidates(37.40, 126.90, 37.41, 126.91)
+    assert {item["key"] for item in candidates} == {"walk", "bicycle"}
+    for item in candidates:
+        assert item["path"] == [[37.40, 126.90], [37.41, 126.91]]
+        assert item["path_distance_m"] == clients.path_length_m(item["path"])
+    assert calls == [clients.WALK_URL, clients.TRANSIT_URL, clients.BICYCLE_URL, clients.CAR_URL]
+
+
+@pytest.mark.parametrize("points", [[[126.90, 37.40], [126.91, 37.41]], []])
+def test_가까운_도보_후보도_경로를_담고_추가_조회하지_않는다(monkeypatch, points):
+    raw = {
+        "status": "OK",
+        "route": {
+            "properties": {"totalTime": 600, "totalDistance": 800},
+            "legs": [{"steps": [{"path": {"points": points}}]}],
+        },
+    }
+    calls = []
+
+    def get(url):
+        calls.append(url.split("?")[0])
+        return raw, False
+
+    monkeypatch.setattr(clients, "_get", get)
+    candidates, degraded = clients.route_candidates(37.40, 126.90, 37.41, 126.91)
+
+    assert not degraded
+    assert len(candidates) == 1
+    assert candidates[0]["key"] == "walk"
+    expected = [[37.40, 126.90], [37.41, 126.91]] if points else []
+    assert candidates[0]["path"] == expected
+    assert candidates[0]["path_distance_m"] == clients.path_length_m(expected)
+    assert calls == [clients.WALK_URL]

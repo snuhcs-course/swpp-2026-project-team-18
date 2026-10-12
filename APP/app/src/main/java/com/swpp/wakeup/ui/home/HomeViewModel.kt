@@ -1848,6 +1848,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { loadCandidates(place, origin, keepSelection = false) }
     }
 
+    /** 후보 지도는 화면 내부 상태를 쓰며 추적 중인 일정 지도와 분리한다. */
+    suspend fun loadCandidateMap(
+        center: GeoPoint,
+        level: Int,
+        widthDp: Int,
+        heightDp: Int,
+    ): EventRepository.Result<Bitmap> = repository.staticMap(
+        center, level, widthDp, heightDp, markers = emptyList(),
+    )
+
     /** 고른 경로를 일정 추가 폼에 반영하고 돌아간다. */
     fun confirmRoute() {
         val current = _routeChoice.value ?: return
