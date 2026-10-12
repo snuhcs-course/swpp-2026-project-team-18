@@ -176,6 +176,7 @@ class EventSerializer(serializers.ModelSerializer):
 
     place = PlaceSerializer(read_only=True)
     tag = EventTagSerializer(read_only=True)
+    lateness_sensitivity = serializers.SerializerMethodField()
     alarm_plan = serializers.SerializerMethodField()
     alarm_on = serializers.SerializerMethodField()
     is_first_alarm = serializers.SerializerMethodField()
@@ -194,6 +195,7 @@ class EventSerializer(serializers.ModelSerializer):
             "place",
             "tag",
             "tau_override",
+            "lateness_sensitivity",
             "route_key",
             "origin_lat",
             "origin_lng",
@@ -205,6 +207,14 @@ class EventSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = ("id", "source", "external_id", "created_at")
+
+    def get_lateness_sensitivity(self, obj) -> str:
+        tau = obj.effective_tau
+        if tau >= 0.95:
+            return "high"
+        if tau >= 0.85:
+            return "normal"
+        return "low"
 
     @cached_property
     def _alarm_states(self):

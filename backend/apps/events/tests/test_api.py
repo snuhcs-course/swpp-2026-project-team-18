@@ -298,7 +298,7 @@ class TestTags:
 
 
 class TestEffectiveTau:
-    def test_priority_is_override_then_tag_then_profile(self, user, stub_route):
+    def test_priority_is_override_then_tag_then_profile(self, user, client):
         place = Place.objects.create(name="목적지", lat=37.46, lng=126.95)
         tag = EventTag.objects.get(key="meetup")  # 0.85
         profile = user.profile
@@ -320,3 +320,40 @@ class TestEffectiveTau:
         assert bare.effective_tau == pytest.approx(0.70)
         assert tagged.effective_tau == pytest.approx(0.85)
         assert overridden.effective_tau == pytest.approx(0.95)
+
+        res = client.get("/api/events")
+        assert res.status_code == 200
+        assert {row["id"]: row["lateness_sensitivity"] for row in res.data["results"]} == {
+            bare.id: "low", tagged.id: "normal", overridden.id: "high",
+        }
+
+    @pytest.mark.parametrize(
+        "tau,expected", [(0.8499, "low"), (0.85, "normal"),
+                         (0.9499, "normal"), (0.95, "high")],
+    )
+    def test_sensitivity_boundaries(self, user, client, tau, expected):
+        event = Event.objects.create(
+            user=user, title="민감도 경계", tau_override=tau,
+            start_at=datetime(2026, 10, 5, 9, 0, tzinfo=KST),
+        )
+        res = client.get(f"/api/events/{event.id}")
+        assert res.status_code == 200
+        assert res.data["lateness_sensitivity"] == expected
+
+    def test_sensitivity_is_derived_on_create_and_update(self, client):
+        res = client.post(
+            "/api/events",
+            {"title": "민감도", "start_at": "2026-10-05T09:00:00+09:00",
+             "tag_key": "meetup", "tau_override": 0.95, "lateness_sensitivity": "low"},
+            format="json",
+        )
+        assert res.status_code == 201
+        assert res.data["lateness_sensitivity"] == "high"
+
+        res = client.patch(
+            f"/api/events/{res.data['id']}",
+            {"tau_override": 0.80, "lateness_sensitivity": "high"},
+            format="json",
+        )
+        assert res.status_code == 200
+        assert res.data["lateness_sensitivity"] == "low"
