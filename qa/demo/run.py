@@ -175,6 +175,9 @@ class Demo:
                 "UI 집 선택이 별도 출발지로 저장되어 준비 시간을 제외합니다.")
         require(event["alarm_enabled"] is True and event["alarm_on"] is True and event["is_first_alarm"] is True,
                 "UI 알람 스위치 ON이 서버에 저장되지 않았습니다.")
+        if self.replay_routing:
+            require(event["tag"]["key"] == "exam" and event["lateness_sensitivity"] == "high",
+                    "시험 일정의 서버 지각 민감도 판정이 다릅니다.")
         plan = event["alarm_plan"]
         require(plan["prep_minutes"] > 0 and plan["prep_source"] != "not_from_home" and
                 len(plan["prep_breakdown"]) == len(blocks), "UI에서 만든 준비 루틴이 알람 계산에 반영되지 않았습니다.")
@@ -349,7 +352,7 @@ class Demo:
                   "event_title": self.scenario["event_title"], "blocks": self.scenario["blocks"],
                   "block_seconds": self.scenario["block_seconds"],
                   "control_url": f"http://10.0.2.2:{CONTROL_PORT}", "control_token": self.control_token,
-                  "public_e2e": self.args.public_e2e}
+                  "public_e2e": self.args.public_e2e, "replay_routing": self.replay_routing}
         config.update(nickname=self.scenario["nickname"], home_query=self.scenario["home_query"],
                       prep_minutes=self.scenario["onboarding_prep_minutes"],
                       block_min_minutes=self.scenario["block_min_minutes"],

@@ -26,7 +26,8 @@ backend/.venv/bin/python qa/demo/run.py --replay-routing --no-video
 일회용 로컬 DB와 현재 백엔드 코드를 사용한다. 외부 응답만
 [`replay/route.json`](replay/route.json)의 실제 도보 경로 기록·고정 대중교통 사례와
 저장된 지도 이미지로 재생한다. 가입·저장·실제 알람·GPS·관측·리포트 검증은
-그대로 실행하며, `RouteDisplayTest`가 배지 3개와 대체 버스 2개의 실제 카드 표시도 확인한다.
+그대로 실행하며, 도보 걸음 수·kcal 추정 표시와 시험 일정의 지각 민감도 배지도 확인한다.
+`RouteDisplayTest`는 자전거→도보 후보 지도 전환, 배지 3개와 대체 버스 2개의 실제 카드 표시를 확인한다.
 결과에는 `external_response_mode`와 `route_display_seconds`를 기록한다.
 이 모드는 공용 서버 옵션과 함께 사용할 수 없으며 실시간 카카오 응답 검증을 대신하지 않는다.
 

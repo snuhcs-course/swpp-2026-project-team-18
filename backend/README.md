@@ -78,6 +78,17 @@ Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정
 - 전용 시나리오: `python -m pytest apps/events/tests/test_location_distance.py
   apps/routing/tests/test_transit_display.py`.
 
+## 지각 민감도·도보 표시·후보 지도 (BE-15, BE-13, BE-23)
+
+- 일정 응답의 `lateness_sensitivity`는 기존 `effective_tau`로 판정한다.
+  τ ≥ 0.95는 `high`, ≥ 0.85는 `normal`, 그 외는 `low`다.
+- 도보 후보의 `steps`·`kcal`는 보폭 0.75m·1km당 50kcal를 사용한 거리 기반
+  추정치(정수 반올림)다. 유효한 양수 거리가 없으면 null이며, 기존 `summary`에
+  추정 표시를 포함해 앱에 전달한다.
+- 도보·자전거 후보의 `path`·`path_distance_m`는 기존 경로 응답에서 추출한다.
+  경로 조회를 추가하지 않으며 좌표가 없으면 빈 path다. 앱은 선택한 카드의 지도만
+  표시하고 기존 일정 지도·GPS 추적 상태를 변경하지 않는다.
+
 ## 주소·장소 검색
 
 `GET /api/places/search?q=...`는 도로명·지번 주소를 먼저 찾고, 없으면 기존 장소명 검색을 사용한다.

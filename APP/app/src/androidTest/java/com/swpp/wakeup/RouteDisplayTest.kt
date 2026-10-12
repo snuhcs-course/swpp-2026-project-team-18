@@ -12,11 +12,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** BE-9·10: 재생 경로를 제공하는 로컬 QA 서버에서 실제 경로 카드를 확인한다. */
+/** 재생 경로를 제공하는 로컬 QA 서버에서 실제 경로 카드·후보 지도를 확인한다. */
 @RunWith(AndroidJUnit4::class)
 class RouteDisplayTest {
     @Test
-    fun transitBadgesAndAlternativeBuses() {
+    fun candidateMapsAndTransitDisplay() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.swpp.wakeup.qa", context.packageName)
         assertEquals("http://10.0.2.2:8765/", BuildConfig.BASE_URL)
@@ -36,6 +36,13 @@ class RouteDisplayTest {
             ui.click(By.res("place_search"), "add_event_scroll")
             ui.click(By.res("place_result_$query"), "add_event_scroll")
             ui.click(By.textContains("경로 고르기"), "add_event_scroll")
+            for ((mode, key) in listOf("자전거" to "bicycle", "도보" to "walk")) {
+                ui.click(By.text(mode), "route_scroll")
+                ui.click(By.res("route_$key"), "route_scroll")
+                ui.await(By.res("candidate_route_map"), "route_scroll")
+                ui.await(By.desc("경로 지도"), "route_scroll", 90_000)
+                device.takeScreenshot(File(directory, "candidate-$key.png"))
+            }
             ui.click(By.text("대중교통"), "route_scroll")
             ui.click(By.res("route_transit:5511"), "route_scroll")
             for (badge in listOf("최단 시간", "최소 비용", "최소 환승")) {
@@ -49,6 +56,7 @@ class RouteDisplayTest {
             File(directory, "route-display-result.json").writeText(JSONObject()
                 .put("status", "passed").put("badges", "최단 시간 · 최소 비용 · 최소 환승")
                 .put("alternative_buses", "5513 · 643")
+                .put("candidate_maps", "bicycle · walk")
                 .put("duration_ms", System.currentTimeMillis() - started).toString(2))
         } catch (error: Throwable) {
             device.takeScreenshot(File(directory, "route-display-failure.png"))
