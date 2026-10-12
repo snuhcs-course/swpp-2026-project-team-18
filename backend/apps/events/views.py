@@ -254,6 +254,7 @@ class EventCalendarImportView(_UserScopedMixin, APIView):
         touched = created + updated + unchanged
         for event in touched:
             event.refresh_from_db()
+            event.user = request.user  # 같은 사용자의 프로필 캐시를 응답 전체가 공유한다.
 
         return Response(
             {
