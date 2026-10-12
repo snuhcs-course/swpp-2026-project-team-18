@@ -355,7 +355,11 @@ data class RouteCandidateDto(
      * 후보가 모두 이 경로로 들어온다.
      */
     val segments: List<RouteSegmentDto>? = null,
-)
+    /** 도보·자전거 미리보기. 구버전 응답의 누락/null 도 같은 파서로 받는다. */
+    val path: JsonElement? = null,
+) {
+    val routePoints: List<List<Double>> get() = path.toLatLngPairs()
+}
 
 // Partly AI-generated (Claude)
 /**

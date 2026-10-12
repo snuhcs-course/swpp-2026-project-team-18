@@ -1,5 +1,7 @@
 package com.swpp.wakeup.domain.model
 
+import com.swpp.wakeup.sensing.GeoPoint
+
 // Partly AI-generated (Claude)
 /**
  * 경로 후보 하나. Figma "⑬ 경로 선택".
@@ -35,6 +37,8 @@ data class RouteOption(
     val distanceM: Int? = null,
     /** 자전거만: 자전거도로 비율 %. 서버가 추정해 줄 때만(B-4) */
     val bikeRoadPercent: Int? = null,
+    /** 선택 화면에 그릴 경로. 좌표가 없으면 미리보기를 숨긴다. */
+    val routePath: List<GeoPoint> = emptyList(),
 ) {
     /** 자동차는 요금이 크게 다르므로 화면에서 구분해 표시한다. */
     val isCar: Boolean get() = key == "car"

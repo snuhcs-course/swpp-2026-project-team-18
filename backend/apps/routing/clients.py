@@ -1192,7 +1192,8 @@ def route_candidates(
     candidates: list[dict] = []
 
     walk = _single_route_candidate(
-        WALK_URL, "walk", "도보", start_lat, start_lng, end_lat, end_lng
+        WALK_URL, "walk", "도보", start_lat, start_lng, end_lat, end_lng,
+        with_path=True,
     )
 
     # 걸어서 갈 만한 거리면 대중교통을 조회하지 않는다. 쿼터를 아끼고,
@@ -1210,7 +1211,8 @@ def route_candidates(
         candidates.append(walk)
 
     bicycle = _single_route_candidate(
-        BICYCLE_URL, "bicycle", "자전거", start_lat, start_lng, end_lat, end_lng
+        BICYCLE_URL, "bicycle", "자전거", start_lat, start_lng, end_lat, end_lng,
+        with_path=True,
     )
     if bicycle:
         candidates.append(bicycle)
@@ -1314,9 +1316,9 @@ def resolve_route(
     선택한 경로가 더 이상 없으면 `(None, True)` 를 돌려준다. 호출자가
     [best_route] 로 되돌릴지 판단한다.
 
-    **여기서만 경로 폴리라인을 함께 받는다**(`path`, `path_distance_m`). 지도에
-    그릴 경로와 진행률의 분모는 고른 경로 하나뿐이고, 이 함수는 알람을 계산할
-    때 이미 호출되므로 카카오 호출이 늘지 않는다.
+    경로 폴리라인도 함께 받는다(`path`, `path_distance_m`). 후보 선택 화면은
+    도보·자전거 경로를 미리 보여 주고, 이 함수는 알람 지도에 쓸 선택 경로를
+    받는다. 기존 응답의 좌표를 쓰므로 카카오 호출이 늘지 않는다.
 
     대중교통을 고른 경우에는 `alternative` 가 함께 올 수 있다 — 같은 응답에서
     본 **더 빠른 후보**다([_with_alternative]). 도보·자전거·자동차는 후보 목록

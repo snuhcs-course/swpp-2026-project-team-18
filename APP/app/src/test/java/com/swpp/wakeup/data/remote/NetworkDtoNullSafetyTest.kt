@@ -2,6 +2,7 @@ package com.swpp.wakeup.data.remote
 
 import com.google.gson.Gson
 import com.swpp.wakeup.data.repository.toOption
+import com.swpp.wakeup.sensing.GeoPoint
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -40,6 +41,22 @@ import org.junit.Test
 class NetworkDtoNullSafetyTest {
 
     private val gson = Gson()
+
+    @Test
+    fun `후보 경로가 화면으로 매핑되고 구버전의 누락과 null도 견딘다`() {
+        val base = """"key":"walk","mode":"도보","minutes":10"""
+        val option = gson.fromJson(
+            """{$base,"path":[[37.5,127.0],[37.6,127.1]]}""",
+            RouteCandidateDto::class.java,
+        ).toOption()
+        assertEquals(listOf(GeoPoint(37.5, 127.0), GeoPoint(37.6, 127.1)), option.routePath)
+
+        for (extra in listOf("", """, "path":null""")) {
+            val legacy = gson.fromJson("{$base$extra}", RouteCandidateDto::class.java).toOption()
+            assertTrue(legacy.routePath.isEmpty())
+            assertEquals(10, legacy.minutes)
+        }
+    }
 
     @Test
     fun `구간 필드가 없는 응답도 읽을 수 있다`() {

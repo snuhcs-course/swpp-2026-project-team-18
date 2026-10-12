@@ -1,5 +1,6 @@
 package com.swpp.wakeup.ui.events
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -46,6 +48,8 @@ import com.swpp.wakeup.domain.model.RouteMode
 import com.swpp.wakeup.domain.model.RouteOption
 import com.swpp.wakeup.domain.model.RouteSegment
 import com.swpp.wakeup.domain.model.RouteSegments
+import com.swpp.wakeup.data.repository.EventRepository
+import com.swpp.wakeup.sensing.GeoPoint
 import com.swpp.wakeup.ui.common.JitPrimaryButton
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
@@ -82,6 +86,7 @@ fun RouteChoiceScreen(
      * ⏳ B-4 이후에는 서버가 준 시각을 쓴다(지금은 임시 계산, `RouteTimeline.kt`).
      */
     arriveBy: java.time.LocalDateTime? = null,
+    loadMap: (suspend (GeoPoint, Int, Int, Int) -> EventRepository.Result<Bitmap>)? = null,
 ) {
     Column(
         modifier = modifier
@@ -153,6 +158,14 @@ fun RouteChoiceScreen(
                         origin = choice.originLabel,
                         destination = choice.destination,
                     )
+                    if (option.key == choice.selectedKey &&
+                        (mode == RouteMode.WALK || mode == RouteMode.BICYCLE) &&
+                        option.routePath.size >= 2 && loadMap != null
+                    ) {
+                        key(option.key, option.routePath) {
+                            CandidateRouteMapCard(path = option.routePath, loadMap = loadMap)
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(4.dp))

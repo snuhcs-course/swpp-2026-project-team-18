@@ -500,6 +500,7 @@ private fun MainHost(
                     modifier = Modifier.padding(innerPadding),
                     // 일정 시작 시각 = 도착 목표. 카드의 출발~도착 시각을 만든다.
                     arriveBy = addState.date.atTime(addState.hour, addState.minute),
+                    loadMap = viewModel::loadCandidateMap,
                 )
 
                 AppRoute.MapPick -> mapPickState?.let { map ->

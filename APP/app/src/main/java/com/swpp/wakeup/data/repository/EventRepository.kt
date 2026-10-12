@@ -791,6 +791,7 @@ internal fun RouteCandidateDto.toOption(fetchedAtElapsedMs: Long = 0L): RouteOpt
             .ifEmpty { listOfNotNull(reason?.trim()?.takeIf { it.isNotEmpty() }) },
         distanceM = distanceM?.takeIf { it > 0 },
         bikeRoadPercent = bikeRoadPercent?.takeIf { it in 0..100 },
+        routePath = routePoints.toGeoPoints(),
         // segments 가 null 인 경우가 정상이다 — 구버전 서버 응답과 Gson 의
         // 기본값 무시가 겹치는 자리다. 근거는 RouteCandidateDto.segments 주석.
         segments = RouteSegments(
