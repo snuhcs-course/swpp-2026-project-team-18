@@ -2,7 +2,8 @@
 """알람 기록(db-schema.md A3). 앱이 올리는 울림·끄기·미루기와 서버가 남기는 스위치 변경.
 
 이동 관측 배치와 같은 규칙이다. 같은 `client_uuid` 는 저장하지 않고 `duplicated` 로
-세고, 남의 일정이면 배치 전체가 404 다. 기록이 실패해도 일정 수정은 성공한다.
+세고, 남의 일정이면 배치 전체가 404 다. 올리기 전에 지운 일정의 기록은 일정 없이
+저장한다(`unlinked`). 기록이 실패해도 일정 수정은 성공한다.
 """
 
 from __future__ import annotations
@@ -10,7 +11,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from django.db import DatabaseError
+from django.db import DatabaseError, connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.events.models import Event
@@ -112,6 +114,54 @@ class TestBatch:
 
         assert res.status_code == 404
         assert not AlarmLog.objects.exists()
+
+    def test_someone_elses_event_rejects_the_whole_batch(self, client, event, django_user_model):
+        """내 일정 기록이 섞여 있어도 일부만 저장하지 않는다."""
+        other = django_user_model.objects.create_user(
+            email="alarmlog3@example.com", password="Wq3-golden-canyon-62", nickname="타인"
+        )
+        theirs = Event.objects.create(user=other, title="타인 일정", start_at=START)
+        res = client.post(
+            BATCH_URL,
+            {"logs": [log(event, "f1", "fired"), log(theirs, "f2", "fired")]},
+            format="json",
+        )
+
+        assert res.status_code == 404
+        assert not AlarmLog.objects.exists()
+
+    def test_deleted_event_keeps_the_rest_of_the_batch(self, client, user, event):
+        """올리기 전에 지운 일정 하나 때문에 다른 일정의 기상 반응을 버리지 않는다(리뷰 #3).
+
+        앱은 400·404 면 보낸 배치를 통째로 버린다. 지운 일정의 기록은 일정 없이 남긴다 —
+        올린 뒤에 지웠을 때(SET_NULL)와 같은 모양이다.
+        """
+        gone = Event.objects.create(user=user, title="취소된 일정", start_at=START + timedelta(days=1))
+        gone_body = log(gone, "g1", "scheduled")
+        gone.delete()
+
+        res = client.post(
+            BATCH_URL,
+            {"logs": [log(event, "f1", "fired"), gone_body, log(event, "x1", "dismissed")]},
+            format="json",
+        )
+
+        assert res.status_code == 201
+        assert (res.data["accepted"], res.data["duplicated"], res.data["unlinked"]) == (3, 0, 1)
+        assert AlarmLog.objects.get(client_uuid="g1").event_id is None
+        assert set(
+            AlarmLog.objects.filter(event=event).values_list("client_uuid", flat=True)
+        ) == {"f1", "x1"}
+
+    def test_event_lookup_is_one_query(self, client, event):
+        """일정 확인은 기록 수와 상관없이 한 번에 한다(배치 상한 100건)."""
+        logs = [log(event, f"f{i}", "fired", at=ALARM + timedelta(minutes=i)) for i in range(20)]
+        with CaptureQueriesContext(connection) as ctx:
+            res = client.post(BATCH_URL, {"logs": logs}, format="json")
+
+        assert res.status_code == 201
+        event_reads = [q["sql"] for q in ctx.captured_queries if '"events_event"' in q["sql"]]
+        assert len(event_reads) == 1, event_reads
 
     def test_requires_login(self, event):
         res = APIClient().post(BATCH_URL, {"logs": [log(event, "f1", "fired")]}, format="json")

@@ -212,9 +212,15 @@ class AlarmLogWriteSerializer(serializers.ModelSerializer):
 
     `user`·`source` 는 받지 않는다. 뷰가 `request.user` 와 `app` 을 넣는다. 켬/끔은
     서버가 일정 수정에서 직접 남기므로 앱이 보낼 수 있는 종류에서 뺀다.
+
+    `event` 는 id 숫자로 받는다. 일정이 있는지와 누구 것인지는 배치가 한 번에 본다
+    ([resolve_alarm_log_events]).
     """
 
     kind = serializers.ChoiceField(choices=[(k.value, k.label) for k in AlarmLog.APP_KINDS])
+    # 앱은 언제나 어느 일정의 알람인지 안다. 모델 FK 필드로 받으면 지운 일정 한 건이 배치
+    # 전체를 400 으로 만들고, 앱은 400 이면 보낸 배치를 버린다(Phase C 리뷰 #3).
+    event = serializers.IntegerField(min_value=1, max_value=2**63 - 1)
 
     class Meta:
         model = AlarmLog
@@ -226,17 +232,6 @@ class AlarmLogWriteSerializer(serializers.ModelSerializer):
             "snooze_minutes",
             "client_uuid",
         )
-        extra_kwargs = {
-            # 앱은 언제나 어느 일정의 알람인지 안다. 일정이 지워지면 DB 에서만 null 이 된다.
-            "event": {"required": True, "allow_null": False},
-        }
-
-    def validate_event(self, value: Event) -> Event:
-        # 이동 관측과 같은 규칙. 403 이 아니라 404 — 그 id 의 일정이 있다는 사실을 흘리지 않는다.
-        request = self.context.get("request")
-        if request is None or value.user_id != request.user.id:
-            raise NotFound("일정을 찾을 수 없다.")
-        return value
 
     def validate_client_uuid(self, value: str) -> str:
         key = (value or "").strip()
@@ -275,4 +270,26 @@ class AlarmLogBatchSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 f"한 번에 {self.MAX_ITEMS}건까지 보낼 수 있다."
             )
-        return value
+        return resolve_alarm_log_events(value, self.context.get("request"))
+
+
+def resolve_alarm_log_events(items, request):
+    """각 기록의 일정 id 를 한 번에 찾아 `event_id` 로 바꾼다(쿼리 한 번).
+
+    - 남의 일정이면 배치 전체가 404 다. 이동 관측과 같은 규칙이고, 403 이 아니라 404 라
+      그 id 의 일정이 있다는 사실을 흘리지 않는다.
+    - 없는 일정(올리기 전에 지운 일정)의 기록은 일정 없이(`event_id` null) 저장한다. 올린
+      뒤에 지웠을 때(SET_NULL)와 같은 모양이다. 배치를 거절하면 앱이 같은 배치에 섞인 다른
+      일정의 울림·미루기·끄기까지 버린다(Phase C 리뷰 #3).
+    """
+    user_id = getattr(getattr(request, "user", None), "id", None)
+    owners = dict(
+        Event.objects.filter(pk__in={item["event"] for item in items}).values_list("id", "user_id")
+    )
+    for item in items:
+        event_id = item.pop("event")
+        owner = owners.get(event_id)
+        if owner is not None and (user_id is None or owner != user_id):
+            raise NotFound("일정을 찾을 수 없다.")
+        item["event_id"] = event_id if owner is not None else None
+    return items
