@@ -88,6 +88,15 @@ class TripObservation(models.Model):
         "체류 시간(초)", null=True, blank=True
     )
 
+    # Partly AI-generated (Claude)
+    # 목적지 반경에 처음 들어온 fix 의 시각. 도착에만 있다(db-schema.md A1).
+    #
+    # `observed_at` 은 반경 진입 + 2분 체류를 채운 판정 fix 의 시각이라 실제 진입보다
+    # 최소 2분 늦다. 그 차이를 나중에 보정할 수 있게 진입 시각을 함께 받는다.
+    # **지금은 학습·리포트가 이 값을 쓰지 않는다** — 어느 시각을 도착으로 볼지는 팀이
+    # 정한다(db-schema.md §5-4). null 인 이유는 `dwell_seconds` 와 같다(출발, 옛 관측).
+    entered_at = models.DateTimeField("반경 진입 시각", null=True, blank=True)
+
     # 앱이 만드는 멱등 키. 재전송해도 행이 늘지 않는다.
     client_uuid = models.CharField("클라이언트 UUID", max_length=40)
 
@@ -162,3 +171,102 @@ class TripObservation(models.Model):
         if planned is None:
             return None
         return round((self.observed_at - planned).total_seconds() / 60)
+
+
+# Partly AI-generated (Claude)
+class AlarmLog(models.Model):
+    """알람 사건 하나. 울림·끄기·미루기·자동 멈춤·등록과 서버의 켬/끔(db-schema.md A3).
+
+    **왜 필요한가.** 알람 → 끄기 → 출발 사이에서 "깨는 데 걸린 시간" 과 "실제 준비
+    시간" 을 나누려면 울린 시각과 끈 시각이 있어야 한다. 지금까지는 기기에만 있었다.
+
+    **학습·리포트는 아직 이 표를 읽지 않는다.** 어떻게 쓸지는 팀이 정한다. 조회 API 도
+    두지 않는다(admin 과 학습 배치용).
+
+    **정합성 규칙**
+
+    1. 일정이 지워져도 행은 남긴다(`SET_NULL`). 기상 반응은 일정과 무관하게 유효한
+       재료다 — 블록 관측과 같은 규칙이다.
+    2. `client_uuid` 는 사용자당 유일하다. 앱의 오프라인 큐가 재전송해도 행이 늘지
+       않는다. 서버가 남기는 기록(`source=server`)은 서버가 키를 만든다.
+    3. `occurred_at` 은 기기 시각이다. 업로드 시각(`created_at`)과 다르다.
+    """
+
+    class Kind(models.TextChoices):
+        # 앱이 올린다.
+        SCHEDULED = "scheduled", "등록·변경"
+        FIRED = "fired", "울림"
+        SNOOZED = "snoozed", "미루기"
+        DISMISSED = "dismissed", "끄기"
+        SILENCED = "silenced", "소리 자동 멈춤"
+        # 서버가 남긴다. 사용자가 일정의 알람 스위치를 바꿨을 때다.
+        ENABLED = "enabled", "켬"
+        DISABLED = "disabled", "끔"
+        # 스위치를 "자동(하루 첫 알람 규칙)" 으로 되돌렸다. 켬·끔과 다른 세 번째 상태다.
+        AUTO = "auto", "자동(하루 첫 알람)"
+
+    class Source(models.TextChoices):
+        APP = "app", "앱"
+        SERVER = "server", "서버"
+
+    # 앱이 올릴 수 있는 종류. 켬/끔은 서버가 일정 수정에서 직접 남긴다.
+    APP_KINDS = (
+        Kind.SCHEDULED,
+        Kind.FIRED,
+        Kind.SNOOZED,
+        Kind.DISMISSED,
+        Kind.SILENCED,
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="alarm_logs",
+        verbose_name="사용자",
+    )
+    event = models.ForeignKey(
+        "events.Event",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="alarm_logs",
+        verbose_name="일정",
+    )
+
+    kind = models.CharField("종류", max_length=12, choices=Kind.choices)
+    occurred_at = models.DateTimeField("일어난 시각")
+    # 그때 기기에 등록돼 있던 알람 시각. 계획 이력(PlanRevision)과 맞춰 볼 수 있다.
+    alarm_at = models.DateTimeField("등록된 알람 시각", null=True, blank=True)
+    # 미루기에만 있다.
+    snooze_minutes = models.PositiveSmallIntegerField("미룬 분", null=True, blank=True)
+    source = models.CharField(
+        "기록한 곳",
+        max_length=8,
+        choices=Source.choices,
+        default=Source.APP,
+        db_default="app",
+    )
+
+    # 멱등 키. 앱이 만들고 재전송해도 같은 값을 쓴다.
+    client_uuid = models.CharField("클라이언트 UUID", max_length=40)
+
+    created_at = models.DateTimeField("수신 시각", auto_now_add=True)
+
+    class Meta:
+        db_table = "observations_alarm_log"
+        verbose_name = "알람 기록"
+        verbose_name_plural = "알람 기록"
+        ordering = ["-occurred_at", "-id"]
+        indexes = [
+            models.Index(fields=["user", "occurred_at"], name="alarm_log_user_time_idx"),
+            # "이 일정의 첫 울림" 을 묻는다(계획 이력의 결정 시점).
+            models.Index(fields=["event", "kind"], name="alarm_log_event_kind_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "client_uuid"], name="alarm_log_user_client_uuid_unique"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.event_id} {self.get_kind_display()} {self.occurred_at:%m-%d %H:%M}"

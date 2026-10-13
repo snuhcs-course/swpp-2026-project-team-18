@@ -17,8 +17,9 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from .models import TripObservation
+from .models import AlarmLog, TripObservation
 from .serializers import (
+    AlarmLogBatchSerializer,
     TripObservationBatchSerializer,
     TripObservationSerializer,
 )
@@ -124,3 +125,43 @@ class ObservationListView(_UserScopedMixin, ListAPIView):
                 qs = qs.filter(observed_at__lte=dt)
 
         return qs
+
+
+# Partly AI-generated (Claude)
+class AlarmLogBatchView(APIView):
+    """POST /api/alarm-logs/batch — 알람 사건 여러 건 업로드(db-schema.md A3).
+
+    이동 관측 배치와 같은 규칙이다. 같은 `client_uuid` 는 저장하지 않고 `duplicated`
+    로 센다 — 앱은 `accepted + duplicated` 만큼을 큐에서 지운다. 남의 일정이면
+    배치 전체가 404 다(`AlarmLogWriteSerializer.validate_event`).
+
+    조회 API 는 두지 않는다. 이 기록은 학습 배치와 admin 이 읽는다.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "observation"
+
+    def post(self, request):
+        batch = AlarmLogBatchSerializer(data=request.data, context={"request": request})
+        batch.is_valid(raise_exception=True)
+        items = batch.validated_data["logs"]
+
+        created: list[int] = []
+        duplicated = 0
+        with transaction.atomic():
+            for item in items:
+                defaults = {k: v for k, v in item.items() if k not in _IDENTITY_FIELDS}
+                log, was_created = AlarmLog.objects.get_or_create(
+                    user=request.user,
+                    client_uuid=item["client_uuid"],
+                    defaults={**defaults, "source": AlarmLog.Source.APP},
+                )
+                if was_created:
+                    created.append(log.pk)
+                else:
+                    duplicated += 1
+
+        return Response(
+            {"accepted": len(created), "duplicated": duplicated, "results": created},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )

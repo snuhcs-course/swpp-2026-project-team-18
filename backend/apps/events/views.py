@@ -24,7 +24,9 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from apps.observations import alarm_logs
 from apps.planning import services as planning_services
+from apps.planning.models import PlanRevision
 from apps.routing import clients
 
 from .geo import validate_route_distance
@@ -79,7 +81,7 @@ class EventListCreateView(_UserScopedMixin, ListCreateAPIView):
 
         # 생성 시점에 한 번만 계산한다. 목록 조회마다 부르면 카카오 무료
         # 쿼터(일 1,000건)가 금방 마른다.
-        planning_services.compute_and_store(event)
+        planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
         event.refresh_from_db()
 
         return Response(
@@ -98,14 +100,22 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
+        # Partly AI-generated (Claude) — 저장 전 값. 스위치가 바뀌었는지 기록할 때 쓴다.
+        alarm_before = instance.alarm_enabled
         write = self.get_serializer(instance, data=request.data, partial=True)
         write.is_valid(raise_exception=True)
         event = write.save()
 
         # 켬/끔만 바꾸면 기존 계획을 쓴다. 카카오 경로를 다시 조회하지 않는다.
         if set(write.validated_data) != {"alarm_enabled"}:
-            planning_services.compute_and_store(event)
+            planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.UPDATE)
         event.refresh_from_db()
+
+        # Partly AI-generated (Claude)
+        # 알람 스위치를 바꿨으면 알람 기록에 남긴다(db-schema.md A3, source=server).
+        # 실패해도 수정은 그대로 성공한다(`record_switch` 가 오류를 삼킨다).
+        if "alarm_enabled" in write.validated_data:
+            alarm_logs.record_switch(event, alarm_before, event.alarm_enabled)
 
         return Response(EventSerializer(event, context=self.get_serializer_context()).data)
 
@@ -129,7 +139,7 @@ class EventRecomputeView(_UserScopedMixin, APIView):
         event = self.get_queryset().filter(pk=pk).first()
         if event is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        planning_services.compute_and_store(event)
+        planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.RECOMPUTE)
         event.refresh_from_db()
         return Response(EventSerializer(event, context={"request": request}).data)
 
@@ -249,7 +259,9 @@ class EventCalendarImportView(_UserScopedMixin, APIView):
             # 계획 계산은 트랜잭션 안에서 한다. 일정은 들어갔는데 계획이 없는
             # 중간 상태를 남기지 않는다.
             for event in created + updated:
-                planning_services.compute_and_store(event)
+                planning_services.compute_and_store(
+                    event, trigger=PlanRevision.Trigger.IMPORT
+                )
 
         touched = created + updated + unchanged
         for event in touched:
