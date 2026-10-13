@@ -45,7 +45,7 @@ from django.db.models import Avg, Count, StdDev
 from apps.events.models import Event
 from apps.routing import clients
 
-from . import estimators
+from . import estimators, history
 from .models import AlarmPlan
 
 logger = logging.getLogger(__name__)
@@ -92,12 +92,15 @@ def _block_observation_stats(user_id: int) -> dict[int, tuple[float, float, int]
 
 
 @transaction.atomic
-def compute_and_store(event: Event) -> AlarmPlan:
+def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
     """일정 하나의 알람 계획을 계산해 저장한다.
 
     이미 계획이 있으면 갱신한다. 일정 1건 = 계획 1건이다.
     카카오 경로 API 를 부르므로 목록 조회마다 호출하지 않는다. 일정 생성·수정
     시점과 명시적 재계산 요청에서만 부른다.
+
+    `trigger` 는 부른 곳(`PlanRevision.Trigger`)이다. 계획 이력에 "왜 다시 계산했나" 로
+    남는다. 비워도 된다(관리 명령·테스트). (Partly AI-generated (Claude))
     """
     profile = event.user.profile
 
@@ -135,7 +138,7 @@ def compute_and_store(event: Event) -> AlarmPlan:
     # 1) 장소가 없으면 이동 시간을 구할 수 없다.
     if event.place_id is None:
         defaults["status"] = AlarmPlan.Status.NO_PLACE
-        return _upsert(event, defaults)
+        return _upsert(event, defaults, trigger=trigger)
 
     # 2) 출발지를 모르면 이동 시간을 구할 수 없다.
     #
@@ -145,7 +148,7 @@ def compute_and_store(event: Event) -> AlarmPlan:
     origin = event.resolve_origin(profile)
     if origin is None:
         defaults["status"] = AlarmPlan.Status.NO_HOME
-        return _upsert(event, defaults)
+        return _upsert(event, defaults, trigger=trigger)
     origin_lat, origin_lng, _origin_label = origin
 
     # 3) 경로 조회.
@@ -174,7 +177,7 @@ def compute_and_store(event: Event) -> AlarmPlan:
         )
     if degraded or not route:
         defaults["status"] = AlarmPlan.Status.ROUTE_FAILED
-        return _upsert(event, defaults)
+        return _upsert(event, defaults, trigger=trigger)
 
     # 4) 분포 추정.
     #
@@ -262,7 +265,23 @@ def compute_and_store(event: Event) -> AlarmPlan:
             **_alternative_fields(route),
         }
     )
-    return _upsert(event, defaults)
+    return _upsert(
+        event,
+        defaults,
+        trigger=trigger,
+        # 카카오가 준 분 그대로(G2). 계획의 `travel_minutes` 는 보정·τ 분위수가 들어간 값이다.
+        route_minutes_raw=_raw_minutes(route),
+    )
+
+
+# Partly AI-generated (Claude)
+def _raw_minutes(route: dict) -> int | None:
+    """경로 응답의 분을 이력용 정수로. 읽을 수 없으면 None(이력만 비고 계산은 그대로다)."""
+    try:
+        minutes = int(round(float(route.get("minutes"))))
+    except (TypeError, ValueError):
+        return None
+    return minutes if minutes >= 0 else None
 
 
 def _alternative_fields(route: dict) -> dict:
@@ -289,12 +308,24 @@ def _alternative_fields(route: dict) -> dict:
     }
 
 
-def _upsert(event: Event, defaults: dict) -> AlarmPlan:
+def _upsert(
+    event: Event,
+    defaults: dict,
+    *,
+    trigger: str = "",
+    route_minutes_raw: int | None = None,
+) -> AlarmPlan:
     plan, _created = AlarmPlan.objects.update_or_create(event=event, defaults=defaults)
+    # Partly AI-generated (Claude)
+    # 같은 트랜잭션에서 이력을 남긴다(db-schema.md A2). 계획은 덮어쓰지만 이력은 쌓인다 —
+    # 결정 시점의 계획을 나중에 고를 수 있게 한다. 이력 쓰기가 실패해도 계획은 남는다.
+    history.record_revision(
+        event, plan, trigger=trigger, route_minutes_raw=route_minutes_raw
+    )
     return plan
 
 
-def recompute_for_user(user, only_future: bool = True) -> int:
+def recompute_for_user(user, only_future: bool = True, *, trigger: str = "") -> int:
     """사용자의 모든 일정 계획을 다시 계산한다.
 
     집 위치를 새로 설정했을 때 쓴다. 그때까지 `NO_HOME` 이던 계획들이 한꺼번에
@@ -311,6 +342,6 @@ def recompute_for_user(user, only_future: bool = True) -> int:
 
     count = 0
     for event in qs[:50]:
-        compute_and_store(event)
+        compute_and_store(event, trigger=trigger)
         count += 1
     return count
