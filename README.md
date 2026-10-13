@@ -19,7 +19,7 @@ your own mornings.
 
 | | |
 | --- | --- |
-| Version | **0.10.0** — server `APP_VERSION` and app `versionName` |
+| Version | **0.11.0** — server `APP_VERSION` and app `versionName` |
 | Shared server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
 | Stack | Android · Kotlin · Jetpack Compose — Django · DRF · Neon Postgres — Render |
 
@@ -55,7 +55,8 @@ What the MVP supports:
    progress bar shows a live ETA and colors the lateness outlook
 7. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
    offline. Prep observations feed the next calculation directly
-8. **Review** — weekly report and calibration: did you arrive as often as τ promised?
+8. **Review** — a weekly report with a short written summary, a per-day detail (plan
+   vs actual, cause of lateness) and calibration: did you arrive as often as τ promised?
 
 Also: Seoul subway and bus real-time arrivals on the route (express, last train,
 congestion), device calendar import, an offline cache and background sync (plans every
@@ -80,7 +81,8 @@ make the screen look finished while being untrue.
 - Risk choice ⑤ — an explanation screen only, no per-time probability options yet
 - Replanning while moving ⑦ — colors, ETA and the live route; no checkpoints or causes
 - Route choice — per-mode tabs work; extended route details and candidate variants remain
-- Weekly and detailed reports ⑧⑨ — part of the board is implemented
+- Weekly and detailed reports ⑧⑨ — built; the Figma panels for sleep, alarm snoozes and
+  per-weekday auto-adjustment are left out because nothing records that data yet
 - Sign-in — email and password only; the social buttons show a notice
 - Route learning — corrections update only when someone runs
   `python manage.py train_models`; there is no scheduler on Render's free plan
@@ -331,7 +333,7 @@ health, password check, sign-up, token and refresh.
 | Service | Render `justintime-api` — Docker, free plan, Singapore, deploys `main` |
 | Start | `backend/Dockerfile` runs `migrate`, then gunicorn with 2 workers |
 | Database | Neon Postgres, **direct** URL (the `-pooler` endpoint can break migrations) |
-| Health | `GET /api/health` → `{"ok": true, "version": "0.10.0", "realtime": {"subway": true, "bus": true}}`, independent of the database |
+| Health | `GET /api/health` → `{"ok": true, "version": "0.11.0", "realtime": {"subway": true, "bus": true}}`, independent of the database |
 | Idle | sleeps after 15 minutes; waking takes 30–60 seconds |
 
 Bump the server `APP_VERSION` and the app `versionName` / `versionCode` together in the
@@ -356,11 +358,11 @@ committed.** The deployed values live in the Render dashboard, and CI needs none
 | `SEOUL_SUBWAY_API_KEY` | Subway real-time arrivals ([data.seoul.go.kr](https://data.seoul.go.kr)) |
 | `SEOUL_BUS_API_KEY_ENCODING` / `_DECODING` | Bus real-time arrivals ([data.go.kr](https://www.data.go.kr)). Set both forms of the key |
 | `STATIC_MAP_DAILY_UPSTREAM_LIMIT` | Daily budget for Kakao static-map requests, default 900 |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL` | Weekly report summary (optional; without them a fixed template is used). Any OpenAI-compatible chat-completions endpoint; an empty base URL means OpenAI. Check with `python manage.py probe_report_summary` |
 
 Without the real-time keys the arrival lines simply do not appear; routing still works.
-`KMA_API_KEY`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `FCM_CREDENTIALS_PATH`,
-`KAKAO_MOBILITY_KEY` and `REDIS_URL` are reserved for planned features; nothing uses
-them yet.
+`KMA_API_KEY`, `FCM_CREDENTIALS_PATH`, `KAKAO_MOBILITY_KEY` and `REDIS_URL` are reserved
+for planned features; nothing uses them yet.
 
 Kakao Map needs no review — switch it on under `My Application > Product Settings >
 Kakao Map`. **The free quota applies to one app per developer account, so the team
