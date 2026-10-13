@@ -20,19 +20,55 @@ DRF 가 인증한 사용자는 뷰가 끝난 뒤 `request.user` 에 보인다(DR
 
 하루 한 번(프로세스마다) 오래된 기록을 지운다(`retention.maybe_purge`). Render 무료
 플랜에는 cron 이 없고, 잠들었다 깨면 프로세스가 새로 뜨므로 요청이 있는 날은 돈다.
+
+## 아무나 표를 채우지 못하게 (Phase C 리뷰 #2)
+
+- URL 패턴에 없는 경로(Django 가 404 로 답한 요청)는 남기지 않는다. 뷰에 닿지 않은
+  요청이라 남길 내용도 없다.
+- 로그인하지 않은 요청은 프로세스마다 하루 `API_REQUEST_LOG_ANON_DAILY_CAP` 건(기본 2000)
+  까지만 남긴다. 이 앱에는 전역 요청 빈도 제한이 없어서, 상한이 없으면 로그인 없이 보낸
+  요청으로 공용 DB 저장 공간을 채울 수 있다. 가입·로그인·토큰 갱신 같은 정상 익명 요청은
+  이 안에 든다. 로그인한 요청은 상한 없이 남긴다.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 from django.conf import settings
 from django.db import connection, transaction
+from django.utils import timezone
 
 from . import request_log, retention
 
 logger = logging.getLogger(__name__)
+
+# 로그인하지 않은 요청을 오늘 몇 건 남겼나(프로세스마다, 서버 시간대의 날짜 기준).
+_anonymous_day = None
+_anonymous_count = 0
+_anonymous_lock = threading.Lock()
+
+
+def anonymous_allowed(*, today=None) -> bool:
+    """로그인하지 않은 요청을 하나 더 남겨도 되는가. 되면 센다.
+
+    상한에 처음 닿은 날 한 번만 경고를 남긴다. 0 이하면 익명 요청은 남기지 않는다.
+    """
+    global _anonymous_day, _anonymous_count
+    cap = int(getattr(settings, "API_REQUEST_LOG_ANON_DAILY_CAP", 2000))
+    today = today or timezone.localdate()
+    with _anonymous_lock:
+        if _anonymous_day != today:
+            _anonymous_day, _anonymous_count = today, 0
+        if _anonymous_count < cap:
+            _anonymous_count += 1
+            return True
+        if _anonymous_count == cap and cap > 0:
+            _anonymous_count += 1  # 경고는 하루 한 번
+            logger.warning("로그인하지 않은 API 요청 기록이 오늘 상한 %s건에 닿았다", cap)
+        return False
 
 
 class ApiRequestLogMiddleware:
@@ -67,8 +103,15 @@ def _record(request, response, body, started: float) -> None:
     from .models import ApiRequestLog
 
     match = getattr(request, "resolver_match", None)
-    route = (match.route if match is not None else request.path.lstrip("/"))[:200]
+    if match is None:
+        # URL 패턴에 없는 경로. 아무 경로나 보내 표를 채우지 못하게 남기지 않는다.
+        return
+    route = (match.route or request.path.lstrip("/"))[:200]
     if route in request_log.SKIPPED_ROUTES:
+        return
+
+    user_id = _user_id(request)
+    if user_id is None and not anonymous_allowed():
         return
 
     method = (request.method or "")[:8]
@@ -100,7 +143,7 @@ def _record(request, response, body, started: float) -> None:
         )
 
     row = ApiRequestLog(
-        user_id=_user_id(request),
+        user_id=user_id,
         method=method,
         route=route,
         object_id=_object_id(match),

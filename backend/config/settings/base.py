@@ -328,6 +328,10 @@ LLM_GLOBAL_DAILY_LIMIT = _env_int("LLM_GLOBAL_DAILY_LIMIT", 100)
 API_REQUEST_LOG_ENABLED = (os.getenv("API_REQUEST_LOG_ENABLED") or "1").strip() != "0"
 API_REQUEST_LOG_RETENTION_DAYS = _env_int("API_REQUEST_LOG_RETENTION_DAYS", 30)
 LLM_CALL_RETENTION_DAYS = _env_int("LLM_CALL_RETENTION_DAYS", 90)
+# 로그인하지 않은 요청을 프로세스마다 하루 몇 건까지 남기나(Phase C 리뷰 #2). 전역 요청
+# 빈도 제한이 없어서, 상한이 없으면 로그인 없이 보낸 요청으로 공용 DB 를 채울 수 있다.
+# 0 이하면 익명 요청은 남기지 않는다. 로그인한 요청에는 상한이 없다. (Partly AI-generated (Claude))
+API_REQUEST_LOG_ANON_DAILY_CAP = _env_int("API_REQUEST_LOG_ANON_DAILY_CAP", 2000)
 
 FCM_CREDENTIALS_PATH = os.getenv("FCM_CREDENTIALS_PATH", "")
 REDIS_URL = os.getenv("REDIS_URL", "")

@@ -23,7 +23,7 @@ from django.db import DatabaseError
 from django.utils import timezone as dj_timezone
 from rest_framework.test import APIClient
 
-from apps.common import request_log, retention
+from apps.common import middleware, request_log, retention
 from apps.common.models import ApiRequestLog
 from apps.events.models import Event, Place
 from apps.planning import services
@@ -149,6 +149,9 @@ def logging_on(settings, monkeypatch):
     settings.API_REQUEST_LOG_ENABLED = True
     # 하루 한 번 지우기가 이 테스트들 사이에서 돌지 않게 오늘은 이미 지운 것으로 둔다.
     monkeypatch.setattr(retention, "_last_purged_on", dj_timezone.localdate())
+    # 익명 요청 상한은 프로세스 전역이다. 테스트마다 0 에서 센다.
+    monkeypatch.setattr(middleware, "_anonymous_day", None)
+    monkeypatch.setattr(middleware, "_anonymous_count", 0)
 
 
 @pytest.fixture
@@ -249,6 +252,34 @@ class TestMiddleware:
     @pytest.mark.parametrize("path", ["/api/health", "/admin/login/"])
     def test_excluded_paths(self, client, path):
         client.get(path)
+        assert not ApiRequestLog.objects.exists()
+
+    def test_unmatched_paths_are_not_logged(self, client):
+        """URL 패턴에 없는 경로는 남기지 않는다. 아무 경로나 보내 표를 채우지 못한다(리뷰 #2)."""
+        assert client.get("/api/no-such-route").status_code == 404
+        assert APIClient().post("/api/x" * 50, {"a": 1}, format="json").status_code == 404
+        assert not ApiRequestLog.objects.exists()
+
+    def test_anonymous_rows_have_a_daily_cap(self, client, user, settings):
+        """로그인 없이 보낸 요청은 하루 상한까지만 남긴다. 로그인한 요청은 계속 남긴다."""
+        settings.API_REQUEST_LOG_ANON_DAILY_CAP = 2
+        for _ in range(4):
+            assert APIClient().get("/api/events").status_code == 401
+        assert ApiRequestLog.objects.filter(user__isnull=True).count() == 2
+
+        client.get("/api/events")
+        assert ApiRequestLog.objects.filter(user=user).count() == 1
+
+    def test_anonymous_cap_starts_over_each_day(self, settings):
+        settings.API_REQUEST_LOG_ANON_DAILY_CAP = 1
+        today = dj_timezone.localdate()
+        assert middleware.anonymous_allowed(today=today) is True
+        assert middleware.anonymous_allowed(today=today) is False
+        assert middleware.anonymous_allowed(today=today + timedelta(days=1)) is True
+
+    def test_zero_cap_keeps_no_anonymous_rows(self, settings):
+        settings.API_REQUEST_LOG_ANON_DAILY_CAP = 0
+        assert APIClient().get("/api/events").status_code == 401
         assert not ApiRequestLog.objects.exists()
 
     def test_live_location_is_not_kept(self, client, user, stub_route):
