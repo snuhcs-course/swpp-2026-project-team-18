@@ -250,7 +250,8 @@ private fun learningNote(dto: RoutineBlockDto): String {
 
     if (count == 0 || mean == null) {
         return if (dto.minMinutes == dto.maxMinutes) {
-            "관측 없음 · 범위가 한 점이라 확률 계산에 쓰이지 않음"
+            // 블록 값은 알람 계산에 쓰인다. 변동 폭이 없을 뿐이다.
+            "관측 없음 · 범위가 한 점이라 변동 폭이 없음"
         } else {
             "관측 없음 · 신고 범위를 사전값으로 씀"
         }

@@ -275,9 +275,11 @@ private fun AlarmRingingScreen(
                             fontSize = 12,
                         )
                         Text(
+                            // 기록은 학습 배치가 돌아야 보정에 반영된다(R-3). "다음 알람이
+                            // 더 정확해진다" 고 약속하지 않는다.
                             text = "집에서 나가는 시각과 목적지에 닿는 시각을 " +
-                                "위치로 판별해 기록함. 이 기록이 다음 알람을 " +
-                                "더 정확하게 만든다.",
+                                "위치로 판별해 기록함. 이 기록이 쌓이면 이동 " +
+                                "시간 보정에 쓰임",
                             color = JitColor.TextSecondary,
                             fontSize = 12.sp,
                         )

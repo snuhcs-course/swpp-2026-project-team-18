@@ -89,9 +89,9 @@ class ConfidenceViewTest {
     )
 
     @Test
-    fun `확률이 없으면 학습 중이다`() {
-        assertTrue(confidence(null).isLearning)
-        assertFalse(confidence(92).isLearning)
+    fun `확률이 없으면 아직 계산할 수 없는 상태다`() {
+        assertTrue(confidence(null).isUnavailable)
+        assertFalse(confidence(92).isUnavailable)
     }
 
     @Test
