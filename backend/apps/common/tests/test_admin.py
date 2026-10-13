@@ -26,8 +26,11 @@ import pytest
 from django.contrib import admin
 from django.urls import reverse
 
+from apps.common.models import ApiRequestLog
 from apps.events.models import Event, Place
-from apps.observations.models import TripObservation
+from apps.observations.models import AlarmLog, TripObservation
+from apps.planning.models import PlanRevision
+from apps.reports.models import LlmCall
 
 KST = timezone(timedelta(hours=9))
 pytestmark = pytest.mark.django_db
@@ -70,6 +73,25 @@ def seeded(django_user_model):
         observed_at=datetime(2026, 10, 5, 8, 55, tzinfo=KST),
         lat=37.4601, lng=126.9520, accuracy_m=12.0, distance_m=20.0,
         dwell_seconds=150, client_uuid="admin-smoke-1",
+        entered_at=datetime(2026, 10, 5, 8, 52, 30, tzinfo=KST),
+    )
+    # Partly AI-generated (Claude) — 기록 표(db-schema.md A2~A5)도 한 줄씩. 일정 화면의
+    # 읽기 전용 inline 과 각 표의 커스텀 열이 실제 값을 만나게 한다.
+    PlanRevision.objects.create(
+        user=user, event=event, computed_at=datetime(2026, 10, 4, 21, 0, tzinfo=KST),
+        status="ok", event_start_at=event.start_at, prep_minutes=30, travel_minutes=25,
+        buffer_minutes=10, trigger="create",
+    )
+    AlarmLog.objects.create(
+        user=user, event=event, kind="snoozed", snooze_minutes=5,
+        occurred_at=datetime(2026, 10, 5, 7, 0, tzinfo=KST), client_uuid="admin-smoke-alarm",
+    )
+    LlmCall.objects.create(
+        user=user, day=datetime(2026, 10, 5).date(), week_start=datetime(2026, 9, 28).date(),
+        outcome="ok", model="gpt-test-mini", duration_ms=900,
+    )
+    ApiRequestLog.objects.create(
+        user=user, method="POST", route="api/events", status_code=201, duration_ms=40,
     )
     return user
 
@@ -142,8 +164,12 @@ class TestEveryAdminOpens:
         나오면 설정 실수다.
         """
         # 주간 요약은 LLM 이 쓴 문장만 저장한다(apps/reports/admin.py).
+        # 기록 표(계획 이력·알람 기록·LLM 호출·API 요청 기록)는 읽기 전용이다(db-schema.md §6).
         # (Partly AI-generated (Claude))
-        closed = {"alarmplan", "tripobservation", "weeklysummary"}
+        closed = {
+            "alarmplan", "tripobservation", "weeklysummary",
+            "planrevision", "alarmlog", "llmcall", "apirequestlog",
+        }
         broken = []
         for model in registered_models():
             name = model._meta.model_name
