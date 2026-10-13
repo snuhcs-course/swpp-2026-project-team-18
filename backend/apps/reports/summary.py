@@ -25,11 +25,15 @@
 실패 종류별로 잠시 부르지 않는다(백오프). 검사에 떨어진 수치는 바뀔 때까지 다시
 보내지 않는다.
 
-## 사용자마다 하루 상한이 있다
+## 사용자마다, 그리고 서버 전체에 하루 상한이 있다
 
 저장은 (사용자, 주) 한 줄이라 수치가 A→B→A 로 오가면 매번 다시 부른다. 그래서
-부르기 직전에 사용자별 하루 호출 수를 세고([LLM_USER_DAILY_LIMIT]) 넘으면 템플릿을
-쓴다. 리포트 GET 은 막지 않는다 — 주 넘기기는 그대로 된다.
+부르기 직전에 오늘의 호출 수를 세고 넘으면 템플릿을 쓴다. 사용자별
+([LLM_USER_DAILY_LIMIT])과 전체(`settings.LLM_GLOBAL_DAILY_LIMIT`) 둘 다 본다. 리포트
+GET 은 막지 않는다 — 주 넘기기는 그대로 된다.
+
+호출 수는 DB 의 `LlmCall` 행으로 센다(db-schema.md A5). `/tmp` 캐시로 세면 서버가
+잠들거나 재배포할 때 0 부터 다시 센다. (Partly AI-generated (Claude))
 """
 
 from __future__ import annotations
@@ -38,16 +42,17 @@ import hashlib
 import json
 import logging
 import re
+import time
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
-from django.core.cache import cache, caches
+from django.core.cache import cache
 from django.db import DatabaseError, IntegrityError, transaction
 from django.utils import timezone
 
 from . import llm
-from .models import WeeklySummary
+from .models import LlmCall, WeeklySummary
 from .services import (
     RESULT_LATE,
     RESULT_UNOBSERVED,
@@ -83,12 +88,8 @@ BACKOFF_INVALID_SECONDS = LLM_MAX_WEEKS_BACK * 7 * 24 * 60 * 60
 
 # 사용자별 하루 LLM 호출 상한. LLM 용 `nlp` 스로틀(30/hour)과 같은 수를 하루 상한으로
 # 쓴다. 정상 사용(최근 12주를 한 번씩 열고 수치가 몇 번 바뀜)은 넉넉히 덮는다.
+# 서버 전체 상한은 `settings.LLM_GLOBAL_DAILY_LIMIT`(환경변수)다. 둘 다 `LlmCall` 로 센다.
 LLM_USER_DAILY_LIMIT = 30
-# 카운터는 이미지 캐시와 분리한 `llm_budget` 캐시에 둔다(config/settings CACHES).
-LLM_BUDGET_CACHE = "llm_budget"
-LLM_BUDGET_KEY = "reports:llm:user:{user}:{day}"
-# 키에 날짜가 있어 다음 날과 섞이지 않는다. 하루보다 조금 길게 둔다.
-LLM_BUDGET_SECONDS = 25 * 60 * 60
 _BACKOFF_SECONDS = {
     llm.BAD_BASE_URL: BACKOFF_LONG_SECONDS,
     llm.HTTP_4XX: BACKOFF_LONG_SECONDS,
@@ -599,11 +600,14 @@ def _summary_for(user, report: dict) -> tuple[str, str]:
     if cache.get(DOWN_KEY) or cache.get(INVALID_KEY.format(digest=digest)):
         return template, SOURCE_TEMPLATE
     # 실제로 부를 때만 센다. 저장된 문장·백오프로 끝나는 요청은 상한을 쓰지 않는다.
-    if not _take_llm_budget(user):
+    call = _start_llm_call(user, start, digest)
+    if call is None:
         return template, SOURCE_TEMPLATE
 
+    started = time.monotonic()
     text, failure = llm.chat(SYSTEM_PROMPT, json.dumps(facts, ensure_ascii=False))
     if failure is not None:
+        _finish_llm_call(call, failure, started)
         seconds = _BACKOFF_SECONDS.get(failure)
         if seconds:
             cache.set(DOWN_KEY, failure, seconds)
@@ -612,40 +616,72 @@ def _summary_for(user, report: dict) -> tuple[str, str]:
     clean = normalize(text)
     reason = check_text(clean, facts)
     if reason is not None:
+        _finish_llm_call(call, LlmCall.Outcome.INVALID, started)
         # 같은 수치로 다시 불러도 비슷한 문장이 나온다. 그 해시는 수치가 바뀔 때까지
         # 쉰다(다른 주·다른 수치는 막지 않는다).
         cache.set(INVALID_KEY.format(digest=digest), reason, BACKOFF_INVALID_SECONDS)
         logger.warning("LLM 요약을 쓰지 않는다: %s", reason)
         return template, SOURCE_TEMPLATE
 
+    _finish_llm_call(call, LlmCall.Outcome.OK, started)
     _store(user, start, digest, facts, clean)
     return clean, SOURCE_LLM
 
 
-def _take_llm_budget(user) -> bool:
-    """이 사용자의 오늘 LLM 호출 하나를 센다. 상한([LLM_USER_DAILY_LIMIT]) 안이면 True.
+# Partly AI-generated (Claude)
+def _start_llm_call(user, start: date, digest: str) -> LlmCall | None:
+    """오늘의 호출 수를 세고, 상한 안이면 `pending` 행을 만든다. 상한이면 None.
 
     지난 일정의 알람 켬/끔만으로도 수치가 바뀐다. 저장은 (사용자, 주) 한 줄이라 두
     수치를 번갈아 만들면 해시가 매번 빗나가 다시 부른다 — 로그인한 사용자 하나가
-    학교 키 예산을 원하는 만큼 쓸 수 있다. 이 상한이 그 길을 막는다.
+    학교 키 예산을 원하는 만큼 쓸 수 있다. 사용자 상한이 그 길을, 전체 상한이 계정을
+    여러 개 만드는 길을 막는다.
 
-    `incr` 는 워커 사이에서 원자적이지 않다(파일 캐시). 경계에서 한두 번 더 부를 수
-    있지만 상한으로는 충분하다. 셀 수 없으면(캐시 고장) 부르지 않는다.
+    **DB 행으로 센다.** 서버가 잠들거나 재배포해도 그날 센 수가 남는다(db-schema.md A5).
+    두 요청이 같은 순간 세면 한두 번 넘칠 수 있다. 비용 방어용 상한이라 받아들인다.
+    셀 수 없으면(DB 오류) 부르지 않는다 — 상한이 없는 상태로 열지 않는다. 상한에 걸린
+    시도는 행을 만들지 않는다(부르지 않았으므로).
     """
-    key = LLM_BUDGET_KEY.format(user=user.pk, day=timezone.localdate().strftime("%Y%m%d"))
+    today = timezone.localdate()
+    global_limit = int(getattr(settings, "LLM_GLOBAL_DAILY_LIMIT", 0) or 0)
     try:
-        budget = caches[LLM_BUDGET_CACHE]
-        budget.add(key, 0, timeout=LLM_BUDGET_SECONDS)
-        used = budget.incr(key)
-    except Exception:
+        with transaction.atomic():
+            today_calls = LlmCall.objects.filter(day=today)
+            if today_calls.count() >= global_limit:
+                logger.warning(
+                    "서버 하루 LLM 요약 상한(%s회)에 닿았다. 오늘은 고정 문장을 쓴다",
+                    global_limit,
+                )
+                return None
+            if today_calls.filter(user=user).count() >= LLM_USER_DAILY_LIMIT:
+                logger.warning(
+                    "사용자 하루 LLM 요약 상한(%s회)에 닿았다. 오늘은 고정 문장을 쓴다",
+                    LLM_USER_DAILY_LIMIT,
+                )
+                return None
+            return LlmCall.objects.create(
+                user=user,
+                day=today,
+                week_start=start,
+                outcome=LlmCall.Outcome.PENDING,
+                model=(getattr(settings, "OPENAI_MODEL", "") or "").strip()[:100],
+                facts_hash=digest,
+            )
+    except DatabaseError:
         logger.exception("LLM 호출 수를 세지 못했다. 고정 문장을 쓴다")
-        return False
-    if used == LLM_USER_DAILY_LIMIT + 1:
-        logger.warning(
-            "사용자 하루 LLM 요약 상한(%s회)에 닿았다. 오늘은 고정 문장을 쓴다",
-            LLM_USER_DAILY_LIMIT,
-        )
-    return used <= LLM_USER_DAILY_LIMIT
+        return None
+
+
+def _finish_llm_call(call: LlmCall, outcome: str, started: float) -> None:
+    """결과와 걸린 시간을 적는다. 실패해도 요약은 그대로 나간다(행은 pending 으로 남는다)."""
+    known = {choice.value for choice in LlmCall.Outcome}
+    call.outcome = outcome if outcome in known else LlmCall.Outcome.BAD_RESPONSE
+    call.duration_ms = max(0, int((time.monotonic() - started) * 1000))
+    try:
+        with transaction.atomic():
+            call.save(update_fields=["outcome", "duration_ms"])
+    except DatabaseError:
+        logger.warning("LLM 호출 결과를 적지 못했다")
 
 
 def _stored_text(user, start: date, digest: str) -> str | None:

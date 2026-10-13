@@ -12,9 +12,9 @@ from __future__ import annotations
 import json
 
 import pytest
-from django.core.cache import cache, caches
+from django.core.cache import cache
 
-from apps.reports import llm, summary
+from apps.reports import llm
 
 
 class LlmCalled(BaseException):
@@ -35,13 +35,11 @@ def _no_llm(monkeypatch, settings):
     monkeypatch.setattr(llm, "_urlopen", _refuse)
     # test.py 가 고정하지만 한 번 더 — 요청 주소를 단언하는 테스트가 기댄다.
     settings.OPENAI_BASE_URL = llm.DEFAULT_BASE_URL
-    # 백오프 키·하루 호출 수가 테스트 사이에 남으면 다음 테스트가 LLM 을 부르지 않은
-    # 이유가 바뀐다.
+    # 백오프 키가 테스트 사이에 남으면 다음 테스트가 LLM 을 부르지 않은 이유가 바뀐다.
+    # 하루 호출 수는 DB(`LlmCall`)라 테스트 트랜잭션과 함께 사라진다. (Partly AI-generated (Claude))
     cache.clear()
-    caches[summary.LLM_BUDGET_CACHE].clear()
     yield
     cache.clear()
-    caches[summary.LLM_BUDGET_CACHE].clear()
 
 
 class FakeResponse:

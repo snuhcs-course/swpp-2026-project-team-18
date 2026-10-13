@@ -49,3 +49,69 @@ class WeeklySummary(models.Model):
 
     def __str__(self):
         return f"{self.week_start} 주간 요약"
+
+
+# Partly AI-generated (Claude)
+class LlmCall(models.Model):
+    """주간 요약 LLM 호출 한 번(db-schema.md A5).
+
+    ## 왜 캐시가 아니라 DB 인가
+
+    호출 상한을 `/tmp` 파일 캐시에서 세면 Render 무료 플랜이 잠들거나 재배포할 때
+    0 부터 다시 센다(phaseB-review.md 1·2). 이 표는 그날 행 수가 곧 호출 수라 프로세스와
+    무관하게 상한이 유지되고, 전체 하루 상한도 같은 표에서 센다.
+
+    부르기 직전에 `pending` 으로 만들고 결과로 바꾼다. 상한에 걸린 시도는 행을 만들지
+    않는다(호출하지 않았으므로). 보낸 집계값은 저장하지 않는다 — 그건 `WeeklySummary`
+    가 성공한 문장과 함께 둔다. 여기는 `facts_hash` 만 둔다.
+    """
+
+    class Outcome(models.TextChoices):
+        PENDING = "pending", "호출 중"
+        OK = "ok", "성공"
+        INVALID = "invalid", "검사 탈락"
+        TIMEOUT = "timeout", "시간 초과"
+        NETWORK = "network", "연결 실패"
+        HTTP_429 = "http_429", "요청 한도(429)"
+        HTTP_5XX = "http_5xx", "서버 오류(5xx)"
+        HTTP_4XX = "http_4xx", "설정 오류(4xx)"
+        BAD_RESPONSE = "bad_response", "응답 형식 다름"
+        BAD_BASE_URL = "bad_base_url", "주소 설정 오류"
+        NOT_CONFIGURED = "not_configured", "키 없음"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="llm_calls",
+        verbose_name="사용자",
+    )
+    # 서버 시간대(Asia/Seoul)의 날짜. 하루 상한이 이 값으로 센다.
+    day = models.DateField("날짜")
+    week_start = models.DateField("요약한 주(월)")
+    outcome = models.CharField(
+        "결과",
+        max_length=16,
+        choices=Outcome.choices,
+        default=Outcome.PENDING,
+        db_default="pending",
+    )
+    model = models.CharField("모델", max_length=100, blank=True, default="", db_default="")
+    facts_hash = models.CharField(
+        "집계 해시", max_length=64, blank=True, default="", db_default=""
+    )
+    duration_ms = models.PositiveIntegerField("걸린 시간(ms)", null=True, blank=True)
+    created_at = models.DateTimeField("호출 시각", auto_now_add=True)
+
+    class Meta:
+        db_table = "reports_llm_call"
+        verbose_name = "LLM 호출"
+        verbose_name_plural = "LLM 호출"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            # 전체 하루 상한과 사용자 하루 상한을 센다.
+            models.Index(fields=["day"], name="llm_call_day_idx"),
+            models.Index(fields=["user", "day"], name="llm_call_user_day_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.day} {self.get_outcome_display()}"

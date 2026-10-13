@@ -49,6 +49,9 @@ INSTALLED_APPS = [
     # LLM 이 쓴 주간 요약 문장(`WeeklySummary`)만 저장한다.
     # (Partly AI-generated (Claude))
     "apps.reports",
+    # 공통 오류 형식·헬스 체크 + API 요청 기록(`ApiRequestLog`, db-schema.md A4).
+    # 모델이 생기면서 앱으로 등록한다. (Partly AI-generated (Claude))
+    "apps.common",
 ]
 
 MIDDLEWARE = [
@@ -60,6 +63,11 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Partly AI-generated (Claude)
+    # `/api/` 요청마다 메타와 정리한 본문을 한 줄 남긴다(db-schema.md A4). 맨 뒤에 둔다 —
+    # 뷰 바로 바깥이라 DRF 가 인증한 사용자가 끝난 뒤 `request.user` 에 보인다.
+    # 기록이 실패해도 응답은 그대로 나간다(apps/common/middleware.py).
+    "apps.common.middleware.ApiRequestLogMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -232,8 +240,8 @@ CACHES = {
         "TIMEOUT": 25 * 60 * 60,
     },
     # Partly AI-generated (Claude)
-    # 주간 요약 LLM 의 사용자별 일일 호출 수(apps/reports/summary.py). 위 지도 예산과
-    # 같은 이유로 이미지 캐시와 분리하고 TTL 을 하루보다 길게 둔다.
+    # 주간 요약 LLM 의 사용자별 일일 호출 수였다. **지금은 쓰지 않는다** — 호출 수는 DB 의
+    # `reports_llm_call` 로 센다(db-schema.md A5). 별칭 정리는 P3(§8)에서 한다.
     "llm_budget": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "jit-llm-budget",
@@ -299,6 +307,27 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
 # **빈 문자열도 기본값으로 읽는다.** Render 는 값이 빈 변수를 둘 수 있고, 그러면
 # getenv 의 기본값이 듣지 않는다(위 DATABASE_URL 주석과 같은 함정).
 OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
+
+
+# Partly AI-generated (Claude)
+def _env_int(name: str, default: int) -> int:
+    """정수 환경변수. 비었거나 숫자가 아니면 기본값이다(Render 의 빈 변수, 위 주석)."""
+    try:
+        return int((os.getenv(name) or "").strip() or default)
+    except ValueError:
+        return default
+
+
+# 서버 전체의 하루 LLM 요약 호출 상한(db-schema.md A5). 사용자별 상한(30회,
+# apps/reports/summary.py)과 함께 `reports_llm_call` 의 오늘 행 수로 센다. 계정을 여러 개
+# 만들어도 이 이상은 부르지 않는다. 넘으면 고정 문장(템플릿)으로 나간다. 0 이면 부르지 않는다.
+LLM_GLOBAL_DAILY_LIMIT = _env_int("LLM_GLOBAL_DAILY_LIMIT", 100)
+
+# API 요청 기록(db-schema.md A4)과 기록 표의 보존 일수(§9-2). 0 이하면 그 표는 지우지
+# 않는다. 오래된 행은 미들웨어가 프로세스마다 하루 한 번, 또는 `manage.py purge_logs` 가 지운다.
+API_REQUEST_LOG_ENABLED = (os.getenv("API_REQUEST_LOG_ENABLED") or "1").strip() != "0"
+API_REQUEST_LOG_RETENTION_DAYS = _env_int("API_REQUEST_LOG_RETENTION_DAYS", 30)
+LLM_CALL_RETENTION_DAYS = _env_int("LLM_CALL_RETENTION_DAYS", 90)
 
 FCM_CREDENTIALS_PATH = os.getenv("FCM_CREDENTIALS_PATH", "")
 REDIS_URL = os.getenv("REDIS_URL", "")

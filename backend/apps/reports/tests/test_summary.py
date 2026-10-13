@@ -23,6 +23,7 @@ from datetime import timedelta
 import pytest
 from django.core.cache import cache
 from django.core.management import call_command
+from django.db import DatabaseError
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -31,7 +32,7 @@ from apps.observations.models import TripObservation
 from apps.planning.models import AlarmPlan
 from apps.reports import llm, summary
 from apps.reports.management.commands.probe_report_summary import SAMPLE_FACTS
-from apps.reports.models import WeeklySummary
+from apps.reports.models import LlmCall, WeeklySummary
 from apps.reports.services import half_up, week_bounds
 
 SECRET_TITLE = "비밀 회의"
@@ -699,18 +700,93 @@ class TestSummaryFor:
         assert fake_llm.calls == 3
 
     # Partly AI-generated (Claude)
-    def test_budget_cache_failure_uses_the_template(self, user, fake_llm, monkeypatch):
-        """호출 수를 셀 수 없으면 부르지 않는다(상한이 없는 상태로 열지 않는다)."""
+    def test_count_failure_uses_the_template(self, user, fake_llm, monkeypatch):
+        """호출 수를 셀 수 없으면(DB 오류) 부르지 않는다(상한이 없는 상태로 열지 않는다)."""
 
-        class BrokenCaches:
-            def __getitem__(self, alias):
-                raise OSError("cache unavailable")
+        def broken(*args, **kwargs):
+            raise DatabaseError("db unavailable")
 
-        monkeypatch.setattr(summary, "caches", BrokenCaches())
+        monkeypatch.setattr(LlmCall.objects, "filter", broken)
         assert summary.summary_for(user, example_report()) == (
             EXAMPLE_TEXT, summary.SOURCE_TEMPLATE,
         )
         assert fake_llm.calls == 0
+
+    # Partly AI-generated (Claude) — 호출 기록(db-schema.md A5)
+    def test_each_call_is_recorded_with_its_outcome(self, user, fake_llm):
+        fake_llm.reply = with_suffix
+        report = example_report()
+        assert summary.summary_for(user, report)[1] == summary.SOURCE_LLM
+
+        call = LlmCall.objects.get()
+        assert call.user_id == user.pk
+        assert call.outcome == LlmCall.Outcome.OK
+        assert call.model == "gpt-test-mini"
+        assert call.day == timezone.localdate()
+        assert call.week_start.isoformat() == report["week_start"]
+        assert call.facts_hash == summary.facts_digest(summary.build_facts(report))
+        assert call.duration_ms is not None
+
+    # Partly AI-generated (Claude)
+    @pytest.mark.parametrize(
+        "setup, outcome",
+        [
+            (lambda f: setattr(f, "error", TimeoutError("timed out")), LlmCall.Outcome.TIMEOUT),
+            (lambda f: setattr(f, "reply", EXAMPLE_TEXT.replace("83%", "84%")), LlmCall.Outcome.INVALID),
+        ],
+    )
+    def test_failed_calls_are_recorded(self, user, fake_llm, setup, outcome):
+        """실패한 호출도 상한에 든다. 학교 키 예산은 실패한 호출로도 줄어든다."""
+        setup(fake_llm)
+        assert summary.summary_for(user, example_report())[1] == summary.SOURCE_TEMPLATE
+        assert list(LlmCall.objects.values_list("outcome", flat=True)) == [outcome]
+
+    # Partly AI-generated (Claude)
+    def test_global_daily_cap_across_users(self, fake_llm, settings, django_user_model):
+        """계정을 여러 개 만들어도 서버 전체 하루 상한을 넘겨 부르지 않는다."""
+        settings.LLM_GLOBAL_DAILY_LIMIT = 2
+        fake_llm.reply = with_suffix
+        users = [
+            django_user_model.objects.create_user(
+                email=f"cap{i}@example.com", password="Qm4-silver-meadow-21", nickname=f"상한{i}"
+            )
+            for i in range(3)
+        ]
+        sources = [summary.summary_for(u, example_report())[1] for u in users]
+
+        assert sources == [summary.SOURCE_LLM, summary.SOURCE_LLM, summary.SOURCE_TEMPLATE]
+        assert fake_llm.calls == 2
+        # 상한에 걸린 시도는 부르지 않았으므로 행도 없다.
+        assert LlmCall.objects.count() == 2
+
+    # Partly AI-generated (Claude)
+    def test_cap_survives_a_cache_reset(self, user, fake_llm, monkeypatch):
+        """서버가 잠들거나 재배포해 캐시가 비어도 그날 센 수가 남는다(phaseB-review 1·2)."""
+        monkeypatch.setattr(summary, "LLM_USER_DAILY_LIMIT", 1)
+        fake_llm.reply = with_suffix
+        alarm_off = example_report()
+        alarm_off["outcomes"][6] = unseen(4, alarm_on=False)
+
+        assert summary.summary_for(user, example_report())[1] == summary.SOURCE_LLM
+        cache.clear()
+        assert summary.summary_for(user, alarm_off)[1] == summary.SOURCE_TEMPLATE
+        assert fake_llm.calls == 1
+
+    # Partly AI-generated (Claude)
+    def test_cap_counts_only_today(self, user, fake_llm, monkeypatch):
+        """어제 쓴 호출은 오늘 상한에 들지 않는다(서버 시간대의 날짜로 센다)."""
+        monkeypatch.setattr(summary, "LLM_USER_DAILY_LIMIT", 1)
+        fake_llm.reply = with_suffix
+        today = timezone.localdate()
+        LlmCall.objects.create(
+            user=user, day=today - timedelta(days=1), week_start=today, outcome="ok"
+        )
+        alarm_off = example_report()
+        alarm_off["outcomes"][6] = unseen(4, alarm_on=False)
+
+        assert summary.summary_for(user, example_report())[1] == summary.SOURCE_LLM
+        assert summary.summary_for(user, alarm_off)[1] == summary.SOURCE_TEMPLATE
+        assert LlmCall.objects.filter(day=today).count() == 1
 
     def test_template_failure_uses_the_fallback(self, user, monkeypatch):
         def broken(facts):

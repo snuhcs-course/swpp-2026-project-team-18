@@ -87,6 +87,12 @@ REST_FRAMEWORK = {  # noqa: F405
     },
 }
 
+# API 요청 기록(db-schema.md A4)은 기본으로 끈다. 켜 두면 요청마다 INSERT 가 붙어 조회 수를
+# 세는 테스트가 기록과 무관하게 깨진다. 기록 자체는 `apps/common/tests/test_request_log.py`
+# 가 `settings` 픽스처로 켜고 확인한다. 로컬 회귀(`run_local_suite.py`)는 켠 채로 돈다.
+# (Partly AI-generated (Claude))
+API_REQUEST_LOG_ENABLED = False
+
 # 로그를 조용히 한다. 실패 원인은 assert 메시지에서 본다.
 LOGGING = {
     "version": 1,
