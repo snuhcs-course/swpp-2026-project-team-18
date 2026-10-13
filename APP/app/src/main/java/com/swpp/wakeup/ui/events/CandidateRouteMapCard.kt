@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.domain.model.MapCameraMath
 import com.swpp.wakeup.domain.model.RouteMapProjection
@@ -20,11 +21,21 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 
-/** 화면을 떠나면 버리는 미리보기. 일정 지도·GPS 추적 상태를 변경하지 않는다. */
+// Partly AI-generated (Claude)
+/**
+ * 화면을 떠나면 버리는 미리보기. 일정 지도·GPS 추적 상태를 변경하지 않는다.
+ *
+ * 지금은 전체 화면 미리보기([RoutePreviewScreen])만 쓴다. 그래서 기본값이 그쪽에
+ * 맞춰져 있다 — [mapHeight] null 은 부모가 준 높이를 채운다는 뜻이고(호출부가
+ * `Modifier.weight(1f)` 로 높이를 제한), 위의 "경로" 캡션은 그리지 않는다.
+ */
 @Composable
 internal fun CandidateRouteMapCard(
     path: List<GeoPoint>,
     loadMap: suspend (GeoPoint, Int, Int, Int) -> EventRepository.Result<Bitmap>,
+    modifier: Modifier = Modifier,
+    mapHeight: Dp? = null,
+    showCaption: Boolean = false,
 ) {
     val initialFit = remember(path) { RouteMapProjection.fit(path, 360, 260) } ?: return
     var map by remember(path) {
@@ -102,6 +113,8 @@ internal fun CandidateRouteMapCard(
         },
         onRecenter = {},
         showCurrentLocation = false,
-        modifier = Modifier.testTag("candidate_route_map"),
+        modifier = modifier.testTag("candidate_route_map"),
+        mapHeight = mapHeight,
+        showCaption = showCaption,
     )
 }

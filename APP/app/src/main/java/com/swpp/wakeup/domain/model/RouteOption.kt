@@ -63,6 +63,17 @@ data class RouteOption(
             "bicycle" -> RouteMode.BICYCLE
             else -> RouteMode.TRANSIT
         }
+
+    // AI-generated (Claude)
+    /**
+     * 카드를 눌러 지도 미리보기를 열 수 있는가.
+     *
+     * 서버는 도보·자전거 후보에만 좌표(`path`)를 준다(BE-23). 대중교통·자동차는 좌표가
+     * 없고, 구버전 서버는 도보·자전거에도 주지 않는다. 점이 둘 미만이면 선이 되지 않는다.
+     */
+    val canPreviewMap: Boolean
+        get() = (travelMode == RouteMode.WALK || travelMode == RouteMode.BICYCLE) &&
+            routePath.size >= 2
 }
 
 // AI-generated (Claude)
