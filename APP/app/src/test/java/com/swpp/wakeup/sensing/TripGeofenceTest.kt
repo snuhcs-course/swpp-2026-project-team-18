@@ -625,4 +625,45 @@ class TripGeofenceTest {
         // 창은 출발 전 갱신 주기(30초)보다 길어야 좌표 둘 이상을 본다.
         assertTrue(TripGeofence.MOVING_WINDOW_MILLIS >= 60_000L)
     }
+
+    // --- 반경 진입 시각 (db-schema.md A1) ---------------------------------
+    // Partly AI-generated (Claude)
+
+    @Test
+    fun `도착은 반경에 처음 들어온 시각을 싣는다`() {
+        val f = fence(home = null)
+        f.offer(fix(north(dest, 3_000.0)))
+        val entered = fix(north(dest, 30.0))
+        f.offer(entered)
+        f.offer(fix(north(dest, 25.0)))
+        val arrived = f.offer(afterDwell(north(dest, 20.0))) as TripEvent.Arrived
+
+        assertEquals(entered.atMillis, arrived.enteredAtMillis)
+        // 판정 시각은 그대로 판정 fix 다. 체류는 진입부터 판정까지다.
+        assertEquals(arrived.fix.atMillis - entered.atMillis, arrived.dwellMillis)
+    }
+
+    @Test
+    fun `반경을 나갔다 오면 다시 들어온 시각을 싣는다`() {
+        val f = fence(home = null)
+        f.offer(fix(north(dest, 20.0)))
+        f.offer(fix(north(dest, 500.0)))
+        val again = fix(north(dest, 20.0))
+        f.offer(again)
+        val arrived = f.offer(afterDwell(north(dest, 20.0))) as TripEvent.Arrived
+
+        assertEquals(again.atMillis, arrived.enteredAtMillis)
+    }
+
+    @Test
+    fun `마감 확정도 진입 시각을 싣고 판정보다 늦지 않다`() {
+        val f = fence(home = null)
+        val entered = fix(north(dest, 20.0))
+        f.offer(entered)
+        f.offer(fix(north(dest, 20.0), afterMillis = 40_000))
+        val arrived = f.finalizeArrival()
+
+        assertEquals(entered.atMillis, arrived!!.enteredAtMillis)
+        assertTrue(arrived.enteredAtMillis <= arrived.fix.atMillis)
+    }
 }

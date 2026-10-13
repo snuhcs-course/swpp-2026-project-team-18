@@ -52,6 +52,12 @@ object ApiClient {
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            // Partly AI-generated (Claude) — 서버의 요청 기록이 어느 빌드인지 알게 한다(A4).
+            .addInterceptor(
+                AppVersionInterceptor(
+                    AppVersionInterceptor.label(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE)
+                )
+            )
             // 순서가 중요하다. 인증 헤더를 먼저 붙이고 그 다음 로깅해야
             // 로그에 실제로 나간 헤더가 찍힌다.
             .addInterceptor(AuthInterceptor(tokenStore))
@@ -128,6 +134,9 @@ object ApiClient {
     val routines: RoutinesApi by lazy { retrofit.create(RoutinesApi::class.java) }
 
     val reports: ReportsApi by lazy { retrofit.create(ReportsApi::class.java) }
+
+    /** 알람 울림·끄기·미루기 기록(db-schema.md A3). (Partly AI-generated (Claude)) */
+    val alarmLogs: AlarmLogsApi by lazy { retrofit.create(AlarmLogsApi::class.java) }
 
     /** 초기화됐는지. 서비스·리시버는 Application 보다 먼저 깨어날 수 있다. */
     val isReady: Boolean get() = ::tokenStore.isInitialized

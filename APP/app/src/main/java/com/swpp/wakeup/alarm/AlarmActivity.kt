@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import com.swpp.wakeup.MainActivity
 import com.swpp.wakeup.data.local.MorningSessionStore
+import com.swpp.wakeup.data.remote.AlarmLogInput
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.sensing.TripTrackingService
@@ -73,6 +74,8 @@ class AlarmActivity : ComponentActivity() {
     private val silenceRunnable = Runnable {
         Log.i(TAG, "${AUTO_SILENCE_MINUTES}분간 응답이 없어 소리를 멈춘다")
         AlarmRinger.stop(this)
+        // Partly AI-generated (Claude) — 아무도 끄지 않았다는 사실도 기상 반응이다(A3).
+        schedule?.let { AlarmLogQueue(this).record(AlarmLogInput.KIND_SILENCED, it) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,6 +141,8 @@ class AlarmActivity : ComponentActivity() {
     private fun dismiss() {
         val current = schedule ?: return
         stopEverything()
+        // Partly AI-generated (Claude) — 끈 시각(A3). 울림 → 끄기 → 출발 사이를 나누는 재료다.
+        AlarmLogQueue(this).record(AlarmLogInput.KIND_DISMISSED, current)
 
         if (current.canTrack && LocationPermissions.granted(this)) {
             TripTrackingService.start(this, current)
@@ -161,6 +166,12 @@ class AlarmActivity : ComponentActivity() {
     private fun snooze() {
         val current = schedule ?: return
         stopEverything()
+        // Partly AI-generated (Claude) — 미루기 전에 적는다. `alarm_at` 이 지금 울린 시각이다(A3).
+        AlarmLogQueue(this).record(
+            AlarmLogInput.KIND_SNOOZED,
+            current,
+            snoozeMinutes = SNOOZE_MINUTES,
+        )
         AlarmScheduler(this).snooze(current, SNOOZE_MINUTES)
         finish()
     }

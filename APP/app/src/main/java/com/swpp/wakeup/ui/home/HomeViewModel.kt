@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.swpp.wakeup.alarm.AlarmLogQueue
 import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.BuildConfig
 import com.swpp.wakeup.background.JitWork
@@ -628,6 +629,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             queue.flush()
             runCatching { blockQueue.flush() }
+            // Partly AI-generated (Claude) — 알람 울림·끄기 기록(db-schema.md A3)도 함께 올린다.
+            runCatching { AlarmLogQueue(app).flush() }
             _state.update { it.copy(pendingObservations = pendingObservationCount()) }
         }
     }
