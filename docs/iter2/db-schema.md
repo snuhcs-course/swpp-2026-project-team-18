@@ -422,5 +422,6 @@ Neon 무료 플랜은 프로젝트당 저장 1 GB, 계산 월 100 CU-시간, 공
 - 공용 DB 에 로컬에서 `migrate` 하지 않는다. 이 브랜치의 마이그레이션은 main 에 머지된 뒤 Render 가 컨테이너를 띄울 때 적용된다(`backend/Dockerfile`: `migrate --noinput` 후 gunicorn).
 - 머지 직전: main 의 같은 앱에 새 마이그레이션이 있으면 번호와 `dependencies` 를 다시 잡는다. `makemigrations --check` 로 빠진 것이 없는지 본다.
 - 배포 뒤: 읽기만 하는 `scripts/db_status.py` 로 미적용이 0 인지 본다.
+- **배포 뒤 사용자·일정 삭제는 새 모델이 있는 코드에서만 한다**(Phase C 리뷰 #1). 새 표 넷(계획 이력·알람 기록·요청 기록·LLM 호출)의 FK 도 기존 표처럼 Django 기본(`DEFERRABLE INITIALLY DEFERRED`, DB 수준 `ON DELETE` 없음)이다. 이 모델을 모르는 코드 — main 을 받기 전 브랜치에서 돌린 `scripts/purge_test_accounts.py`·`emu_verify_cleanup.py`, 배포가 겹치는 동안의 옛 인스턴스 — 가 ORM 으로 사용자·일정을 지우면 새 표에 남은 행 때문에 커밋에서 `IntegrityError` 가 나고 전부 되돌려진다. 요청 기록은 로그인한 요청마다 생기므로 배포 뒤에는 거의 모든 사용자가 해당된다. 박준하 님께 [backend-requests.md](backend-requests.md) R-9 로 알린다.
 - 이번 점검에 쓴 일회용 스크립트는 지웠다. 공용 DB 에는 쓰기를 하지 않았다.
 

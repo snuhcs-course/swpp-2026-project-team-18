@@ -48,7 +48,8 @@
 
 - 바뀐 QA 흐름의 기기 위 E2E: 아직 돌리지 않았다(Phase A 재생 모드 `qa/demo/run.py`, Phase B `DemoFlowTest` 리포트 단계, Phase C 알람 기록 큐).
 - Figma F-0~F-13: 메인 세션이 10-13 에 반영했다. 노드 목록과 명세와 다른 점은 [figma-changes.md](figma-changes.md) 맨 위 "Figma 반영 상태".
-- [backend-requests.md](backend-requests.md) R-1~R-8: 박준하(back-iter2)에게 전달.
+- [backend-requests.md](backend-requests.md) R-1~R-9: 박준하(back-iter2)에게 전달. R-9(머지 뒤 사용자·일정 삭제 도구는 새 모델이 있는 코드로)는 머지 전에 알린다.
+- Phase C 리뷰: APPROVED, 막지 않는 지적 5건 중 #1~#4 를 반영했다(#5 테스트 보강은 남김). [phaseC-verification.md](phaseC-verification.md) "리뷰 반영".
 - 팀 결정 대기: 도착 시각 편향(geofence 진입·체류 기준 도착 시각의 치우침)을 어떻게 다룰지, 실제 도착 시각의 정답값(ground truth)을 어떻게 모을지.
 - 버리는 QA 계정: 공용 서버(Neon)에는 만든 계정이 없다. 로컬 스위트가 실행마다 임시 SQLite 에 만든 계정(Phase C 회귀에서 11명)은 실행이 끝나면 DB 와 함께 사라진다.
 - 배포: 공용 DB 에 `migrate` 하지 않았다. main 머지 뒤 `scripts/db_status.py`·`check_db_defaults.py` 로 확인한다.

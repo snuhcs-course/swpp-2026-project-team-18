@@ -12,6 +12,7 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 | R-6 | `onboarding_prep_min` 범위 검증 | 보통 | 앱에만 5~240 |
 | R-7 | 가까운 출발·도착 오류 코드 고정 (선택) | 낮음 | `details.destination` 으로 판단 중 |
 | R-8 | 회원가입 요청 빈도 제한 (Phase C) | 보통 | 바꿀 것 없음 |
+| R-9 | 머지 뒤 사용자·일정 삭제 도구는 새 모델이 있는 코드로 (Phase C 알림) | 높음 | 바꿀 것 없음 |
 
 ## R-1. 이동 보정에 쓴 기록 수
 
@@ -61,3 +62,10 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 - 문제: 스크립트로 계정을 계속 만들 수 있다. 계정마다 LLM 사용자 하루 상한 30회가 새로 생기고(Phase B 리뷰 2번) 행도 쌓인다. Phase C 는 LLM 전체 하루 상한(`db-schema.md` A5)으로 비용만 막는다.
 - 요청: `ScopedRateThrottle` scope `register`(예: IP 당 시간 10회). 넘으면 429 와 한국어 메시지. 값은 백엔드가 정한다.
 - 앱: 429 일 때 보이는 문구만 프론트가 확인한다.
+
+## R-9. 머지 뒤 사용자·일정 삭제 도구는 새 모델이 있는 코드로 (Phase C 알림)
+
+- 바뀌는 것: 이 브랜치가 main 에 머지되면 Render 가 새 표 넷을 만든다 — 계획 이력 `planning_plan_revision`, 알람 기록 `observations_alarm_log`, API 요청 기록 `common_api_request_log`, LLM 호출 `reports_llm_call`. 넷 다 사용자(앞의 둘은 일정도)를 FK 로 가리킨다. FK 는 기존 표처럼 Django 기본(`DEFERRABLE INITIALLY DEFERRED`, DB 수준 `ON DELETE` 없음)이다.
+- 문제: 이 모델을 모르는 코드가 공용 DB 에서 ORM 으로 사용자·일정을 지우면, 새 표에 남은 행 때문에 커밋에서 `IntegrityError` 가 나고 삭제 전체가 되돌려진다. 요청 기록은 로그인한 요청마다 생기므로 배포 뒤에는 거의 모든 사용자가 해당된다. 해당하는 것: main 을 받기 전 브랜치에서 돌린 `scripts/purge_test_accounts.py`·`scripts/emu_verify_cleanup.py`, 배포가 겹치는 동안의 옛 인스턴스.
+- 요청: 머지 뒤에는 main 을 받은 브랜치에서만 이 스크립트를 돌린다. 새 코드의 ORM 은 새 표까지 CASCADE·SET_NULL 로 지우므로 따로 고칠 것은 없다.
+- 근거: [db-schema.md](db-schema.md) §10, Phase C 리뷰 #1([phaseC-verification.md](phaseC-verification.md) "리뷰 반영").

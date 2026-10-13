@@ -40,8 +40,12 @@ class WeeklySummaryAdmin(admin.ModelAdmin):
 # Partly AI-generated (Claude)
 @admin.register(LlmCall)
 class LlmCallAdmin(admin.ModelAdmin):
-    """LLM 호출 기록. **읽기 전용이다.** 하루 상한이 이 행 수로 센다 — 손으로 만들거나
-    지우면 그날 상한이 바뀐다. 오래된 행은 `purge_logs` 가 지운다."""
+    """LLM 호출 기록. **추가·수정은 막는다.** 하루 상한이 이 행 수로 센다 — 손으로 만들면
+    그날 상한이 바뀐다. 오래된 행은 `purge_logs` 가 지운다.
+
+    삭제는 열어 둔다. admin 에서 사용자를 지울 때 연결된 행의 admin 이 삭제를 거부하면
+    사용자 삭제까지 막힌다(다른 기록 표 admin 과 같다). 오늘 행을 지우면 그만큼 그날
+    상한이 다시 생긴다."""
 
     list_display = ("created_at", "user_email", "day", "week_start", "outcome", "model", "duration_ms")
     list_filter = ("outcome", "day")
