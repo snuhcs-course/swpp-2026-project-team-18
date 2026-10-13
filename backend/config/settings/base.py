@@ -45,9 +45,9 @@ INSTALLED_APPS = [
     "apps.routing",
     # 학습 결과 아티팩트. 전역·개인 분포 모수를 담는다.
     "apps.prediction",
-    # 주간 리포트·캘리브레이션. **모델이 없다** — 기존 관측에서 요청 시점에
-    # 계산한다. 앱으로 등록하는 것은 위치를 명시하기 위한 것이고, 나중에
-    # 배치 생성이 필요해지면 여기에 모델이 생긴다.
+    # 주간 리포트·캘리브레이션. 수치는 기존 관측에서 요청 시점에 계산하고,
+    # LLM 이 쓴 주간 요약 문장(`WeeklySummary`)만 저장한다.
+    # (Partly AI-generated (Claude))
     "apps.reports",
 ]
 
@@ -231,6 +231,14 @@ CACHES = {
         # 키에 KST 날짜도 들어가므로 하루보다 조금 길게 남아도 다음 날과 섞이지 않는다.
         "TIMEOUT": 25 * 60 * 60,
     },
+    # Partly AI-generated (Claude)
+    # 주간 요약 LLM 의 사용자별 일일 호출 수(apps/reports/summary.py). 위 지도 예산과
+    # 같은 이유로 이미지 캐시와 분리하고 TTL 을 하루보다 길게 둔다.
+    "llm_budget": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "jit-llm-budget",
+        "TIMEOUT": 25 * 60 * 60,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -279,9 +287,18 @@ SEOUL_BUS_API_KEY_DECODING = os.getenv("SEOUL_BUS_API_KEY_DECODING", "")
 # 시각을 보여 준다.
 SEOUL_SUBWAY_API_KEY = os.getenv("SEOUL_SUBWAY_API_KEY", "")
 
-# F12 자연어 파싱. Structured Outputs(strict) 를 쓰므로 모델도 설정으로 뺀다.
+# Partly AI-generated (Claude)
+# OpenAI 호환 LLM. 주간 리포트 줄글 요약(P6, apps/reports/summary.py) · F12 자연어
+# 파싱(미착수)이 쓴다.
+#
+# **셋 다 비어 있어도 서버는 돈다.** 리포트 요약은 같은 수치로 만든 고정 문장
+# (템플릿)으로 나간다. 키는 서버에만 둔다 — 앱(APK)에 넣지 않는다(N20).
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
+# chat completions 주소의 앞부분. 끝의 /chat/completions 는 서버가 붙인다.
+# **빈 문자열도 기본값으로 읽는다.** Render 는 값이 빈 변수를 둘 수 있고, 그러면
+# getenv 의 기본값이 듣지 않는다(위 DATABASE_URL 주석과 같은 함정).
+OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
 
 FCM_CREDENTIALS_PATH = os.getenv("FCM_CREDENTIALS_PATH", "")
 REDIS_URL = os.getenv("REDIS_URL", "")
@@ -305,8 +322,9 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 #   0.8.0  이동 중 현재 위치부터 목적지까지의 최단 경로를 1분마다 다시 계산한다.
 #          앱이 백그라운드여도 추적 서비스가 경로를 최신 상태로 유지한다
 #   0.9.0  지도 핀치 줌·GPS 재중심·장소 마커/목록 동기화.
+#   0.11.0 주간 리포트 줄글 요약·상세 리포트(outcomes)
 #
 # 버전만으로 판별하지 않는 것이 더 확실하다. `scripts/check_deployed.py` 와
 # 같은 방식으로 **새 엔드포인트의 404 여부**를 보면 버전을 올리는 것을
 # 잊었더라도 드러난다 — 인증이 필요한 경로는 배포됐으면 401, 미배포면 404 다.
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.11.0"

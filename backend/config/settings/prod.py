@@ -172,6 +172,17 @@ CACHES = {
         "TIMEOUT": 25 * 60 * 60,
         "OPTIONS": {"MAX_ENTRIES": 400},
     },
+    # Partly AI-generated (Claude)
+    # 주간 요약 LLM 의 사용자별 일일 호출 수(apps/reports/summary.py). 지도 예산과
+    # 같은 이유로 따로 둔다 — 기본 캐시에 두면 지도 이미지 때문에 퇴출되거나
+    # incr()가 기본 TTL(300초)로 다시 써서 그날 상한이 0부터 다시 센다.
+    # 사용자·날짜마다 작은 정수 하나다.
+    "llm_budget": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": os.getenv("DJANGO_LLM_BUDGET_CACHE_DIR", "/tmp/jit-llm-budget"),
+        "TIMEOUT": 25 * 60 * 60,
+        "OPTIONS": {"MAX_ENTRIES": 400},
+    },
 }
 
 # ---------------------------------------------------------------------------

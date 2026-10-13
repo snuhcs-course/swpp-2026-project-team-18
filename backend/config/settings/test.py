@@ -50,6 +50,9 @@ KAKAO_MOBILITY_KEY = ""
 KMA_API_KEY = ""
 OPENAI_API_KEY = ""
 OPENAI_MODEL = ""
+# 주소도 고정한다. `.env` 를 따르지 않는다 — 개발자가 학교 주소를 채우면 요청
+# 주소를 단언하는 리포트 테스트가 그 사람 PC 에서만 깨진다. (Partly AI-generated (Claude))
+OPENAI_BASE_URL = "https://api.openai.com/v1"
 FCM_CREDENTIALS_PATH = ""
 REDIS_URL = ""
 # 실시간 도착 정보. 열린데이터광장은 일일 호출 한도가 있어서 테스트가 태우면

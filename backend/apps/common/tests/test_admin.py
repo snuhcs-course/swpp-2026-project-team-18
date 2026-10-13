@@ -141,7 +141,9 @@ class TestEveryAdminOpens:
         값인지 모르는 행이 학습에 들어가므로 일부러 막았다. 그 외에 403 이
         나오면 설정 실수다.
         """
-        closed = {"alarmplan", "tripobservation"}
+        # 주간 요약은 LLM 이 쓴 문장만 저장한다(apps/reports/admin.py).
+        # (Partly AI-generated (Claude))
+        closed = {"alarmplan", "tripobservation", "weeklysummary"}
         broken = []
         for model in registered_models():
             name = model._meta.model_name

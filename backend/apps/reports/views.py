@@ -1,8 +1,9 @@
 """리포트 API. back-spec.md 5.8.
 
-**조회 전용이다.** 저장된 리포트를 읽는 것이 아니라 요청 시점에 계산한다.
-근거는 `services.weekly` 주석에 있다 — 한 주 분량이 작고, 저장하면 "언제
-만들어진 값인가" 와 "계획이 바뀌면 다시 만드나" 가 문제가 된다.
+**수치는 요청 시점에 계산한다.** 저장된 리포트를 읽지 않는다. 근거는
+`services.weekly` 주석에 있다 — 한 주 분량이 작고, 저장하면 "언제 만들어진
+값인가" 와 "계획이 바뀌면 다시 만드나" 가 문제가 된다. 저장하는 것은 LLM 이 쓴
+주간 요약 문장뿐이다(`summary.py`, `models.WeeklySummary`).
 
 모든 계산이 `request.user` 로 좁혀진다. 리포트는 개인의 지각 이력이라 남의
 것을 보면 안 된다. 범위 제한은 `services.collect_outcomes` 한 곳에 있다.
@@ -15,7 +16,7 @@ from datetime import date
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import services
+from . import services, summary
 
 
 def _parse_week(raw: str | None) -> date | None:
@@ -40,9 +41,16 @@ class WeeklyReportView(APIView):
     아직 진행 중이라 값이 매 시간 달라지고 사용자가 최종인지 알 수 없다.
     """
 
+    # Partly AI-generated (Claude)
     def get(self, request):
         anchor = _parse_week(request.query_params.get("week"))
-        return Response(services.weekly(request.user, anchor=anchor))
+        report = services.weekly(request.user, anchor=anchor)
+        # 줄글 요약은 계산한 수치 위에 붙인다. 키가 없거나 LLM 이 실패해도 예외를
+        # 던지지 않고 같은 수치로 만든 고정 문장이 나간다(summary_source="template").
+        report["summary"], report["summary_source"] = summary.summary_for(
+            request.user, report
+        )
+        return Response(report)
 
 
 class CalibrationView(APIView):

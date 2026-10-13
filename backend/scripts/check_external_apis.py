@@ -91,6 +91,9 @@ for key in (
 ):
     shown = ENV.get(key) if key in ("OPENAI_MODEL", "FCM_CREDENTIALS_PATH") else mask(ENV.get(key))
     print(f"  {key:22} {shown or '(비어 있음)'}")
+# 주소는 호스트만 보여 준다. 주소 안에 계정 정보를 넣었으면 그것까지 찍히면 안 된다.
+_base_host = urllib.parse.urlsplit((ENV.get("OPENAI_BASE_URL") or "").strip()).hostname
+print(f"  {'OPENAI_BASE_URL':22} {_base_host or '(비어 있음 → OpenAI 기본 주소)'}")
 print("=" * 74 + "\n")
 
 
@@ -291,17 +294,37 @@ else:
 
 
 # ---------------------------------------------------------------------------
-# 5. OpenAI — 키 유효성 + Structured Outputs(strict) 지원 모델 후보
+# 5. OpenAI 호환 LLM — 키 유효성 + Structured Outputs(strict) 지원 모델 후보
 # ---------------------------------------------------------------------------
+# Partly AI-generated (Claude)
+# 주소는 서버와 같이 OPENAI_BASE_URL 을 따른다(비우면 OpenAI). 학교 프록시에는
+# /models 가 없을 수 있다 — 그때는 실패가 아니라 "확인 불가" 로 두고 실제 요약
+# 요청으로 확인한다(python manage.py probe_report_summary).
 oai = ENV.get("OPENAI_API_KEY") or ""
+oai_base = ((ENV.get("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1").rstrip("/")
+if oai_base.endswith("/chat/completions"):
+    oai_base = oai_base[: -len("/chat/completions")].rstrip("/")
+_oai_parts = urllib.parse.urlsplit(oai_base)
+oai_base_ok = _oai_parts.scheme == "https" or (
+    _oai_parts.scheme == "http" and _oai_parts.hostname in ("localhost", "127.0.0.1")
+)
 if not oai:
     record("OpenAI", None, "OPENAI_API_KEY 없음")
+elif not oai_base_ok:
+    record("OpenAI", False, "OPENAI_BASE_URL 이 https 주소가 아니다. 키를 보내지 않았다")
 else:
     st, body = http(
-        "https://api.openai.com/v1/models",
+        f"{oai_base}/models",
         {"Authorization": f"Bearer {oai}"},
     )
-    if st == 200:
+    if st == 404:
+        record(
+            "OpenAI 키 유효성",
+            None,
+            f"{_oai_parts.hostname} 에 /models 가 없다. 확인 불가 → "
+            "python manage.py probe_report_summary 로 확인할 것",
+        )
+    elif st == 200:
         ids = sorted(m["id"] for m in json.loads(body).get("data", []))
         # 파싱 용도로 값싸고 strict 지원 가능성이 높은 후보만 추린다
         picks = [
