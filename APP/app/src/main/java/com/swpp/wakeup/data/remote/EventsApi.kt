@@ -459,9 +459,10 @@ data class EventTagDto(
 /**
  * 알람 계획.
  *
- * **[onTimeProbability] 는 null 일 수 있다.** 관측이 쌓이기 전에는 서버가 확률을
- * 만들 수 없다. 카카오 경로 응답에도 변동성 정보가 없다. null 이면 화면이
- * "학습 중" 으로 표시한다. 절대 0 이나 임의값으로 바꿔 채우지 않는다.
+ * **[onTimeProbability] 는 null 일 수 있다.** 서버는 준비·이동 둘 다 변동 폭이 있을
+ * 때만 확률을 만든다. 카카오 경로 응답에는 변동성 정보가 없다. null 이면 화면이
+ * 확률 자리를 숨기거나 "아직 계산할 수 없음" 과 그 이유를 쓴다. 절대 0 이나
+ * 임의값으로 바꿔 채우지 않는다.
  *
  * [status] 는 `ok` / `no_home` / `no_place` / `route_failed` 중 하나다.
  * `ok` 가 아니면 시각·분 필드가 전부 null 이다.
@@ -486,7 +487,7 @@ data class AlarmPlanDto(
      * | --- | --- | --- |
      * | `observed` | 준비·이동 둘 다 관측 기반. 확률이 있다 | — |
      * | `point_estimate` | 둘 다 점추정 | 루틴 블록을 등록한다 |
-     * | `travel_variance_unknown` | 준비만 변동성 있음 | 같은 경로를 몇 번 다닌다 |
+     * | `travel_variance_unknown` | 준비만 변동성 있음 | 이동 기록이 쌓이길 기다린다(전체 사용자 보정, R-3) |
      * | `prep_variance_unknown` | 이동만 변동성 있음 | 블록에 범위를 넣는다 |
      *
      * `status != ok` 면 빈 문자열이다.
@@ -558,9 +559,10 @@ data class AlarmPlanDto(
     @SerializedName("route_choice_honored") val routeChoiceHonored: Boolean?,
 
     /**
-     * 각 값의 출처. 무엇이 실측이고 무엇이 아직 고정값인지 구분한다.
+     * 각 값의 출처. 무엇이 추정·보정값이고 무엇이 아직 고정값인지 구분한다.
      *
-     * `travel_time_source` 는 `kakao_transit` 등 실측이고,
+     * `travel_time_source` 는 `kakao_transit` 등 카카오 경로 추정이고, 이동 기록으로
+     * 보정되면 `+observed_route`/`+observed_global` 이 붙는다(④ 이동 줄의 첫 마디),
      * `prep_source` 는 `onboarding`/`default`, `buffer_source` 는 `fixed` 다.
      * 화면에서 "이건 학습된 값" 처럼 오해하지 않게 서버가 명시해 준다.
      */

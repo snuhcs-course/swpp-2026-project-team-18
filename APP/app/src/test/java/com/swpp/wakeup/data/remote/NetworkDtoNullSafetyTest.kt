@@ -55,7 +55,33 @@ class NetworkDtoNullSafetyTest {
             val legacy = gson.fromJson("{$base$extra}", RouteCandidateDto::class.java).toOption()
             assertTrue(legacy.routePath.isEmpty())
             assertEquals(10, legacy.minutes)
+            assertTrue("좌표가 없으면 미리보기를 열지 않는다", !legacy.canPreviewMap)
         }
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `백엔드 후속 필드가 비거나 null 이어도 카드가 만들어진다`() {
+        // 3cd1a1f: 도보 steps/kcal 은 정수 또는 null. 앱은 DTO 에 두지 않고 서버 문장을 쓴다.
+        // f6f1630: badges 는 해당 없으면 [], reason 은 "" 일 수 있다.
+        // 59e5253: path_distance_m 은 앱이 쓰지 않는다.
+        val walk = gson.fromJson(
+            """{"key":"walk","mode":"도보","minutes":18,"distance_m":1200,"badges":[],
+               "reason":"걸어갈 수 있는 거리","steps":null,"kcal":null,"path_distance_m":null,
+               "summary":"18분 · 1.2km · 1,600걸음 · 60kcal (거리 기반 추정)"}""",
+            RouteCandidateDto::class.java,
+        ).toOption()
+        assertEquals(listOf("걸어갈 수 있는 거리"), walk.badges)
+        assertEquals("1.2km · 1,600걸음 · 60kcal (거리 기반 추정)", walk.detailLine)
+        assertTrue(walk.routePath.isEmpty())
+
+        val transit = gson.fromJson(
+            """{"key":"transit:5511","mode":"버스","minutes":25,"badges":[],"reason":"",
+               "segments":[{"kind":"bus","seconds":900,"vehicle":"5511","alt_vehicles":null}]}""",
+            RouteCandidateDto::class.java,
+        ).toOption()
+        assertTrue("배지도 reason 도 비면 배지가 없다", transit.badges.isEmpty())
+        assertTrue(transit.segments.items.single().alternatives.isEmpty())
     }
 
     @Test

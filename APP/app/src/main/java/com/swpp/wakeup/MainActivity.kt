@@ -55,6 +55,7 @@ import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
 import com.swpp.wakeup.ui.alarm.arrivalClockLabel
 import com.swpp.wakeup.ui.alarm.freshnessLabel
 import com.swpp.wakeup.ui.calendar.CalendarImportScreen
+import com.swpp.wakeup.ui.common.durationLabel
 import com.swpp.wakeup.ui.alarm.RiskChoiceScreen
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.ui.events.AddEventScreen
@@ -264,9 +265,17 @@ private fun MainHost(
     //
     // 블록 편집 폼은 같은 경로 안에서 겹쳐 뜨므로 스택에 없다. 폼이 열려
     // 있으면 먼저 닫는다 — 그러지 않으면 뒤로가 폼과 목록을 한꺼번에 건너뛴다.
+    //
+    // 경로 지도 미리보기도 같은 방식이다(⑬ 안에서 겹쳐 그림). 열려 있으면 미리보기만
+    // 닫고 경로 목록으로 돌아간다.
     val draftOpen = routineState.editing != null
-    BackHandler(enabled = nav.canGoBack || draftOpen) {
-        if (draftOpen) viewModel.dismissBlockDraft() else viewModel.goBack()
+    val routePreviewOpen = nav.current == AppRoute.RouteChoice && routeState?.previewKey != null
+    BackHandler(enabled = nav.canGoBack || draftOpen || routePreviewOpen) {
+        when {
+            draftOpen -> viewModel.dismissBlockDraft()
+            routePreviewOpen -> viewModel.closeRoutePreview()
+            else -> viewModel.goBack()
+        }
     }
 
     // 일정 추가·집 설정이 끝나면 홈으로 되돌린다.
@@ -295,7 +304,8 @@ private fun MainHost(
             viewModel.goBack()
             viewModel.resetPrepOnboarding()
             if (saved != null) {
-                snackbarHostState.showSnackbar("평소 준비 시간을 ${saved}분으로 저장했습니다")
+                // "1시간 5분" 처럼 다이얼과 같은 표기. "분"·"간" 모두 받침이 있어 "으로" 고정.
+                snackbarHostState.showSnackbar("평소 준비 시간을 ${durationLabel(saved)}으로 저장했습니다")
             }
         }
     }
@@ -501,6 +511,8 @@ private fun MainHost(
                     // 일정 시작 시각 = 도착 목표. 카드의 출발~도착 시각을 만든다.
                     arriveBy = addState.date.atTime(addState.hour, addState.minute),
                     loadMap = viewModel::loadCandidateMap,
+                    onPreview = viewModel::openRoutePreview,
+                    onClosePreview = viewModel::closeRoutePreview,
                 )
 
                 AppRoute.MapPick -> mapPickState?.let { map ->
@@ -524,7 +536,6 @@ private fun MainHost(
                 AppRoute.PrepOnboarding -> PrepOnboardingScreen(
                     state = prepOnboardingState,
                     onMinutesChange = viewModel::onPrepOnboardingChange,
-                    onStep = viewModel::onPrepOnboardingStep,
                     onSubmit = viewModel::submitPrepOnboarding,
                     onSkip = viewModel::skipPrepOnboarding,
                     modifier = Modifier.padding(innerPadding),

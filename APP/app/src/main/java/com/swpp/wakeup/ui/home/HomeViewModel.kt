@@ -1343,6 +1343,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 일정 추가에서 고른 출발지. null 이면 프로필 집 */
         val origin: PlaceSearchItem? = null,
+
+        /**
+         * 지도 미리보기로 연 후보 key. null 이면 목록이다.
+         *
+         * 새 화면 경로를 쌓지 않고 같은 경로 안에서 바꿔 그린다. "이 경로로 계산" 이
+         * 일정 추가로 한 번에 돌아가야 해서다. 뒤로는 `MainActivity` 가 먼저 이걸 닫는다.
+         */
+        val previewKey: String? = null,
+
+        /**
+         * [error] 가 다시 시도로 풀리는가. 가까운 출발·도착(400)은 장소를 바꿔야
+         * 풀리므로 false 다([candidatesRetryable]).
+         */
+        val retryable: Boolean = true,
     )
 
     private val _routeChoice = MutableStateFlow<RouteState?>(null)
@@ -1365,7 +1379,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _nav.update { it.copy(stack = it.stack + AppRoute.RouteChoice, forward = true) }
 
         val cached = _routeChoice.value?.choice
-        if (cached != null) return
+        if (cached != null) {
+            // 다시 들어오면 목록부터 보인다. 미리보기가 열린 채 남아 있으면 안 된다.
+            _routeChoice.update { it?.copy(previewKey = null) }
+            return
+        }
 
         _routeChoice.value = RouteState(loading = true, origin = add.origin)
         viewModelScope.launch { loadCandidates(place, add.origin, keepSelection = true) }
@@ -1815,7 +1833,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         origin: PlaceSearchItem?,
         keepSelection: Boolean,
     ) {
-        _routeChoice.update { (it ?: RouteState()).copy(loading = true, error = null) }
+        _routeChoice.update {
+            (it ?: RouteState()).copy(loading = true, error = null, retryable = true)
+        }
         when (val result = repository.routeCandidates(place, origin)) {
             is EventRepository.Result.Success -> _routeChoice.update { current ->
                 val base = current ?: RouteState()
@@ -1826,13 +1846,47 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     result.data
                 }
-                base.copy(loading = false, error = null, choice = choice)
+                base.copy(
+                    loading = false,
+                    error = null,
+                    choice = choice,
+                    previewKey = previewKeyAfterReload(base.previewKey, choice.options),
+                )
             }
 
-            is EventRepository.Result.Failure -> _routeChoice.update { current ->
-                (current ?: RouteState()).copy(loading = false, error = result.message)
+            is EventRepository.Result.Failure -> {
+                _routeChoice.update { current ->
+                    (current ?: RouteState()).copy(
+                        loading = false,
+                        error = result.message,
+                        retryable = candidatesRetryable(result),
+                    )
+                }
+                // 가까운 출발·도착(400)은 일정 추가 화면의 도착지 줄에도 남긴다.
+                // 뒤로 돌아가면 무엇을 고쳐야 하는지 그 줄이 말한다.
+                result.fields["destination"]?.let { message ->
+                    _add.update { it.copy(destinationError = message) }
+                }
             }
         }
+    }
+
+    // AI-generated (Claude)
+    /**
+     * 도보·자전거 후보의 지도 미리보기를 연다. 그 후보를 고른 상태로 만든다.
+     *
+     * 일정 지도(`_routeMap`)·추적 상태는 건드리지 않는다. 지도 상태는 미리보기 화면
+     * 안에서만 산다(`CandidateRouteMapCard`).
+     */
+    fun openRoutePreview(key: String) {
+        onRouteSelected(key)
+        _routeChoice.update { it?.copy(previewKey = key) }
+    }
+
+    // AI-generated (Claude)
+    /** 미리보기를 닫고 목록으로. 고른 후보는 그대로 둔다. */
+    fun closeRoutePreview() {
+        _routeChoice.update { it?.copy(previewKey = null) }
     }
 
     fun onRouteSelected(key: String) {
@@ -1860,6 +1914,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 고른 경로를 일정 추가 폼에 반영하고 돌아간다. */
     fun confirmRoute() {
+        // 후보 캐시는 다시 들어올 때 쓰려고 남긴다. 미리보기가 열린 채 남으면 안 된다.
+        _routeChoice.update { it?.copy(previewKey = null) }
         val current = _routeChoice.value ?: return
         val choice = current.choice ?: return
         val option = choice.options.firstOrNull { it.key == choice.selectedKey }
@@ -2383,6 +2439,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /** 현재 위치를 못 구했을 때의 안내. 값은 바꾸지 않고 이유만 보여준다 */
         val originNotice: String? = null,
 
+        /**
+         * 출발지·도착지 줄 바로 아래에 붙일 서버 오류. 예: 가까운 출발·도착(400)
+         * "출발지와 도착지는 50m 이상 떨어져 있어야 한다." 출발지나 도착지가 바뀌면 지운다.
+         */
+        val originError: String? = null,
+        val destinationError: String? = null,
+
         val submitting: Boolean = false,
         val error: String? = null,
         val done: Boolean = false,
@@ -2425,7 +2488,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 place = it.place.copy(results = emptyList(), query = item?.name ?: ""),
                 routeKey = null,
                 routeLabel = null,
-                // 출발지는 이 화면에서 따로 고르므로 남긴다.
+                // 출발지는 이 화면에서 따로 고르므로 남긴다. 줄 오류는 장소가 바뀌었으니 지운다.
+                originError = null,
+                destinationError = null,
             )
         }
         _routeChoice.value = null
@@ -2474,6 +2539,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 originNotice = null,
                 routeKey = null,
                 routeLabel = null,
+                originError = null,
+                destinationError = null,
             )
         }
         _routeChoice.value = null
@@ -2530,7 +2597,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             ),
         )
 
-        _add.update { it.copy(submitting = true, error = null) }
+        _add.update {
+            it.copy(submitting = true, error = null, originError = null, destinationError = null)
+        }
         viewModelScope.launch {
             val result = repository.createEvent(
                 title = current.title,
@@ -2546,8 +2615,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     refresh()
                 }
 
-                is EventRepository.Result.Failure ->
-                    _add.update { it.copy(submitting = false, error = result.message) }
+                // 가까운 출발·도착 같은 필드 오류는 그 줄 아래에, 나머지는 맨 아래에.
+                is EventRepository.Result.Failure -> {
+                    val errors = endpointErrorsOf(result)
+                    _add.update {
+                        it.copy(
+                            submitting = false,
+                            error = errors.general,
+                            originError = errors.origin,
+                            destinationError = errors.destination,
+                        )
+                    }
+                }
             }
         }
     }
@@ -2573,17 +2652,27 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      *
      * **[minutes] 를 비워 둔 채 시작한다.** "30" 을 미리 채우면 대부분이 그대로
      * 저장하고 넘어가서 묻는 의미가 없어진다. 지금까지 전원이 30분이던 이유가
-     * 정확히 그것이다. 빠른 선택 버튼으로 손은 덜게 하되, 값은 반드시 사용자가
-     * 고른 것이어야 한다.
+     * 정확히 그것이다. 시계 다이얼은 값이 없으면 0:00 에서 열린다 — 제안값이 아니고,
+     * 범위 밖이라 그대로 확인할 수 없다. 값은 반드시 사용자가 고른 것이어야 한다.
+     *
+     * (Partly AI-generated (Claude): [fromSettings], [range])
      */
     data class PrepOnboardingState(
         val minutes: String = "",
         val submitting: Boolean = false,
         val error: String? = null,
         val done: Boolean = false,
+        /**
+         * 설정(⑯)에서 고치러 들어왔는가. 버튼이 "저장" 이 되고 "나중에 입력" 이 숨는다.
+         * 뒤로 = 저장하지 않고 닫기다.
+         */
+        val fromSettings: Boolean = false,
     ) {
+        /** 다이얼이 받아들이는 범위(분). R-6 으로 서버와 맞출 때까지 앱 상수다. */
+        val range: IntRange get() = PREP_MIN..PREP_MAX
+
         /** 범위를 벗어난 값은 없는 것으로 본다. 5분 미만·4시간 초과는 입력 실수다. */
-        val parsed: Int? get() = minutes.toIntOrNull()?.takeIf { it in PREP_MIN..PREP_MAX }
+        val parsed: Int? get() = minutes.toIntOrNull()?.takeIf { it in range }
         val canSubmit: Boolean get() = !submitting && parsed != null
     }
 
@@ -2599,6 +2688,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun openPrepOnboarding() {
         _prepOnboarding.value = PrepOnboardingState(
             minutes = _state.value.onboardingPrepMin?.toString().orEmpty(),
+            fromSettings = true,
         )
         _nav.update { it.copy(stack = it.stack + AppRoute.PrepOnboarding, forward = true) }
     }
@@ -2607,20 +2697,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _prepOnboarding.value = PrepOnboardingState()
     }
 
+    /** 다이얼에서 고른 합계(분)를 받는다. 범위 판정은 [PrepOnboardingState.parsed] 가 한다. */
     fun onPrepOnboardingChange(v: String) =
         _prepOnboarding.update { it.copy(minutes = v.filter(Char::isDigit).take(3), error = null) }
-
-    /**
-     * ± 버튼. 값이 비어 있으면 [PREP_SEED] 에서 시작한다.
-     *
-     * 비었을 때 아무 일도 안 하게 두면 버튼이 고장난 것처럼 보인다. 그렇다고
-     * 처음부터 채워 두면 그 값이 기준점이 되어 버려서, 누르는 순간에만 기준을
-     * 만든다.
-     */
-    fun onPrepOnboardingStep(delta: Int) = _prepOnboarding.update {
-        val base = it.minutes.toIntOrNull() ?: PREP_SEED
-        it.copy(minutes = (base + delta).coerceIn(PREP_MIN, PREP_MAX).toString(), error = null)
-    }
 
     fun submitPrepOnboarding() {
         val minutes = _prepOnboarding.value.parsed ?: return
@@ -2690,6 +2769,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // `refresh()` 가 띄운 코루틴 안에서만 불리고, 코루틴 본문은 생성자가
         // 끝난 뒤에 돈다. **동기 호출로 바꾸면 그때 깨진다** — 근거는
         // `HomeViewModelInitOrderTest` 에 있다.
+        if (pending.contains(AppRoute.PrepOnboarding)) {
+            // 설정에서 열었다가 시스템 뒤로 나간 상태(fromSettings = true)가 남아 있으면
+            // 온보딩에서 "나중에 입력" 이 사라진다. 온보딩으로 열 때는 새로 시작한다.
+            _prepOnboarding.value = PrepOnboardingState()
+        }
         if (pending.contains(AppRoute.HomeSetup)) {
             _homeSetup.value = HomeSetupState(onboarding = true)
             // 이 경로는 openHomeSetup() 을 거치지 않고 스택에 직접 넣는다.
@@ -2858,9 +2942,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /** 준비 시간으로 받아들이는 범위(분). 밖의 값은 입력 실수로 본다. */
         const val PREP_MIN = 5
         const val PREP_MAX = 240
-
-        /** ± 버튼을 빈 칸에서 처음 눌렀을 때의 기준점(분). */
-        const val PREP_SEED = 30
 
         /**
          * 블록 **정의**를 고쳤을 때의 안내.

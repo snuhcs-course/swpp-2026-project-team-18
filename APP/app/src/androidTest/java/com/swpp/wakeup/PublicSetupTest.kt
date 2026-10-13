@@ -7,6 +7,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.Until
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
 import java.io.File
@@ -59,35 +60,39 @@ class PublicSetupTest {
                 searchHomePlace(config.getString("home_query"))
                 capture("02_home_address")
                 click(By.res("home_setup_submit"), "home_setup_scroll")
-                find(By.res("prep_minutes"), timeout = 90_000)
+                find(By.res("prep_value"), timeout = 90_000)
             }
+            // Partly AI-generated (Claude)
             step("03_prep_setup") {
+                // 준비 시간은 시계 다이얼(24시간제, 시:분 = 걸리는 시간)로만 고른다(Phase A, A4).
                 val prep = config.getInt("prep_minutes")
                 val changedPrep = if (prep == 15) 30 else 15
-                assertEquals("", ui.text(By.res("prep_minutes")))
-                input("prep_minutes", prep.toString())
+                assertPrepValue("—") // 값을 미리 채우지 않는다.
+                pickDuration(prep)
                 click(By.res("prep_submit"))
                 find(By.res("home_list"), timeout = 90_000)
                 click(By.res("open_settings"), "home_list")
-                find(By.text("${prep}분"), "settings_scroll")
+                find(By.text(durationText(prep)), "settings_scroll")
                 click(By.text("평소 준비 시간"), "settings_scroll")
-                assertEquals(prep.toString(), ui.text(By.res("prep_minutes")))
-                input("prep_minutes", changedPrep.toString())
+                assertPrepValue(durationText(prep))
+                pickDuration(changedPrep)
                 click(By.res("prep_submit"))
                 find(By.res("settings_scroll"), timeout = 90_000)
-                find(By.text("${changedPrep}분"), "settings_scroll", 90_000)
+                find(By.text(durationText(changedPrep)), "settings_scroll", 90_000)
                 click(By.text("평소 준비 시간"), "settings_scroll")
-                assertEquals(changedPrep.toString(), ui.text(By.res("prep_minutes")))
-                input("prep_minutes", prep.toString())
-                click(By.text("나중에 입력"))
+                assertPrepValue(durationText(changedPrep))
+                // 설정에서 연 화면에는 "나중에 입력" 이 없다. 뒤로 = 저장하지 않고 닫기.
+                assertFalse("설정에서 연 화면에 나중에 입력이 있음", device.hasObject(By.text("나중에 입력")))
+                pickDuration(prep)
+                device.pressBack()
                 find(By.res("settings_scroll"))
-                find(By.text("${changedPrep}분"), "settings_scroll")
+                find(By.text(durationText(changedPrep)), "settings_scroll")
                 click(By.text("평소 준비 시간"), "settings_scroll")
-                assertEquals(changedPrep.toString(), ui.text(By.res("prep_minutes")))
-                input("prep_minutes", prep.toString())
+                assertPrepValue(durationText(changedPrep))
+                pickDuration(prep)
                 click(By.res("prep_submit"))
                 find(By.res("settings_scroll"), timeout = 90_000)
-                find(By.text("${prep}분"), "settings_scroll", 90_000)
+                find(By.text(durationText(prep)), "settings_scroll", 90_000)
                 capture("03_prep_settings")
                 device.pressBack()
             }
@@ -130,14 +135,18 @@ class PublicSetupTest {
                 click(By.textContains("경로 고르기"), "add_event_scroll")
                 click(By.text("도보"), "route_scroll", 90_000)
                 click(By.res("route_${config.getString("route_key")}"), "route_scroll", 90_000)
+                // 좌표가 있는 도보 카드는 누르면 전체 화면 지도 미리보기가 열린다(Phase A, A1).
+                // 좌표가 없는 응답이면 목록에서 고르기만 된다.
+                val previewed = device.wait(Until.hasObject(By.res("route_preview_confirm")), 15_000) == true
                 if (config.optBoolean("replay_routing")) {
-                    find(By.textContains("걸음"), "route_scroll")
-                    find(By.textContains("거리 기반 추정"), "route_scroll")
-                    find(By.res("candidate_route_map"), "route_scroll")
-                    find(By.desc("경로 지도"), "route_scroll", 90_000)
+                    assertTrue("재생 도보 경로에 지도 미리보기가 열리지 않음", previewed)
+                    find(By.res("candidate_route_map"))
+                    find(By.desc("경로 지도"), timeout = 90_000)
+                    find(By.textContains("걸음"))
+                    find(By.textContains("거리 기반 추정"))
                     capture("05_walk_candidate")
                 }
-                click(By.res("route_confirm"), "route_scroll")
+                if (previewed) click(By.res("route_preview_confirm")) else click(By.res("route_confirm"), "route_scroll")
                 if (config.optBoolean("replay_routing")) {
                     click(By.text("수업"), "add_event_scroll")
                     click(By.text("시험"))
@@ -160,7 +169,7 @@ class PublicSetupTest {
                 find(By.res("next_alarm"), timeout = 90_000) // 토큰으로 자동 로그인.
                 click(By.res("open_settings"), "home_list")
                 find(By.text(config.getString("home_query")), "settings_scroll")
-                find(By.text("${config.getInt("prep_minutes")}분"), "settings_scroll")
+                find(By.text(durationText(config.getInt("prep_minutes"))), "settings_scroll")
                 click(By.text("로그아웃"), "settings_scroll")
                 input("login_email", config.getString("email"), timeout = 90_000)
                 input("login_password", config.getString("password"))
@@ -199,9 +208,43 @@ class PublicSetupTest {
         click(By.text(Pattern.compile(if (hour >= 12) "PM|오후" else "AM|오전")))
         val clockHour = if (hour % 12 == 0) 12 else hour % 12
         click(By.desc(Pattern.compile("$clockHour (hours?|o'clock)|${clockHour}시")))
+        dragMinute(minute, "05_time_picker")
+    }
+
+    // AI-generated (Claude)
+    /**
+     * 준비 시간 다이얼(24시간제, 시:분 = 걸리는 시간)에서 [minutes] 를 고르고 확인한다.
+     * 오전/오후 버튼이 없고 시 설명은 0~23 이다("0 hours" / "0시").
+     */
+    private fun pickDuration(minutes: Int) {
+        click(By.res("prep_value"))
+        val hour = minutes / 60
+        click(By.desc(Pattern.compile("$hour (hours?|o'clock)|${hour}시(간)?")))
+        dragMinute(minutes % 60, "03_duration_picker")
+        find(By.text("총 ${durationText(minutes)}"))
+        click(By.text("확인"))
+    }
+
+    // AI-generated (Claude)
+    /** 준비 시간 칸의 표시값. 값이 없으면 "—" 다. */
+    private fun assertPrepValue(display: String) {
+        assertTrue("준비 시간 표시가 $display 가 아님",
+            ui.withNode(By.res("prep_value")) { it.findObject(By.text(display)) != null })
+    }
+
+    // AI-generated (Claude)
+    /** 앱의 준비 시간 표기와 같다. 35 → "35분", 120 → "2시간", 65 → "1시간 5분" */
+    private fun durationText(minutes: Int): String = when {
+        minutes < 60 -> "${minutes}분"
+        minutes % 60 == 0 -> "${minutes / 60}시간"
+        else -> "${minutes / 60}시간 ${minutes % 60}분"
+    }
+
+    /** 분 다이얼에서 [minute] 를 1분 단위로 고른다. 시는 이미 고른 상태다. */
+    private fun dragMinute(minute: Int, shot: String) {
         // 현재 시각과 같으면 상단 시 표시를 누를 수 있으므로 분 선택을 명시한다.
         click(By.desc(Pattern.compile("Select minutes|분 선택")))
-        capture("05_time_picker")
+        capture(shot)
         val zero = By.desc(Pattern.compile("0 minutes?|0분"))
         val thirty = By.desc(Pattern.compile("30 minutes?|30분"))
         find(zero)
