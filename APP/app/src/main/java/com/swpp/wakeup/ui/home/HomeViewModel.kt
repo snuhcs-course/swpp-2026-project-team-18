@@ -829,6 +829,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 구조가 있지만 한 주는 표본이 적어 대개 "표본 부족" 이 된다. 모델이
      * 과신하는지는 긴 창으로 봐야 알 수 있어서 둘을 함께 받는다.
      */
+    // Partly AI-generated (Claude)
     data class ReportState(
         val loading: Boolean = true,
         val error: String? = null,
@@ -836,48 +837,52 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val longTerm: CalibrationView? = null,
         /** 보고 있는 주. null 이면 지난 주 */
         val week: LocalDate? = null,
+        /** 홈에서 리포트를 연 횟수. 바뀌면 ⑧ 이 맨 위로 스크롤한다(⑨ 에서 돌아올 때는 그대로) */
+        val openCount: Int = 0,
     ) {
         val hasData: Boolean get() = weekly != null
     }
 
-    private val _report = MutableStateFlow(ReportState())
-    val report: StateFlow<ReportState> = _report.asStateFlow()
+    // Partly AI-generated (Claude)
+    /**
+     * ⑧ 의 상태와 주 이동 규칙(실패 시 주 되돌림, "›" 가드, [ReportState.openCount]).
+     * 규칙은 [ReportWeekNavigator] 에 있다 — `HomeViewModel` 은 JVM 테스트로 만들 수 없어서다.
+     */
+    private val reportNavigator = ReportWeekNavigator(
+        scope = viewModelScope,
+        weekly = { week -> reports.weekly(week) },
+        calibration = { reports.calibration() },
+        onCalibrationFailure = { Log.w(TAG, "전체 캘리브레이션 조회 실패: $it") },
+    )
+    val report: StateFlow<ReportState> = reportNavigator.state
 
+    // Partly AI-generated (Claude)
+    /** ⑧ 을 연다. 마지막으로 본 주를 다시 연다(처음은 지난 주). */
     fun openReport() {
         _nav.update { it.copy(stack = it.stack + AppRoute.WeeklyReport, forward = true) }
-        loadReport(_report.value.week)
+        reportNavigator.open()
     }
 
-    fun loadReport(week: LocalDate? = null) {
-        _report.update { it.copy(loading = true, error = null, week = week) }
-        viewModelScope.launch {
-            when (val result = reports.weekly(week)) {
-                is ReportRepository.ReportResult.Success -> _report.update {
-                    it.copy(loading = false, error = null, weekly = result.data)
-                }
-
-                is ReportRepository.ReportResult.Failure -> _report.update {
-                    it.copy(loading = false, error = result.message)
-                }
-            }
-
-            // 긴 창 캘리브레이션은 실패해도 화면을 막지 않는다. 주간 리포트만
-            // 있어도 볼 것이 있다.
-            when (val long = reports.calibration()) {
-                is ReportRepository.ReportResult.Success ->
-                    _report.update { it.copy(longTerm = long.data) }
-
-                is ReportRepository.ReportResult.Failure ->
-                    Log.w(TAG, "전체 캘리브레이션 조회 실패: ${long.message}")
-            }
+    // AI-generated (Claude)
+    /** ⑨ 상세 리포트. ⑧ 이 이미 받은 주간 응답을 보므로 새로 부르지 않는다. */
+    fun openReportDay(date: LocalDate, eventId: Long?) {
+        _nav.update {
+            it.copy(stack = it.stack + AppRoute.ReportDay(date, eventId), forward = true)
         }
     }
 
-    /** 한 주 앞뒤로 이동한다. 기준이 없으면 지난 주에서 출발한다. */
-    fun shiftReportWeek(weeks: Long) {
-        val base = _report.value.week ?: LocalDate.now().minusWeeks(1)
-        loadReport(base.plusWeeks(weeks))
-    }
+    // Partly AI-generated (Claude)
+    /** [week] 주를 불러온다. 실패하면 보이던 주로 되돌린다([ReportWeekNavigator]). */
+    fun loadReport(week: LocalDate? = null) = reportNavigator.load(week)
+
+    // Partly AI-generated (Claude)
+    /**
+     * 한 주 앞뒤로 이동한다. 기준은 보고 있는 주, 없으면 지난 주다.
+     *
+     * 다음 주로는 서버가 허락할 때만 간다(`has_next_week`). 이번 주까지 가고 미래
+     * 주는 못 간다 — 화면이 "›" 를 끄지만 여기서도 막는다.
+     */
+    fun shiftReportWeek(weeks: Long) = reportNavigator.shift(weeks)
 
     // --- 캘린더 가져오기 --------------------------------------------------
 

@@ -425,9 +425,21 @@ fun HomeSetupScreen(
 
 // ---------------------------------------------------------------------------
 
+// Partly AI-generated (Claude)
+/**
+ * 하위 화면 머리. [trailing] 이 있으면 오른쪽 끝에 붙인다(상세 리포트의 "10월 6일").
+ */
 @Composable
-internal fun ScreenHeader(title: String, onBack: () -> Unit, enabled: Boolean = true) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+internal fun ScreenHeader(
+    title: String,
+    onBack: () -> Unit,
+    enabled: Boolean = true,
+    trailing: String? = null,
+) {
+    Row(
+        modifier = if (trailing != null) Modifier.fillMaxWidth() else Modifier,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(
             text = "‹",
             color = JitColor.TextPrimary,
@@ -445,6 +457,10 @@ internal fun ScreenHeader(title: String, onBack: () -> Unit, enabled: Boolean = 
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
         )
+        if (trailing != null) {
+            Spacer(Modifier.weight(1f))
+            Text(text = trailing, color = JitColor.TextSecondary, fontSize = 13.sp)
+        }
     }
 }
 

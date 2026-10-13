@@ -19,6 +19,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
@@ -69,6 +70,7 @@ import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.places.MapPickScreen
+import com.swpp.wakeup.ui.report.ReportDayScreen
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
 import com.swpp.wakeup.ui.settings.SettingsScreen
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
@@ -188,6 +190,15 @@ private fun MainHost(
     val importState by viewModel.calendarImport.collectAsStateWithLifecycle()
     val reportState by viewModel.report.collectAsStateWithLifecycle()
     val morningSession by viewModel.morning.collectAsStateWithLifecycle()
+
+    // Partly AI-generated (Claude)
+    // ⑧ 의 스크롤 위치. 화면 전환(AnimatedContent)이 ⑧ 을 컴포지션에서 빼므로 화면 안에
+    // 두면 ⑨ 에서 돌아올 때마다 맨 위로 튄다. 여기 두고 넘긴다. 주가 바뀌거나 홈에서
+    // 새로 열면 맨 위로 보낸다.
+    val reportScroll = rememberScrollState()
+    LaunchedEffect(reportState.weekly?.weekStart, reportState.openCount) {
+        reportScroll.scrollTo(0)
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -626,6 +637,18 @@ private fun MainHost(
                     onPreviousWeek = { viewModel.shiftReportWeek(-1) },
                     onNextWeek = { viewModel.shiftReportWeek(1) },
                     onRetry = { viewModel.loadReport(reportState.week) },
+                    onOpenDay = viewModel::openReportDay,
+                    modifier = Modifier.padding(innerPadding),
+                    scrollState = reportScroll,
+                )
+
+                // Partly AI-generated (Claude)
+                is AppRoute.ReportDay -> ReportDayScreen(
+                    report = reportState.weekly,
+                    longTerm = reportState.longTerm,
+                    date = route.date,
+                    initialEventId = route.eventId,
+                    onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                 )
 

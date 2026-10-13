@@ -156,7 +156,10 @@ class DemoFlowTest {
                 device.pressBack()
                 ui.click(By.res("open_report"), "home_list")
                 ui.click(By.res("report_next_week"))
-                find(By.text("1 / 1건"), timeout = 45_000)
+                // Partly AI-generated (Claude)
+                // ⑧ 왼쪽 타일: 큰 값 "정시/도착 기록" + 아래 "정시 도착 N%" (Phase B).
+                // 진행 중인 이번 주라 요약은 템플릿이다(LLM 을 부르지 않는다).
+                find(By.text("1/1"), timeout = 45_000)
                 assertTrue(device.hasObject(By.text("정시 도착 100%")))
             }
             writeResult("passed")

@@ -2,6 +2,7 @@ package com.swpp.wakeup.data.remote
 
 import com.google.gson.Gson
 import com.swpp.wakeup.data.repository.toOption
+import com.swpp.wakeup.data.repository.toView
 import com.swpp.wakeup.sensing.GeoPoint
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -293,6 +294,95 @@ class NetworkDtoNullSafetyTest {
 
         // 폭 0 인 칸은 색만 한 줄 끼어 경계선처럼 보인다.
         assertTrue(option.segments.items.size == 1)
+    }
+
+    // --- 주간 리포트 (Phase B) -------------------------------------------------
+
+    private val seoul = java.time.ZoneId.of("Asia/Seoul")
+
+    private fun weekly(json: String) =
+        gson.fromJson(json, WeeklyReportDto::class.java).toView(seoul)
+
+    // AI-generated (Claude)
+    @Test
+    fun `빈 주간 리포트 응답도 화면까지 터지지 않는다`() {
+        // weekStart·weekEnd 에 기본값이 없던 때는 Gson 이 생성자를 건너뛰어 목록 필드가
+        // null 이 됐다. 지금은 전부 기본값이라 무인자 생성자를 쓴다.
+        val view = weekly("{}")
+        assertEquals("—", view.rangeLabel)
+        assertTrue(view.days.isEmpty())
+        assertTrue(view.lateDays.isEmpty())
+        assertNull(view.summary)
+        assertTrue(view.canGoNext)
+
+        val withEmptyOutcome = weekly("""{"outcomes":[{}]}""")
+        assertTrue(withEmptyOutcome.days.isEmpty())
+
+        val dated = weekly("""{"week_start":"2026-10-05","week_end":"2026-10-11","outcomes":[{}]}""")
+        assertEquals(7, dated.days.size)
+        assertTrue("날짜가 없는 일정은 칸에 넣지 않는다", dated.days.all { it.outcomes.isEmpty() })
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `목록·객체 키가 null 이어도 견딘다`() {
+        val view = weekly(
+            """{"week_start":"2026-10-05","week_end":"2026-10-11","by_weekday":null,
+                "late_causes":null,"primary_counts":null,"previous_week":null,
+                "deviation":{"prep_over":null,"depart_late":null,"travel_over":null},
+                "learning":null,"outcomes":null,
+                "calibration":{"buckets":null,"verdict":null}}"""
+        )
+        assertTrue(view.days.isEmpty())
+        assertEquals(listOf("측정 안 됨", "측정 안 됨", "측정 안 됨"), view.deviations.map { it.valueLabel })
+
+        val calibration = gson.fromJson(
+            """{"buckets":null,"verdict":null,"scored_count":null}""",
+            CalibrationDto::class.java,
+        ).toView()
+        assertTrue(calibration.points.isEmpty())
+        assertEquals(CalibrationDto.VERDICT_INSUFFICIENT, calibration.verdict)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `일정별 결과의 수가 null 이면 0 으로 보이지 않는다`() {
+        // Int = 0 으로 두면 Gson 이 JSON null 을 원시형에 넣지 않고 0 을 남겨
+        // "정시 확률 0%"·"계획 0분" 이 된다(측정 못 한 값은 0 이 아니다).
+        val view = weekly(
+            """{"week_start":"2026-10-05","week_end":"2026-10-11","event_count":1,
+                "unobserved_count":1,"outcomes":[
+                  {"event":1,"date":"2026-10-05","result":"unobserved","prep_applies":true,
+                   "on_time_probability":null,"tau":null,"slack_minutes":null,
+                   "planned":{"prep_minutes":null,"travel_minutes":null,"buffer_minutes":null},
+                   "actual":{"prep_minutes":null},"deviation":{"prep_over":null}}]}"""
+        )
+        val morning = view.days[0].outcomes.single()
+        assertNull(morning.confidenceLine)
+        val texts = buildList {
+            add(morning.headline)
+            add(morning.contextLine)
+            morning.rows.forEach { add(it.plannedLabel); add(it.actualLabel.orEmpty()); add(it.deltaLabel) }
+            add(view.days[0].valueLabel)
+        }
+        assertTrue("0 이 새어 나왔다: $texts", texts.none { "0%" in it || "0분" in it })
+        assertEquals("계획 없음", morning.rows[0].plannedLabel)
+        assertEquals("측정 안 됨", morning.rows[0].deltaLabel)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `새 DTO 들은 키가 없어도 읽힌다`() {
+        val outcome = gson.fromJson("{}", OutcomeDto::class.java)
+        assertNull(outcome.event)
+        assertNull(outcome.onTimeProbability)
+        assertNull(outcome.planned)
+        assertNull(outcome.unmeasured)
+        assertNull(gson.fromJson("{}", PlannedDto::class.java).prepMinutes)
+        assertEquals(0, gson.fromJson("{}", LearningDto::class.java).planCount)
+        assertEquals(0, gson.fromJson("{}", DeviationStatDto::class.java).count)
+        assertNull(gson.fromJson("{}", PreviousWeekDto::class.java).onTimeRateChangePp)
+        assertNull(gson.fromJson("{}", WeeklyDeviationDto::class.java).travelOver)
     }
 }
 
