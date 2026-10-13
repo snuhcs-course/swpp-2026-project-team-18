@@ -11,6 +11,7 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 | R-5 | 알람 계획 요약에서 걸음·kcal 제외 (선택) | 낮음 | 서버 문구 그대로 표시 중 |
 | R-6 | `onboarding_prep_min` 범위 검증 | 보통 | 앱에만 5~240 |
 | R-7 | 가까운 출발·도착 오류 코드 고정 (선택) | 낮음 | `details.destination` 으로 판단 중 |
+| R-8 | 회원가입 요청 빈도 제한 (Phase C) | 보통 | 바꿀 것 없음 |
 
 ## R-1. 이동 보정에 쓴 기록 수
 
@@ -53,3 +54,10 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 
 - 지금(`710545a`): `ValidationError` 라 `error.code` 가 DRF 기본값 `"invalid"` 이다. 앱은 `details.destination` 이 있는지로 판단한다.
 - 요청: `error.code` 를 `"endpoints_too_close"` 같은 고정 값으로. `details.destination` 과 메시지는 지금처럼 유지. 없어도 앱은 동작한다.
+
+## R-8. 회원가입 요청 빈도 제한 (Phase C)
+
+- 지금: `POST /api/auth/register` 에 throttle 이 없다. 비밀번호 검사(`password_check`)에만 있다.
+- 문제: 스크립트로 계정을 계속 만들 수 있다. 계정마다 LLM 사용자 하루 상한 30회가 새로 생기고(Phase B 리뷰 2번) 행도 쌓인다. Phase C 는 LLM 전체 하루 상한(`db-schema.md` A5)으로 비용만 막는다.
+- 요청: `ScopedRateThrottle` scope `register`(예: IP 당 시간 10회). 넘으면 429 와 한국어 메시지. 값은 백엔드가 정한다.
+- 앱: 429 일 때 보이는 문구만 프론트가 확인한다.
