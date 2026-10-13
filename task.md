@@ -129,6 +129,24 @@ Figma: "얼마나 안전하게 갈까?" / "지각하지 않을 확률 선택" �
 
 ---
 
+## 8·9. 주간 리포트 (Figma node 1:137) · 상세 리포트 (16:2) — `ui/report/`
+
+설계: `docs/iter2/report-design.md`(Phase B, 리뷰 반영). Figma 반영 명세는 `docs/iter2/figma-changes.md` F-10 ~ F-13.
+
+### 🔴 백엔드 (이 브랜치에서 구현, 백엔드 담당에게 PR 로 공유)
+- [x] `GET /api/reports/weekly` 확장: `outcomes`(일정별 계획 대비 실제·원인·τ 구간·알람 여부), `deviation`, `learning`, `previous_week`, `target_rate`·`target_met`, `week_complete`·`has_next_week`. 좌표·장소·주소는 내리지 않는다.
+- [x] 주간 캘리브레이션이 그 뒤 주의 일정까지 세던 결함 수정. 주 경계는 끝을 포함하지 않는다.
+- [x] 줄글 요약 `summary`·`summary_source`(`llm`/`template`). 집계 수치만 OpenAI 호환 API 로 보내고, 키가 없거나 실패·시간 초과·검사 실패면 같은 수치로 만든 고정 문장. LLM 문장은 `WeeklySummary` 에 저장(수치가 바뀌면 다시 만듦). `OPENAI_BASE_URL` 설정 추가.
+- [ ] ⏳ 학교 키·주소를 받으면 `.env`·Render 대시보드에 넣고 `python manage.py probe_report_summary` 한 번.
+
+### 🟢 프론트
+- [x] ⑧: 주간 요약 카드(AI 요약 표시·진행 중 칩) → 정시/평소 도착 타일 → 측정 공백 안내 → 요일별 도착(위 일찍·아래 늦게) → 지각한 날 → 계획 대비 실제 평균·기록 반영 → 예측 검증 90일. 이 주 캘리브레이션 카드·요일별 지각 비율·원인 카드는 뺐다.
+- [x] ⑨ `ReportDayScreen`: 요일 칸·지각한 날 줄에서 진입, 일정 칩, 결과 카드(지각 `SurfaceDanger`), 준비·출발·이동·도착 계획 대비 실제, 원인 분석, τ 구간 표. 뒤로 가면 ⑧ 의 주·스크롤 그대로.
+- [x] 빈·적은 데이터: "측정 안 됨"·"기록 없음"·"표본 부족". "학습 중" 없음. 구버전 서버(0.10.0)는 요약·요일·지각한 날·계획 대비 실제를 숨긴다.
+- 뺀 것(재료 없음): 수면, 알람 수락·스누즈, 기상 지연, 요일별 자동 조정·"도입 전 정시율", 취침 알림 버튼.
+
+---
+
 ## 12. 일정 추가 (Figma node 80:2) — `ui/events/AddEventScreen.kt`, `HomeViewModel.AddState`
 
 Figma 순서: "‹ 일정 추가" → "무슨 일정인가?" / "도착 시각에서 거꾸로 계산해 알람을 정함" → 일정 제목 → 날짜 → **반복** → 시작 시각 → **출발지 [집][검색]** → **도착지 [집][검색]** → 경로 "경로 고르기 ›" → 종류 → "일정 추가".
