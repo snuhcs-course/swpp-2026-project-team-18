@@ -163,7 +163,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements/dev.txt
 test -f .env || cp .env.example .env  # Create the template only when .env does not exist
-python -m pytest                   # 717 tests — in-memory SQLite, no keys needed
+python -m pytest                   # 865 tests — in-memory SQLite, no keys needed
 ```
 
 For platform instructions and `.env` setup, see the [backend run guide](backend/README.md).
@@ -267,10 +267,24 @@ Three suites run locally and in CI on every push to `main` and every pull reques
 ([`ci.yml`](.github/workflows/ci.yml)). CI uses no secrets.
 
 ```bash
-cd backend && python -m pytest                      # 717 unit tests
+cd backend && python -m pytest                      # 865 unit tests
 cd backend && python scripts/run_local_suite.py     # 8 HTTP suites against a live local server
-cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 487 unit tests + lint + build
+cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 529 unit tests + lint + build
 ```
+
+CI also measures line coverage and prints a per-layer table in the job summary; the
+HTML reports are uploaded as the `backend-coverage` and `app-coverage` artifacts.
+To get the same numbers locally:
+
+```bash
+cd backend && python -m pytest --cov --cov-report=html --cov-report=json && python scripts/coverage_summary.py
+cd APP     && ./gradlew jacocoDebugUnitTestReport && python3 scripts/coverage_summary.py
+```
+
+Excluded from coverage: tests, migrations and seed commands on the server
+([`.coveragerc`](backend/.coveragerc)); generated code (R, BuildConfig, Room `*_Impl`,
+`ComposableSingletons`), `ui/theme` and the app entry points in the app
+(`coverageExcludes` in [`app/build.gradle.kts`](APP/app/build.gradle.kts)).
 
 The middle one is the unusual part. `scripts/check_*.py` drive a **running** Django
 server over HTTP, which catches what the Django test client does not: a URL that was

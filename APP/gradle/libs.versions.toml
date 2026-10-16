@@ -14,6 +14,8 @@ lifecycle = "2.9.2"
 coroutines = "1.9.0"
 retrofit = "2.11.0"
 okhttpLogging = "4.12.0"
+# 커버리지. JDK 25(Gradle 데몬) 클래스 파일을 읽으려면 0.8.14 이상.
+jacoco = "0.8.14"
 # --- Compose ---
 # AGP 9.3.2 가 내장한 Kotlin 버전. `gradlew buildEnvironment` 의 kotlin-stdlib
 # 해결 결과로 확인했다. Compose 컴파일러 플러그인과 반드시 일치해야 하며,

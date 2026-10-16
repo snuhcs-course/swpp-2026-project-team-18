@@ -1,0 +1,30 @@
+; 백엔드 커버리지 설정. pytest-cov 가 읽는다.
+;
+; 실행:
+;   cd backend
+;   python -m pytest --cov --cov-report=term --cov-report=html --cov-report=json
+;   python scripts/coverage_summary.py          # 컴포넌트별 표
+;
+; 무엇을 빼는가 — 숫자가 "우리가 쓴 서버 코드 중 테스트가 닿은 비율" 이 되게 한다.
+;   tests/      테스트 자체. 넣으면 100% 짜리 파일이 평균을 끌어올린다.
+;   migrations/ makemigrations 가 만든 코드.
+;   seed_*      개발용 가짜 데이터 명령. 서비스 경로가 아니다.
+; train_models 는 빼지 않는다. 매일 돌아야 하는 운영 코드다.
+
+[run]
+source = apps
+omit =
+    */tests/*
+    */migrations/*
+    */management/commands/seed_*.py
+
+[report]
+; 줄 커버리지. 앱(JaCoCo LINE)과 같은 기준으로 비교한다.
+skip_empty = true
+precision = 1
+
+[html]
+directory = htmlcov
+
+[json]
+output = coverage.json

@@ -66,8 +66,26 @@ jobs:
       # config/settings/test.py 가 DB 를 메모리 SQLite 로 고정하고 외부 API 키를
       # 빈 문자열로 덮는다. 그래서 환경변수를 하나도 주지 않는다 — 실수로 공용
       # DB 나 실제 키를 쓰게 되는 경로를 아예 만들지 않는 것이다.
-      - name: pytest
-        run: python -m pytest
+      #
+      # 커버리지를 함께 잰다(.coveragerc). 테스트 문서(Wiki)의 "계층별 목표 vs
+      # 실제" 표는 이 잡의 요약을 옮긴 것이다. 로컬에서 같은 숫자를 보려면 같은
+      # 두 명령을 돌린다.
+      - name: pytest · 커버리지
+        run: python -m pytest --cov --cov-report=term --cov-report=html --cov-report=json
+
+      - name: 커버리지 요약
+        run: |
+          echo "## 백엔드 줄 커버리지" >> "$GITHUB_STEP_SUMMARY"
+          python scripts/coverage_summary.py >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 커버리지 리포트 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/htmlcov/
+          retention-days: 14
+          if-no-files-found: ignore
 
   # =========================================================================
   # 앱-서버 계약 검사 (살아 있는 서버 상대)
@@ -145,10 +163,28 @@ jobs:
       # 57건이고, 처음부터 노란불이 섞이면 아무도 보지 않는다. 오류 쪽은
       # MissingPermission·WrongThread 처럼 실제 크래시가 되는 것들이라 막을
       # 가치가 있다(실제로 3건을 이 검사로 찾아 고쳤다).
-      - name: 단위 테스트 · lint · 디버그 빌드
+      #
+      # jacocoDebugUnitTestReport 가 testDebugUnitTest 를 돌리고 커버리지 리포트를
+      # 만든다(app/build.gradle.kts). 테스트를 두 번 돌리지 않는다.
+      - name: 단위 테스트 · 커버리지 · lint · 디버그 빌드
         run: >-
-          ./gradlew testDebugUnitTest lintDebug assembleDebug --console=plain
+          ./gradlew testDebugUnitTest jacocoDebugUnitTestReport lintDebug assembleDebug --console=plain
           -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
+
+      # 리포트가 비어 있으면(클래스 경로가 틀림) 이 단계가 실패한다.
+      - name: 커버리지 요약
+        run: |
+          echo "## 앱 줄 커버리지 (JVM 단위 테스트)" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/coverage_summary.py >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 커버리지 리포트 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-coverage
+          path: APP/app/build/reports/jacoco/
+          retention-days: 14
+          if-no-files-found: ignore
 
       # 실패했을 때 어느 테스트가 깨졌는지 보려면 리포트가 필요하다. 로그만
       # 보고는 Compose·Gradle 출력에 묻힌다.
