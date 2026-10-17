@@ -20,6 +20,9 @@
     실제 이동(분)  arrive − depart
     실제 준비 초과 실제 출발 − 계획 출발마감(depart_by)
 
+수치는 저장하지 않는다. 저장하는 것은 LLM 이 쓴 요약 문장뿐이고 그건
+`summary.py`·`models.WeeklySummary` 의 몫이다. 이 모듈은 순수 계산이다.
+
 ## 지각 원인 분해에서 무엇을 말할 수 있고 무엇은 말할 수 없는가
 
     travel_over   실제 이동 − 계획 이동      출발·도착 관측이 둘 다 있을 때
@@ -34,19 +37,28 @@
 `depart_late` 와 `prep_over` 는 겹친다 — 준비가 늦으면 출발도 늦는다. 그래서
 블록 관측이 있으면 `prep_over` 를 쓰고, 없으면 `depart_late` 로 "집에서 늦게
 나섰다" 까지만 말한다. 둘을 더하지 않는다.
+
+집에서 출발하지 않는 일정(`prep_source == not_from_home`)은 준비 단계가 **해당되지
+않는다.** 그 일정의 `prep_over` 는 None 이지만 "측정 못 함" 으로 세지 않는다.
 """
 
 from __future__ import annotations
 
+import math
 import statistics
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from datetime import timezone as dt_timezone
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Prefetch
 from django.utils import timezone
 
+from apps.events.alarms import alarm_states
 from apps.events.models import Event
 from apps.observations.models import TripObservation
+from apps.planning.estimators import PREP_SOURCE_NOT_FROM_HOME
+from apps.planning.models import AlarmPlan
 from apps.routines.models import BlockObservation
 
 # 캘리브레이션 버킷 폭. back-spec 5.8 이 0.05 로 정했다.
@@ -65,6 +77,50 @@ MIN_BUCKET_SAMPLES = 3
 
 # 리포트가 다루는 과거 범위. 이보다 오래된 관측은 루틴이 달라져 있다.
 DEFAULT_LOOKBACK_DAYS = 90
+
+# Partly AI-generated (Claude)
+# 주간 정시율로 "목표 달성"·"지난주 대비" 를 말하려면 필요한 도착 기록 수.
+# 버킷 신뢰 기준과 같은 수를 쓴다 — 같은 3건을 두고 캘리브레이션은 보류하는데
+# 주간 판정은 내리면 같은 화면의 두 카드가 서로 다른 말을 한다. 요약 템플릿의
+# "기록 적음" 문장과 LLM 허용 기준도 이 값이다(summary.py).
+THIN_ARRIVALS = MIN_BUCKET_SAMPLES
+
+# 일정 하나의 결과. 앱 `OutcomeDto.result` 와 같은 값이다.
+RESULT_ON_TIME = "on_time"
+RESULT_LATE = "late"
+RESULT_UNOBSERVED = "unobserved"
+
+# 계획이 실제 기록을 썼는지 판별하는 출처 값(planning.estimators).
+# 준비는 사용자 본인의 블록 관측이 있을 때만 "observed" 이고, 이동은 보정이
+# 적용되면 "<경로 출처>+observed_route|observed_global" 이다(planning/services.py).
+PREP_SOURCE_OBSERVED = "observed"
+TRAVEL_SOURCE_OBSERVED_MARK = "+observed"
+
+
+# Partly AI-generated (Claude)
+def half_up(value: float) -> int:
+    """반올림. 절댓값을 0.5 올림한 뒤 부호를 붙인다(8.5 → 9, −8.5 → −9).
+
+    파이썬 `round()` 는 은행가 반올림이라 `round(62.5) == 62` 다. 앱의
+    `roundToInt()` 는 63 이라, 같은 값을 두고 요약 문장과 화면 타일이 1 씩
+    어긋난다. 분·%·%p 를 만드는 곳은 모두 이 함수를 쓴다.
+
+    소수 6자리에서 먼저 정리한다. `(0.6 - 0.375) * 100` 이 22.499999999999996 이
+    되는 것처럼 이진 표현 오차가 경계값을 반대쪽으로 넘기기 때문이다.
+    """
+    magnitude = math.floor(round(abs(value), 6) + 0.5)
+    return int(math.copysign(magnitude, value)) if magnitude else 0
+
+
+# Partly AI-generated (Claude)
+def late_minutes(slack: float) -> int:
+    """지각 분(양수). 늦었으면 **최소 1분**이다.
+
+    여유 −0.4분을 그냥 반올림하면 0 이 되어 "0분 늦음" 이 나온다. 서버는 그
+    아침을 지각으로 세므로 화면·요약도 지각으로 말해야 한다. 지각 줄·타일·요일
+    값·상세 화면·요약이 모두 같은 값을 쓴다(앱 `ReportMapping.lateMinutes`).
+    """
+    return max(1, half_up(-slack))
 
 
 @dataclass
@@ -114,6 +170,7 @@ class CalibrationBucket:
         }
 
 
+# Partly AI-generated (Claude)
 @dataclass
 class LatenessCause:
     """지각 한 건의 원인 분해.
@@ -123,11 +180,16 @@ class LatenessCause:
     """
 
     event_id: int
-    #: 얼마나 늦었나(분). 양수다
+    #: 얼마나 늦었나(분). 양수이고 최소 1이다([late_minutes])
     late_minutes: int
     prep_over: float | None = None
     travel_over: float | None = None
     depart_late: float | None = None
+    #: 준비 단계가 있는 일정인가. False 면 `prep_over` 가 None 이어도 "측정 못 함"
+    #: 이 아니다 — 집에서 출발하지 않는 일정은 준비가 **해당되지 않는다.** 이것을
+    #: 측정 못 함으로 세면 전부 잰 지각도 `unknown` 이 되고, 화면이 숨긴 준비를
+    #: "측정 안 됨: 준비" 로 적게 된다.
+    prep_applies: bool = True
 
     @property
     def measured(self) -> dict[str, float]:
@@ -155,15 +217,9 @@ class LatenessCause:
 
     @property
     def unmeasured(self) -> list[str]:
-        return [
-            name
-            for name, value in (
-                ("prep_over", self.prep_over),
-                ("travel_over", self.travel_over),
-                ("depart_late", self.depart_late),
-            )
-            if value is None
-        ]
+        pairs = [("prep_over", self.prep_over)] if self.prep_applies else []
+        pairs += [("travel_over", self.travel_over), ("depart_late", self.depart_late)]
+        return [name for name, value in pairs if value is None]
 
     @property
     def label(self) -> str:
@@ -297,6 +353,104 @@ def collect_outcomes(
     return outcomes
 
 
+# Partly AI-generated (Claude)
+def _week_outcomes(user, start: datetime, end: datetime) -> list[Outcome]:
+    """`[start, end)` 의 지난 일정. **끝을 포함하지 않는다.**
+
+    `collect_outcomes` 는 끝을 포함한다(`start_at__lte`). 주 경계에 그대로 쓰면
+    다음 주 월요일 00:00 에 시작하는 일정이 두 주에 다 들어간다. 1µs 앞에서 끊는다.
+    """
+    return collect_outcomes(user, since=start, until=end - timedelta(microseconds=1))
+
+
+# Partly AI-generated (Claude)
+def _ok_plan(event: Event) -> AlarmPlan | None:
+    """계산이 끝난 계획. 없거나 OK 가 아니면 None — 그런 계획은 값이 전부 null 이다."""
+    plan = getattr(event, "alarm_plan", None)
+    if plan is None or plan.status != AlarmPlan.Status.OK:
+        return None
+    return plan
+
+
+# Partly AI-generated (Claude)
+def _prep_applies(event: Event) -> bool | None:
+    """준비 단계가 있는 일정인가. 계획이 없으면 모른다(None)."""
+    plan = _ok_plan(event)
+    if plan is None:
+        return None
+    return plan.prep_source != PREP_SOURCE_NOT_FROM_HOME
+
+
+# Partly AI-generated (Claude)
+def _block_minutes(user, event_ids: list[int]) -> dict[int, float]:
+    """일정별 블록 관측 합(분). 병렬 블록은 뺀다.
+
+    병렬 블록은 계획에서도 합으로 더하지 않는다. 실제에서도 빼야 비교가 같은
+    기준이 된다. 관측이 없는 일정은 키가 없다 — 0 이 아니다.
+    """
+    if not event_ids:
+        return {}
+    totals: dict[int, float] = {}
+    rows = BlockObservation.objects.filter(user=user, event_id__in=event_ids).values_list(
+        "event_id", "duration_minutes", "was_parallel"
+    )
+    for event_id, duration, was_parallel in rows:
+        if was_parallel:
+            continue
+        totals[event_id] = totals.get(event_id, 0.0) + float(duration)
+    return totals
+
+
+# Partly AI-generated (Claude)
+def _measure(outcome: Outcome, block_minutes: dict[int, float]) -> dict[str, float | None]:
+    """계획 대비 실제 세 값. 잴 수 없으면 None 이다(0 이 아니다).
+
+    정의는 모듈 머리말의 표 그대로다. 준비가 해당되지 않는 일정
+    (`not_from_home`)은 블록 관측이 있어도 준비를 재지 않는다.
+    """
+    values: dict[str, float | None] = {
+        "prep_over": None,
+        "travel_over": None,
+        "depart_late": None,
+    }
+    plan = _ok_plan(outcome.event)
+    if plan is None:
+        return values
+
+    if (
+        outcome.depart_at is not None
+        and outcome.arrive_at is not None
+        and plan.travel_minutes is not None
+    ):
+        actual = (outcome.arrive_at - outcome.depart_at).total_seconds() / 60
+        values["travel_over"] = round(actual - plan.travel_minutes, 1)
+
+    if outcome.depart_at is not None and plan.depart_by is not None:
+        values["depart_late"] = round(
+            (outcome.depart_at - plan.depart_by).total_seconds() / 60, 1
+        )
+
+    observed_prep = block_minutes.get(outcome.event.pk)
+    if (
+        plan.prep_source != PREP_SOURCE_NOT_FROM_HOME
+        and observed_prep is not None
+        and plan.prep_minutes is not None
+    ):
+        values["prep_over"] = round(observed_prep - plan.prep_minutes, 1)
+
+    return values
+
+
+# Partly AI-generated (Claude)
+def _cause(outcome: Outcome, measured: dict[str, float | None]) -> LatenessCause:
+    return LatenessCause(
+        event_id=outcome.event.pk,
+        late_minutes=late_minutes(outcome.slack_minutes),
+        prep_applies=_prep_applies(outcome.event) is not False,
+        **measured,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 캘리브레이션
 # ---------------------------------------------------------------------------
@@ -336,7 +490,17 @@ def calibration(user, *, since: datetime | None = None) -> dict:
     빈 버킷은 내리지 않는다. 표본 없는 점을 0 으로 그리면 그래프가 바닥에
     붙어 모델이 완전히 틀린 것처럼 보인다.
     """
-    outcomes = collect_outcomes(user, since=since)
+    return calibration_from(collect_outcomes(user, since=since))
+
+
+# Partly AI-generated (Claude)
+def calibration_from(outcomes: list[Outcome]) -> dict:
+    """이미 모은 결과로 캘리브레이션을 계산한다.
+
+    주간 리포트는 **그 주의 일정만** 넘긴다. 예전에는 `calibration(user,
+    since=주 시작)` 을 불러 끝이 "지금" 이 됐고, 과거 주를 보면 그 뒤 주의
+    일정까지 그 주 캘리브레이션에 섞였다.
+    """
     scored = [o for o in outcomes if o.tau is not None and o.on_time is not None]
 
     buckets: dict[tuple[float, float], CalibrationBucket] = {}
@@ -393,6 +557,7 @@ def _verdict(mean_gap: float | None, reliable_buckets: int) -> str:
 # ---------------------------------------------------------------------------
 
 
+# Partly AI-generated (Claude)
 def lateness_causes(user, *, since: datetime | None = None) -> list[LatenessCause]:
     """지각한 일정마다 원인을 분해한다.
 
@@ -407,47 +572,8 @@ def lateness_causes(user, *, since: datetime | None = None) -> list[LatenessCaus
     if not outcomes:
         return []
 
-    # 그 아침의 블록 관측. 일정별로 묶어 둔다.
-    block_minutes: dict[int, float] = {}
-    rows = BlockObservation.objects.filter(
-        user=user, event_id__in=[o.event.pk for o in outcomes]
-    ).values_list("event_id", "duration_minutes", "was_parallel")
-    for event_id, duration, was_parallel in rows:
-        # 병렬 블록은 계획에서도 합으로 더하지 않는다. 실제에서도 빼야 비교가
-        # 같은 기준이 된다.
-        if was_parallel:
-            continue
-        block_minutes[event_id] = block_minutes.get(event_id, 0.0) + float(duration)
-
-    causes: list[LatenessCause] = []
-    for outcome in outcomes:
-        plan = getattr(outcome.event, "alarm_plan", None)
-        cause = LatenessCause(
-            event_id=outcome.event.pk,
-            late_minutes=int(round(-outcome.slack_minutes)),
-        )
-
-        if plan is not None:
-            if (
-                outcome.depart_at is not None
-                and outcome.arrive_at is not None
-                and plan.travel_minutes is not None
-            ):
-                actual = (outcome.arrive_at - outcome.depart_at).total_seconds() / 60
-                cause.travel_over = round(actual - plan.travel_minutes, 1)
-
-            if outcome.depart_at is not None and plan.depart_by is not None:
-                cause.depart_late = round(
-                    (outcome.depart_at - plan.depart_by).total_seconds() / 60, 1
-                )
-
-            observed_prep = block_minutes.get(outcome.event.pk)
-            if observed_prep is not None and plan.prep_minutes is not None:
-                cause.prep_over = round(observed_prep - plan.prep_minutes, 1)
-
-        causes.append(cause)
-
-    return causes
+    blocks = _block_minutes(user, [o.event.pk for o in outcomes])
+    return [_cause(outcome, _measure(outcome, blocks)) for outcome in outcomes]
 
 
 # ---------------------------------------------------------------------------
@@ -470,15 +596,25 @@ def week_bounds(anchor: date | None = None) -> tuple[datetime, datetime]:
     return start, start + timedelta(days=7)
 
 
+# Partly AI-generated (Claude)
 def weekly(user, *, anchor: date | None = None) -> dict:
     """주간 리포트.
 
     저장하지 않고 요청마다 계산한다. 한 주의 일정은 수십 건이라 비용이 작고,
     저장하면 "언제 만들어진 값인가" 와 "계획이 바뀌면 다시 만드나" 라는 문제가
     생긴다. 배치 생성은 사용자가 수천 명이 된 뒤에 필요한 최적화다.
+
+    한 번 모아 나눠 쓴다 — 그 주 결과·블록 관측·알람 상태를 한 번씩 읽고 원인
+    분해·캘리브레이션·일정별 행이 같은 값을 쓴다. 줄글 요약은 여기서 만들지 않고
+    뷰가 붙인다(`summary.summary_for`). 그래서 이 함수의 테스트는 LLM 과 무관하다.
+
+    **좌표·장소·주소는 내리지 않는다**(N19). 일정 제목은 본인 일정이라 내린다.
     """
     start, end = week_bounds(anchor)
-    outcomes = collect_outcomes(user, since=start, until=end)
+    outcomes = _week_outcomes(user, start, end)
+    blocks = _block_minutes(user, [o.event.pk for o in outcomes])
+    alarms = _alarm_flags(user) if outcomes else {}
+    measured = {o.event.pk: _measure(o, blocks) for o in outcomes}
 
     arrived = [o for o in outcomes if o.on_time is not None]
     on_time = [o for o in arrived if o.on_time]
@@ -501,18 +637,28 @@ def weekly(user, *, anchor: date | None = None) -> dict:
             }
         )
 
-    causes = [
-        c
-        for c in lateness_causes(user, since=start)
-        if any(o.event.pk == c.event_id for o in late)
-    ]
+    causes = {o.event.pk: _cause(o, measured[o.event.pk]) for o in late}
 
     # 원인별 건수. `unknown` 을 따로 센다 — 측정 실패를 "계획이 짧았다" 로
     # 합치면 사용자가 앱의 계획을 의심하게 되는데, 실제로는 추적이 동작하지
     # 않은 것이다.
     primary_counts: dict[str, int] = {}
-    for cause in causes:
+    for cause in causes.values():
         primary_counts[cause.label] = primary_counts.get(cause.label, 0) + 1
+
+    on_time_rate = round(len(on_time) / len(arrived), 4) if arrived else None
+
+    # 목표 = 도착 기록이 있는 일정들이 계획에 쓴 τ 의 평균. 판정은 반올림한 %
+    # 끼리 한다 — 그래야 "정시율 92%로 목표 92%에 못 미쳤음" 이 나오지 않는다.
+    taus = [o.tau for o in arrived if o.tau is not None]
+    target_rate = round(statistics.fmean(taus), 4) if taus else None
+    target_met = None
+    if on_time_rate is not None and target_rate is not None and len(arrived) >= THIN_ARRIVALS:
+        target_met = half_up(on_time_rate * 100) >= half_up(target_rate * 100)
+
+    # 끝난 주인가. 다음 주 월요일 00:00 이 지났는가와 **같은 값**이다 — 화면이
+    # 쓰는 곳이 달라(요약의 "진행 중" 표시, 주 전환 "›") 이름을 나눠 둔다.
+    complete = timezone.now() >= end
 
     return {
         "week_start": start.date().isoformat(),
@@ -523,16 +669,193 @@ def weekly(user, *, anchor: date | None = None) -> dict:
         "unobserved_count": len(outcomes) - len(arrived),
         "on_time_count": len(on_time),
         "late_count": len(late),
-        "on_time_rate": (
-            round(len(on_time) / len(arrived), 4) if arrived else None
-        ),
+        "on_time_rate": on_time_rate,
         "median_slack_minutes": (
             round(statistics.median(slacks), 1) if slacks else None
         ),
         # 가장 아슬아슬했던 아침. 정시였어도 여유가 1분이면 운이 좋았던 것이다.
         "tightest_slack_minutes": min(slacks) if slacks else None,
         "by_weekday": by_weekday,
-        "late_causes": [c.as_dict() for c in causes],
+        "late_causes": [causes[o.event.pk].as_dict() for o in late],
         "primary_counts": primary_counts,
-        "calibration": calibration(user, since=start),
+        # 그 주 일정만으로 계산한다(`calibration_from` 주석).
+        "calibration": calibration_from(outcomes),
+        "week_complete": complete,
+        "has_next_week": complete,
+        "target_rate": target_rate,
+        "target_met": target_met,
+        "previous_week": _previous_week(user, start, on_time_rate, len(arrived)),
+        "deviation": _deviation_stats(list(measured.values())),
+        "learning": _learning(outcomes),
+        "outcomes": [
+            _outcome_row(o, measured[o.event.pk], causes.get(o.event.pk), alarms, blocks)
+            for o in outcomes
+        ],
+    }
+
+
+# Partly AI-generated (Claude)
+def _alarm_flags(user) -> dict[int, bool] | None:
+    """일정 id → 알람이 울리는 일정인가. `events.alarms.alarm_states` 를 읽기만 한다.
+
+    출발·도착 기록은 알람을 해제할 때만 시작된다(앱 `AlarmActivity`). 알람이 없던
+    일정은 원래 기록될 수 없으므로 리포트가 그것을 "측정 실패" 로 말하면 안 된다.
+
+    **지금 설정 기준이다.** 지난 일정의 켬/끔을 나중에 바꿨으면 바뀐 값이 나온다.
+    알람 상호작용 기록이 따로 없어서 이것이 가장 가까운 근사다.
+
+    판정할 수 없으면(프로필이 없는 오래된 계정) None — 모두 "꺼짐" 으로 보면 측정
+    공백을 알람 탓으로 잘못 돌린다.
+    """
+    try:
+        states = alarm_states(user)
+    except ObjectDoesNotExist:
+        return None
+    return {event_id: on for event_id, (on, _first) in states.items()}
+
+
+# Partly AI-generated (Claude)
+def _previous_week(
+    user, start: datetime, this_rate: float | None, this_arrived: int
+) -> dict | None:
+    """앞 주의 정시 집계. 앞 주에 지난 일정이 없으면 None.
+
+    `on_time_rate_change_pp` 는 두 주 모두 도착 기록이 [THIN_ARRIVALS] 건 이상일
+    때만 낸다. 1건짜리 주와 비교한 "%p 올랐음" 은 우연을 추세로 보이게 한다.
+    """
+    prev_start, prev_end = week_bounds(timezone.localtime(start).date() - timedelta(days=7))
+    outcomes = _week_outcomes(user, prev_start, prev_end)
+    if not outcomes:
+        return None
+
+    arrived = [o for o in outcomes if o.on_time is not None]
+    on_time = sum(1 for o in arrived if o.on_time)
+    rate = round(on_time / len(arrived), 4) if arrived else None
+
+    change = None
+    if (
+        rate is not None
+        and this_rate is not None
+        and len(arrived) >= THIN_ARRIVALS
+        and this_arrived >= THIN_ARRIVALS
+    ):
+        change = half_up((this_rate - rate) * 100)
+
+    return {
+        "week_start": prev_start.date().isoformat(),
+        "event_count": len(outcomes),
+        "arrived_count": len(arrived),
+        "on_time_count": on_time,
+        "on_time_rate": rate,
+        "on_time_rate_change_pp": change,
+    }
+
+
+# Partly AI-generated (Claude)
+def _deviation_stats(rows: list[dict[str, float | None]]) -> dict:
+    """계획 대비 실제의 주간 평균·표준편차. 그 주 **모든** 일정 중 잰 것만 쓴다.
+
+    표본이 없으면 평균도 None 이다. 표준편차는 2건부터 낸다(모표준편차) — 1건의
+    편차 0 은 "흔들림이 없다" 가 아니라 "모른다" 다.
+    """
+    out = {}
+    for key in ("prep_over", "depart_late", "travel_over"):
+        values = [row[key] for row in rows if row[key] is not None]
+        out[key] = {
+            "count": len(values),
+            "mean_minutes": round(statistics.fmean(values), 1) if values else None,
+            "sd_minutes": round(statistics.pstdev(values), 1) if len(values) >= 2 else None,
+        }
+    return out
+
+
+# Partly AI-generated (Claude)
+def _learning(outcomes: list[Outcome]) -> dict:
+    """이 주 계획이 실제 기록을 썼는지 센다.
+
+    `prediction.ModelArtifact` 는 알람 계산이 읽지 않는다. 아티팩트를 "학습 반영"
+    으로 보이면 사실이 아니어서, 대신 **각 계획이 실제로 쓴 출처**를 센다.
+    이동 보정(`RouteCorrection`)은 모든 사용자의 기록으로 만든다 — 그래서 앱은
+    이동 쪽을 "내 기록" 이 아니라 "이동 기록 보정" 이라고 쓴다.
+    """
+    plans = [plan for plan in (_ok_plan(o.event) for o in outcomes) if plan is not None]
+    return {
+        "plan_count": len(plans),
+        "prep_from_records": sum(1 for p in plans if p.prep_source == PREP_SOURCE_OBSERVED),
+        "travel_from_records": sum(
+            1 for p in plans if TRAVEL_SOURCE_OBSERVED_MARK in (p.travel_source or "")
+        ),
+    }
+
+
+# Partly AI-generated (Claude)
+def _iso(value: datetime | None) -> str | None:
+    """UTC ISO 8601, 끝은 `Z`. 다른 API 와 같이 로컬 변환은 앱 몫이다."""
+    if value is None:
+        return None
+    return value.astimezone(dt_timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# Partly AI-generated (Claude)
+def _outcome_row(
+    outcome: Outcome,
+    measured: dict[str, float | None],
+    cause: LatenessCause | None,
+    alarms: dict[int, bool] | None,
+    blocks: dict[int, float],
+) -> dict:
+    """지난 일정 하나의 계획 대비 실제. 앱 ⑨ 상세 리포트가 그대로 그린다.
+
+    정시·지각·원인·τ 구간은 **서버가 판정한다.** 앱은 받은 값을 표시만 한다.
+    계획이 없거나 OK 가 아니면 `planned` 객체는 두고 값만 전부 null 이다.
+    """
+    event = outcome.event
+    plan = _ok_plan(event)
+    local = timezone.localtime(event.start_at)
+
+    if outcome.on_time is None:
+        result = RESULT_UNOBSERVED
+    elif outcome.on_time:
+        result = RESULT_ON_TIME
+    else:
+        result = RESULT_LATE
+
+    travel_actual = None
+    if outcome.depart_at is not None and outcome.arrive_at is not None:
+        travel_actual = round((outcome.arrive_at - outcome.depart_at).total_seconds() / 60, 1)
+    observed_prep = blocks.get(event.pk)
+
+    return {
+        "event": event.pk,
+        "title": event.title,
+        "start_at": _iso(event.start_at),
+        # 날짜·요일은 서버 시간대(Asia/Seoul) 기준이다. 주 경계와 같은 기준이어야
+        # 앱이 이 일정을 맞는 요일 칸에 넣는다.
+        "date": local.date().isoformat(),
+        "weekday": local.weekday(),
+        "result": result,
+        "slack_minutes": outcome.slack_minutes,
+        "on_time_probability": plan.on_time_probability if plan else None,
+        "tau": outcome.tau,
+        "tau_bucket_lower": bucket_for(outcome.tau)[0] if outcome.tau is not None else None,
+        "prep_applies": _prep_applies(event),
+        # 알람 판정에 빠진 일정(계획 실패·명시적 끔)은 울리지 않은 것이다.
+        "alarm_on": None if alarms is None else alarms.get(event.pk, False),
+        "planned": {
+            "alarm_at": _iso(plan.alarm_at) if plan else None,
+            "depart_by": _iso(plan.depart_by) if plan else None,
+            "arrive_at": _iso(plan.arrive_at) if plan else None,
+            "prep_minutes": plan.prep_minutes if plan else None,
+            "travel_minutes": plan.travel_minutes if plan else None,
+            "buffer_minutes": plan.buffer_minutes if plan else None,
+        },
+        "actual": {
+            "depart_at": _iso(outcome.depart_at),
+            "arrive_at": _iso(outcome.arrive_at),
+            "prep_minutes": round(observed_prep, 1) if observed_prep is not None else None,
+            "travel_minutes": travel_actual,
+        },
+        "deviation": dict(measured),
+        "cause": cause.label if cause is not None else None,
+        "unmeasured": cause.unmeasured if cause is not None else [],
     }

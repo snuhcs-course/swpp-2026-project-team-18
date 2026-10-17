@@ -60,6 +60,9 @@ object JitColor {
     /** 지각·실패 */
     val Red = Color(0xFFF87171)
 
+    /** 지각 결과 카드. Figma `color/surface-danger` (Partly AI-generated (Claude)) */
+    val SurfaceDanger = Color(0xFF4A2121)
+
     /**
      * 더 빠른 길. 지도에만 쓴다.
      *

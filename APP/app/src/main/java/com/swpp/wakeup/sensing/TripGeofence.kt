@@ -46,6 +46,13 @@ sealed interface TripEvent {
         override val fix: LocationFix,
         val distanceM: Double,
         val dwellMillis: Long,
+        /**
+         * 반경에 처음 들어온 fix 의 시각(epoch ms). 판정 fix 보다 늦지 않다.
+         *
+         * 판정 시각([fix])은 진입 + 체류라 실제 진입보다 늦다. 서버가 나중에 보정할 수
+         * 있게 함께 올린다(db-schema.md A1). (Partly AI-generated (Claude))
+         */
+        val enteredAtMillis: Long,
     ) : TripEvent
 }
 
@@ -294,7 +301,7 @@ class TripGeofence(
         if (dwelled < dwellMillis) return null
 
         phase = Phase.ARRIVED
-        return TripEvent.Arrived(fix, distance, dwellMillis = dwelled)
+        return TripEvent.Arrived(fix, distance, dwellMillis = dwelled, enteredAtMillis = enteredAt)
     }
 
     /**
@@ -339,6 +346,9 @@ class TripGeofence(
             fix = fix,
             distanceM = distanceMeters(fix.point, dest),
             dwellMillis = (fix.atMillis - entered).coerceAtLeast(0),
+            // 체류를 0 으로 깎는 것과 같은 규칙이다. 진입이 판정보다 늦게 가면 서버가
+            // 그 배치를 거부한다(400 이면 큐가 통째로 버린다). (Partly AI-generated (Claude))
+            enteredAtMillis = minOf(entered, fix.atMillis),
         )
     }
 

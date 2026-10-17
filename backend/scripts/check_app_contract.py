@@ -746,9 +746,23 @@ def main() -> int:
     bucket_fields = dto_wire_names(reports_api, "CalibrationBucketDto")
     cause_fields = dto_wire_names(reports_api, "LateCauseDto")
     weekday_fields = dto_wire_names(reports_api, "WeekdayRowDto")
+    # Partly AI-generated (Claude) — 0.11.0 상세 리포트·줄글 요약
+    outcome_fields = dto_wire_names(reports_api, "OutcomeDto")
+    planned_fields = dto_wire_names(reports_api, "PlannedDto")
+    actual_fields = dto_wire_names(reports_api, "ActualDto")
+    outcome_dev_fields = dto_wire_names(reports_api, "OutcomeDeviationDto")
+    previous_fields = dto_wire_names(reports_api, "PreviousWeekDto")
+    deviation_fields = dto_wire_names(reports_api, "WeeklyDeviationDto")
+    stat_fields = dto_wire_names(reports_api, "DeviationStatDto")
+    learning_fields = dto_wire_names(reports_api, "LearningDto")
 
     check("WeeklyReportDto 파싱", len(weekly_fields) >= 12, f"{weekly_fields}")
     check("CalibrationDto 파싱", len(calib_fields) >= 7, f"{calib_fields}")
+    check(
+        "앱이 summary_source 를 읽는다",
+        "summary_source" in weekly_fields,
+        f"{weekly_fields} — 없으면 AI 요약인지 고정 문장인지 화면이 밝힐 수 없다",
+    )
 
     # 이 화면의 값어치는 "앱이 과신하는지" 를 보여주는 데 있다. 판정과 표본
     # 부족 표시가 빠지면 화면이 앱을 변호하는 쪽으로 기운다.
@@ -784,6 +798,38 @@ def main() -> int:
         check("요일 7칸", len(rows) == 7, f"n={len(rows)}")
         if rows:
             compare("요일 행", weekday_fields, rows[0])
+
+        # Partly AI-generated (Claude) — 0.11.0
+        check(
+            "summary_source 가 llm/template 중 하나",
+            weekly_body.get("summary_source") in ("llm", "template"),
+            f"summary_source={weekly_body.get('summary_source')!r}",
+        )
+        check(
+            "summary 가 비어 있지 않은 문장",
+            isinstance(weekly_body.get("summary"), str) and bool(weekly_body["summary"].strip()),
+            f"summary={str(weekly_body.get('summary'))[:80]!r}",
+        )
+        deviation = weekly_body.get("deviation") or {}
+        compare("계획 대비 실제 평균", deviation_fields, deviation)
+        if deviation.get("travel_over") is not None:
+            compare("편차 통계", stat_fields, deviation["travel_over"])
+        compare("기록 반영", learning_fields, weekly_body.get("learning") or {})
+
+        # 새 계정이라 지난 일정이 없을 수 있다. 그때는 실패가 아니라 건너뜀이다.
+        outcomes = weekly_body.get("outcomes") or []
+        if outcomes:
+            compare("일정별 결과", outcome_fields, outcomes[0])
+            compare("일정별 계획", planned_fields, outcomes[0].get("planned") or {})
+            compare("일정별 실제", actual_fields, outcomes[0].get("actual") or {})
+            compare("일정별 편차", outcome_dev_fields, outcomes[0].get("deviation") or {})
+        else:
+            skip("일정별 결과 필드", "이 계정의 그 주에 지난 일정이 없음")
+        previous = weekly_body.get("previous_week")
+        if previous:
+            compare("앞 주", previous_fields, previous)
+        else:
+            skip("앞 주 필드", "앞 주에 지난 일정이 없어 previous_week 가 null")
 
     st, calib_body = api("/api/reports/calibration")
     if check("캘리브레이션 200", st == 200, f"status={st}"):

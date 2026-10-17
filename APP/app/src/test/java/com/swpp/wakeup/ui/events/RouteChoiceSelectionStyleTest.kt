@@ -17,13 +17,23 @@ class RouteChoiceSelectionStyleTest {
 
     private val source by lazy { readSource("ui/events/RouteChoiceScreen.kt") }
 
+    /** 구간 막대·노선 칩은 공용 부품 파일로 옮겼다(Phase A, A1-5). */
+    private val visuals by lazy { readSource("ui/events/TransitVisuals.kt") }
+
+    // AI-generated (Claude)
+    /** RouteCard 본문. 바로 다음 최상위 함수 앞까지 자른다. */
+    private fun routeCard(): String {
+        val start = source.indexOf("private fun RouteCard")
+        assertTrue("RouteCard 를 찾지 못했다", start >= 0)
+        val end = Regex("\n(private|internal) fun ").find(source, start + 1)?.range?.first
+            ?: source.length
+        return source.substring(start, end)
+    }
+
     // Partly AI-generated (Claude)
     @Test
     fun `선택 경로는 주황 점 없이 주황 테두리만 쓴다`() {
-        val start = source.indexOf("private fun RouteCard")
-        val end = source.indexOf("private fun SegmentBar", start)
-        assertTrue("RouteCard 를 찾지 못했다", start >= 0 && end > start)
-        val card = source.substring(start, end)
+        val card = routeCard()
 
         assertTrue("주황 테두리를 쓰지 않는다", card.contains("color = JitColor.Accent,"))
         assertTrue("Figma 의 2dp 테두리와 다르다", card.contains("width = 2.dp"))
@@ -52,18 +62,16 @@ class RouteChoiceSelectionStyleTest {
     fun `다음 차량 도착정보와 수단 이름은 그리지 않는다`() {
         assertFalse("차량 도착 행이 다시 생겼다", source.contains("CheckpointArrivalRow"))
         assertFalse("차량 도착정보를 다시 읽는다", source.contains("VehicleArrival"))
-        val start = source.indexOf("private fun RouteCard")
-        val end = source.indexOf("private fun SegmentBar", start)
-        assertFalse("\"지하철+도보+버스\" 수단 이름이 다시 생겼다", source.substring(start, end).contains("text = option.mode"))
+        assertFalse("\"지하철+도보+버스\" 수단 이름이 다시 생겼다", routeCard().contains("text = option.mode"))
     }
 
     // Partly AI-generated (Claude)
     @Test
     fun `구간 막대 라벨은 글리프를 수직 중앙에 세운다`() {
-        val start = source.indexOf("private fun SegmentBar")
-        assertTrue("SegmentBar 를 찾지 못했다", start >= 0)
-        val end = source.indexOf("internal fun barSegments", start)
-        val bar = source.substring(start, if (end > start) end else source.length)
+        val start = visuals.indexOf("internal fun TransitSegmentBar")
+        assertTrue("TransitSegmentBar 를 찾지 못했다", start >= 0)
+        val end = visuals.indexOf("internal fun barSegments", start)
+        val bar = visuals.substring(start, if (end > start) end else visuals.length)
 
         assertTrue("칸 안에서 가운데 정렬이 빠졌다", bar.contains("Alignment.Center"))
         assertTrue(

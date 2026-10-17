@@ -51,6 +51,28 @@ class PrepOnboardingStateTest {
         assertNull(state("삼십").parsed)
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `다이얼 범위는 5분에서 4시간이다`() {
+        // 다이얼(시:분)의 경계. 0:04 ✗, 0:05 ✓, 4:00 ✓, 4:01 ✗, 23:00 ✗
+        val range = HomeViewModel.PrepOnboardingState().range
+        assertEquals(5..240, range)
+        assertNull(state("${0 * 60 + 4}").parsed)
+        assertEquals(5, state("${0 * 60 + 5}").parsed)
+        assertEquals(240, state("${4 * 60}").parsed)
+        assertNull(state("${4 * 60 + 1}").parsed)
+        assertNull(state("${23 * 60}").parsed)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `온보딩으로 열면 설정 모드가 아니다`() {
+        assertFalse(
+            "설정 모드가 남으면 온보딩에서 \"나중에 입력\" 이 사라진다",
+            HomeViewModel.PrepOnboardingState().fromSettings,
+        )
+    }
+
     @Test
     fun `저장 중에는 다시 제출할 수 없다`() {
         val s = HomeViewModel.PrepOnboardingState(minutes = "35", submitting = true)

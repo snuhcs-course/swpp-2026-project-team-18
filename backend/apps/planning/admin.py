@@ -13,7 +13,7 @@
 
 from django.contrib import admin
 
-from .models import AlarmPlan
+from .models import AlarmPlan, PlanRevision
 
 
 @admin.register(AlarmPlan)
@@ -92,3 +92,56 @@ class AlarmPlanAdmin(admin.ModelAdmin):
     @admin.display(description="경로")
     def travel_summary(self, obj):
         return obj.route_summary or obj.get_travel_mode_display() or "—"
+
+
+# Partly AI-generated (Claude)
+@admin.register(PlanRevision)
+class PlanRevisionAdmin(admin.ModelAdmin):
+    """계획 이력. **읽기 전용이다.**
+
+    계산이 남긴 기록이다. 고치면 "그때 무엇을 보여 줬나" 가 거짓이 된다. 일정 화면에도
+    같은 이력이 읽기 전용으로 붙는다(`apps/events/admin.py`).
+    """
+
+    list_display = (
+        "computed_at",
+        "user_email",
+        "event_title",
+        "trigger",
+        "status",
+        "event_start_at",
+        "alarm_at",
+        "depart_by",
+        "arrive_at",
+        "minutes_breakdown",
+        "route_key",
+        "route_minutes_raw",
+    )
+    list_filter = ("trigger", "status", "travel_mode")
+    search_fields = ("user__email", "user__nickname", "event__title", "route_key")
+    date_hierarchy = "computed_at"
+    ordering = ("-computed_at", "-id")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("user", "event")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="사용자", ordering="user__email")
+    def user_email(self, obj):
+        return obj.user.email
+
+    @admin.display(description="일정", ordering="event__title")
+    def event_title(self, obj):
+        return obj.event.title
+
+    @admin.display(description="준비+이동+버퍼")
+    def minutes_breakdown(self, obj):
+        parts = [obj.prep_minutes, obj.travel_minutes, obj.buffer_minutes]
+        if all(p is None for p in parts):
+            return "—"
+        return " + ".join("?" if p is None else str(p) for p in parts)

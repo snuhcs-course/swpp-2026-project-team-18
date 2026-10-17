@@ -13,7 +13,8 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+import json
+from datetime import datetime, timedelta
 
 import pytest
 from django.utils import timezone
@@ -21,6 +22,7 @@ from rest_framework.test import APIClient
 
 from apps.events.models import Event, Place
 from apps.observations.models import TripObservation
+from apps.planning.estimators import PREP_SOURCE_NOT_FROM_HOME
 from apps.planning.models import AlarmPlan
 from apps.reports import services
 from apps.routines.models import BlockObservation, RoutineBlock
@@ -575,3 +577,462 @@ class TestApi:
 
         weekly = client.get("/api/reports/weekly")
         assert weekly.data["event_count"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase B — 일정별 결과(outcomes)·주간 집계 확장 (report-design.md §3)
+# Partly AI-generated (Claude)
+# ---------------------------------------------------------------------------
+
+
+def monday_weeks_ago(weeks: int):
+    """`weeks` 주 전 월요일 00:00(서버 시간대). 끝난 주라 진행 중 판정과 무관하다."""
+    start, _ = services.week_bounds(timezone.localdate() - timedelta(weeks=weeks))
+    return start
+
+
+def plan_event(
+    user,
+    place,
+    monday,
+    *,
+    day: int = 0,
+    hour: int = 9,
+    title: str = "자료구조",
+    tau: float = 0.90,
+    prep: int = 28,
+    travel: int = 42,
+    buffer_minutes: int = 10,
+    probability: int | None = None,
+    prep_source: str = "",
+    travel_source: str = "kakao_transit",
+    alarm_enabled: bool | None = None,
+) -> Event:
+    """그 주 `day` 요일 `hour` 시에 시작하는 일정 + OK 계획.
+
+    계획은 실제 계산과 같은 모양이다 — 도착 예정 = 시작 − 버퍼, 출발 = 도착 예정 −
+    이동, 알람 = 출발 − 준비. 기본값: 09:00 시작 → 알람 7:40 · 출발 8:08 · 도착 8:50.
+    """
+    start = monday + timedelta(days=day, hours=hour)
+    event = Event.objects.create(
+        user=user, title=title, start_at=start, place=place, alarm_enabled=alarm_enabled
+    )
+    arrive_at = start - timedelta(minutes=buffer_minutes)
+    depart_by = arrive_at - timedelta(minutes=travel)
+    AlarmPlan.objects.create(
+        user=user,
+        event=event,
+        status=AlarmPlan.Status.OK,
+        alarm_at=depart_by - timedelta(minutes=prep),
+        depart_by=depart_by,
+        arrive_at=arrive_at,
+        prep_minutes=prep,
+        travel_minutes=travel,
+        buffer_minutes=buffer_minutes,
+        tau_used=tau,
+        on_time_probability=probability,
+        prep_source=prep_source,
+        travel_source=travel_source,
+    )
+    return event
+
+
+def at(event, minutes: float):
+    """일정 시작 기준 분(음수 = 시작 전)."""
+    return event.start_at + timedelta(minutes=minutes)
+
+
+def trip(event, *, depart: float | None = None, arrive: float | None = None):
+    if depart is not None:
+        observe(event, TripObservation.Kind.DEPART, at(event, depart))
+    if arrive is not None:
+        observe(event, TripObservation.Kind.ARRIVE, at(event, arrive))
+
+
+def record_blocks(user, event, *minutes: float, parallel: bool = False):
+    block, _ = RoutineBlock.objects.get_or_create(
+        user=user,
+        name="세탁기" if parallel else "샤워",
+        defaults={
+            "default_min_minutes": 5,
+            "default_max_minutes": 20,
+            "parallelizable": parallel,
+        },
+    )
+    for index, value in enumerate(minutes):
+        BlockObservation.objects.create(
+            user=user,
+            block=block,
+            event=event,
+            observed_on=timezone.localdate(),
+            duration_minutes=value,
+            was_parallel=parallel,
+            client_uuid=f"blk-{event.pk}-{int(parallel)}-{index}",
+            client_recorded_at=timezone.now(),
+        )
+
+
+def parse_utc(text: str) -> datetime:
+    assert text.endswith("Z"), text
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def all_keys(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from all_keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from all_keys(item)
+
+
+class TestRounding:
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (62.5, 63),
+            (92.5, 93),
+            (-22.5, -23),
+            (8.4, 8),
+            (-0.4, 0),
+            (0.925 * 100, 93),
+            # 이진 표현으로 22.499999999999996 이 된다. 경계를 넘기면 안 된다.
+            ((0.6 - 0.375) * 100, 23),
+        ],
+    )
+    def test_half_up_matches_the_app(self, value, expected):
+        """파이썬 round() 는 은행가 반올림이다(62.5 → 62). 앱과 1 씩 어긋난다."""
+        assert services.half_up(value) == expected
+
+    @pytest.mark.parametrize("slack,expected", [(-0.4, 1), (-0.5, 1), (-1.5, 2), (-10.0, 10)])
+    def test_late_minutes_are_at_least_one(self, slack, expected):
+        assert services.late_minutes(slack) == expected
+
+
+class TestOutcomeRows:
+
+    def test_late_morning_row_matches_plan_and_observations(self, user, place):
+        """설계 예시(화요일 09:00 자료구조, 10분 지각)를 그대로 재현한다."""
+        monday = monday_weeks_ago(3)
+        event = plan_event(user, place, monday, day=1, probability=90)
+        trip(event, depart=-45, arrive=10)  # 8:15 출발 · 9:10 도착
+        record_blocks(user, event, 20.0, 14.0)
+        record_blocks(user, event, 30.0, parallel=True)  # 병렬은 빼서 34분
+
+        row = services.weekly(user, anchor=monday.date())["outcomes"][0]
+
+        assert row["event"] == event.pk
+        assert row["title"] == "자료구조"
+        assert parse_utc(row["start_at"]) == event.start_at
+        assert row["date"] == (monday + timedelta(days=1)).date().isoformat()
+        assert row["weekday"] == 1
+        assert row["result"] == services.RESULT_LATE
+        assert row["slack_minutes"] == pytest.approx(-10.0)
+        assert row["on_time_probability"] == 90
+        assert row["tau"] == pytest.approx(0.9)
+        assert row["tau_bucket_lower"] == pytest.approx(0.9)
+        assert row["prep_applies"] is True
+        assert row["alarm_on"] is True
+
+        planned = row["planned"]
+        assert parse_utc(planned["alarm_at"]) == at(event, -80)
+        assert parse_utc(planned["depart_by"]) == at(event, -52)
+        assert parse_utc(planned["arrive_at"]) == at(event, -10)
+        assert planned["prep_minutes"] == 28
+        assert planned["travel_minutes"] == 42
+        assert planned["buffer_minutes"] == 10
+
+        actual = row["actual"]
+        assert parse_utc(actual["depart_at"]) == at(event, -45)
+        assert parse_utc(actual["arrive_at"]) == at(event, 10)
+        assert actual["prep_minutes"] == pytest.approx(34.0)
+        assert actual["travel_minutes"] == pytest.approx(55.0)
+
+        assert row["deviation"] == {
+            "prep_over": pytest.approx(6.0),
+            "depart_late": pytest.approx(7.0),
+            "travel_over": pytest.approx(13.0),
+        }
+        assert row["cause"] == "travel_over"
+        assert row["unmeasured"] == []
+
+    def test_on_time_and_unobserved_rows(self, user, place):
+        monday = monday_weeks_ago(3)
+        seen = plan_event(user, place, monday, day=0)
+        trip(seen, arrive=-12)
+        unseen = plan_event(user, place, monday, day=2)
+
+        rows = {
+            r["event"]: r for r in services.weekly(user, anchor=monday.date())["outcomes"]
+        }
+        assert rows[seen.pk]["result"] == services.RESULT_ON_TIME
+        assert rows[seen.pk]["slack_minutes"] == pytest.approx(12.0)
+        assert rows[seen.pk]["cause"] is None
+        assert rows[seen.pk]["unmeasured"] == []
+        # 출발 관측이 없으면 이동 시간을 재지 않는다. 0 이 아니다.
+        assert rows[seen.pk]["actual"]["travel_minutes"] is None
+        assert rows[seen.pk]["actual"]["depart_at"] is None
+
+        assert rows[unseen.pk]["result"] == services.RESULT_UNOBSERVED
+        assert rows[unseen.pk]["slack_minutes"] is None
+        assert set(rows[unseen.pk]["deviation"].values()) == {None}
+
+    def test_rows_follow_start_order_and_hold_nulls_without_a_plan(self, user, place):
+        monday = monday_weeks_ago(3)
+        later = plan_event(user, place, monday, day=0, hour=15)
+        earlier = Event.objects.create(
+            user=user, title="계획 없음", start_at=monday + timedelta(hours=9), place=place
+        )
+
+        rows = services.weekly(user, anchor=monday.date())["outcomes"]
+        assert [r["event"] for r in rows] == [earlier.pk, later.pk]
+        assert set(rows[0]["planned"]) == {
+            "alarm_at", "depart_by", "arrive_at", "prep_minutes", "travel_minutes",
+            "buffer_minutes",
+        }
+        assert set(rows[0]["planned"].values()) == {None}
+        assert rows[0]["prep_applies"] is None
+        assert rows[0]["tau"] is None
+        assert rows[0]["tau_bucket_lower"] is None
+        assert rows[0]["on_time_probability"] is None
+        assert rows[0]["alarm_on"] is False
+
+    def test_not_from_home_prep_is_not_counted_as_unmeasured(self, user, place):
+        """준비가 해당 없는 일정은 준비를 "측정 못 함" 으로 세지 않는다.
+
+        전부 측정했고 초과가 없으면 `plan_too_tight` 여야 한다. 준비를 측정 못 함으로
+        세면 `unknown` 이 되고, 화면이 숨긴 준비를 "측정 안 됨" 으로 적는다.
+        """
+        monday = monday_weeks_ago(3)
+        event = plan_event(
+            user, place, monday, day=1, prep=0, travel=20, buffer_minutes=0,
+            prep_source=PREP_SOURCE_NOT_FROM_HOME,
+        )
+        record_blocks(user, event, 25.0)  # 기록이 있어도 준비를 재지 않는다
+        trip(event, depart=-21, arrive=-2)  # 1분 일찍 나서 1분 빨리 도착
+        # 계획을 세운 뒤 일정이 5분 당겨졌다 → 계획대로 움직였는데 3분 늦음.
+        event.start_at -= timedelta(minutes=5)
+        event.save()
+
+        report = services.weekly(user, anchor=monday.date())
+        row = report["outcomes"][0]
+        assert row["prep_applies"] is False
+        assert row["deviation"]["prep_over"] is None
+        assert row["actual"]["prep_minutes"] == pytest.approx(25.0)
+        assert row["result"] == services.RESULT_LATE
+        assert row["cause"] == "plan_too_tight"
+        assert row["unmeasured"] == []
+        assert report["primary_counts"] == {"plan_too_tight": 1}
+
+    def test_lateness_under_a_minute_is_one_minute(self, user, place):
+        """여유 −0.4분을 반올림하면 "0분 늦음" 이 된다. 지각은 최소 1분이다."""
+        monday = monday_weeks_ago(3)
+        event = plan_event(user, place, monday, day=0)
+        observe(event, TripObservation.Kind.ARRIVE, event.start_at + timedelta(seconds=24))
+
+        report = services.weekly(user, anchor=monday.date())
+        assert report["outcomes"][0]["slack_minutes"] == pytest.approx(-0.4)
+        assert report["outcomes"][0]["result"] == services.RESULT_LATE
+        assert report["late_causes"][0]["late_minutes"] == 1
+
+    def test_alarm_on_follows_the_first_alarm_rule(self, user, place):
+        """출발·도착은 알람을 해제할 때만 기록된다. 그래서 알람 여부를 함께 내린다."""
+        monday = monday_weeks_ago(3)
+        first = plan_event(user, place, monday, day=0, hour=9)
+        second = plan_event(user, place, monday, day=0, hour=14)
+        forced = plan_event(user, place, monday, day=0, hour=18, alarm_enabled=True)
+        off = plan_event(user, place, monday, day=1, alarm_enabled=False)
+
+        rows = {
+            r["event"]: r["alarm_on"]
+            for r in services.weekly(user, anchor=monday.date())["outcomes"]
+        }
+        assert rows == {first.pk: True, second.pk: False, forced.pk: True, off.pk: False}
+
+    def test_alarm_on_is_unknown_when_rules_cannot_be_read(self, user, place):
+        """프로필이 없는 오래된 계정. 리포트는 막히지 않고 알람 여부만 모른다(null)."""
+        monday = monday_weeks_ago(3)
+        plan_event(user, place, monday, day=0)
+        user.profile.delete()
+        fresh = type(user).objects.get(pk=user.pk)
+
+        row = services.weekly(fresh, anchor=monday.date())["outcomes"][0]
+        assert row["alarm_on"] is None
+
+
+class TestWeeklyAggregates:
+
+    def test_deviation_mean_sd_and_count(self, user, place):
+        monday = monday_weeks_ago(3)
+        a = plan_event(user, place, monday, day=0, travel=20)
+        trip(a, depart=-30, arrive=-7)  # 제때 나섬, 이동 23분 → +3
+        record_blocks(user, a, 31.0)  # 준비 +3 (1건뿐)
+        b = plan_event(user, place, monday, day=1, travel=20)
+        trip(b, depart=-28, arrive=-1)  # 2분 늦게 나섬, 이동 27분 → +7
+        c = plan_event(user, place, monday, day=2, travel=20)
+        trip(c, arrive=-5)  # 출발 기록 없음 → 출발·이동 못 잼
+
+        deviation = services.weekly(user, anchor=monday.date())["deviation"]
+        assert deviation["travel_over"] == {"count": 2, "mean_minutes": 5.0, "sd_minutes": 2.0}
+        assert deviation["depart_late"] == {"count": 2, "mean_minutes": 1.0, "sd_minutes": 1.0}
+        # 1건이면 표준편차를 내지 않는다 — 편차 0 은 "모른다" 가 아니다.
+        assert deviation["prep_over"] == {"count": 1, "mean_minutes": 3.0, "sd_minutes": None}
+
+    def test_empty_week_has_no_deviation_values(self, user):
+        deviation = services.weekly(user, anchor=monday_weeks_ago(3).date())["deviation"]
+        for key in ("prep_over", "depart_late", "travel_over"):
+            assert deviation[key] == {"count": 0, "mean_minutes": None, "sd_minutes": None}
+
+    def test_target_rate_and_met(self, user, place):
+        monday = monday_weeks_ago(3)
+        for day, tau in enumerate((0.90, 0.90, 0.95)):
+            trip(plan_event(user, place, monday, day=day, tau=tau), arrive=-5)
+
+        report = services.weekly(user, anchor=monday.date())
+        assert report["target_rate"] == pytest.approx(0.9167)
+        assert report["target_met"] is True  # 100% >= 92%
+
+    def test_target_missed(self, user, place):
+        monday = monday_weeks_ago(3)
+        for day in range(4):
+            trip(plan_event(user, place, monday, day=day), arrive=-5 if day else 5)
+
+        report = services.weekly(user, anchor=monday.date())
+        assert report["on_time_rate"] == pytest.approx(0.75)
+        assert report["target_met"] is False
+
+    def test_target_is_not_judged_on_two_arrivals(self, user, place):
+        monday = monday_weeks_ago(3)
+        for day in range(2):
+            trip(plan_event(user, place, monday, day=day), arrive=-5)
+
+        report = services.weekly(user, anchor=monday.date())
+        assert report["target_rate"] == pytest.approx(0.9)
+        assert report["target_met"] is None
+
+    def test_previous_week_counts_and_change(self, user, place):
+        monday = monday_weeks_ago(3)
+        prev = monday - timedelta(days=7)
+        for day in range(3):
+            trip(plan_event(user, place, monday, day=day), arrive=-5)
+        for day in range(4):
+            trip(plan_event(user, place, prev, day=day), arrive=-5 if day < 2 else 5)
+        plan_event(user, place, prev, day=5)  # 도착 기록 없음
+
+        assert services.weekly(user, anchor=monday.date())["previous_week"] == {
+            "week_start": prev.date().isoformat(),
+            "event_count": 5,
+            "arrived_count": 4,
+            "on_time_count": 2,
+            "on_time_rate": 0.5,
+            "on_time_rate_change_pp": 50,
+        }
+
+    def test_change_needs_three_arrivals_in_both_weeks(self, user, place):
+        monday = monday_weeks_ago(3)
+        prev = monday - timedelta(days=7)
+        for day in range(3):
+            trip(plan_event(user, place, monday, day=day), arrive=-5)
+        for day in range(2):
+            trip(plan_event(user, place, prev, day=day), arrive=-5)
+
+        previous = services.weekly(user, anchor=monday.date())["previous_week"]
+        assert previous["on_time_rate"] == 1.0
+        assert previous["on_time_rate_change_pp"] is None
+
+    def test_previous_week_is_null_without_events(self, user):
+        assert services.weekly(user, anchor=monday_weeks_ago(3).date())["previous_week"] is None
+
+    def test_week_complete_and_has_next_week(self, user):
+        last = services.weekly(user)
+        current = services.weekly(user, anchor=timezone.localdate())
+        assert last["week_complete"] is True
+        assert last["has_next_week"] is True
+        assert current["week_complete"] is False
+        assert current["has_next_week"] is False
+        # 정의상 같은 값이다. 화면이 쓰는 곳이 달라 이름만 나눴다.
+        for report in (last, current):
+            assert report["week_complete"] == report["has_next_week"]
+
+    def test_learning_counts_the_sources_plans_used(self, user, place):
+        monday = monday_weeks_ago(3)
+        plan_event(
+            user, place, monday, day=0, prep_source="observed",
+            travel_source="kakao_transit+observed_route",
+        )
+        plan_event(
+            user, place, monday, day=1, prep_source="declared_range",
+            travel_source="kakao_walk+observed_global",
+        )
+        plan_event(user, place, monday, day=2, prep_source="onboarding")
+        failed = Event.objects.create(
+            user=user, title="장소 없음", start_at=monday + timedelta(days=3, hours=9)
+        )
+        AlarmPlan.objects.create(user=user, event=failed, status=AlarmPlan.Status.NO_PLACE)
+
+        assert services.weekly(user, anchor=monday.date())["learning"] == {
+            "plan_count": 3,
+            "prep_from_records": 1,
+            "travel_from_records": 2,
+        }
+
+    def test_weekly_calibration_counts_only_that_week(self, user, place):
+        """과거 주의 캘리브레이션에 그 뒤 주의 일정이 섞이면 안 된다(결함 회귀).
+
+        예전에는 끝이 "지금" 이라 그 뒤의 모든 일정이 이 주 캘리브레이션에 들어갔다.
+        """
+        monday = monday_weeks_ago(3)
+        trip(plan_event(user, place, monday, day=0), arrive=-5)
+        trip(plan_event(user, place, monday + timedelta(days=7), day=0), arrive=5)
+
+        calibration = services.weekly(user, anchor=monday.date())["calibration"]
+        assert calibration["scored_count"] == 1
+        assert calibration["buckets"][0]["on_time"] == 1
+
+    def test_next_monday_midnight_belongs_to_the_next_week_only(self, user, place):
+        monday = monday_weeks_ago(3)
+        plan_event(user, place, monday, day=7, hour=0)
+
+        assert services.weekly(user, anchor=monday.date())["event_count"] == 0
+        next_week = services.weekly(user, anchor=(monday + timedelta(days=7)).date())
+        assert next_week["event_count"] == 1
+
+
+class TestWeeklyApiPhaseB:
+
+    def test_summary_is_a_template_without_a_key(self, client, user, place):
+        res = client.get("/api/reports/weekly")
+        assert res.status_code == 200
+        assert res.data["summary_source"] == "template"
+        assert res.data["summary"].strip()
+        for key in (
+            "week_complete",
+            "has_next_week",
+            "target_rate",
+            "target_met",
+            "previous_week",
+            "deviation",
+            "learning",
+            "outcomes",
+        ):
+            assert key in res.data, key
+
+    def test_response_carries_no_coordinates_or_addresses(self, client, user, place):
+        """N19. 좌표·장소·주소는 리포트 응답 어디에도 없다."""
+        monday = monday_weeks_ago(1)
+        event = plan_event(user, place, monday, day=1)
+        trip(event, depart=-50, arrive=5)
+
+        res = client.get(f"/api/reports/weekly?week={monday.date().isoformat()}")
+        assert res.status_code == 200
+        assert res.data["outcomes"], "일정이 응답에 있어야 검사가 의미 있다"
+        keys = set(all_keys(res.data))
+        assert not keys & {
+            "lat", "lng", "address", "place", "origin_lat", "origin_lng",
+            "home_lat", "home_lng", "accuracy_m", "distance_m",
+        }
+        body = json.dumps(res.data, ensure_ascii=False)
+        assert "관악로 1" not in body
+        assert "서울대" not in body

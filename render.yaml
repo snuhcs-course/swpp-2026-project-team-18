@@ -73,6 +73,18 @@ services:
       - key: SEOUL_SUBWAY_API_KEY
         sync: false
 
+      # OpenAI 호환 LLM(주간 리포트 줄글 요약). **대시보드에서 직접 넣는다.**
+      # 셋 다 비워 두면 요약은 같은 수치로 만든 고정 문장으로 나간다. 키는 서버에만
+      # 두고 앱에는 넣지 않는다. BASE_URL 을 비우면 OpenAI 기본 주소다.
+      - key: OPENAI_API_KEY
+        sync: false
+
+      - key: OPENAI_MODEL
+        sync: false
+
+      - key: OPENAI_BASE_URL
+        sync: false
+
 # databases 블록을 두지 않는다.
 #
 # 여기에 Render Postgres 를 정의하면 DATABASE_URL 이 그쪽으로 자동 연결되고,

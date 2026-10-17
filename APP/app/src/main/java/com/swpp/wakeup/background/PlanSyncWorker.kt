@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.swpp.wakeup.alarm.AlarmLogQueue
 import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
@@ -90,6 +91,9 @@ class PlanSyncWorker(
             .onFailure { Log.w(TAG, "이동 관측 업로드 실패. 큐에 남는다", it) }
         runCatching { BlockObservationQueue(applicationContext).flush() }
             .onFailure { Log.w(TAG, "블록 관측 업로드 실패. 큐에 남는다", it) }
+        // Partly AI-generated (Claude) — 알람 기록(db-schema.md A3)도 정기 동기화에서 올린다.
+        runCatching { AlarmLogQueue(applicationContext).flush() }
+            .onFailure { Log.w(TAG, "알람 기록 업로드 실패. 큐에 남는다", it) }
     }
 
     internal companion object {

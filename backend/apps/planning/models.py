@@ -243,3 +243,141 @@ class AlarmPlan(models.Model):
         if any(p is None for p in parts):
             return None
         return sum(parts)
+
+
+# Partly AI-generated (Claude)
+class PlanRevision(models.Model):
+    """알람 계획의 이력. 계산 결과가 바뀔 때마다 한 줄씩 쌓는다(db-schema.md A2).
+
+    ## 왜 필요한가
+
+    [AlarmPlan] 은 일정당 한 줄이고 재계산이 덮어쓴다. 그래서 이동이 끝난 뒤 일정을
+    고치면 **사용자가 따른 계획이 사라지고**, 학습이 다른 값과 실측을 비교한다(G1).
+    이 표는 덮어쓰지 않는다. 결정 시점의 계획은 여기서 고른다([decision_revision]).
+
+    ## 이름
+
+    `AlarmPlan` 과 **같은 필드 이름**을 쓰고 값을 그대로 복사한다. 이름을 바꿀 때(P1)
+    두 표를 함께 바꾼다. 경로 좌표(`route_path`, `alt_route_path`)는 크기 때문에 넣지
+    않는다.
+
+    ## 언제 쌓이나
+
+    `compute_and_store` 가 계획을 저장한 바로 뒤, 같은 트랜잭션이다. 결정값
+    ([DECISION_FIELDS])이 그 일정의 마지막 이력과 같으면 쌓지 않는다 — 같은 값으로
+    다시 계산한 것은 결정이 바뀐 것이 아니다. 실패 상태(`route_failed` 등)도 결정이다.
+
+    **학습·리포트는 아직 이 표를 읽지 않는다.** 바꾸는 것은 팀이 정한다.
+    """
+
+    class Trigger(models.TextChoices):
+        """`compute_and_store` 를 부른 곳. 왜 다시 계산했는지를 남긴다."""
+
+        CREATE = "create", "일정 생성"
+        UPDATE = "update", "일정 수정"
+        RECOMPUTE = "recompute", "다시 계산"
+        IMPORT = "import", "캘린더 가져오기"
+        PROFILE = "profile", "프로필 변경"
+        BLOCKS = "blocks", "블록 체크 변경"
+
+    # 이 값들이 마지막 이력과 다를 때만 새 줄을 만든다.
+    DECISION_FIELDS = (
+        "status",
+        "alarm_at",
+        "depart_by",
+        "arrive_at",
+        "prep_minutes",
+        "travel_minutes",
+        "buffer_minutes",
+        "tau_used",
+        "route_key",
+        "event_start_at",
+    )
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="plan_revisions",
+        verbose_name="사용자",
+    )
+    # 계획과 같은 규칙. 일정이 지워지면 어느 계획이었는지 비교할 실측도 함께 사라진다.
+    event = models.ForeignKey(
+        "events.Event",
+        on_delete=models.CASCADE,
+        related_name="plan_revisions",
+        verbose_name="일정",
+    )
+    computed_at = models.DateTimeField("계산 시각")
+
+    # --- AlarmPlan 에서 같은 이름으로 복사 ---------------------------------
+    status = models.CharField("상태", max_length=16, choices=AlarmPlan.Status.choices)
+    alarm_at = models.DateTimeField("알람 시각", null=True, blank=True)
+    depart_by = models.DateTimeField("출발 시각", null=True, blank=True)
+    arrive_at = models.DateTimeField("도착 예정", null=True, blank=True)
+    prep_minutes = models.PositiveIntegerField("준비 시간(분)", null=True, blank=True)
+    travel_minutes = models.PositiveIntegerField("이동 시간(분)", null=True, blank=True)
+    buffer_minutes = models.PositiveIntegerField("안전 버퍼(분)", null=True, blank=True)
+    tau_used = models.FloatField("적용 τ", null=True, blank=True)
+    on_time_probability = models.PositiveSmallIntegerField(
+        "정시 도착 확률(%)", null=True, blank=True
+    )
+    confidence_basis = models.CharField(
+        "확신도 근거", max_length=32, blank=True, default="", db_default=""
+    )
+    prep_source = models.CharField(
+        "준비시간 출처", max_length=24, blank=True, default="", db_default=""
+    )
+    # 그때 체크된 블록별 계획. 일정별 블록 선택은 현재 값만 남으므로 여기서 본다.
+    # 리스트를 넘긴다 — 문자열 "[]" 는 JSON 문자열이 된다(AlarmPlan.prep_breakdown 주석).
+    prep_breakdown = models.JSONField(
+        "준비 내역",
+        default=list,
+        blank=True,
+        db_default=Value([], output_field=models.JSONField()),
+    )
+    total_quantile_minutes = models.FloatField("합성 분위수(분)", null=True, blank=True)
+    travel_mode = models.CharField(
+        "이동 수단", max_length=20, blank=True, default="", db_default=""
+    )
+    travel_source = models.CharField(
+        "이동시간 출처", max_length=30, blank=True, default="", db_default=""
+    )
+    route_key = models.CharField(
+        "사용한 경로", max_length=120, blank=True, default="", db_default=""
+    )
+    route_detail = models.CharField(
+        "경로 상세", max_length=120, blank=True, default="", db_default=""
+    )
+    route_distance_m = models.PositiveIntegerField("경로 길이(m)", null=True, blank=True)
+
+    # --- 이력에만 있는 값 ----------------------------------------------------
+    # 계산 때의 일정 시작. 일정을 고치면 `Event.start_at` 은 덮어써진다.
+    event_start_at = models.DateTimeField("계산 때 일정 시작")
+    # 그때 사용자가 고른 경로(`Event.route_key`). `route_key` 와 다르면 대체된 것이다.
+    requested_route_key = models.CharField(
+        "고른 경로", max_length=120, blank=True, default="", db_default=""
+    )
+    # 카카오가 준 분 그대로(G2). `travel_minutes` 는 보정·τ 분위수가 들어간 값이다.
+    route_minutes_raw = models.PositiveIntegerField("경로 원값(분)", null=True, blank=True)
+    trigger = models.CharField(
+        "계산한 이유",
+        max_length=16,
+        choices=Trigger.choices,
+        blank=True,
+        default="",
+        db_default="",
+    )
+
+    class Meta:
+        db_table = "planning_plan_revision"
+        verbose_name = "계획 이력"
+        verbose_name_plural = "계획 이력"
+        ordering = ["-computed_at", "-id"]
+        indexes = [
+            # "이 일정의 마지막 이력" 과 "결정 시점 이전 마지막 이력" 을 묻는다.
+            models.Index(fields=["event", "computed_at"], name="plan_rev_event_time_idx"),
+        ]
+
+    def __str__(self):
+        label = self.event.title if self.event_id else "(일정 없음)"
+        return f"{label} — {self.get_status_display()} {self.computed_at:%m-%d %H:%M}"

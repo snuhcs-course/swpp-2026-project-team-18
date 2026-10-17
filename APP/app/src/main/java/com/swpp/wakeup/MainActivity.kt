@@ -19,6 +19,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
@@ -55,6 +56,7 @@ import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
 import com.swpp.wakeup.ui.alarm.arrivalClockLabel
 import com.swpp.wakeup.ui.alarm.freshnessLabel
 import com.swpp.wakeup.ui.calendar.CalendarImportScreen
+import com.swpp.wakeup.ui.common.durationLabel
 import com.swpp.wakeup.ui.alarm.RiskChoiceScreen
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.ui.events.AddEventScreen
@@ -68,6 +70,7 @@ import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.places.MapPickScreen
+import com.swpp.wakeup.ui.report.ReportDayScreen
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
 import com.swpp.wakeup.ui.settings.SettingsScreen
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
@@ -188,6 +191,15 @@ private fun MainHost(
     val reportState by viewModel.report.collectAsStateWithLifecycle()
     val morningSession by viewModel.morning.collectAsStateWithLifecycle()
 
+    // Partly AI-generated (Claude)
+    // ⑧ 의 스크롤 위치. 화면 전환(AnimatedContent)이 ⑧ 을 컴포지션에서 빼므로 화면 안에
+    // 두면 ⑨ 에서 돌아올 때마다 맨 위로 튄다. 여기 두고 넘긴다. 주가 바뀌거나 홈에서
+    // 새로 열면 맨 위로 보낸다.
+    val reportScroll = rememberScrollState()
+    LaunchedEffect(reportState.weekly?.weekStart, reportState.openCount) {
+        reportScroll.scrollTo(0)
+    }
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -264,9 +276,17 @@ private fun MainHost(
     //
     // 블록 편집 폼은 같은 경로 안에서 겹쳐 뜨므로 스택에 없다. 폼이 열려
     // 있으면 먼저 닫는다 — 그러지 않으면 뒤로가 폼과 목록을 한꺼번에 건너뛴다.
+    //
+    // 경로 지도 미리보기도 같은 방식이다(⑬ 안에서 겹쳐 그림). 열려 있으면 미리보기만
+    // 닫고 경로 목록으로 돌아간다.
     val draftOpen = routineState.editing != null
-    BackHandler(enabled = nav.canGoBack || draftOpen) {
-        if (draftOpen) viewModel.dismissBlockDraft() else viewModel.goBack()
+    val routePreviewOpen = nav.current == AppRoute.RouteChoice && routeState?.previewKey != null
+    BackHandler(enabled = nav.canGoBack || draftOpen || routePreviewOpen) {
+        when {
+            draftOpen -> viewModel.dismissBlockDraft()
+            routePreviewOpen -> viewModel.closeRoutePreview()
+            else -> viewModel.goBack()
+        }
     }
 
     // 일정 추가·집 설정이 끝나면 홈으로 되돌린다.
@@ -295,7 +315,8 @@ private fun MainHost(
             viewModel.goBack()
             viewModel.resetPrepOnboarding()
             if (saved != null) {
-                snackbarHostState.showSnackbar("평소 준비 시간을 ${saved}분으로 저장했습니다")
+                // "1시간 5분" 처럼 다이얼과 같은 표기. "분"·"간" 모두 받침이 있어 "으로" 고정.
+                snackbarHostState.showSnackbar("평소 준비 시간을 ${durationLabel(saved)}으로 저장했습니다")
             }
         }
     }
@@ -501,6 +522,8 @@ private fun MainHost(
                     // 일정 시작 시각 = 도착 목표. 카드의 출발~도착 시각을 만든다.
                     arriveBy = addState.date.atTime(addState.hour, addState.minute),
                     loadMap = viewModel::loadCandidateMap,
+                    onPreview = viewModel::openRoutePreview,
+                    onClosePreview = viewModel::closeRoutePreview,
                 )
 
                 AppRoute.MapPick -> mapPickState?.let { map ->
@@ -524,7 +547,6 @@ private fun MainHost(
                 AppRoute.PrepOnboarding -> PrepOnboardingScreen(
                     state = prepOnboardingState,
                     onMinutesChange = viewModel::onPrepOnboardingChange,
-                    onStep = viewModel::onPrepOnboardingStep,
                     onSubmit = viewModel::submitPrepOnboarding,
                     onSkip = viewModel::skipPrepOnboarding,
                     modifier = Modifier.padding(innerPadding),
@@ -615,6 +637,18 @@ private fun MainHost(
                     onPreviousWeek = { viewModel.shiftReportWeek(-1) },
                     onNextWeek = { viewModel.shiftReportWeek(1) },
                     onRetry = { viewModel.loadReport(reportState.week) },
+                    onOpenDay = viewModel::openReportDay,
+                    modifier = Modifier.padding(innerPadding),
+                    scrollState = reportScroll,
+                )
+
+                // Partly AI-generated (Claude)
+                is AppRoute.ReportDay -> ReportDayScreen(
+                    report = reportState.weekly,
+                    longTerm = reportState.longTerm,
+                    date = route.date,
+                    initialEventId = route.eventId,
+                    onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                 )
 

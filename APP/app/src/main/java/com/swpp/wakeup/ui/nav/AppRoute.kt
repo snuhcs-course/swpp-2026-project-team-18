@@ -1,5 +1,7 @@
 package com.swpp.wakeup.ui.nav
 
+import java.time.LocalDate
+
 /**
  * `MainActivity` 안의 화면 경로.
  *
@@ -100,12 +102,20 @@ sealed interface AppRoute {
     data object CalendarImport : AppRoute
 
     /**
-     * Figma ⑨ 주간 리포트.
+     * Figma ⑧ 주간 리포트.
      *
      * **앱을 변호하는 화면이 아니다.** 앱이 말한 확률과 실제 정시율을 나란히
      * 놓아 과신하고 있는지 사용자가 직접 보게 한다.
      */
     data object WeeklyReport : AppRoute
+
+    /**
+     * Figma ⑨ 상세 리포트. ⑧ 의 요일 칸이나 지각한 날 줄에서 들어온다.
+     *
+     * 값은 ⑧ 이 받은 주간 응답에서 찾는다(따로 부르지 않는다). [eventId] 는 처음
+     * 고를 일정이고, null 이면 그날 대표 일정이다. (Partly AI-generated (Claude))
+     */
+    data class ReportDay(val date: LocalDate, val eventId: Long?) : AppRoute
 
     /**
      * 아침 기록. 알람을 해제하면 여기로 온다.

@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.swpp.wakeup.data.remote.AlarmLogInput
 
 /**
  * AlarmManager 가 깨우는 지점.
@@ -44,6 +45,10 @@ class AlarmReceiver : BroadcastReceiver() {
         }
 
         Log.i(TAG, "알람 발화: 일정 $eventId ${schedule.alarmLabel}")
+
+        // Partly AI-generated (Claude) — 울린 시각을 남긴다(db-schema.md A3). 디스크에 적고
+        // 업로드는 워커가 한다. 실패해도 알람은 그대로 뜬다(`record` 가 삼킨다).
+        AlarmLogQueue(context).record(AlarmLogInput.KIND_FIRED, schedule)
 
         AlarmNotifications.ensureChannels(context)
 

@@ -10,6 +10,7 @@ from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.response import Response
 
 from apps.planning import services as planning_services
+from apps.planning.models import PlanRevision
 
 from .models import Profile
 from .serializers import ProfileSerializer
@@ -40,7 +41,9 @@ class ProfileView(RetrieveUpdateAPIView):
         if before != after:
             # 집 위치나 준비시간이 바뀌면 알람 시각이 전부 달라진다.
             # NO_HOME 이던 계획들이 이때 계산 가능해진다.
-            recomputed = planning_services.recompute_for_user(request.user)
+            recomputed = planning_services.recompute_for_user(
+                request.user, trigger=PlanRevision.Trigger.PROFILE
+            )  # Partly AI-generated (Claude) — 계획 이력에 "프로필 변경" 으로 남긴다
 
         data = dict(serializer.data)
         data["recomputed_plans"] = recomputed

@@ -82,6 +82,8 @@ class TestTestSettingsProtectTheSharedDatabase:
             "KAKAO_MOBILITY_KEY",
             "KMA_API_KEY",
             "OPENAI_API_KEY",
+            # 모델이 비어 있어야 리포트 요약이 LLM 경로로 가지 않는다(키와 둘 다 필요).
+            "OPENAI_MODEL",
             "FCM_CREDENTIALS_PATH",
             # 실시간 도착 정보. 열린데이터광장은 일일 호출 한도가 있어서
             # 테스트가 태우면 정작 기기에서 확인할 때 막힌다.
@@ -97,6 +99,39 @@ class TestTestSettingsProtectTheSharedDatabase:
     def test_debug_is_off(self, settings):
         """DEBUG=True 면 일부 에러 처리가 달라져 운영 버그를 못 잡는다."""
         assert settings.DEBUG is False
+
+    # Partly AI-generated (Claude)
+    def test_llm_base_url_is_pinned(self, settings):
+        """`.env` 에 학교 주소를 채워도 테스트가 그 주소로 가지 않는다."""
+        assert settings.OPENAI_BASE_URL == "https://api.openai.com/v1"
+
+
+# Partly AI-generated (Claude)
+class TestOpenAiBaseUrlDefault:
+    """`OPENAI_BASE_URL` 이 빈 값이면 기본 주소다.
+
+    Render 는 값이 빈 환경변수를 둘 수 있다. `os.getenv(키, 기본값)` 은 빈 문자열을
+    값으로 보고 기본값을 쓰지 않는다(`DATABASE_URL` 주석의 함정과 같다).
+    """
+
+    @pytest.mark.parametrize("raw", ["", "   "])
+    def test_blank_env_falls_back(self, monkeypatch, raw):
+        base = importlib.import_module("config.settings.base")
+        monkeypatch.setenv("OPENAI_BASE_URL", raw)
+        try:
+            assert importlib.reload(base).OPENAI_BASE_URL == "https://api.openai.com/v1"
+        finally:
+            monkeypatch.undo()
+            importlib.reload(base)
+
+    def test_value_is_trimmed(self, monkeypatch):
+        base = importlib.import_module("config.settings.base")
+        monkeypatch.setenv("OPENAI_BASE_URL", "  https://llm.example.ac.kr/v1  ")
+        try:
+            assert importlib.reload(base).OPENAI_BASE_URL == "https://llm.example.ac.kr/v1"
+        finally:
+            monkeypatch.undo()
+            importlib.reload(base)
 
 
 class TestThrottleRatesAreDefined:
@@ -167,6 +202,20 @@ class TestProductionCacheIsSharedBetweenWorkers:
 
         assert "locmem" not in budget_cache["BACKEND"].lower()
         assert budget_cache["LOCATION"] != image_cache["LOCATION"]
+        assert budget_cache["TIMEOUT"] > 24 * 60 * 60
+        assert budget_cache["OPTIONS"]["MAX_ENTRIES"] > 0
+
+    # Partly AI-generated (Claude)
+    def test_llm_budget_cache_is_shared_and_isolated(self, prod):
+        """사용자별 LLM 일일 상한. 워커마다 따로 세거나 지도 이미지와 함께 퇴출되면
+        상한이 0부터 다시 센다."""
+        image_cache = prod.CACHES["default"]
+        budget_cache = prod.CACHES["llm_budget"]
+
+        assert "locmem" not in budget_cache["BACKEND"].lower()
+        assert budget_cache["LOCATION"] not in (
+            image_cache["LOCATION"], prod.CACHES["static_map_budget"]["LOCATION"],
+        )
         assert budget_cache["TIMEOUT"] > 24 * 60 * 60
         assert budget_cache["OPTIONS"]["MAX_ENTRIES"] > 0
 

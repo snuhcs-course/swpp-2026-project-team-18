@@ -39,6 +39,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.MapCameraMath
@@ -98,21 +99,30 @@ fun RouteMapCard(
     onRecenter: () -> Unit,
     modifier: Modifier = Modifier,
     showCurrentLocation: Boolean = true,
+    /**
+     * 지도 높이. null 이면 부모가 준 남은 높이를 채운다(`weight(1f)`). 그때는 호출부가
+     * 높이를 제한해야 한다 — 스크롤 안에서는 높이가 0 이 된다. 전체 화면 미리보기용이다.
+     */
+    mapHeight: Dp? = MAP_HEIGHT,
+    /** 지도 위 "경로" 캡션. 화면 제목이 이미 말하는 곳(미리보기)에서는 끈다 */
+    showCaption: Boolean = true,
 ) {
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        Text(
-            text = if (moving) "이동 중 · 현재 위치부터 가장 빠른 길" else "경로",
-            color = JitColor.TextSecondary,
-            fontSize = 11.sp,
-        )
+        if (showCaption) {
+            Text(
+                text = if (moving) "이동 중 · 현재 위치부터 가장 빠른 길" else "경로",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+            )
+        }
 
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(MAP_HEIGHT)
+                .then(if (mapHeight != null) Modifier.height(mapHeight) else Modifier.weight(1f))
                 .clip(RoundedCornerShape(JitRadius.Card))
                 .background(JitColor.Surface),
         ) {

@@ -71,6 +71,15 @@ data class TripObservationInput(
     @SerializedName("dwell_seconds") val dwellSeconds: Int? = null,
     /** 멱등 키. 앱이 만들고 재전송해도 같은 값을 쓴다 */
     @SerializedName("client_uuid") val clientUuid: String,
+    /**
+     * 목적지 반경에 처음 들어온 fix 의 시각. ISO 8601. 도착에만 있고 출발은 null.
+     *
+     * [observedAt] 은 반경 진입 + 2분 체류를 채운 판정 시각이라 진입보다 늦다. 서버가
+     * 나중에 보정할 수 있게 진입 시각을 함께 보낸다(db-schema.md A1). 이 필드가 생기기
+     * 전 큐에 쌓인 관측은 값이 없고, 구버전 서버는 모르는 키라 무시한다.
+     * (Partly AI-generated (Claude))
+     */
+    @SerializedName("entered_at") val enteredAt: String? = null,
 ) {
     companion object {
         const val DETECTOR_GPS = "gps"
@@ -106,4 +115,6 @@ data class TripObservationDto(
     /** 계획보다 늦은 분. 이르면 음수. 계획이 없으면 null */
     @SerializedName("delay_minutes") val delayMinutes: Int?,
     @SerializedName("client_uuid") val clientUuid: String?,
+    /** 반경 진입 시각. 출발·옛 관측·구버전 서버는 null (Partly AI-generated (Claude)) */
+    @SerializedName("entered_at") val enteredAt: String? = null,
 )

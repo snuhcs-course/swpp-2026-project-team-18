@@ -172,6 +172,16 @@ CACHES = {
         "TIMEOUT": 25 * 60 * 60,
         "OPTIONS": {"MAX_ENTRIES": 400},
     },
+    # Partly AI-generated (Claude)
+    # 주간 요약 LLM 의 사용자별 일일 호출 수였다. **지금은 쓰지 않는다** — `/tmp` 라 잠들거나
+    # 재배포하면 0 부터 다시 셌다. 호출 수는 DB 의 `reports_llm_call` 로 센다(db-schema.md
+    # A5). 별칭 정리는 P3(§8)에서 한다.
+    "llm_budget": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": os.getenv("DJANGO_LLM_BUDGET_CACHE_DIR", "/tmp/jit-llm-budget"),
+        "TIMEOUT": 25 * 60 * 60,
+        "OPTIONS": {"MAX_ENTRIES": 400},
+    },
 }
 
 # ---------------------------------------------------------------------------

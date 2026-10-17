@@ -390,17 +390,18 @@ fun BlockDraftSheet(
             }
         }
 
-        // 범위가 확률 계산의 입구다. 한 점으로 두면 변동성이 없다고 신고한
-        // 것이 되어 정시 도착 확률이 만들어지지 않는다. 그 사실을 여기서 알린다.
+        // 범위가 준비 시간 변동 폭의 재료다. 한 점으로 두면 변동이 없다고 신고한
+        // 것이 된다. 정시 도착 확률은 이동 변동 폭까지 있어야 나오므로(서버
+        // compute_alarm_math) 준비 범위만으로 확률이 생긴다고 약속하지 않는다.
         NoticeCard(
             dot = if (draft.minText.isNotBlank() && draft.minText == draft.maxText) {
                 JitColor.Amber
             } else {
                 JitColor.Blue
             },
-            title = "범위가 확률의 재료임",
-            body = "최소와 최대를 다르게 주면 그 폭을 변동성으로 읽어 정시 도착 확률을 계산함. " +
-                "같게 두면 변동성이 없다고 신고한 것이 되어 확률이 만들어지지 않음",
+            title = "범위가 변동 폭의 재료임",
+            body = "최소와 최대를 다르게 주면 그 폭을 준비 시간 변동으로 계산함. " +
+                "정시 도착 확률은 이동 기록도 쌓여야 나옴",
         )
 
         Text("포기 시 손실", color = JitColor.TextSecondary, fontSize = 11.sp)
@@ -548,8 +549,10 @@ private fun EmptyCard() {
             dotSize = 8.dp,
         )
         Text(
-            text = "항목이 없으면 집 설정에서 답한 준비 시간을 한 덩어리로 씀. " +
-                "쪼개면 왜 그 시각인지 설명되고 확률 계산도 시작됨",
+            // 준비 시간은 ⑮ 에서 받고, 답하지 않았으면 서버 기본값을 쓴다. 그 숫자는
+            // 서버 소유라 앱에 적지 않는다.
+            text = "항목이 없으면 평소 준비 시간 하나를 한 덩어리로 씀. " +
+                "쪼개면 왜 그 시각인지 설명됨",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
@@ -630,7 +633,7 @@ private fun previewBlocks() = listOf(
         order = 3,
         observationCount = 0,
         observedMeanLabel = null,
-        learningNote = "관측 없음 · 범위가 한 점이라 확률 계산에 쓰이지 않음",
+        learningNote = "관측 없음 · 범위가 한 점이라 변동 폭이 없음",
         rangeMismatch = false,
         checked = false,
     ),

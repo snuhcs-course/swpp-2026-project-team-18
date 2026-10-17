@@ -45,10 +45,13 @@ INSTALLED_APPS = [
     "apps.routing",
     # 학습 결과 아티팩트. 전역·개인 분포 모수를 담는다.
     "apps.prediction",
-    # 주간 리포트·캘리브레이션. **모델이 없다** — 기존 관측에서 요청 시점에
-    # 계산한다. 앱으로 등록하는 것은 위치를 명시하기 위한 것이고, 나중에
-    # 배치 생성이 필요해지면 여기에 모델이 생긴다.
+    # 주간 리포트·캘리브레이션. 수치는 기존 관측에서 요청 시점에 계산하고,
+    # LLM 이 쓴 주간 요약 문장(`WeeklySummary`)만 저장한다.
+    # (Partly AI-generated (Claude))
     "apps.reports",
+    # 공통 오류 형식·헬스 체크 + API 요청 기록(`ApiRequestLog`, db-schema.md A4).
+    # 모델이 생기면서 앱으로 등록한다. (Partly AI-generated (Claude))
+    "apps.common",
 ]
 
 MIDDLEWARE = [
@@ -60,6 +63,11 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Partly AI-generated (Claude)
+    # `/api/` 요청마다 메타와 정리한 본문을 한 줄 남긴다(db-schema.md A4). 맨 뒤에 둔다 —
+    # 뷰 바로 바깥이라 DRF 가 인증한 사용자가 끝난 뒤 `request.user` 에 보인다.
+    # 기록이 실패해도 응답은 그대로 나간다(apps/common/middleware.py).
+    "apps.common.middleware.ApiRequestLogMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -231,6 +239,14 @@ CACHES = {
         # 키에 KST 날짜도 들어가므로 하루보다 조금 길게 남아도 다음 날과 섞이지 않는다.
         "TIMEOUT": 25 * 60 * 60,
     },
+    # Partly AI-generated (Claude)
+    # 주간 요약 LLM 의 사용자별 일일 호출 수였다. **지금은 쓰지 않는다** — 호출 수는 DB 의
+    # `reports_llm_call` 로 센다(db-schema.md A5). 별칭 정리는 P3(§8)에서 한다.
+    "llm_budget": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "jit-llm-budget",
+        "TIMEOUT": 25 * 60 * 60,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -279,9 +295,43 @@ SEOUL_BUS_API_KEY_DECODING = os.getenv("SEOUL_BUS_API_KEY_DECODING", "")
 # 시각을 보여 준다.
 SEOUL_SUBWAY_API_KEY = os.getenv("SEOUL_SUBWAY_API_KEY", "")
 
-# F12 자연어 파싱. Structured Outputs(strict) 를 쓰므로 모델도 설정으로 뺀다.
+# Partly AI-generated (Claude)
+# OpenAI 호환 LLM. 주간 리포트 줄글 요약(P6, apps/reports/summary.py) · F12 자연어
+# 파싱(미착수)이 쓴다.
+#
+# **셋 다 비어 있어도 서버는 돈다.** 리포트 요약은 같은 수치로 만든 고정 문장
+# (템플릿)으로 나간다. 키는 서버에만 둔다 — 앱(APK)에 넣지 않는다(N20).
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "")
+# chat completions 주소의 앞부분. 끝의 /chat/completions 는 서버가 붙인다.
+# **빈 문자열도 기본값으로 읽는다.** Render 는 값이 빈 변수를 둘 수 있고, 그러면
+# getenv 의 기본값이 듣지 않는다(위 DATABASE_URL 주석과 같은 함정).
+OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "").strip() or "https://api.openai.com/v1"
+
+
+# Partly AI-generated (Claude)
+def _env_int(name: str, default: int) -> int:
+    """정수 환경변수. 비었거나 숫자가 아니면 기본값이다(Render 의 빈 변수, 위 주석)."""
+    try:
+        return int((os.getenv(name) or "").strip() or default)
+    except ValueError:
+        return default
+
+
+# 서버 전체의 하루 LLM 요약 호출 상한(db-schema.md A5). 사용자별 상한(30회,
+# apps/reports/summary.py)과 함께 `reports_llm_call` 의 오늘 행 수로 센다. 계정을 여러 개
+# 만들어도 이 이상은 부르지 않는다. 넘으면 고정 문장(템플릿)으로 나간다. 0 이면 부르지 않는다.
+LLM_GLOBAL_DAILY_LIMIT = _env_int("LLM_GLOBAL_DAILY_LIMIT", 100)
+
+# API 요청 기록(db-schema.md A4)과 기록 표의 보존 일수(§9-2). 0 이하면 그 표는 지우지
+# 않는다. 오래된 행은 미들웨어가 프로세스마다 하루 한 번, 또는 `manage.py purge_logs` 가 지운다.
+API_REQUEST_LOG_ENABLED = (os.getenv("API_REQUEST_LOG_ENABLED") or "1").strip() != "0"
+API_REQUEST_LOG_RETENTION_DAYS = _env_int("API_REQUEST_LOG_RETENTION_DAYS", 30)
+LLM_CALL_RETENTION_DAYS = _env_int("LLM_CALL_RETENTION_DAYS", 90)
+# 로그인하지 않은 요청을 프로세스마다 하루 몇 건까지 남기나(Phase C 리뷰 #2). 전역 요청
+# 빈도 제한이 없어서, 상한이 없으면 로그인 없이 보낸 요청으로 공용 DB 를 채울 수 있다.
+# 0 이하면 익명 요청은 남기지 않는다. 로그인한 요청에는 상한이 없다. (Partly AI-generated (Claude))
+API_REQUEST_LOG_ANON_DAILY_CAP = _env_int("API_REQUEST_LOG_ANON_DAILY_CAP", 2000)
 
 FCM_CREDENTIALS_PATH = os.getenv("FCM_CREDENTIALS_PATH", "")
 REDIS_URL = os.getenv("REDIS_URL", "")
@@ -305,8 +355,9 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 #   0.8.0  이동 중 현재 위치부터 목적지까지의 최단 경로를 1분마다 다시 계산한다.
 #          앱이 백그라운드여도 추적 서비스가 경로를 최신 상태로 유지한다
 #   0.9.0  지도 핀치 줌·GPS 재중심·장소 마커/목록 동기화.
+#   0.11.0 주간 리포트 줄글 요약·상세 리포트(outcomes)
 #
 # 버전만으로 판별하지 않는 것이 더 확실하다. `scripts/check_deployed.py` 와
 # 같은 방식으로 **새 엔드포인트의 404 여부**를 보면 버전을 올리는 것을
 # 잊었더라도 드러난다 — 인증이 필요한 경로는 배포됐으면 401, 미배포면 404 다.
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.11.0"

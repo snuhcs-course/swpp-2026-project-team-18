@@ -50,6 +50,9 @@ KAKAO_MOBILITY_KEY = ""
 KMA_API_KEY = ""
 OPENAI_API_KEY = ""
 OPENAI_MODEL = ""
+# 주소도 고정한다. `.env` 를 따르지 않는다 — 개발자가 학교 주소를 채우면 요청
+# 주소를 단언하는 리포트 테스트가 그 사람 PC 에서만 깨진다. (Partly AI-generated (Claude))
+OPENAI_BASE_URL = "https://api.openai.com/v1"
 FCM_CREDENTIALS_PATH = ""
 REDIS_URL = ""
 # 실시간 도착 정보. 열린데이터광장은 일일 호출 한도가 있어서 테스트가 태우면
@@ -83,6 +86,12 @@ REST_FRAMEWORK = {  # noqa: F405
         "password_check": None,
     },
 }
+
+# API 요청 기록(db-schema.md A4)은 기본으로 끈다. 켜 두면 요청마다 INSERT 가 붙어 조회 수를
+# 세는 테스트가 기록과 무관하게 깨진다. 기록 자체는 `apps/common/tests/test_request_log.py`
+# 가 `settings` 픽스처로 켜고 확인한다. 로컬 회귀(`run_local_suite.py`)는 켠 채로 돈다.
+# (Partly AI-generated (Claude))
+API_REQUEST_LOG_ENABLED = False
 
 # 로그를 조용히 한다. 실패 원인은 assert 메시지에서 본다.
 LOGGING = {

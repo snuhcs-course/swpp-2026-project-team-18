@@ -37,10 +37,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import java.time.Instant
-import java.time.OffsetDateTime
-import java.time.ZoneId
-import java.util.UUID
 import kotlin.math.roundToInt
 
 /**
@@ -297,6 +293,7 @@ class TripTrackingService : Service() {
                     decision.fix,
                     decision.distanceM,
                     dwellMillis = decision.dwellMillis,
+                    enteredAtMillis = decision.enteredAtMillis,
                 )
                 // 도착했으면 화면도 그것을 알아야 한다. 이 갱신을 빼면 목록은
                 // "이동 중" 에 멈춰 있고, 사용자는 도착이 기록됐는지 알 수 없다.
@@ -340,21 +337,18 @@ class TripTrackingService : Service() {
         fix: LocationFix,
         distanceM: Double,
         dwellMillis: Long? = null,
+        enteredAtMillis: Long? = null,
     ) {
-        val observation = TripObservationInput(
-            event = current.eventId,
+        // Partly AI-generated (Claude) — 변환은 [tripObservationOf] 한곳에 둔다(JVM 테스트).
+        // 도착이면 체류 시간과 반경 진입 시각(db-schema.md A1)이 함께 큐에 들어간다.
+        // 멱등 키(client_uuid)는 여기서, 판정 시점에 만든다.
+        val observation = tripObservationOf(
+            eventId = current.eventId,
             kind = kind,
-            observedAt = OffsetDateTime
-                .ofInstant(Instant.ofEpochMilli(fix.atMillis), ZoneId.systemDefault())
-                .toString(),
-            lat = fix.lat,
-            lng = fix.lng,
-            accuracyM = fix.accuracyM.toDouble(),
+            fix = fix,
             distanceM = distanceM,
-            // 도착에만 있다. 출발은 "반경을 벗어남" 이라 머문 시간이 없다.
-            dwellSeconds = dwellMillis?.let { (it / 1000).toInt() },
-            // 판정 시점에 만든다. 재전송할 때 새로 만들면 멱등성이 깨진다.
-            clientUuid = UUID.randomUUID().toString(),
+            dwellMillis = dwellMillis,
+            enteredAtMillis = enteredAtMillis,
         )
         queue.enqueue(observation)
         scope.launch { queue.flush() }
@@ -450,6 +444,7 @@ class TripTrackingService : Service() {
                     event.fix,
                     event.distanceM,
                     dwellMillis = event.dwellMillis,
+                    enteredAtMillis = event.enteredAtMillis,
                 )
                 postArrivalResult(current, event.fix)
             }

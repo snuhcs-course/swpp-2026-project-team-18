@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.swpp.wakeup.alarm.AlarmLogQueue
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.sensing.BlockObservationQueue
@@ -52,15 +53,19 @@ class ObservationUploadWorker(
         // 올려야 하는 시점은 같다.
         val trips = TripObservationQueue(applicationContext)
         val blocks = BlockObservationQueue(applicationContext)
+        // Partly AI-generated (Claude) — 알람 울림·끄기·미루기 기록(db-schema.md A3)도 같은
+        // 네트워크 창에서 올린다.
+        val alarms = AlarmLogQueue(applicationContext)
 
-        val before = trips.pendingCount + blocks.pendingCount
+        val before = trips.pendingCount + blocks.pendingCount + alarms.pendingCount
         if (before == 0) return Result.success()
 
         // 한쪽이 실패해도 다른 쪽은 올린다. 예외로 묶으면 이동 관측의 형식
         // 오류가 아침 기록까지 막는다.
         val sent = runCatching { trips.flush() }.getOrDefault(0) +
-            runCatching { blocks.flush() }.getOrDefault(0)
-        val after = trips.pendingCount + blocks.pendingCount
+            runCatching { blocks.flush() }.getOrDefault(0) +
+            runCatching { alarms.flush() }.getOrDefault(0)
+        val after = trips.pendingCount + blocks.pendingCount + alarms.pendingCount
 
         Log.i(TAG, "관측 업로드: 대기 ${before}건 → 처리 ${sent}건, 남음 ${after}건")
 

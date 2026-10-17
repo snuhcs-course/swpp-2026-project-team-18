@@ -10,7 +10,7 @@
 
 from django.contrib import admin
 
-from .models import DWELL_CONFIRM_SECONDS, TripObservation
+from .models import DWELL_CONFIRM_SECONDS, AlarmLog, TripObservation
 
 
 class DwellFilter(admin.SimpleListFilter):
@@ -89,3 +89,44 @@ class TripObservationAdmin(admin.ModelAdmin):
             return "—"
         mark = "✓" if obj.dwell_confirmed else "미달"
         return f"{obj.dwell_seconds}초 {mark}"
+
+
+# Partly AI-generated (Claude)
+@admin.register(AlarmLog)
+class AlarmLogAdmin(admin.ModelAdmin):
+    """알람 기록. **읽기 전용이다.**
+
+    울림·끄기·미루기는 기기가 겪은 사실이다. 손으로 만들거나 고친 행은 어느 아침의
+    무엇인지 알 수 없으면서 학습 재료로 남는다. 잘못 올라온 기록은 지운다.
+    """
+
+    list_display = (
+        "occurred_at",
+        "user_email",
+        "event_title",
+        "kind",
+        "alarm_at",
+        "snooze_minutes",
+        "source",
+    )
+    list_filter = ("kind", "source")
+    search_fields = ("user__email", "user__nickname", "event__title", "client_uuid")
+    date_hierarchy = "occurred_at"
+    ordering = ("-occurred_at", "-id")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("user", "event")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="사용자", ordering="user__email")
+    def user_email(self, obj):
+        return obj.user.email
+
+    @admin.display(description="일정", ordering="event__title")
+    def event_title(self, obj):
+        return obj.event.title if obj.event_id else "—"

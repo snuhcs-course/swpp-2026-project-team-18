@@ -57,8 +57,8 @@ import com.swpp.wakeup.ui.theme.JitTheme
  * **근거를 함께 보여주는 것이 이 화면의 목적이다.** "7:32" 만 주면 사용자가
  * 믿을 이유가 없다. 준비·이동·버퍼를 분해하고 각 값의 출처를 적는다.
  *
- * 확률은 서버가 null 로 줄 수 있다. 관측이 쌓이기 전에는 분포가 없어서다.
- * 그때는 "학습 중" 으로 적고 왜 그런지도 밝힌다.
+ * 확률은 서버가 null 로 줄 수 있다. 준비·이동 둘 다 변동 폭이 있어야 나와서다.
+ * 그때는 숫자를 만들지 않고 "아직 계산할 수 없음" 과 그 이유를 밝힌다.
  */
 @Composable
 fun AlarmDecisionScreen(
@@ -332,13 +332,13 @@ private fun RecommendedAlarmCard(plan: AlarmPlanView) {
  * 확률 한 줄.
  *
  * null 이면 왜 없는지까지 적는다. 사용자가 "고장인가?" 하고 의심하지 않게
- * 하려는 것이고, 나중에 값이 채워질 것임을 알려 준다.
+ * 하려는 것이고, 무엇이 있어야 값이 생기는지 알려 준다. 숫자는 만들지 않는다.
  */
 @Composable
 private fun ProbabilityRow(plan: AlarmPlanView) {
     val confidence = plan.confidence
 
-    if (confidence.isLearning) {
+    if (confidence.isUnavailable) {
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             JitDotLabel(
                 text = confidence.headline,
@@ -419,8 +419,11 @@ private fun BreakdownCard(plan: AlarmPlanView) {
         }
 
         plan.tauUsed?.let {
+            // 출처는 서버 effective_tau 순서(직접 고른 값 → 일정 종류 → 기본값)를 따른다.
+            // 종류가 없는 일정에 "일정 종류에서 결정됨" 이라고 쓰면 틀린다.
             Text(
-                text = "적용 τ ${"%.2f".format(it)} · 일정 종류에서 결정됨",
+                text = listOfNotNull("적용 τ ${"%.2f".format(it)}", plan.tauSourceLabel)
+                    .joinToString(" · "),
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
@@ -431,8 +434,8 @@ private fun BreakdownCard(plan: AlarmPlanView) {
 /**
  * 블록 편집 입구.
  *
- * 블록이 없을 때와 있을 때의 문구가 다르다. 없으면 **확률이 만들어지지 않는
- * 이유**가 여기라서 그 사실을 말해야 하고, 있으면 "이 아침만 조정" 이라는
+ * 블록이 없을 때와 있을 때의 문구가 다르다. 없으면 **준비 시간이 왜 그 값인지
+ * 설명할 수 없다는 것**을 말해야 하고, 있으면 "이 아침만 조정" 이라는
  * 것을 밝혀야 한다 — 기본 설정을 바꾸는 것으로 오해하면 다른 날짜까지 바뀐
  * 줄 알게 된다.
  */
@@ -444,7 +447,7 @@ private fun BlocksEntryCard(plan: AlarmPlanView, onClick: () -> Unit) {
         modifier = Modifier.clickable(onClick = onClick),
         padding = 14.dp,
         gap = 6.dp,
-        accented = empty && plan.confidence.isLearning,
+        accented = empty && plan.confidence.isUnavailable,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -461,8 +464,9 @@ private fun BlocksEntryCard(plan: AlarmPlanView, onClick: () -> Unit) {
         }
         Text(
             text = if (empty) {
+                // 준비 범위만으로는 확률이 나오지 않는다(이동 변동 폭도 필요). 약속하지 않는다.
                 "준비 시간이 한 덩어리라 왜 그 값인지 설명할 수 없음. 항목으로 쪼개고 " +
-                    "최소~최대 범위를 주면 정시 도착 확률이 계산됨"
+                    "최소~최대 범위를 주면 준비 시간 변동이 계산에 반영됨"
             } else {
                 "체크를 바꾸면 이 일정의 알람만 다시 계산됨. 기본값은 그대로 남음"
             },
@@ -671,13 +675,14 @@ private fun AlarmDecisionPreview() {
                 tauUsed = 0.90,
                 confidence = ConfidenceView(
                     percent = null,
-                    headline = "정시 도착 확률 학습 중",
-                    reason = "준비 시간은 분포가 있지만 이동 시간은 경로 조회값 하나뿐임",
-                    action = "같은 경로를 몇 번 다니면 이동 변동성이 쌓임",
+                    headline = "정시 도착 확률 · 아직 계산할 수 없음",
+                    reason = "이동 시간은 경로 조회값 하나뿐임",
+                    action = "이동 기록이 쌓이면 변동성이 생김",
                 ),
+                tauSourceLabel = "수업 일정 기본값",
                 breakdown = listOf(
                     PlanRow("준비 시간", 28, "신고 범위 기반 · 블록 3개. 실제 소요가 쌓이면 학습값으로 바뀜", PlanRow.Kind.PREP),
-                    PlanRow("버스 이동", 20, "카카오 실측 경로 · 20분 · 4.6km · 환승 1회", PlanRow.Kind.TRAVEL),
+                    PlanRow("버스 이동", 20, "카카오 경로 추정 · 5511 · 4.6km · 환승 1회", PlanRow.Kind.TRAVEL),
                     PlanRow("안전 버퍼", 10, "문 앞에서 실제 출발까지의 여유", PlanRow.Kind.BUFFER),
                 ),
                 prepBlocks = listOf(

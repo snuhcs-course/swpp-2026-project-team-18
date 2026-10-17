@@ -2,6 +2,7 @@ package com.swpp.wakeup.data.local
 
 import android.content.Context
 import android.util.Log
+import com.swpp.wakeup.alarm.AlarmLogQueue
 import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
 import com.swpp.wakeup.sensing.BlockObservationQueue
@@ -48,7 +49,7 @@ object LocalStores {
      * 정리될 때 취소된다. 팀이 이미 한 번 당했고 그래서 Room 삭제는
      * [OfflineCache.wipeDetached] 로 분리돼 있다.
      *
-     * 여기는 SharedPreferences 파일 다섯 개라 그 방식까지 필요하지 않다 — 작고,
+     * 여기는 SharedPreferences 파일 여섯 개라 그 방식까지 필요하지 않다 — 작고,
      * 블로킹 시간이 화면 전환 한 프레임 안에 들어온다. 정말 옮겨야 한다면
      * 화면 수명과 분리된 스코프를 써야 하고, `viewModelScope` 는 답이 아니다.
      */
@@ -73,6 +74,9 @@ object LocalStores {
 
         runCatching { BlockObservationQueue(app).wipe() }
             .onFailure { Log.w(TAG, "블록 관측 큐 삭제 실패", it) }
+        // Partly AI-generated (Claude) — 알람 기록 큐(db-schema.md A3). 앞 사용자의 기상 기록이다.
+        runCatching { AlarmLogQueue(app).wipe() }
+            .onFailure { Log.w(TAG, "알람 기록 큐 삭제 실패", it) }
 
         runCatching { MorningSessionStore(app).wipe() }
             .onFailure { Log.w(TAG, "아침 기록 삭제 실패", it) }

@@ -531,6 +531,15 @@ def main() -> int:
     if st == 200:
         for field in ("week_start", "on_time_rate", "by_weekday", "late_causes"):
             check(f"주간 리포트에 {field}", field in (weekly or {}), f"{sorted(weekly or {})}")
+        # Partly AI-generated (Claude)
+        # 0.11.0 — 줄글 요약과 출처. 배포 전 서버에서는 없음으로 나온다(정상).
+        for field in ("summary", "summary_source", "outcomes"):
+            check(f"주간 리포트에 {field} (0.11.0)", field in (weekly or {}), f"{sorted(weekly or {})}")
+        check(
+            "summary_source 가 llm/template 중 하나",
+            (weekly or {}).get("summary_source") in ("llm", "template"),
+            f"summary_source={(weekly or {}).get('summary_source')!r}",
+        )
 
     st, calib = api("/api/reports/calibration")
     check("캘리브레이션 200", st == 200, f"status={st} body={str(calib)[:300]}")

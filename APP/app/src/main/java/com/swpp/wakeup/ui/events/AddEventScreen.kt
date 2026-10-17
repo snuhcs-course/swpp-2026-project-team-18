@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
@@ -26,10 +25,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
-import androidx.compose.material3.TimePickerDefaults
 import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,8 +44,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.common.JitDotLabel
+import com.swpp.wakeup.ui.common.JitPickerValue
 import com.swpp.wakeup.ui.common.JitPrimaryButton
 import com.swpp.wakeup.ui.common.JitTextField
+import com.swpp.wakeup.ui.common.JitTimePickerDialog
 import com.swpp.wakeup.ui.common.PlacePicker
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
@@ -206,6 +204,7 @@ fun AddEventScreen(
                 },
                 onSearchToggle = { originSearching = !originSearching },
             )
+            state.originError?.let { EndpointError(it, tag = "origin_error") }
             state.originNotice?.let { NoticeLine(it) }
             if (originSearching) {
                 // 현재 위치는 버튼을 늘리지 않고 검색 맨 위에 한 줄로 둔다.
@@ -263,6 +262,7 @@ fun AddEventScreen(
                 },
                 onSearchToggle = { destinationSearching = !destinationSearching },
             )
+            state.destinationError?.let { EndpointError(it, tag = "destination_error") }
             if (destinationSearching) {
                 PlacePicker(
                     label = "도착지 검색",
@@ -425,9 +425,21 @@ fun HomeSetupScreen(
 
 // ---------------------------------------------------------------------------
 
+// Partly AI-generated (Claude)
+/**
+ * 하위 화면 머리. [trailing] 이 있으면 오른쪽 끝에 붙인다(상세 리포트의 "10월 6일").
+ */
 @Composable
-internal fun ScreenHeader(title: String, onBack: () -> Unit, enabled: Boolean = true) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+internal fun ScreenHeader(
+    title: String,
+    onBack: () -> Unit,
+    enabled: Boolean = true,
+    trailing: String? = null,
+) {
+    Row(
+        modifier = if (trailing != null) Modifier.fillMaxWidth() else Modifier,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(
             text = "‹",
             color = JitColor.TextPrimary,
@@ -445,46 +457,10 @@ internal fun ScreenHeader(title: String, onBack: () -> Unit, enabled: Boolean = 
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
         )
-    }
-}
-
-// Partly AI-generated (Claude)
-/**
- * 날짜·시각 카드 가운데의 값. 누르면 피커 팝업을 띄운다.
- *
- * 밑줄은 "눌러서 바꿀 수 있음" 을 알리는 표시다.
- */
-@Composable
-private fun PickerValue(
-    display: String,
-    fontSize: Int,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(vertical = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = display,
-            color = JitColor.TextPrimary,
-            fontSize = fontSize.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(3.dp))
-        Spacer(
-            Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(JitColor.Track)
-        )
+        if (trailing != null) {
+            Spacer(Modifier.weight(1f))
+            Text(text = trailing, color = JitColor.TextSecondary, fontSize = 13.sp)
+        }
     }
 }
 
@@ -516,8 +492,9 @@ private fun DateRow(date: LocalDate, onChange: (LocalDate) -> Unit, enabled: Boo
                 fontWeight = FontWeight.Bold,
             )
         }
-        PickerValue(display = label, fontSize = 16, enabled = enabled,
-            onClick = { picking = true }, modifier = Modifier.testTag("event_date"))
+        JitPickerValue(display = label, fontSize = 16, enabled = enabled,
+            onClick = { picking = true }, modifier = Modifier.testTag("event_date"),
+            onClickLabel = "날짜 고르기")
     }
 
     if (picking) {
@@ -560,20 +537,24 @@ private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enable
             }
         }
         // 화면은 12시간제로 보여준다. 오전/오후는 오른쪽 위에 따로 적는다.
-        PickerValue(
+        JitPickerValue(
             modifier = Modifier.testTag("event_time"),
             display = "%02d:%02d".format(to12Hour(hour), minute),
             fontSize = 24,
             enabled = enabled,
             onClick = { picking = true },
+            onClickLabel = "시작 시각 고르기",
         )
     }
 
     if (picking) {
+        // 다이얼은 준비 시간 화면과 같은 공용 부품이다. 여기서는 12시간제(오전/오후 토글).
         JitTimePickerDialog(
-            hour = hour,
-            minute = minute,
-            onPick = { h, m -> onChange(h, m); picking = false },
+            title = "시작 시각",
+            initialHour = hour,
+            initialMinute = minute,
+            is24Hour = false,
+            onConfirm = { h, m -> onChange(h, m); picking = false },
             onDismiss = { picking = false },
         )
     }
@@ -730,68 +711,6 @@ private fun JitDatePickerDialog(
             title = null,
             showModeToggle = false,
         )
-    }
-}
-
-// AI-generated (Claude)
-/**
- * 시계 다이얼 팝업. 시를 고르면 분 다이얼로 넘어가고 오전/오후 토글이 함께 있다.
- * 내부 값은 0~23 시 그대로다(`TimePickerState.hour`).
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun JitTimePickerDialog(
-    hour: Int,
-    minute: Int,
-    onPick: (Int, Int) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val state = rememberTimePickerState(initialHour = hour, initialMinute = minute, is24Hour = false)
-
-    BasicAlertDialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .clip(RoundedCornerShape(JitRadius.Card))
-                .background(JitColor.Surface)
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(
-                text = "시작 시각",
-                color = JitColor.TextSecondary,
-                fontSize = 12.sp,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            TimePicker(
-                state = state,
-                colors = TimePickerDefaults.colors(
-                    clockDialColor = JitColor.Surface2,
-                    clockDialSelectedContentColor = JitColor.Bg,
-                    clockDialUnselectedContentColor = JitColor.TextPrimary,
-                    selectorColor = JitColor.Accent,
-                    containerColor = JitColor.Surface,
-                    periodSelectorBorderColor = JitColor.Track,
-                    periodSelectorSelectedContainerColor = JitColor.Accent,
-                    periodSelectorUnselectedContainerColor = JitColor.Surface2,
-                    periodSelectorSelectedContentColor = JitColor.Bg,
-                    periodSelectorUnselectedContentColor = JitColor.TextSecondary,
-                    timeSelectorSelectedContainerColor = JitColor.Accent,
-                    timeSelectorUnselectedContainerColor = JitColor.Surface2,
-                    timeSelectorSelectedContentColor = JitColor.Bg,
-                    timeSelectorUnselectedContentColor = JitColor.TextPrimary,
-                ),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = onDismiss) { Text("취소", color = JitColor.TextSecondary) }
-                TextButton(onClick = { onPick(state.hour, state.minute) }) {
-                    Text("확인", color = JitColor.Accent, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
     }
 }
 
@@ -1080,6 +999,23 @@ private fun EndpointButton(
             .background(if (active) JitColor.Accent else JitColor.Surface2)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+}
+
+// AI-generated (Claude)
+/**
+ * 출발지·도착지 줄 바로 아래의 서버 오류. 예: "출발지와 도착지는 50m 이상 떨어져
+ * 있어야 한다." 규칙은 서버가 소유하므로 문구를 그대로 쓴다.
+ */
+@Composable
+private fun EndpointError(text: String, tag: String) {
+    Text(
+        text = text,
+        color = JitColor.Red,
+        fontSize = 11.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(tag),
     )
 }
 
