@@ -39,6 +39,9 @@ interface EventsApi {
     @GET("api/events/{id}")
     suspend fun get(@Path("id") id: Long): Response<EventDto>
 
+    @GET("api/events/{id}/risk-options")
+    suspend fun riskOptions(@Path("id") id: Long): Response<RiskOptionsDto>
+
     @POST("api/events")
     suspend fun create(@Body body: EventCreateRequest): Response<EventDto>
 
@@ -859,6 +862,7 @@ data class EventUpdateRequest(
     @SerializedName("tag_key") val tagKey: String? = null,
     @SerializedName("route_key") val routeKey: String? = null,
     @SerializedName("alarm_enabled") val alarmEnabled: Boolean? = null,
+    @SerializedName("tau_override") val tauOverride: Double? = null,
 )
 
 data class PlaceInput(

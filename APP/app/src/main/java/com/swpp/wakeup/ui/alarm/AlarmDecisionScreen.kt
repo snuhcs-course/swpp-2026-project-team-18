@@ -216,6 +216,7 @@ fun AlarmDecisionScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
+                        .testTag("risk_entry")
                         .clickable(onClick = onChangeRisk)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 )

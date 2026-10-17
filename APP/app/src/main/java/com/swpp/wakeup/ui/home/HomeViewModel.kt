@@ -50,6 +50,7 @@ import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.sensing.TripLiveState
 import com.swpp.wakeup.sensing.TripObservationQueue
 import com.swpp.wakeup.domain.model.RouteChoice
+import com.swpp.wakeup.domain.model.RiskOptionsView
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.nav.NavState
@@ -682,7 +683,72 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openRiskChoice(eventId: Long) {
+        if (_nav.value.current == AppRoute.RiskChoice(eventId)) return
+        _risk.value = RiskState()
         _nav.update { it.copy(stack = it.stack + AppRoute.RiskChoice(eventId), forward = true) }
+        loadRiskOptions(eventId)
+    }
+
+    data class RiskState(
+        val eventId: Long? = null,
+        val loading: Boolean = false,
+        val saving: Boolean = false,
+        val options: RiskOptionsView? = null,
+        val error: String? = null,
+    )
+
+    private val _risk = MutableStateFlow(RiskState())
+    val risk: StateFlow<RiskState> = _risk.asStateFlow()
+    private var riskJob: Job? = null
+    private var riskGeneration = 0
+
+    fun loadRiskOptions(eventId: Long) {
+        if (_risk.value.saving) return
+        riskJob?.cancel()
+        val generation = ++riskGeneration
+        _risk.value = RiskState(eventId = eventId, loading = true)
+        riskJob = viewModelScope.launch {
+            val result = repository.loadRiskOptions(eventId)
+            if (generation != riskGeneration || _nav.value.current != AppRoute.RiskChoice(eventId)) return@launch
+            _risk.value = when (result) {
+                is EventRepository.Result.Success -> RiskState(eventId, options = result.data)
+                is EventRepository.Result.Failure -> RiskState(eventId, error = result.message)
+            }
+        }
+    }
+
+    fun saveRiskOption(eventId: Long, key: String) {
+        val state = _risk.value
+        if (_nav.value.current != AppRoute.RiskChoice(eventId)
+            || state.eventId != eventId || state.loading || state.saving) return
+        val selected = state.options?.option(key) ?: return
+        val generation = riskGeneration
+        _risk.update { it.copy(saving = true, error = null) }
+        viewModelScope.launch {
+            val error = when (val saved = repository.saveRiskOption(eventId, selected.tau)) {
+                is EventRepository.Result.Failure -> saved.message
+                is EventRepository.Result.Success -> {
+                    if (_nav.value.current == AppRoute.RiskChoice(eventId)
+                        || _nav.value.current == AppRoute.AlarmDecision(eventId)) {
+                        ++planLoadGeneration // Ignore an older in-flight detail request.
+                        _plan.value = saved.data
+                    }
+                    when (val home = repository.loadHome()) {
+                        is EventRepository.Result.Success -> {
+                            if (!home.data.fromCache) {
+                                applyHome(home.data) // Refresh home and device alarms together.
+                                null
+                            } else "선택은 저장됐지만 알람 목록을 갱신하지 못했습니다. 다시 계속하기를 눌러 주세요."
+                        }
+                        is EventRepository.Result.Failure ->
+                            "선택은 저장됐지만 알람 목록을 갱신하지 못했습니다. ${home.message}"
+                    }
+                }
+            }
+            if (generation != riskGeneration || _nav.value.current != AppRoute.RiskChoice(eventId)) return@launch
+            _risk.update { it.copy(saving = false, error = error) }
+            if (error == null) goBack()
+        }
     }
 
     // Partly AI-generated (Claude)
@@ -1944,6 +2010,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun goBack() {
+        if (_nav.value.current is AppRoute.RiskChoice) {
+            ++riskGeneration
+            riskJob?.cancel()
+            _risk.value = RiskState()
+        }
         _nav.update {
             if (!it.canGoBack) it
             else it.copy(stack = it.stack.dropLast(1), forward = false)
