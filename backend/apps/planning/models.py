@@ -127,6 +127,7 @@ class AlarmPlan(models.Model):
     # 이동 시간의 출처를 남긴다. 나중에 실측과 비교할 때 필요하다.
     travel_mode = models.CharField("이동 수단", max_length=20, blank=True)
     travel_source = models.CharField("이동시간 출처", max_length=30, blank=True)
+    travel_sample_count = models.PositiveIntegerField("이동 보정 표본 수", default=0, db_default=0)
     route_summary = models.CharField("경로 요약", max_length=200, blank=True)
 
     # 실제로 계산에 쓴 경로 key. `Event.route_key` 와 다르면 사용자가 고른
@@ -342,6 +343,7 @@ class PlanRevision(models.Model):
     travel_source = models.CharField(
         "이동시간 출처", max_length=30, blank=True, default="", db_default=""
     )
+    travel_sample_count = models.PositiveIntegerField("이동 보정 표본 수", default=0, db_default=0)
     route_key = models.CharField(
         "사용한 경로", max_length=120, blank=True, default="", db_default=""
     )

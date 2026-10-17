@@ -36,14 +36,17 @@ COPIED_FIELDS = (
     "total_quantile_minutes",
     "travel_mode",
     "travel_source",
+    "travel_sample_count",
     "route_key",
     "route_detail",
     "route_distance_m",
 )
 
-# Risk previews reuse these raw inputs. They can change while the rounded alarm
-# decision stays identical, so deduplicate the complete reusable snapshot.
-DEDUP_FIELDS = (*PlanRevision.DECISION_FIELDS, "requested_route_key", "route_minutes_raw")
+# Raw inputs and correction provenance can change while the rounded alarm
+# decision stays identical. Keep both in the reusable snapshot.
+DEDUP_FIELDS = (
+    *PlanRevision.DECISION_FIELDS, "requested_route_key", "route_minutes_raw", "travel_sample_count",
+)
 
 
 def record_revision(
