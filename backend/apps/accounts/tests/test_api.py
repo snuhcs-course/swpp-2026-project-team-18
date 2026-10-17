@@ -395,9 +395,49 @@ class TestProfileOtherFields:
         res = client.patch("/api/profile", {"default_tau": tau}, format="json")
         assert res.status_code == 200
 
-    def test_negative_prep_minutes_is_rejected(self, client):
-        res = client.patch("/api/profile", {"onboarding_prep_min": -5}, format="json")
+    @pytest.mark.parametrize("minutes", [-5, 4, 241])
+    def test_prep_outside_range_is_rejected_without_saving(self, client, user, minutes):
+        profile = user.profile
+        profile.onboarding_prep_min = 30
+        profile.home_label = "기존 집"
+        profile.save()
+
+        res = client.patch(
+            "/api/profile",
+            {"onboarding_prep_min": minutes, "home_label": "바뀐 집"},
+            format="json",
+        )
         assert res.status_code == 400
+        message = res.data["error"]["details"]["onboarding_prep_min"][0]
+        assert any("가" <= char <= "힣" for char in message)
+        profile.refresh_from_db()
+        assert profile.onboarding_prep_min == 30
+        assert profile.home_label == "기존 집"
+
+    @pytest.mark.parametrize("minutes", [5, 240])
+    def test_prep_range_boundaries_are_accepted(self, client, user, minutes):
+        res = client.patch(
+            "/api/profile", {"onboarding_prep_min": minutes}, format="json"
+        )
+        assert res.status_code == 200
+        assert res.data["onboarding_prep_min"] == minutes
+        user.profile.refresh_from_db()
+        assert user.profile.onboarding_prep_min == minutes
+
+    @pytest.mark.parametrize(
+        "body,expected",
+        [({"onboarding_prep_min": None}, None), ({"home_label": "새 집"}, 30)],
+    )
+    def test_prep_null_and_omitted_remain_supported(self, client, user, body, expected):
+        profile = user.profile
+        profile.onboarding_prep_min = 30
+        profile.save()
+
+        res = client.patch("/api/profile", body, format="json")
+        assert res.status_code == 200
+        assert res.data["onboarding_prep_min"] == expected
+        profile.refresh_from_db()
+        assert profile.onboarding_prep_min == expected
 
     def test_shadow_started_at_is_read_only(self, client):
         """클라이언트가 섀도 시작 시각을 조작하면 학습 구간이 틀어진다."""
