@@ -29,7 +29,7 @@ internal data class EndpointErrors(
  */
 internal fun endpointErrorsOf(failure: EventRepository.Result.Failure): EndpointErrors {
     val origin = failure.fields["origin_lat"] ?: failure.fields["origin_lng"]
-    val destination = failure.fields["destination"]
+    val destination = failure.fields["destination"] ?: failure.fields["destination_is_home"]
     return EndpointErrors(
         origin = origin,
         destination = destination,

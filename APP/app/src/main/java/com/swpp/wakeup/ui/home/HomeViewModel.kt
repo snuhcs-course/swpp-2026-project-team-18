@@ -2495,6 +2495,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /** 목적지 검색. 집 주소·출발지와 같은 상태를 쓴다 */
         val place: PlaceSearch = PlaceSearch(),
         val selectedPlace: PlaceSearchItem? = null,
+        /** 집 버튼으로 선택한 목적지. 좌표가 같아도 검색한 장소는 일반 목적지다. */
+        val destinationIsHome: Boolean = false,
 
         /** ⑬ 경로 선택에서 고른 값. 비어 있으면 서버가 최단 경로를 쓴다 */
         val routeKey: String? = null,
@@ -2539,6 +2541,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          */
         fun canPickRoute(hasHome: Boolean): Boolean =
             !submitting && selectedPlace != null && (origin != null || hasHome)
+
     }
 
     private val _add = MutableStateFlow(AddState())
@@ -2562,14 +2565,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 목적지가 달라졌는데 이전 경로 key 를 들고 있으면 서버가 그 노선을 찾지
      * 못해 `route_failed` 가 되거나, 운 나쁘면 엉뚱한 노선에 맞아 버린다.
      */
-    fun onAddPlaceSelected(item: PlaceSearchItem?) {
+    fun onAddPlaceSelected(item: PlaceSearchItem?) = selectAddDestination(item, isHome = false)
+
+    fun onAddDestinationHome() {
+        val home = _state.value.homePlace ?: return
+        selectAddDestination(home, isHome = true)
+    }
+
+    private fun selectAddDestination(item: PlaceSearchItem?, isHome: Boolean) {
         _add.update {
             it.copy(
                 selectedPlace = item,
+                destinationIsHome = isHome,
                 place = it.place.copy(results = emptyList(), query = item?.name ?: ""),
                 routeKey = null,
                 routeLabel = null,
-                // 출발지는 이 화면에서 따로 고르므로 남긴다. 줄 오류는 장소가 바뀌었으니 지운다.
                 originError = null,
                 destinationError = null,
             )
@@ -2689,6 +2699,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 tagKey = current.tagKey,
                 routeKey = current.routeKey,
                 origin = current.origin,
+                destinationIsHome = current.destinationIsHome,
             )
             when (result) {
                 is EventRepository.Result.Success -> {

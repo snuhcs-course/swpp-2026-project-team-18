@@ -494,6 +494,7 @@ private fun MainHost(
                     onQueryChange = viewModel::onAddQueryChange,
                     onSearch = viewModel::searchPlaces,
                     onPlaceSelect = viewModel::onAddPlaceSelected,
+                    onDestinationHome = viewModel::onAddDestinationHome,
                     onLoadMore = viewModel::loadMoreAddPlaces,
                     onSortChange = viewModel::onAddSortChange,
                     onOpenMap = {
