@@ -167,6 +167,9 @@ android {
     }
 
     testOptions {
+        // 기기 테스트(connectedDebugAndroidTest) 동안 시스템 애니메이션을 끈다.
+        // 켜 두면 화면 전환 중간 상태를 읽어 같은 테스트가 PC 마다 다르게 나온다.
+        animationsDisabled = true
         unitTests {
             // JVM 단위 테스트에서 안드로이드 프레임워크 호출이 예외를 던지지
             // 않고 기본값을 돌려주게 한다.
@@ -177,6 +180,14 @@ android {
             // 원인을 찾는 유일한 창구라 빼고 싶지 않다.
             isReturnDefaultValues = true
         }
+    }
+
+    // JVM 단위 테스트와 기기 테스트가 같은 가짜 API·픽스처 도우미를 쓴다
+    // (src/sharedTest/.../testing/Fakes.kt). 한쪽에만 두면 두 벌이 되고, 두 벌은
+    // 서버 응답 모양이 바뀔 때 반드시 갈린다.
+    sourceSets {
+        getByName("test").kotlin.directories.add("src/sharedTest/java")
+        getByName("androidTest").kotlin.directories.add("src/sharedTest/java")
     }
 }
 
@@ -231,6 +242,10 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.uiautomator)
+    // 화면 통합 테스트(src/androidTest/.../integration). 실행은 README "Verification".
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
 jacoco {

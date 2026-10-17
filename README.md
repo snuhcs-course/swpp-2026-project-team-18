@@ -267,14 +267,22 @@ budget for static maps.
 Latest local integration evidence (2026-10-17, `back-iter2` feature baseline `d434097`): **1,182 backend tests, 611 Android tests, 8 HTTP suites with zero failures (34 external-key skips), lint zero errors, emulator E2E 386 seconds**. This is recorded/fixed upstream routing replay, not a claim about the current public deployment. See the [current checklist](docs/demo-checklist.md), [TODO](task.md) and [direct tests](docs/iter2/account-ranges-and-travel-counts.md).
 
 
-Three suites run locally and in CI on every push to `main` and every pull request
+Four suites run locally and in CI on every push to `main` and every pull request
 ([`ci.yml`](.github/workflows/ci.yml)). CI uses no secrets. Local feature checks can use `:app:testE2eUnitTest` and `:app:lintE2e` with `-PjitE2e=true`; see [QA setup](qa/demo/README.md).
 
 ```bash
 cd backend && python -m pytest                      # backend unit tests
 cd backend && python scripts/run_local_suite.py     # 8 HTTP suites against a live local server
 cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # Android unit tests + lint + build
+cd APP     && ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.package=com.swpp.wakeup.integration
+                                                    # Android integration tests on a running emulator (API 34+)
 ```
+
+The integration tests (`app/src/androidTest/.../integration`) run screens, the Room
+cache and the repository together on a real Android runtime, with fake APIs and no
+server. They log the debug app out on the emulator they run on. The package filter
+leaves out the end-to-end tests in the same folder, which need the QA build and the
+replay server and run through `qa/demo/run.py`.
 
 CI also measures line coverage and prints a per-layer table in the job summary; the
 HTML reports are uploaded as the `backend-coverage` and `app-coverage` artifacts.

@@ -46,7 +46,8 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import retrofit2.Response
 
 /*
- * Repository 단위 테스트용 가짜들.
+ * Repository 테스트용 가짜들. JVM 단위 테스트(src/test)와 기기 통합 테스트
+ * (src/androidTest)가 함께 쓴다(app/build.gradle.kts 의 sharedTest 소스 폴더).
  *
  * ## 왜 손으로 만든 Fake 인가
  *
