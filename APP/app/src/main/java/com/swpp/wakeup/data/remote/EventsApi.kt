@@ -151,6 +151,7 @@ interface EventsApi {
         @Query("origin_lat") originLat: Double? = null,
         @Query("origin_lng") originLng: Double? = null,
         @Query("origin_label") originLabel: String? = null,
+        @Query("dest_label") destLabel: String? = null,
     ): Response<RouteCandidateResponse>
 
     /**
@@ -288,14 +289,18 @@ data class EventDto(
 /**
  * 경로 후보 목록.
  *
- * 카카오는 대중교통 대안을 항상 15개 주지만 대부분 같은 버스의 다른 환승
- * 조합이다. 서버가 축별(빠름·환승없음·지하철·저렴) 대표만 추려 6개 이하로
- * 내려 준다. 앱은 받은 순서대로 보여주면 된다 — 이미 빠른 순이다.
+ * 수단별 목록이 정본이며 `results`는 구버전 서버와의 호환용이다.
+ * 누락된 새 필드는 null로 받아 기존 results로 전환한다.
  */
 data class RouteCandidateResponse(
     val origin: RouteOriginDto?,
-    val results: List<RouteCandidateDto> = emptyList(),
+    val results: List<RouteCandidateDto>? = null,
     val degraded: Boolean = false,
+    val car: List<RouteCandidateDto>? = null,
+    val transit: List<RouteCandidateDto>? = null,
+    val walk: List<RouteCandidateDto>? = null,
+    val bicycle: List<RouteCandidateDto>? = null,
+    @SerializedName("fastest_key") val fastestKey: String? = null,
 )
 
 data class RouteOriginDto(
@@ -357,6 +362,8 @@ data class RouteCandidateDto(
     val segments: List<RouteSegmentDto>? = null,
     /** 도보·자전거 미리보기. 구버전 응답의 누락/null 도 같은 파서로 받는다. */
     val path: JsonElement? = null,
+    /** 서버가 출발지·도착지와 실제 경로 정보로 만든 안내. 구버전은 null. */
+    val guide: String? = null,
 ) {
     val routePoints: List<List<Double>> get() = path.toLatLngPairs()
 }

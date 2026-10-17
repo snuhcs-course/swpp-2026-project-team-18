@@ -61,7 +61,7 @@ import com.swpp.wakeup.ui.theme.JitTheme
  * 경로 선택. Figma "⑬ 경로 선택" (node 77:2).
  *
  * **왜 고르게 하는가.** 카카오는 대중교통 대안을 15개 준다. 서버가 축별
- * 대표만 추려 6개 이하로 내리는데, 그 중 무엇이 나은지는 사람마다 다르다.
+ * 대표를 수단별로 추려 내리는데, 그 중 무엇이 나은지는 사람마다 다르다.
  * 신림역 → 서울대는 23분(환승 1회)과 27분(환승 없음)이 함께 나오고, 4분을
  * 더 쓰더라도 환승을 피하는 사람이 있다. 서버가 최단 시간으로 정해 버리면
  * 그 선택을 빼앗는다.
@@ -194,6 +194,9 @@ fun RouteChoiceScreen(
                         destination = choice.destination,
                         previewable = previewable,
                     )
+                    if (option.key == choice.selectedKey) {
+                        RouteGuide(option.guide)
+                    }
                     // 구버전 서버처럼 좌표가 없으면 고르기만 된다. 지도가 안 뜨는 이유를 밝힌다.
                     if (option.key == choice.selectedKey &&
                         (mode == RouteMode.WALK || mode == RouteMode.BICYCLE) &&
@@ -221,6 +224,24 @@ fun RouteChoiceScreen(
 }
 
 // ---------------------------------------------------------------------------
+
+@Composable
+internal fun RouteGuide(guide: String?) {
+    if (guide.isNullOrBlank()) return
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = "● 최단 경로 안내", color = JitColor.Accent,
+            fontSize = 12.sp, fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = guide, color = JitColor.TextSecondary, fontSize = 12.sp,
+            modifier = Modifier.testTag("route_guide"),
+        )
+    }
+}
 
 // Partly AI-generated (Claude)
 /**

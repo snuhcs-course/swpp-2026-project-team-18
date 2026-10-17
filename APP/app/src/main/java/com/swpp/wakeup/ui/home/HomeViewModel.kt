@@ -1849,7 +1849,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val base = current ?: RouteState()
                 val choice = if (keepSelection) {
                     result.data.copy(
-                        selectedKey = _add.value.routeKey ?: result.data.selectedKey
+                        selectedKey = _add.value.routeKey?.takeIf { key ->
+                            result.data.options.any { it.key == key }
+                        } ?: result.data.selectedKey
                     )
                 } else {
                     result.data

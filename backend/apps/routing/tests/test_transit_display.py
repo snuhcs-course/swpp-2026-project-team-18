@@ -119,7 +119,7 @@ def test_representatives_still_include_each_best_axis(upstream):
     routes = [route(f"fast{i}", 1200 + i * 60, 3000, 2) for i in range(8)]
     routes += [route("fewest", 2400, 2500, 0), route("cheapest", 3000, 1000, 1)]
     items = candidates(upstream, routes)
-    assert len(items) <= clients.CANDIDATE_LIMIT - 1
+    assert len(items) <= clients.CANDIDATE_LIMITS["transit"]
     assert {"fast0", "fewest", "cheapest"} <= items.keys()
 
 
