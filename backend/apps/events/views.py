@@ -198,13 +198,17 @@ class EventCalendarImportView(_UserScopedMixin, APIView):
             }
 
             for row in rows:
-                place = self._resolve_place(row.get("place"))
+                event = existing.get(row["external_id"])
+                # 앱에서 고른 집 목적지는 캘린더 재가져오기로 덮어쓰지 않는다.
+                place = (
+                    None if event is not None and event.destination_is_home
+                    else self._resolve_place(row.get("place"))
+                )
                 tag = (
                     EventTag.objects.filter(key=row["tag_key"]).first()
                     if row.get("tag_key")
                     else None
                 )
-                event = existing.get(row["external_id"])
 
                 if event is None:
                     event = Event.objects.create(
@@ -886,7 +890,15 @@ class RouteLiveView(_UserScopedMixin, APIView):
             .filter(pk=event_id)
             .first()
         )
-        if event is None or event.place_id is None:
+        if event is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        destination = event.resolve_destination(event.user.profile)
+        if destination is None:
+            if event.destination_is_home:
+                return _error(
+                    "no_home", "도착지로 쓸 집 주소를 먼저 설정해야 한다.",
+                    status.HTTP_400_BAD_REQUEST,
+                )
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         plan = getattr(event, "alarm_plan", None)
@@ -900,8 +912,8 @@ class RouteLiveView(_UserScopedMixin, APIView):
             chosen,
             start_lat=lat,
             start_lng=lng,
-            end_lat=event.place.lat,
-            end_lng=event.place.lng,
+            end_lat=destination[0],
+            end_lng=destination[1],
         )
         if degraded or not route:
             return Response({"route": None, "degraded": True})

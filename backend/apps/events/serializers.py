@@ -174,7 +174,7 @@ class EventSerializer(serializers.ModelSerializer):
     일정마다 알람을 또 조회하면 N+1 왕복이 된다.
     """
 
-    place = PlaceSerializer(read_only=True)
+    place = serializers.SerializerMethodField()
     tag = EventTagSerializer(read_only=True)
     lateness_sensitivity = serializers.SerializerMethodField()
     alarm_plan = serializers.SerializerMethodField()
@@ -193,6 +193,7 @@ class EventSerializer(serializers.ModelSerializer):
             # 막을 수 있다.
             "external_id",
             "place",
+            "destination_is_home",
             "tag",
             "tau_override",
             "lateness_sensitivity",
@@ -207,6 +208,18 @@ class EventSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = ("id", "source", "external_id", "created_at")
+
+    def get_place(self, obj):
+        if not obj.destination_is_home:
+            return PlaceSerializer(obj.place).data if obj.place is not None else None
+        destination = obj.resolve_destination(obj.user.profile)
+        if destination is None:
+            return None
+        lat, lng, label = destination
+        return {
+            "id": None, "name": label, "address": "", "lat": lat, "lng": lng,
+            "kakao_place_id": None,
+        }
 
     def get_lateness_sensitivity(self, obj) -> str:
         tau = obj.effective_tau
@@ -310,6 +323,7 @@ class EventWriteSerializer(serializers.ModelSerializer):
             "title",
             "start_at",
             "place",
+            "destination_is_home",
             "tag_key",
             "tau_override",
             "alarm_enabled",
@@ -354,19 +368,38 @@ class EventWriteSerializer(serializers.ModelSerializer):
                 {"origin_lat": "국내 좌표만 출발지로 쓸 수 있다."}
             )
 
+        if attrs.get("destination_is_home") and attrs.get("place") is not None:
+            raise serializers.ValidationError(
+                {"destination_is_home": "집을 도착지로 고르면 place 를 함께 보낼 수 없다."}
+            )
+        # 검색한 장소로 바꾸면 집 선택을 해제한다. 집으로 바꾸면 이전 장소를 비운다.
+        if attrs.get("place") is not None and "destination_is_home" not in attrs:
+            attrs["destination_is_home"] = False
+        home = attrs.get(
+            "destination_is_home", getattr(self.instance, "destination_is_home", False)
+        )
+        if attrs.get("destination_is_home") is True:
+            attrs["place"] = None
+
         # 장소 수정은 저장된 출발지와 합쳐 검증한다. 켬/끔이나 제목만 바꾸는
         # 요청은 기존 가까운 일정도 계속 관리할 수 있게 허용한다.
-        if self.instance is None or {"place", "origin_lat", "origin_lng"} & attrs.keys():
+        endpoint_fields = {"place", "destination_is_home", "origin_lat", "origin_lng"}
+        if self.instance is None or endpoint_fields & self.initial_data.keys():
             profile = self.context["request"].user.profile
-            origin = Event(origin_lat=lat, origin_lng=lng).resolve_origin(profile)
+            candidate = Event(origin_lat=lat, origin_lng=lng, destination_is_home=home)
             if "place" in attrs:
                 place = attrs["place"]
-                destination = (place["lat"], place["lng"]) if place else None
+                candidate.place = Place(**place) if place else None
             else:
-                place = getattr(self.instance, "place", None)
-                destination = (place.lat, place.lng) if place else None
+                candidate.place = getattr(self.instance, "place", None)
+            destination = candidate.resolve_destination(profile)
+            if home and destination is None:
+                raise serializers.ValidationError(
+                    {"destination_is_home": "도착지로 쓸 집 주소를 먼저 설정해야 한다."}
+                )
+            origin = candidate.resolve_origin(profile)
             if origin is not None and destination is not None:
-                validate_route_distance(*origin[:2], *destination)
+                validate_route_distance(*origin[:2], *destination[:2])
         return attrs
 
     def validate_route_key(self, value):

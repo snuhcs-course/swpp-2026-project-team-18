@@ -244,11 +244,12 @@ class EventRepository(
         tagKey: String?,
         routeKey: String? = null,
         origin: PlaceSearchItem? = null,
+        destinationIsHome: Boolean = false,
     ): Result<EventDto> = guard {
         val body = EventCreateRequest(
             title = title.trim(),
             startAt = startAt.toString(),
-            place = place?.let {
+            place = place?.takeUnless { destinationIsHome }?.let {
                 PlaceInput(
                     name = it.name,
                     lat = it.lat,
@@ -264,6 +265,7 @@ class EventRepository(
             originLat = origin?.lat,
             originLng = origin?.lng,
             originLabel = origin?.name,
+            destinationIsHome = destinationIsHome,
         )
         val response = api.create(body)
         // 필드별 오류를 살린다. 가까운 출발·도착(710545a)은 `details.destination` 으로 온다.
@@ -1295,8 +1297,8 @@ internal fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedu
             listOfNotNull(p.name, p.address?.takeIf(String::isNotBlank)).joinToString(" · ")
         },
         arrivalLine = arriveLocal?.let { "${it.format(ALARM_FORMAT)} 도착 예정" },
-        homeLat = profile.homeLat,
-        homeLng = profile.homeLng,
+        homeLat = originLat ?: profile.homeLat,
+        homeLng = originLng ?: profile.homeLng,
         destLat = place?.lat,
         destLng = place?.lng,
         prepMinutes = plan.prepMinutes,

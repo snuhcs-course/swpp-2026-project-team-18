@@ -283,6 +283,8 @@ data class EventDto(
      * 서버가 아직 보내지 않으면 null 이다.
      */
     @SerializedName("lateness_sensitivity") val latenessSensitivity: String? = null,
+    /** 집 목적지의 place 는 서버가 현재 프로필 좌표로 펼쳐 준다. */
+    @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
 )
 
 /**
@@ -850,6 +852,7 @@ data class EventCreateRequest(
     @SerializedName("origin_lat") val originLat: Double? = null,
     @SerializedName("origin_lng") val originLng: Double? = null,
     @SerializedName("origin_label") val originLabel: String? = null,
+    @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
 )
 
 data class EventUpdateRequest(
@@ -859,6 +862,7 @@ data class EventUpdateRequest(
     @SerializedName("tag_key") val tagKey: String? = null,
     @SerializedName("route_key") val routeKey: String? = null,
     @SerializedName("alarm_enabled") val alarmEnabled: Boolean? = null,
+    @SerializedName("destination_is_home") val destinationIsHome: Boolean? = null,
 )
 
 data class PlaceInput(

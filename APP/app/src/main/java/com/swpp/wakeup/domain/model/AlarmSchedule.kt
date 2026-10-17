@@ -35,7 +35,7 @@ data class AlarmSchedule(
     /** "8:50 도착 예정". 계산 못 했으면 null */
     val arrivalLine: String?,
 
-    /** 출발 판별의 기준점 = 프로필 집 위치. */
+    /** 출발 판별의 기준점 = 일정 출발지, 없으면 프로필 집 위치. */
     val homeLat: Double? = null,
     val homeLng: Double? = null,
     /** 도착 판별의 기준점 = 일정 장소. */
@@ -55,7 +55,7 @@ data class AlarmSchedule(
      */
     val prepBlocks: List<ScheduledBlock> = emptyList(),
 ) {
-    /** 집이 있으면 "언제 나갔는지" 를 판별할 수 있다. */
+    /** 출발지가 있으면 "언제 나갔는지" 를 판별할 수 있다. */
     val canDetectDeparture: Boolean get() = homeLat != null && homeLng != null
 
     /** 목적지가 있으면 "언제 닿았는지" 를 판별할 수 있다. */

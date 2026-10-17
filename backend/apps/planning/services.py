@@ -41,7 +41,9 @@ from datetime import timedelta
 
 from django.db import transaction
 from django.db.models import Avg, Count, StdDev
+from rest_framework.exceptions import ValidationError
 
+from apps.events.geo import validate_route_distance
 from apps.events.models import Event
 from apps.routing import clients
 
@@ -135,9 +137,12 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         "alt_route_path": [],
     }
 
-    # 1) 장소가 없으면 이동 시간을 구할 수 없다.
-    if event.place_id is None:
-        defaults["status"] = AlarmPlan.Status.NO_PLACE
+    # 1) 집 목적지는 계산할 때마다 현재 프로필에서 해석한다.
+    destination = event.resolve_destination(profile)
+    if destination is None:
+        defaults["status"] = (
+            AlarmPlan.Status.NO_HOME if event.destination_is_home else AlarmPlan.Status.NO_PLACE
+        )
         return _upsert(event, defaults, trigger=trigger)
 
     # 2) 출발지를 모르면 이동 시간을 구할 수 없다.
@@ -150,6 +155,15 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         defaults["status"] = AlarmPlan.Status.NO_HOME
         return _upsert(event, defaults, trigger=trigger)
     origin_lat, origin_lng, _origin_label = origin
+    dest_lat, dest_lng, _dest_label = destination
+
+    # 집 변경으로 기존 일정의 양 끝이 가까워질 수 있다. 낡은 계획을 지우고
+    # 외부 경로 호출 전에 중단한다. API 저장 검증과 같은 거리 규칙을 쓴다.
+    try:
+        validate_route_distance(origin_lat, origin_lng, dest_lat, dest_lng)
+    except ValidationError:
+        defaults["status"] = AlarmPlan.Status.ROUTE_FAILED
+        return _upsert(event, defaults, trigger=trigger)
 
     # 3) 경로 조회.
     #
@@ -165,15 +179,15 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
             event.route_key,
             start_lat=origin_lat,
             start_lng=origin_lng,
-            end_lat=event.place.lat,
-            end_lng=event.place.lng,
+            end_lat=dest_lat,
+            end_lng=dest_lng,
         )
     else:
         route, degraded = clients.best_route(
             start_lat=origin_lat,
             start_lng=origin_lng,
-            end_lat=event.place.lat,
-            end_lng=event.place.lng,
+            end_lat=dest_lat,
+            end_lng=dest_lng,
         )
     if degraded or not route:
         defaults["status"] = AlarmPlan.Status.ROUTE_FAILED
