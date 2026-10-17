@@ -1,5 +1,22 @@
 # DB 스키마 점검과 정리안 (Phase C1·C2)
 
+## 최신 코드 증분 (2026-10-17)
+
+아래 공용 DB 수치·ER·§3~7의 "현재/이번"은 **2026-10-13 조회·설계 당시**를 뜻한다. 공용 DB를 이번에 다시 조회하지 않았다. 최신 코드에는 Phase C A1~A7과 다음 후속 변경이 적용됐다.
+
+| 변경 | 현재 코드 |
+| --- | --- |
+| 집 목적지 | `events.0007`: `Event.destination_is_home` 기본/DB 기본 false, true이면 `place_id=NULL`. 현재 프로필 집을 응답·계산에 사용 |
+| 이동 보정 표본 수 | `planning.0010`: `AlarmPlan`·`PlanRevision.travel_sample_count` 기본/DB 기본 0. 실제 추정기 값을 저장 |
+| 계획 이력 | 결정값뿐 아니라 `requested_route_key`·`route_minutes_raw`·`travel_sample_count` 변경도 보존. 리스크 미리보기가 원값을 재사용하지만 이동 학습은 아직 현재 계획의 `travel_minutes`를 사용(G1·G2 미해결) |
+| 도착 | 100m 안 첫 새 유효 GPS 위치에서 확정. `entered_at=observed_at`, 체류 0초. 과거 체류 필드는 호환용이고 현재 관측·학습·리포트 유효성 조건이 아님 |
+| 프로필·가입 검증 | 준비 시간 5~240분은 API 검증(null 유지), 가입은 IP당 10회/시간. DB 범위 CHECK를 추가한 것은 아님 |
+
+[현재 TODO](../../task.md) · [알람·도착 정책](alarm-arrival-policy.md) · [경로·리스크·집](route-risk-home.md) · [표본 수·계정 검증](account-ranges-and-travel-counts.md). 배포 시 전체 `migrate`를 적용하고 공용 DB 상태를 별도로 확인한다.
+
+## 2026-10-13 조회·설계 기록
+
+
 - 작성 2026-10-13 · 기준 코드 `front-iter2` `7a0c920` · 공용 DB Neon Postgres 18.6
 - 점검 방법: 읽기 전용 세션(`SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY` 후 `transaction_read_only = on` 확인)에서 `pg_catalog`·`information_schema`·`django_migrations` 만 읽었다. 행 내용·접속 정보는 읽지도 적지도 않았다. 행 수는 통계 추정치(`n_live_tup`)다.
 - 이 문서는 설계다. 코드·마이그레이션은 바꾸지 않았다. 구현은 Phase C 빌드 단계에서 §7(추가 변경)만 한다.

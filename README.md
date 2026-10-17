@@ -13,13 +13,13 @@ alarm = event start − safety buffer (10 min) − τ-quantile of (prep + travel
 ```
 
 τ is the confidence you ask for — 0.90 for a class, 0.99 for an exam or a train. The
-app **shows the reasoning behind the number**: what was measured (a Kakao route of
-20 min, 4.6 km, one transfer), what is fixed (the buffer) and what was learned from
-your own mornings.
+app **shows the reasoning behind the number**: what Kakao estimated (a route of
+20 min, 4.6 km, one transfer), what is fixed (the buffer), and what comes from
+observations.
 
 | | |
 | --- | --- |
-| Version | **0.11.0** — server `APP_VERSION` and app `versionName` |
+| Version | **0.11.0** — source `APP_VERSION` and app `versionName`; deployment status is tracked separately |
 | Shared server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
 | Stack | Android · Kotlin · Jetpack Compose — Django · DRF · Neon Postgres — Render |
 
@@ -36,12 +36,12 @@ your own mornings.
 
 What the MVP supports:
 
-1. **Sign up and onboard** — server-checked password, terms consent, home address, usual prep time
+1. **Sign up and onboard** — server-checked password, terms consent, home address, prep time (5–240 minutes); sign-up allows 10 attempts per IP per hour
 2. **Add an event** — title, time, category (which sets τ), destination (Kakao place
-   search or a pick on the map), origin (home by default), and a route chosen from
-   Kakao's candidates: transit, walk, bicycle or car
+   search, a pick on the map, or your current home), origin (home by default), and a route chosen from
+   grouped Kakao candidates: transit, walk, bicycle or car, with server-written guidance
 3. **See the alarm and why** — the server computes it; the decision screen breaks out
-   prep, travel and buffer, each labeled as measured or fixed, with a progress bar and
+   prep, travel and buffer, each labeled as estimated, observed or fixed, with a progress bar and
    a route map. A faster alternative from the origin is drawn on the map
 4. **Wake up reliably** — `setAlarmClock` (survives Doze, shows the system next-alarm
    icon), full screen over the lock screen, re-registered after reboot, app update and
@@ -53,9 +53,10 @@ What the MVP supports:
    valid location within 100 m of the destination). While you are moving, the app fetches the
    fastest route from your current position every minute and draws it in purple; the
    progress bar shows a live ETA and colors the lateness outlook
-7. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
+7. **Choose risk** — server-modeled safe/normal/gamble choices update the alarm and device schedule. Missing uncertainty has an explicit empty state
+8. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
    offline. Prep observations feed the next calculation directly
-8. **Review** — a weekly report with a short written summary, a per-day detail (plan
+9. **Review** — a weekly report with a short written summary, a per-day detail (plan
    vs actual, cause of lateness) and calibration: did you arrive as often as τ promised?
 
 Also: Seoul subway and bus real-time arrivals on the route (express, last train,
@@ -65,9 +66,9 @@ congestion), device calendar import, an offline cache and background sync (plans
 ### Why the probability is blank
 
 An on-time probability needs a **distribution** of travel times. Kakao returns a single
-`totalTime` with no variance, so the spread has to come from your own trips — route
-corrections learned from observed departures and arrivals. Until that evidence exists,
-the field stays empty and the screen says "learning". Filling in an arbitrary 90% would
+`totalTime` with no variance, so the spread comes from observed trips — route
+corrections learned from departures and arrivals across users. Until that evidence exists,
+the home screen hides the probability and the detail screen explains why it cannot yet be calculated. Filling in an arbitrary 90% would
 make the screen look finished while being untrue.
 
 ---
@@ -78,9 +79,8 @@ make the screen look finished while being untrue.
 
 - On-time probability *value* — the pipeline is complete; the value waits for travel
   variance evidence (above)
-- Risk choice ⑤ — an explanation screen only, no per-time probability options yet
 - Replanning while moving ⑦ — colors, ETA and the live route; no checkpoints or causes
-- Route choice — per-mode tabs work; extended route details and candidate variants remain
+- Route choice — grouped candidates, fastest default and guidance work. Four car variants (BE-8), arrival-time/operating-hour routing (BE-11) and optional bicycle-road ratio (BE-14) remain
 - Weekly and detailed reports ⑧⑨ — built; the Figma panels for sleep, alarm snoozes and
   per-weekday auto-adjustment are left out because nothing records that data yet
 - Sign-in — email and password only; the social buttons show a notice
@@ -93,16 +93,15 @@ make the screen look finished while being untrue.
 - Group rooms ⑩⑪
 - Editing a saved event — schedule changes via `PATCH /api/events/{id}` recompute, but the
   app has no edit screen
-- Adjusting τ directly, natural-language input, weather adjustment, push (FCM),
-  bedtime suggestions
+- Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
+- Recurring events (BE-20), user-defined tags (BE-21) and sleep-time calculation (BE-22)
 - Encrypted token storage — tokens sit in plain SharedPreferences; required before a
   real release
 - Battery-optimization guidance
 
-**Known bugs** (found in review, not fixed yet)
+**Runtime limitations** (route scope and previously identified recovery/map issues)
 
-1. "Fastest route" is the fastest within the chosen mode, not across modes — the scope
-   is still to be decided
+1. Live/alternative routes compare within the selected mode. The candidate picker separately uses `fastest_key` across its available candidates
 2. Arrival restoration after app process restart is not implemented
 3. When the tracking service restarts, the moving state and the live route are lost
 4. Map panning can jump twice as far during consecutive gestures while a response is slow
@@ -165,7 +164,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements/dev.txt
 test -f .env || cp .env.example .env  # Create the template only when .env does not exist
-python -m pytest                   # 865 tests — in-memory SQLite, no keys needed
+python -m pytest                   # in-memory SQLite, no keys needed
 ```
 
 For platform instructions and `.env` setup, see the [backend run guide](backend/README.md).
@@ -253,7 +252,7 @@ budget for static maps.
 │   │   ├── prediction/           learning from observations
 │   │   ├── reports/              weekly report, calibration
 │   │   └── common/               error format, health
-│   ├── config/settings/          base · dev · prod · test
+│   ├── config/settings/          base · dev · prod · test · local_suite
 │   ├── scripts/                  HTTP checks and DB tools
 │   └── Dockerfile                migrate, then gunicorn
 ├── docs/                         setup guides, design notes, the board image
@@ -265,13 +264,16 @@ budget for static maps.
 
 ## Verification
 
+Latest local integration evidence (2026-10-17, `back-iter2` feature baseline `d434097`): **1,182 backend tests, 611 Android tests, 8 HTTP suites with zero failures (34 external-key skips), lint zero errors, emulator E2E 386 seconds**. This is recorded/fixed upstream routing replay, not a claim about the current public deployment. See the [current checklist](docs/demo-checklist.md), [TODO](task.md) and [direct tests](docs/iter2/account-ranges-and-travel-counts.md).
+
+
 Three suites run locally and in CI on every push to `main` and every pull request
-([`ci.yml`](.github/workflows/ci.yml)). CI uses no secrets.
+([`ci.yml`](.github/workflows/ci.yml)). CI uses no secrets. Local feature checks can use `:app:testE2eUnitTest` and `:app:lintE2e` with `-PjitE2e=true`; see [QA setup](qa/demo/README.md).
 
 ```bash
-cd backend && python -m pytest                      # 865 unit tests
+cd backend && python -m pytest                      # backend unit tests
 cd backend && python scripts/run_local_suite.py     # 8 HTTP suites against a live local server
-cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 529 unit tests + lint + build
+cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # Android unit tests + lint + build
 ```
 
 CI also measures line coverage and prints a per-layer table in the job summary; the
@@ -296,7 +298,7 @@ refuses to run if port 8000 is already taken — a stale server answering health
 once made a whole suite pass against old code.
 
 It also pins the database to a **throwaway SQLite file in the temp directory**, never
-the team's Neon database; the scripts create close to a hundred accounts per run.
+the team's Neon database; the scripts create close to a hundred accounts per run. Its dedicated `local_suite` settings disable only the sign-up throttle; separate tests and the emulator use the real 10/hour limit.
 Without `KAKAO_REST_API_KEY` the checks that need route lookups are **skipped rather
 than failed**, so CI never burns the daily free quota. Lint blocks errors only.
 
@@ -316,16 +318,18 @@ health, password check, sign-up, token and refresh.
 | Health | `GET health` — version and real-time availability |
 | Auth | `POST auth/password/check` · `POST auth/register` · `POST auth/token` · `POST auth/token/refresh` · `GET auth/me` |
 | Profile | `GET PATCH PUT profile` — home, prep time, default τ. A new home or prep time recomputes up to 50 future events |
-| Events | `GET POST events` · `GET PATCH DELETE events/{id}` · `POST events/{id}/recompute` · `POST events/import` · `GET events/tags` · `GET PUT events/{id}/blocks` |
+| Events | `GET POST events` · `GET PATCH DELETE events/{id}` · `GET events/{id}/risk-options` · `POST events/{id}/recompute` · `POST events/import` · `GET events/tags` · `GET PUT events/{id}/blocks` |
 | Places | `GET places/search` · `GET places/staticmap` · `GET places/reverse` |
 | Routes | `GET routes/candidates` · `POST routes/live` (from the current position, while moving) |
-| Observations | `POST observations/batch` · `GET observations` |
+| Observations | `POST observations/batch` · `GET observations` · `POST alarm-logs/batch` |
 | Routines | `GET POST routines/blocks` · `GET PATCH DELETE routines/blocks/{id}` · `POST routines/observations/batch` |
 | Reports | `GET reports/weekly` · `GET reports/calibration` |
 
 - Errors look like `{"error": {"code", "message", "details"}}`. Another user's id
   returns **404, not 403**, so existence does not leak
-- Sign-up requires `terms_agreed: true`. Alarm enablement and password validation
+- Sign-up requires `terms_agreed: true` and is limited to 10 attempts/IP/hour (429 with `Retry-After`). Profile prep time accepts 5–240 minutes or null.
+- `destination_is_home:true` resolves the current profile home without a Place row. Risk distributions use modeled `bins.mass`, not observation counts; `travel_sample_count` is persisted correction provenance.
+- Alarm enablement and password validation
   contracts are documented in [backend setup](backend/README.md#프론트-연결-계약-be-16).
 - Batch uploads are idempotent on `(user, client_uuid)`. Detection happens mid-commute
   where there is often no network, so the app queues records and resends them; a retry
@@ -347,7 +351,7 @@ health, password check, sign-up, token and refresh.
 | Service | Render `justintime-api` — Docker, free plan, Singapore, deploys `main` |
 | Start | `backend/Dockerfile` runs `migrate`, then gunicorn with 2 workers |
 | Database | Neon Postgres, **direct** URL (the `-pooler` endpoint can break migrations) |
-| Health | `GET /api/health` → `{"ok": true, "version": "0.11.0", "realtime": {"subway": true, "bus": true}}`, independent of the database |
+| Expected source health | `GET /api/health` → `{"ok": true, "version": "0.11.0", "realtime": {"subway": true, "bus": true}}`, independent of the database |
 | Idle | sleeps after 15 minutes; waking takes 30–60 seconds |
 
 Bump the server `APP_VERSION` and the app `versionName` / `versionCode` together in the

@@ -60,14 +60,14 @@ class AlarmPlanSerializer(serializers.Serializer):
     변동성이 있을 때만 채운다. 한쪽만 있으면 없는 쪽을 0 분산으로 치게 되어
     확신도를 과대 보고한다.
 
-    왜 null 인지는 `confidence_basis` 가 알려준다. 화면이 "학습 중" 문구를
-    구체적으로 쓸 수 있어야 한다 — 사용자가 할 수 있는 행동이 다르다.
+    왜 null 인지는 `confidence_basis` 가 알려준다. 앱은 계산할 수 없다는
+    문구와 구체적인 이유를 표시한다 — 사용자가 할 수 있는 행동이 다르다.
 
     | confidence_basis | 뜻 | 사용자가 할 일 |
     | --- | --- | --- |
-    | `observed` | 둘 다 관측 기반. 확률이 있다 | — |
-    | `point_estimate` | 둘 다 점추정 | 루틴 블록을 등록하면 시작된다 |
-    | `travel_variance_unknown` | 준비만 변동성 있음 | 같은 경로를 몇 번 다니면 쌓인다 |
+    | `observed` | 양쪽 모두 변동성 근거가 있어 확률을 계산함 | — |
+    | `point_estimate` | 둘 다 점추정 | 준비 범위·이동 보정 근거가 필요함 |
+    | `travel_variance_unknown` | 준비만 변동성 있음 | 이동 기록 학습·재계산이 필요함 |
     | `prep_variance_unknown` | 이동만 변동성 있음 | 루틴 블록에 범위를 넣으면 된다 |
     """
 

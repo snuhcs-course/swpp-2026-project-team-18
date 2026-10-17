@@ -1,5 +1,7 @@
 # Phase B 설계 리뷰 — 리포트(⑧ 주간 · ⑨ 상세)와 주간 줄글 요약
 
+> 이 문서는 해당 Phase의 설계·리뷰·검증 당시 기록이다. 당시 테스트 수·미구현 설명을 현재 상태로 해석하지 않는다. 2026-10-17 후속 통합 상태는 [최신 TODO](../../task.md), [요청별 완료 상태](backend-requests.md), [최신 검증](account-ranges-and-travel-counts.md)을 따른다.
+
 - 대상: `docs/iter2/report-design.md` (참고 `figma-changes.md` Phase B F-10~F-13, `backend-requests.md` R-3·R-4). 기준 `front-iter2` HEAD `5a41095`(설계 문서는 아직 커밋 전).
 - 방법: 설계의 주장을 서버(`backend/apps/{reports,planning,events,routing}`, `config/settings`, `scripts`, `Dockerfile`, `pytest.ini`, `render.yaml`)와 앱(`APP/app/src/**`) 소스에 하나씩 대조했다. 예시 날짜의 요일은 직접 계산했다. 지시대로 빌드·테스트는 돌리지 않았다. 메인 체크아웃 `backend/.env` 는 키 이름과 빈 값 여부만 확인했다(모델 이름 외의 값은 읽지 않음).
 - 집계: HIGH 0 · MEDIUM 11 · NIT 19. 판정은 `phaseB-design-review.json` 에 적었다.
