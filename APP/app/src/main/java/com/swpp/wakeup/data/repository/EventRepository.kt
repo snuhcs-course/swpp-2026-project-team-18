@@ -27,6 +27,7 @@ import com.swpp.wakeup.data.remote.ProfileDto
 import com.swpp.wakeup.data.remote.ProfileUpdateRequest
 import com.swpp.wakeup.data.remote.RouteArrivalDto
 import com.swpp.wakeup.data.remote.RouteCandidateDto
+import com.swpp.wakeup.data.remote.RouteCandidateResponse
 import com.swpp.wakeup.data.remote.RouteSegmentDto
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
@@ -39,6 +40,7 @@ import com.swpp.wakeup.domain.model.PrepBlockLine
 import com.swpp.wakeup.domain.model.ScheduledBlock
 import com.swpp.wakeup.domain.model.RouteArrival
 import com.swpp.wakeup.domain.model.RouteChoice
+import com.swpp.wakeup.domain.model.RouteMode
 import com.swpp.wakeup.domain.model.RouteOption
 import com.swpp.wakeup.domain.model.RouteSegment
 import com.swpp.wakeup.domain.model.RouteSegments
@@ -290,6 +292,7 @@ class EventRepository(
             originLat = origin?.lat,
             originLng = origin?.lng,
             originLabel = origin?.name,
+            destLabel = destination.name,
         )
         val body = unwrap(response)
             ?: return@guard failureFrom(response.code(), response.errorBody()?.string())
@@ -297,23 +300,11 @@ class EventRepository(
         // 도착정보가 화면에서 줄어들려면 '언제 받은 값인지' 가 필요하다.
         // 응답을 푼 직후에 한 번만 읽어 모든 후보가 같은 기준을 갖게 한다.
         val fetchedAt = SystemClock.elapsedRealtime()
-        val options = body.results.map { it.toOption(fetchedAt) }
-        if (options.isEmpty()) {
+        val choice = body.toChoice(destination, origin, fetchedAt)
+        if (choice.options.isEmpty()) {
             return@guard Result.Failure("경로를 찾지 못했다. 장소를 다시 확인한다.")
         }
-        Result.Success(
-            RouteChoice(
-                originLabel = body.origin?.label?.takeIf { it.isNotBlank() }
-                    ?: origin?.name ?: "집",
-                destination = destination.name,
-                options = options,
-                selectedKey = options.firstOrNull()?.key,
-                // 사용자가 고른 출발지만 좌표를 남긴다. 집을 쓴 경우 null 이라
-                // 일정 생성 때 출발지를 보내지 않고 서버 기본값에 맡긴다.
-                originLat = origin?.lat,
-                originLng = origin?.lng,
-            )
-        )
+        Result.Success(choice)
     }
 
     /**
@@ -800,6 +791,33 @@ private fun importWhenLabel(startAtMillis: Long, zone: ZoneId): String {
         local.format(TIME_FORMAT)
 }
 
+/** 새 수단별 응답과 구버전 results를 같은 선택 상태로 바꾼다. */
+internal fun RouteCandidateResponse.toChoice(
+    destination: PlaceSearchItem,
+    origin: PlaceSearchItem? = null,
+    fetchedAtElapsedMs: Long = 0L,
+): RouteChoice {
+    val groups = listOf(car, transit, walk, bicycle)
+    val candidates = if (groups.any { it != null }) groups.flatMap { it.orEmpty() } else results.orEmpty()
+    val all = candidates.distinctBy { it.key }.map { it.toOption(fetchedAtElapsedMs) }
+    // 수단별로 자른다. 전체 6개 상한은 자동차·도보·자전거 후보를 없앨 수 있다.
+    val options = RouteMode.entries.flatMap { mode ->
+        all.filter { it.travelMode == mode }.take(mode.candidateLimit)
+    }
+    val fallback = candidates.filter { candidate -> options.any { it.key == candidate.key } }
+        .minWithOrNull(compareBy<RouteCandidateDto> { it.minutes }.thenBy { it.transfers })
+    return RouteChoice(
+        originLabel = this.origin?.label?.takeIf { it.isNotBlank() } ?: origin?.name ?: "집",
+        destination = destination.name,
+        options = options,
+        selectedKey = fastestKey?.takeIf { key -> options.any { it.key == key } }
+            ?: fallback?.key,
+        // 프로필 집은 null로 남겨 일정 생성 때 서버 기본 출발지를 사용한다.
+        originLat = origin?.lat,
+        originLng = origin?.lng,
+    )
+}
+
 // Partly AI-generated (Claude)
 /**
  * 경로 후보를 화면용으로 바꾼다.
@@ -835,6 +853,7 @@ internal fun RouteCandidateDto.toOption(fetchedAtElapsedMs: Long = 0L): RouteOpt
         distanceM = distanceM?.takeIf { it > 0 },
         bikeRoadPercent = bikeRoadPercent?.takeIf { it in 0..100 },
         routePath = routePoints.toGeoPoints(),
+        guide = guide?.trim()?.takeIf { it.isNotEmpty() },
         // segments 가 null 인 경우가 정상이다 — 구버전 서버 응답과 Gson 의
         // 기본값 무시가 겹치는 자리다. 근거는 RouteCandidateDto.segments 주석.
         segments = RouteSegments(

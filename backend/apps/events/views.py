@@ -727,7 +727,7 @@ class PlaceReverseView(APIView):
 
 
 class RouteCandidateView(APIView):
-    """GET /api/routes/candidates?dest_lat=&dest_lng=[&origin_lat=&origin_lng=&origin_label=]
+    """GET /api/routes/candidates?dest_lat=&dest_lng=[&dest_label=&origin_lat=&origin_lng=&origin_label=]
 
     출발지는 **기본이 프로필의 집 위치**이고, 사용자가 다른 곳에서 출발할 때만
     `origin_*` 으로 덮어쓴다. 집에서만 출발한다는 가정이 틀렸기 때문이다 —
@@ -744,8 +744,8 @@ class RouteCandidateView(APIView):
        사용을 제한하지 않으면서, 전 세계 경로 프록시로 쓰이는 길을 막는다.
 
     카카오는 대중교통 후보를 항상 15개 주는데 대부분 같은 버스의 다른 환승
-    조합이다. `clients.route_candidates()` 가 축별 대표만 추려 6개 이하로
-    내린다(자세한 기준은 그 함수의 주석).
+    조합이다. `clients.route_candidates()` 가 대중교통 대표를 최대 3개로 추린다.
+    응답은 수단별 목록과 구버전 앱용 `results`를 함께 제공한다.
 
     **호출 비용** — 한 번에 외부 API 를 최대 4번 부른다. 사용자가 일정 추가
     화면에서 명시적으로 요청할 때만 부르고, 알람 재계산에서는 선택된 수단
@@ -800,11 +800,28 @@ class RouteCandidateView(APIView):
             end_lat=dest_lat,
             end_lng=dest_lng,
         )
+        destination_label = (request.query_params.get("dest_label") or "").strip()[:80] or "도착지"
+        groups = {mode: [] for mode in clients.CANDIDATE_LIMITS}
+        results = []
+        for candidate in candidates:
+            mode = candidate["kind"]
+            if mode not in groups or len(groups[mode]) >= clients.CANDIDATE_LIMITS[mode]:
+                continue
+            item = {
+                **candidate,
+                "guide": clients.candidate_guide(candidate, origin["label"], destination_label),
+            }
+            groups[mode].append(item)
+            results.append(item)
+        # 기존 results와 같은 분·환승 순위와 안정적인 동률 순서를 쓴다.
+        fastest = min(results, key=lambda item: (item["minutes"], item["transfers"]), default=None)
         return Response(
             {
                 "origin": origin,
-                "results": candidates,
+                "results": results,
                 "degraded": degraded,
+                **groups,
+                "fastest_key": fastest["key"] if fastest else None,
             }
         )
 

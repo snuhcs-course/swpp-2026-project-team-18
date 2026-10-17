@@ -93,8 +93,8 @@ def meters_per_unit(level: int) -> float:
 # 도보를 후보로 제시할 상한. 이보다 멀면 목록만 어지럽힌다.
 WALK_CANDIDATE_MAX_MINUTES = 40
 
-# 후보 목록에 담을 최대 개수.
-CANDIDATE_LIMIT = 6
+# 수단별 상한. 한 수단의 후보 때문에 다른 수단이 전체 목록에서 잘리지 않는다.
+CANDIDATE_LIMITS = {"car": 4, "transit": 3, "walk": 1, "bicycle": 1}
 
 
 def _get(url: str) -> tuple[dict | None, bool]:
@@ -1049,7 +1049,7 @@ def _transit_candidates(
     seen: set[str] = set()
 
     def take(item: dict | None) -> None:
-        if item is None or item["key"] in seen:
+        if item is None or item["key"] in seen or len(picked) >= CANDIDATE_LIMITS["transit"]:
             return
         seen.add(item["key"])
         picked.append(item)
@@ -1057,16 +1057,16 @@ def _transit_candidates(
     take(min(pool, key=fastest))
     take(min(pool, key=lambda c: (c["transfers"], *fastest(c))))
 
+    if priced:
+        take(min(priced, key=lambda c: (c["fare"], *fastest(c))))
+
     subway = [c for c in pool if "지하철" in c["mode"]]
     if subway:
         take(min(subway, key=fastest))
 
-    if priced:
-        take(min(priced, key=lambda c: (c["fare"], *fastest(c))))
-
     # 3) 자리가 남으면 빠른 순으로 채운다.
     for c in sorted(pool, key=fastest):
-        if len(picked) >= CANDIDATE_LIMIT - 1:  # 도보·자전거·자동차 자리를 남긴다
+        if len(picked) >= CANDIDATE_LIMITS["transit"]:
             break
         take(c)
 
@@ -1187,6 +1187,12 @@ def _car_candidate(
         "source": "kakao_car",
         "reason": "",
         "segments": [{"kind": "car", "seconds": int(seconds), "label": "자동차"}],
+        "road_names": list(dict.fromkeys(
+            name
+            for section in routes[0].get("sections") or []
+            for road in section.get("roads") or []
+            if (name := str(road.get("name") or "").strip())
+        )),
     }
     if with_path:
         path = car_route_path(data)
@@ -1244,7 +1250,6 @@ def route_candidates(
 
     # 빠른 순. 같으면 환승 적은 순.
     candidates.sort(key=lambda c: (c["minutes"], c["transfers"]))
-    candidates = candidates[:CANDIDATE_LIMIT]
 
     # 대중교통 배지는 같은 수단 내 비교 결과를 유지한다. 다른 수단의 기존
     # reason 라벨만 전체 목록 기준으로 매긴다.
@@ -1269,6 +1274,28 @@ def route_candidates(
 
     enrich_candidates(candidates)
     return candidates, transit_degraded and not transit
+
+
+def candidate_guide(candidate: dict, origin_label: str, destination_label: str) -> str:
+    """이미 받은 경로 정보로만 안내한다. 주소·도로명을 새로 조회하거나 추측하지 않는다."""
+    description = candidate["mode"]
+    distance = candidate.get("distance_m")
+    if (
+        isinstance(distance, (int, float)) and not isinstance(distance, bool)
+        and math.isfinite(distance) and distance > 0
+    ):
+        description += f" {distance / 1000:.1f}km"
+    via = ""
+    if candidate["kind"] == "car":
+        roads = candidate.get("road_names") or []
+        if roads:
+            via = f"{', '.join(roads[:3])} 경유 "
+    elif candidate["kind"] == "transit" and candidate.get("detail"):
+        via = f"{candidate['detail']} 이용 "
+    return (
+        f"{origin_label} 출발 → {destination_label}까지 {description}, "
+        f"{via}예상 소요 {candidate['minutes']}분"
+    )
 
 
 def _transit_label(route_key: str) -> str:
