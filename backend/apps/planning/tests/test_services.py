@@ -217,6 +217,51 @@ class TestWithFullVariance:
         )
 
 
+class TestTravelSampleCount:
+    @pytest.mark.parametrize("specific,global_,expected", [(0, 0, 0), (7, 0, 7), (0, 40, 40), (7, 40, 47)])
+    def test_api_exposes_the_count_actually_used(self, user, place, stub_route, specific, global_, expected):
+        from rest_framework.test import APIClient
+        from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection
+
+        for signature, count in [(ROUTE["key"], specific), (GLOBAL_SIGNATURE, global_)]:
+            if count:
+                RouteCorrection.objects.create(route_signature=signature, sample_count=count)
+        event = make_event(user, place)
+        services.compute_and_store(event)
+        client = APIClient()
+        client.force_authenticate(user)
+        response = client.get(f"/api/events/{event.pk}")
+        assert response.status_code == 200
+        assert response.json()["alarm_plan"]["travel_sample_count"] == expected
+
+    @pytest.mark.parametrize("failed", [False, True])
+    def test_recompute_clears_stale_counts(self, user, place, stub_route, monkeypatch, failed):
+        from apps.routing.models import RouteCorrection
+
+        correction = RouteCorrection.objects.create(route_signature=ROUTE["key"], sample_count=7)
+        event = make_event(user, place)
+        assert services.compute_and_store(event).travel_sample_count == 7
+        correction.delete()
+        if failed:
+            monkeypatch.setattr(services.clients, "best_route", lambda **kw: (None, True))
+        plan = services.compute_and_store(event)
+        plan.refresh_from_db()
+        assert plan.travel_sample_count == 0
+        assert plan.status == (AlarmPlan.Status.ROUTE_FAILED if failed else AlarmPlan.Status.OK)
+
+    def test_history_keeps_count_changes_without_duplicating_identical_recomputes(self, user, place, stub_route):
+        from apps.routing.models import RouteCorrection
+
+        correction = RouteCorrection.objects.create(route_signature=ROUTE["key"], sample_count=7)
+        event = make_event(user, place)
+        old_alarm = services.compute_and_store(event).alarm_at
+        correction.sample_count = 8
+        correction.save()
+        assert services.compute_and_store(event).alarm_at == old_alarm
+        services.compute_and_store(event)
+        assert list(event.plan_revisions.order_by("id").values_list("travel_sample_count", flat=True)) == [7, 8]
+
+
 class TestFailureStates:
     def test_no_place(self, user, stub_route):
         event = Event.objects.create(

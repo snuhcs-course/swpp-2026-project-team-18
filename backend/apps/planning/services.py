@@ -122,6 +122,7 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         "total_quantile_minutes": None,
         "travel_mode": "",
         "travel_source": "",
+        "travel_sample_count": 0,
         "route_summary": "",
         "route_key": "",
         "route_detail": "",
@@ -230,6 +231,7 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
                 math_.total_minutes - math_.buffer_minutes, 2
             ),
             "travel_mode": (route.get("mode") or "")[:20],
+            "travel_sample_count": travel.sample_count,
             # 보정이 적용됐으면 그 사실을 남긴다. 나중에 실측과 비교할 때
             # "카카오 원값" 과 "보정값" 을 구분해야 한다.
             "travel_source": (

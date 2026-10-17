@@ -581,6 +581,8 @@ data class AlarmPlanDto(
     @SerializedName("prep_source") val prepSource: String?,
     @SerializedName("buffer_source") val bufferSource: String?,
     @SerializedName("travel_time_source") val travelTimeSource: String?,
+    /** 실제 이동 보정에 쓴 표본 수. 구버전 응답에서는 null. */
+    @SerializedName("travel_sample_count") val travelSampleCount: Int? = null,
 
     /**
      * 준비 시간을 블록별로 쪼갠 내역. 루틴 블록이 없으면 **빈 배열**이다.

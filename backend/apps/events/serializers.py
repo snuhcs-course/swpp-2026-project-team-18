@@ -78,6 +78,7 @@ class AlarmPlanSerializer(serializers.Serializer):
     arrive_at = serializers.DateTimeField(allow_null=True)
     prep_minutes = serializers.IntegerField(allow_null=True)
     travel_minutes = serializers.IntegerField(allow_null=True)
+    travel_sample_count = serializers.IntegerField()
     buffer_minutes = serializers.IntegerField(allow_null=True)
     total_minutes = serializers.IntegerField(allow_null=True)
     tau_used = serializers.FloatField(allow_null=True)

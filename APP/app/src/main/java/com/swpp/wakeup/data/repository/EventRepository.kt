@@ -1149,7 +1149,8 @@ private const val TRAVEL_ACTION = "이동 기록이 쌓이면 변동성이 생�
  * 예전에는 "실측" 이라고 적었는데, 카카오 경로 추정치를 측정값처럼 읽게 한다.
  * 출처는 `kakao_*` 에 보정 꼬리(`+observed_route`/`+observed_global`)가 붙는 모양이다.
  */
-internal fun travelSourceNote(source: String?): String = when {
+internal fun travelSourceNote(source: String?, sampleCount: Int? = null): String = when {
+    sampleCount != null && sampleCount > 0 -> "카카오 추정 · 이동 기록 ${sampleCount}회로 보정"
     source?.contains("+observed_route") == true -> "카카오 추정 · 이 경로 이동 기록으로 보정"
     source?.contains("+observed_global") == true -> "카카오 추정 · 전체 이동 기록으로 보정"
     else -> "카카오 경로 추정"
@@ -1198,7 +1199,7 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
                 ?: "이동 시간"
             val bits = buildList {
                 // "실측" 이라고 쓰지 않는다. 카카오 추정치를 측정값처럼 읽게 한다.
-                add(travelSourceNote(plan.travelTimeSource))
+                add(travelSourceNote(plan.travelTimeSource, plan.travelSampleCount))
                 // 집이 아닌 출발지면 **먼저** 밝힌다. 이동 시간이 그 좌표
                 // 기준으로 계산됐는데 화면이 감추면 알람 시각이 설명되지 않는다.
                 originLabel?.takeIf { l -> l.isNotBlank() }?.let { l -> add("${l}에서 출발") }
