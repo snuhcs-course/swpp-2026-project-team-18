@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 from unittest.mock import Mock
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.db import connection
@@ -9,6 +10,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.events.models import Event
+from apps.observations import alarm_logs
+from apps.observations.models import AlarmLog
 from apps.planning import services
 from apps.planning.models import AlarmPlan
 
@@ -189,6 +192,75 @@ def test_create_without_override_defaults_to_automatic(client, monkeypatch):
     }, format="json")
     assert response.status_code == 201
     assert response.data["alarm_enabled"] is None
+
+
+@pytest.mark.parametrize("zone,day", [
+    ("Asia/Seoul", "2026-10-05"),
+    ("America/New_York", "2026-11-01"),  # 25시간인 날도 현지 날짜로 묶는다.
+])
+def test_be25_creation_resets_only_owners_same_local_day(
+    client, event, user, django_user_model, monkeypatch, zone, day,
+):
+    user.profile.timezone = zone
+    user.profile.save()
+    midnight = datetime.fromisoformat(day).replace(tzinfo=ZoneInfo(zone))
+    first = event(start=(midnight + timedelta(hours=1)).isoformat(), enabled=False)
+    later = event(start=(midnight + timedelta(hours=23)).isoformat(), enabled=True)
+    outside = [event(start=at.isoformat(), enabled=False) for at in (
+        midnight - timedelta(seconds=1), midnight + timedelta(days=1),
+    )]
+    other = django_user_model.objects.create_user(email="reset-other@example.com", password="test")
+    foreign = event(start=midnight.isoformat(), enabled=False, owner=other)
+    original_log = alarm_logs.record_switch(first, None, False)
+    compute = Mock()
+    monkeypatch.setattr(services, "compute_and_store", compute)
+
+    response = client.post("/api/events", {
+        "title": "새 일정", "start_at": (midnight + timedelta(hours=12)).isoformat(),
+    }, format="json")
+
+    assert response.status_code == 201
+    first.refresh_from_db()
+    later.refresh_from_db()
+    assert first.alarm_enabled is None and later.alarm_enabled is None
+    current = states(client)
+    assert current[first.pk] == (True, True)
+    assert current[later.pk] == (False, False)
+    for untouched in [*outside, foreign]:
+        untouched.refresh_from_db()
+        assert untouched.alarm_enabled is False
+    assert AlarmLog.objects.filter(pk=original_log.pk).exists()
+    assert set(AlarmLog.objects.filter(kind=AlarmLog.Kind.AUTO).values_list("event_id", flat=True)) == {
+        first.pk, later.pk,
+    }
+    compute.assert_called_once()  # 기존 일정 경로는 재조회하지 않는다.
+
+
+@pytest.mark.parametrize("failure", ["validation", "planning"])
+def test_be25_failed_creation_preserves_existing_choices(client, event, monkeypatch, failure):
+    original = event(enabled=False)
+    monkeypatch.setattr(services, "compute_and_store", Mock(side_effect=RuntimeError("plan failure")))
+    body = {"title": "" if failure == "validation" else "새 일정", "start_at": original.start_at.isoformat()}
+    if failure == "validation":
+        assert client.post("/api/events", body, format="json").status_code == 400
+    else:
+        with pytest.raises(RuntimeError, match="plan failure"):
+            client.post("/api/events", body, format="json")
+    original.refresh_from_db()
+    assert original.alarm_enabled is False
+    assert Event.objects.count() == 1
+    assert not AlarmLog.objects.filter(kind=AlarmLog.Kind.AUTO).exists()
+
+
+def test_be25_calendar_import_preserves_manual_choices(client, event, monkeypatch):
+    original = event(start=(timezone.now() + timedelta(days=2)).isoformat(), enabled=False)
+    monkeypatch.setattr(services, "compute_and_store", Mock())
+    response = client.post("/api/events/import", {"events": [{
+        "external_id": "no-reset", "title": "캘린더 일정", "start_at": original.start_at.isoformat(),
+    }]}, format="json")
+    assert response.status_code == 200
+    original.refresh_from_db()
+    assert original.alarm_enabled is False
 
 
 def test_invalid_override_is_rejected_without_changing_event(client, event):

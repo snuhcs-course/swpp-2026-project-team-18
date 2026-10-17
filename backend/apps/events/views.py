@@ -29,6 +29,7 @@ from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
 
+from .alarms import reset_alarm_overrides
 from .geo import validate_route_distance
 from .models import Event, EventTag
 from .serializers import (
@@ -77,12 +78,12 @@ class EventListCreateView(_UserScopedMixin, ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         write = self.get_serializer(data=request.data)
         write.is_valid(raise_exception=True)
-        event = write.save()
-
-        # 생성 시점에 한 번만 계산한다. 목록 조회마다 부르면 카카오 무료
-        # 쿼터(일 1,000건)가 금방 마른다.
-        planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
-        event.refresh_from_db()
+        with transaction.atomic():
+            event = write.save()
+            # 새 일정만 계산한다. 기존 일정은 선택값만 자동으로 돌린다.
+            planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
+            reset_alarm_overrides(event)
+            event.refresh_from_db()
 
         return Response(
             EventSerializer(event, context=self.get_serializer_context()).data,
