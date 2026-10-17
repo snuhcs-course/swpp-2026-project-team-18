@@ -114,7 +114,7 @@ class Demo:
         self.result = {"scenario": self.scenario["name"], "mode": mode,
                        "api": self.api_base, "status": "failed", "device": self.device}
         if self.replay_routing:
-            self.result["external_response_mode"] = "recorded_walk_map_and_fixed_transit_cases"
+            self.result["external_response_mode"] = "recorded_walk_map_and_fixed_transit_home_cases"
 
     def shell(self, *args):
         return run(self.adb + ["shell", *args], capture_output=True, timeout=30).stdout.strip()
@@ -326,6 +326,9 @@ class Demo:
                     self.send_error(403)
                     return
                 actions = {"/arm": demo.arm, "/travel": demo.travel, "/verify": demo.verify_and_close}
+                if demo.replay_routing:
+                    actions.update({"/risk_empty": demo.risk_empty, "/risk_ready": demo.risk_ready,
+                                    "/risk_restore": demo.risk_restore})
                 try:
                     require(self.path in actions, "알 수 없는 QA 단계")
                     payload = actions[self.path]()
@@ -338,6 +341,56 @@ class Demo:
                 self.wfile.write(json.dumps(payload).encode())
         self.control = ThreadingHTTPServer(("127.0.0.1", CONTROL_PORT), Handler)
         threading.Thread(target=self.control.serve_forever, daemon=True).start()
+
+    def fixture_db(self, script):
+        require(self.replay_routing and not self.public_server, "QA fixture는 일회용 DB에서만 만듭니다.")
+        return run([str(self.python), "-c", "import django; django.setup(); " + script],
+                   cwd=ROOT / "backend", env=self.env, capture_output=True).stdout.strip()
+
+    def risk_empty(self):
+        self.risk_original = self.api("GET", f"events/{self.event_id}/blocks")["blocks"]
+        self.risk_tau = self.event["tau_override"]
+        self.api("PUT", f"events/{self.event_id}/blocks", {"selections": [
+            {"block": block["id"], "checked": False} for block in self.risk_original]})
+        result = self.api("GET", f"events/{self.event_id}/risk-options")
+        require(not result["options"] and result["unavailable_reason"], "리스크 빈 상태가 아닙니다.")
+        self.result["risk_empty"] = result
+        return {"prepared": True}
+
+    def restore_blocks(self):
+        self.api("PUT", f"events/{self.event_id}/blocks", {"selections": [
+            {"block": block["id"], "checked": block["checked"]} for block in self.risk_original]})
+
+    def risk_ready(self):
+        # Only uncertainty inputs are seeded; the real planner/API computes every choice.
+        self.restore_blocks()
+        self.risk_fixture_id = int(self.fixture_db(
+            "from apps.events.models import Event; from apps.routing.models import RouteCorrection; "
+            f"p=Event.objects.get(pk={self.event_id}).alarm_plan; "
+            "r=RouteCorrection.objects.create(route_signature=p.route_key, mode=p.travel_mode, "
+            "factor=1.5, sd_minutes=8, sample_count=20, hour_bucket=-1, weekday_type='any'); print(r.pk)"))
+        self.api("POST", f"events/{self.event_id}/recompute", {})
+        result = self.api("GET", f"events/{self.event_id}/risk-options")
+        require(len(result["options"]) == 3 and result["selected_key"] is None,
+                "현재 시험 τ를 유지한 3개 선택지가 아닙니다.")
+        self.result["risk_options"] = result
+        return {"prepared": True}
+
+    def risk_restore(self):
+        if not hasattr(self, "risk_original"):
+            return {"restored": True}
+        event = self.api("GET", f"events/{self.event_id}")
+        require(event["tau_override"] == .9 and event["alarm_plan"]["tau_used"] == .9,
+                "UI 리스크 선택이 저장·계산되지 않았습니다.")
+        self.result["risk_saved"] = event
+        self.fixture_db("from apps.routing.models import RouteCorrection; "
+                        f"RouteCorrection.objects.filter(pk={self.risk_fixture_id}).delete()")
+        self.restore_blocks()
+        self.event = self.api("PATCH", f"events/{self.event_id}", {"tau_override": self.risk_tau})
+        count = int(self.fixture_db("from apps.events.models import Place; print(Place.objects.count())"))
+        require(count == 1, "집 목적지가 Place 행을 만들었습니다.")
+        self.result["home_place_count"] = count
+        return {"restored": True}
 
     def build_install(self):
         print("[2/5] 독립 QA 앱 · UI 테스트 빌드/설치", flush=True)
@@ -424,6 +477,9 @@ class Demo:
             self.start_control()
             self.write_config()
             self.gps(self.home["lat"], self.home["lng"])
+            if self.replay_routing:
+                self.result["backend_features_seconds"] = self.execute_test(
+                    "BackendFeaturesTest", "backend-features-instrumentation.txt")
             self.result["flow_seconds"] = self.execute_test("DemoFlowTest", "instrumentation.txt")
             require(self.closed, "백엔드 관측·리포트 검증이 실행되지 않았습니다.")
         self.result["status"] = "passed"

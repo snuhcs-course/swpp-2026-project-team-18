@@ -241,13 +241,7 @@ class PublicSetupTest {
         }
     }
 
-    private fun pickTime(time: String) {
-        val (hour, minute) = time.split(":").map(String::toInt)
-        click(By.text(Pattern.compile(if (hour >= 12) "PM|오후" else "AM|오전")))
-        val clockHour = if (hour % 12 == 0) 12 else hour % 12
-        click(By.desc(Pattern.compile("$clockHour (hours?|o'clock)|${clockHour}시")))
-        dragMinute(minute, "05_time_picker")
-    }
+    private fun pickTime(time: String) = ui.pickTime(time) { capture("05_time_picker") }
 
     // AI-generated (Claude)
     /**
@@ -279,26 +273,7 @@ class PublicSetupTest {
     }
 
     /** 분 다이얼에서 [minute] 를 1분 단위로 고른다. 시는 이미 고른 상태다. */
-    private fun dragMinute(minute: Int, shot: String) {
-        // 현재 시각과 같으면 상단 시 표시를 누를 수 있으므로 분 선택을 명시한다.
-        click(By.desc(Pattern.compile("Select minutes|분 선택")))
-        capture(shot)
-        val zero = By.desc(Pattern.compile("0 minutes?|0분"))
-        val thirty = By.desc(Pattern.compile("30 minutes?|30분"))
-        find(zero)
-        find(thirty)
-        // 상단 분 표시도 같은 설명을 쓴다. 아래쪽 다이얼의 숫자를 기준으로 잡는다.
-        val top = ui.withNode(zero) { device.findObjects(zero).maxBy { it.visibleCenter.y }.visibleCenter }
-        val bottom = ui.withNode(thirty) { device.findObjects(thirty).maxBy { it.visibleCenter.y }.visibleCenter }
-        val x = (top.x + bottom.x) / 2.0
-        val y = (top.y + bottom.y) / 2.0
-        val radius = (bottom.y - top.y) / 2.0
-        val angle = Math.PI * 2 * minute / 60
-        // 탭은 5분 단위로 반올림된다. 드래그는 1분 단위로 선택한다.
-        device.swipe(x.toInt(), y.toInt(), (x + radius * kotlin.math.sin(angle)).toInt(),
-            (y - radius * kotlin.math.cos(angle)).toInt(), 30)
-        device.waitForIdle()
-    }
+    private fun dragMinute(minute: Int, shot: String) = ui.dragMinute(minute) { capture(shot) }
 
     private fun until(label: String, timeout: Long = 30_000, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeout

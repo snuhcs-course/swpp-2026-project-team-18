@@ -20,12 +20,12 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 - 요청: `AlarmPlan.travel_sample_count`(정수, `db_default=0`)를 저장하고 계획 응답에 내려 준다. 보정이 없으면 0.
 - 앱: 값이 1 이상이면 ④ 이동 줄에 "· 이동 기록 N회로 보정" 을 붙인다. 필드가 없으면(구버전) 붙이지 않는다.
 
-## R-2. 리스크 옵션·분포 API (task.md BE-16 그대로)
+## R-2. 리스크 옵션·분포 API (task.md BE-16) — 완료 (2026-10-17)
 
-- `GET /api/events/{id}/risk-options` → `{options:[{key, label, tau, alarm_at, probability, sleep_minutes?}], selected_key, auto_adjusted, auto_reason, distribution:{bins:[{min,max,count}], p50, p90, window_days}}`.
-- 옵션을 못 만들 때의 응답을 정해 줄 것: `{"options": [], "unavailable_reason": "no_variance"}` 처럼. 이유 코드가 있으면 ⑤-a 의 "선택지 준비 중" 을 이유별 문구로 바꿀 수 있다.
-- 저장은 BE-17 확인대로 기존 `PATCH tau_override`(0.5~0.999).
-- 지금 ⑤ 가 항상 빈 상태인 이유가 이것이다(관측 부족이 아니라 API 없음). 그래서 앱 문구를 "선택지 준비 중" 으로 바꿨다.
+- 실제 API·화면·`PATCH tau_override`·기기 예약까지 연결했다.
+- 분포는 모형 결과이므로 `bins:[{min,max,mass}]`, `source:"model"`, `window_days:null`이다. 실측 건수나 최근 30일 통계로 표시하지 않는다.
+- 옵션을 계산할 근거가 없으면 `options:[]`, `distribution:null`, 한국어 `unavailable_reason`을 반환한다. 현재 τ가 프리셋과 다르면 선택 없이 바꾸지 않는다.
+- [검증·직접 테스트](route-risk-home.md).
 
 ## R-3. 학습 배치 정기 실행
 

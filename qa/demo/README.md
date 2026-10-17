@@ -25,10 +25,14 @@ backend/.venv/bin/python qa/demo/run.py --replay-routing --no-video
 
 일회용 로컬 DB와 현재 백엔드 코드를 사용한다. 외부 응답만
 [`replay/route.json`](replay/route.json)의 실제 도보 경로 기록·고정 대중교통 사례와
-저장된 지도 이미지로 재생한다. 가입·저장·실제 알람·GPS·관측·리포트 검증은
+저장된 지도 이미지로 재생한다. 집 목적지 변경에는 고정 좌표 경로 사례를 추가로 쓴다. 가입·저장·실제 알람·GPS·관측·리포트 검증은
 그대로 실행하며, 도보 걸음 수·kcal 추정 표시와 시험 일정의 지각 민감도 배지도 확인한다.
 `RouteDisplayTest`는 자전거 카드 → 전체 화면 지도 미리보기 → 뒤로(목록 복귀), 배지 3개와 대체 버스 2개의 실제 카드 표시,
 마지막으로 도보 미리보기의 "이 경로로 계산" → 일정 추가 복귀를 확인한다.
+선택 카드·미리보기의 경로 안내도 확인한다. `BackendFeaturesTest`는 집 목적지 UI 생성·현재 집 변경,
+리스크 빈 상태·모형 옵션·선택 저장·기기 알람 동기화를 확인한다. 리스크 검증 입력만 일회용 DB에 준비하며,
+실제 API가 결과를 계산한다. 이후 입력을 복원하고 같은 일정으로 이동 E2E를 이어 간다.
+[직접 테스트와 변경 전후 증거](../../docs/iter2/route-risk-home.md).
 `PublicSetupTest`의 준비 시간 단계는 시계 다이얼(`prep_value` → 24시간제 시:분)로 고르고, 도보 경로는 미리보기가 열리면
 `route_preview_confirm`, 좌표가 없는 응답이면 목록의 `route_confirm` 으로 확정한다.
 결과에는 `external_response_mode`와 `route_display_seconds`를 기록한다.

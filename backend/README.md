@@ -107,6 +107,13 @@ Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정
 주소 조회가 실패해도 정상 장소 결과는 제공한다. 조회 실패 후 대체 결과도 없으면 `degraded: true`다.
 [카카오 주소 검색](https://developers.kakao.com/docs/ko/local/dev-guide)을 사용하며 새 키·DB 변경은 없다.
 
+## 경로·리스크·집 목적지 (BE-12·7·16·18)
+
+- 후보 응답은 기존 `results`와 함께 `car/transit/walk/bicycle/fastest_key` 및 후보별 `guide`를 제공한다. 자동차 후보 확장은 BE-8로 남는다.
+- `GET /api/events/{id}/risk-options`: 기존 계산 모델의 3개 τ 선택지. 정보가 부족하면 빈 옵션과 이유를 준다. 분포 `bins.mass`는 모형 비율이며 실측 건수가 아니다.
+- 생성·수정의 `destination_is_home:true`는 `place`와 함께 보내지 않는다. 현재 프로필 집을 사용하며 `place` 행을 만들지 않는다. 마이그레이션 `events.0007` 적용이 필요하다.
+- [직접 테스트·전후 검증](../docs/iter2/route-risk-home.md).
+
 ## 검증과 학습
 
 `backend` 폴더에서 실행한다. 두 명령 모두 공용 DB와 분리된 테스트 DB를 사용한다.

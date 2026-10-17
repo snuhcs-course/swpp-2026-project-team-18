@@ -114,7 +114,7 @@ Figma: "얼마나 안전하게 갈까?" / "지각하지 않을 확률 선택" �
 
 ### 🔴 백엔드 (→ [B-5](#b-5-리스크-선택-옵션과-분포-api))
 - 옵션 목록(이름·τ·알람 시각·확률), 현재 선택된 옵션, 일정 종류에 따른 자동 조정 여부, 소요시간 분포(구간·중앙값·90% 값)를 **서버가 계산해서** 내려준다. 옵션의 τ 값(0.97/0.90/0.65 등)도 서버가 정한다.
-- 옵션 선택 저장(기존 `PATCH /api/events/{id}` 의 `tau_override` 를 써도 되고 B-5 에서 전용 API로 해도 된다).
+- 옵션 선택 저장은 기존 `PATCH /api/events/{id}`의 `tau_override`를 사용한다.
 
 ### 🟢 프론트
 - [x] 옵션 카드 3개 UI(시각·라벨 칩·확률·막대·수면 줄), 선택 상태(주황 테두리, "선택됨"), 하단 버튼 "{선택}으로 계속하기".
@@ -122,9 +122,8 @@ Figma: "얼마나 안전하게 갈까?" / "지각하지 않을 확률 선택" �
 - [x] "자동 조정" 안내 카드, 분포 히스토그램(막대 + 62분/80분/98분 축 + "절반은 N분 이내 · 90%는 N분 이내").
   - `AutoAdjustCard`, `DistributionCard`. 축은 첫 구간 · 중앙값 · 끝 구간, 90% 값 안쪽 막대는 주황.
   - 화면이 받는 값은 `RiskOptionsView`(`domain/model/RiskOptions.kt`)이며 B-5 응답 모양을 그대로 따른다.
-- [ ] ⏳ B-5 이후: 옵션·분포를 B-5 응답으로 채우고, 버튼을 누르면 선택을 저장한 뒤 ④로 돌아간다.
-  - 남은 일: `GET /api/events/{id}/risk-options` 호출 → `RiskOptionsView` 로 변환 → `MainActivity` 의 `RiskChoiceScreen(riskOptions = …, onContinue = …)` 에 연결. 지금은 넘기는 값이 없어 항상 빈 상태가 보인다.
-- [x] 관측이 없어 서버가 옵션·분포를 못 주는 경우의 빈 상태 화면(지금 화면의 "관측이 쌓이면" 안내를 재사용).
+- [x] 옵션·분포를 실제 API로 조회하고 선택한 τ를 저장한 뒤 알람 근거·홈·기기 예약을 갱신한다. 정보가 부족하면 서버 이유를 표시한다.
+- [x] 변동 폭·경로 원값이 부족할 때 서버 이유와 다시 시도 버튼을 표시하는 빈 상태 화면.
   - `riskOptions` 가 null 이거나 옵션이 비면 기존 안내 화면(`RiskEmptyState`)을 그대로 보여준다.
 
 ---
@@ -186,7 +185,7 @@ Figma 순서: "‹ 일정 추가" → "무슨 일정인가?" / "도착 시각에
 - [x] (명세 5) 집 버튼:
   - [x] 출발지: 진입 시 저장된 집으로 자동 설정, 집 버튼 **주황(활성)**. 다른 곳을 고르면 회색. 출발지가 집이면 서버에 `origin_*` 를 보내지 않는다(서버 규칙상 비어 있으면 프로필 집을 쓴다). — `origin == null` 이 집이다.
   - [x] 도착지: 집 버튼을 누르면 저장된 집이 들어가고 주황(좌표로 비교, `isSameSpot`, 테스트 `EndpointHomeMatchTest`).
-  - [ ] ⏳ B-7 이후: 도착지가 집이면 B-7 방식(예 `destination_is_home: true`)으로 보낸다. 지금은 집 좌표를 일반 장소로 보낸다.
+  - [x] 도착지가 집이면 `destination_is_home: true`를 보내며 일반 장소를 별도 저장하지 않는다.
   - [x] 집이 없으면 집 버튼 비활성(흐리게), 누르면 ⑭ 집 주소로 안내.
   - [x] 출발지·도착지가 바뀌면 고른 경로(`routeKey`)를 버린다(`onAddOriginSelected`, `onAddPlaceSelected`). 도착지를 바꿔도 출발지는 남긴다.
   - [ ] ⏳ B-7 이후: 출발지 = 도착지 오류는 서버(B-7)가 판정하고, 앱은 그 메시지를 해당 행 아래에 보여준다. 지금은 서버 오류가 화면 아래 공통 오류 줄에 뜬다.
@@ -378,9 +377,9 @@ Figma 공통: "‹ 경로 선택" → "어떻게 갈까?" / "출발지 → 도�
 
 ### B-5. 리스크 선택 옵션과 분포 API
 - 관련 화면: 5. 리스크 선택
-- `GET /api/events/{id}/risk-options` → `{options: [{key:"safe", label:"안전", tau:0.97, alarm_at, probability, sleep_minutes?}, …], selected_key, auto_adjusted: bool, auto_reason, distribution: {bins:[{min, max, count}], p50, p90, window_days: 30}}`
-- 선택 저장: `PATCH /api/events/{id}` 의 `tau_override`(허용 0.5~0.999) 또는 `option_key` 전용 필드.
-- 관측이 없어 분포·확률을 만들 수 없을 때의 응답 형태를 정한다(`planning/models.py` 주석의 "학습 중" 설계와 맞출 것).
+- `GET /api/events/{id}/risk-options` → `{options: [{key:"safe", label:"안전", tau:0.97, alarm_at, probability, sleep_minutes?}, …], selected_key, auto_adjusted: bool, auto_reason, distribution: {bins:[{min, max, mass}], p50, p90, source:"model", window_days:null}}`
+- 선택 저장: `PATCH /api/events/{id}` 의 `tau_override`(허용 0.5~0.999).
+- 근거가 부족하면 `options:[]`, `distribution:null`, `unavailable_reason`을 반환한다. 일부 변동 폭만 알면 옵션은 제공하되 `probability:null`이다.
 
 ### B-6. 반복 일정
 - 관련 화면: 12. 일정 추가
@@ -471,10 +470,9 @@ BE-1~6 구현과 앱 연결 완료(0.10.0). 남은 항목은 BE-7부터다.
 
 ### 🔴 우선순위 3 — 경로 선택 (B-4)
 
-- [ ] **BE-7. 후보를 수단별 목록으로**
+- [x] **BE-7. 후보를 수단별 목록으로**
   - API: 경로 후보 응답을 `{car: [...], transit: [...], walk: [...], bicycle: [...], fastest_key}` 로. 대중교통 최대 3개, 자동차 최대 4개, 도보·자전거 1개(카카오가 1개만 줌, 2026-10-05 원문 확인).
-  - 서버 코드: `backend/apps/routing/clients.py` `route_candidates`(지금은 전체를 섞어 최대 6개, `CANDIDATE_LIMIT`).
-  - 앱 상태: 수단 탭 4개는 지금 응답을 `key` 로 나눠 이미 동작한다. 수단별 목록으로 오면 그대로 탭에 넣는다.
+  - 구현(2026-10-17): 수단별 상한을 적용하고 전체 6개 제한을 제거했다. 기존 `results`·`origin`·`degraded`는 유지한다. 앱은 새 목록·최단 기본 선택을 사용하고 구버전 응답도 읽는다. 자동차 4종 생성은 BE-8로 남는다.
 - [ ] **BE-8. 자동차 후보 4종**
   - 요청: 카카오 모빌리티 길찾기를 `priority=RECOMMEND` / `TIME` / `DISTANCE` / `RECOMMEND&avoid=toll` 로 4번 부르고, 겹치는 경로(거리·소요시간·경유 도로명이 같음)는 하나만 남긴다. 배지는 순서대로 "추천"·"최단 시간"·"최단 거리"·"무료도로". `alternatives=true` 의 기준 없는 대안은 쓰지 않는다.
   - 각 후보에: 택시비 `fare.taxi`, 통행료 `fare.toll`, 경유 도로명(`sections[].roads[].name`, 예 "낙성대로, 남부순환로").
@@ -492,9 +490,9 @@ BE-1~6 구현과 앱 연결 완료(0.10.0). 남은 항목은 BE-7부터다.
 - [ ] **BE-11. 도착 목표 시각에 맞춘 출발·도착 시각**
   - 요청: 요청에 `arrive_by`(일정 시작 시각)를 받아 후보별 `depart_at` / `arrive_at`, 대중교통 정류장별 도착 시각을 계산해 준다. **그 시각에 실제로 갈 수 있는 경로만** 고른다(막차·첫차가 끊긴 노선, 그 시각에 운행하지 않는 버스 빼기).
   - 앱 상태: 지금은 화면 표시를 위해 앱이 "일정 시작 − 소요시간" 으로 **임시 계산**한다(카드 "오후 12:01 - 12:30", 정류장 타임라인 시각). 서버 값이 오면 임시 계산을 지운다.
-- [ ] **BE-12. 경로 안내 문장**
+- [x] **BE-12. 경로 안내 문장**
   - API·필드: 후보마다 `guide`(예 "신림역 출발 → 서울대학교 관악캠퍼스까지 4.3km, 신림로 경유 예상 소요 14분"). Figma 에서 고른 카드 아래 "● 최단 경로 안내" 로 보인다.
-  - 앱 상태: 서버가 주면 고른 카드 아래에 붙인다(앱에서 문장을 조합하지 않는다).
+  - 구현(2026-10-17): 서버가 출발·도착명, 수단·거리·시간과 실제 응답에 있는 경로 정보로 문장을 만든다. 추가 외부 호출 없이 선택 카드·도보/자전거 미리보기에 표시한다.
 - [x] **BE-13. 도보 걸음 수·kcal**
   - API·필드: 도보 후보에 `steps`, `kcal`(거리 기반 추정). Figma 도보 카드 "1.2km · 2,360걸음 · 120kcal".
   - 구현(2026-10-12): 보폭 0.75m·거리 1km당 50kcal로 정수 반올림한다. 유효한 양수 거리가 없으면 둘 다 null이다. 기존 서버 요약에 "거리 기반 추정"과 함께 담아 앱 카드에 표시한다. 개인별 운동량 계산은 아니다.
@@ -507,21 +505,20 @@ BE-1~6 구현과 앱 연결 완료(0.10.0). 남은 항목은 BE-7부터다.
 - [x] **BE-15. 지각 민감도 판정**
   - API·필드: 일정 응답에 `lateness_sensitivity`("high" / "normal" / "low"). τ 기준을 앱에 두지 않으려고 서버가 판정한다.
   - 구현(2026-10-12): 기존 `effective_tau`(일정 override → 종류 기본 → 프로필 기본)를 사용한다. τ ≥ 0.95는 high, ≥ 0.85는 normal, 나머지는 low. 앱의 기존 high 배지 연결을 사용한다.
-- [ ] **BE-16. 리스크 선택 옵션·분포 API**
-  - API: `GET /api/events/{id}/risk-options` → `{options: [{key, label, tau, alarm_at, probability, sleep_minutes?}], selected_key, auto_adjusted, auto_reason, distribution: {bins: [{min, max, count}], p50, p90, window_days}}`. `key` 는 `safe` / `normal` / `gamble`.
-  - 관측이 없어 옵션을 만들 수 없을 때의 응답 형태도 정한다(예 `options: []`).
-  - 서버 코드: 분포 계산은 이미 `backend/apps/planning`(`test_distributions.py`)에 있다. 이걸 이 응답 모양으로 묶어 내보내면 된다.
-  - 앱 상태: **앱 화면 준비 완료**(옵션 카드 3개·자동 조정 카드·히스토그램·빈 상태). API 가 생기면 호출해서 `RiskOptionsView` 로 바꾸는 연결만 남는다.
+- [x] **BE-16. 리스크 선택 옵션·분포 API**
+  - API: `GET /api/events/{id}/risk-options` → `{options: [{key, label, tau, alarm_at, probability, sleep_minutes?}], selected_key, auto_adjusted, auto_reason, distribution: {bins: [{min, max, mass}], p50, p90, window_days}}`. `key` 는 `safe` / `normal` / `gamble`.
+  - 구현(2026-10-17): 기존 추정·알람 계산을 재사용해 안전 .97 / 보통 .90 / 도박 .65를 제공한다. 변동 폭·경로 원값이 없으면 빈 옵션과 이유를 준다. 현재 τ가 프리셋과 다르면 명시적 선택 전까지 유지한다.
+  - 분포는 실측 건수가 아닌 모형의 구간별 비율 `mass`, `source: "model"`, `window_days: null`이다. 앱 조회·선택 저장·알람 예약까지 연결했다.
 - [x] **BE-17. 리스크 선택 저장**
   - API: `PATCH /api/events/{id}` 의 `tau_override`(0.5 ~ 0.999)로 저장할지, `option_key` 전용 필드를 둘지 정해 알려 줄 것. 저장 후 알람 재계산.
   - 앱 상태: "보통으로 계속하기" 버튼 있음. 저장 방식이 정해지면 연결한다.
-  - ✅ 확인(2026-10-06, `main`): 새 필드 없이 **기존 `tau_override`(0.5~0.999, DB 제약 `events_event_tau_override_range`)로 저장**한다. `alarm_enabled` 만 바꾼 경우가 아니면 PATCH 후 알람을 다시 계산한다(`events/views.py` `EventDetailView.update`). 앱 연결은 옵션 목록(BE-16)이 생겨야 할 수 있다 — 옵션별 τ 를 서버가 알려 줘야 하기 때문이다.
+  - ✅ 확인(2026-10-06, `main`): 새 필드 없이 **기존 `tau_override`(0.5~0.999, DB 제약 `events_event_tau_override_range`)로 저장**한다. `alarm_enabled` 만 바꾼 경우가 아니면 PATCH 후 알람을 다시 계산한다(`events/views.py` `EventDetailView.update`). 앱 연결도 BE-16과 함께 완료했다(2026-10-17).
 
 ### 🔴 우선순위 5 — 일정 추가 (B-6, B-7)
 
-- [ ] **BE-18. 도착지 = 집**
+- [x] **BE-18. 도착지 = 집**
   - API·필드: 일정 생성·수정에 `destination_is_home: true`. 계산할 때 프로필의 **현재** 집 좌표를 쓴다(집 주소를 바꾸면 이 일정도 따라가고 `Place` 행이 쌓이지 않게). 출발지가 집인 경우는 지금처럼 `origin_*` 를 비우면 된다.
-  - 앱 상태: 도착지 집 버튼은 있고, 지금은 집 좌표를 일반 장소로 보낸다. 필드가 생기면 그걸 보낸다.
+  - 구현(2026-10-17): 앱 집 버튼은 의미 플래그를 보내고 서버는 `place=NULL`로 저장한다. 응답은 현재 집을 펼쳐 주며 프로필 변경 시 계획·실시간 경로도 갱신한다. 집 없음·동일 장소·혼합 입력을 검증한다.
 - [x] **BE-19. 출발지 = 도착지 검증**
   - 요청: 출발지와 도착지가 같거나 너무 가까우면 400 + 한국어 메시지. 어느 칸 오류인지 알 수 있게 필드 이름을 붙여 줄 것(예 `{"destination": ["출발지와 같은 곳임"]}`).
   - 구현(2026-10-11): 생성·출발지/목적지 수정·후보 조회에서 직선 거리 50m 미만을 저장·외부 호출 전에 거절한다. `error.details.destination`에 한국어 오류. 기존 일정의 켬/끔은 허용한다.
@@ -561,8 +558,10 @@ BE-1~6 구현과 앱 연결 완료(0.10.0). 남은 항목은 BE-7부터다.
 
 1. **완료 — 공통 기준 통합·정책 확정:** `front-iter2`를 `back-iter2`에 통합하고 기존 E2E를 확인했다. 새 도착 반경과 알람 초기화 범위를 확정했다. 프론트의 `docs/iter2/backend-requests.md` R-1~R-9도 대조했다(R-2는 BE-16과 동일). 준비 시간 범위 검증·가입 제한·학습 배치는 별도 요청으로 남아 있다.
 2. **완료 — BE-25 → BE-24:** 알람·도착 정책과 `entered_at`·알람 로그·리포트 회귀를 확인했다.
-3. **BE-12 → BE-7:** 완료 기준이 분명한 경로 안내·후보 응답 정리. 서버 응답부터 확정하고 앱 연결은 프론트 담당과 나눠 작업한다. BE-7은 기존 `results`를 유지하며 필드를 추가하는 방식 등으로 구버전 앱과의 호환을 확보한 뒤 전환한다.
-4. **BE-16 → BE-18:** 리스크 선택 화면을 실제 API에 연결하고 도착지 집 처리를 구현한다. 옵션·분포·빈 상태 계약, 현재 집 좌표·계획 재계산 범위를 각각 먼저 정한다.
+3. **완료 — BE-12·7:** 경로 안내·수단별 후보 계약과 앱 연결. 기존 `results` 호환을 유지했다.
+4. **완료 — BE-16 → BE-18:** 리스크 조회·저장·기기 예약과 현재 집 목적지를 연결했다. [직접 테스트·전후 검증](docs/iter2/route-risk-home.md).
+검증(2026-10-17): BE-12·7·16·18 변경 전 실패 → 변경 후 통과. 백엔드 1,168건·Android 609건·HTTP 8종·lint 오류 0, 에뮬레이터 UI 직접 확인·최종 E2E 약 363초 통과. [직접 테스트·검증 결과](docs/iter2/route-risk-home.md).
+
 5. **BE-8 → BE-11 → BE-20:** 자동차 경로 확장, 운행 시각을 고려한 경로, 반복 일정 순으로 진행한다. 외부 호출·시간 조건·회차별 예외 때문에 앞 작업보다 검증 부담이 크다.
 6. **BE-14·21·22는 후순위:** 추정 정확도가 낮은 선택 기능 또는 팀 결정 대기 항목이다.
 7. **배포 후 공용 E2E:** 로컬 통합 검증 뒤 공용 서버에서 최신 UI·알람·도착·리포트를 다시 확인한다.

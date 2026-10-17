@@ -15,8 +15,6 @@ import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.sensing.TripLiveState
 import com.swpp.wakeup.ui.auth.LoginActivity
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -199,22 +197,7 @@ class DemoFlowTest {
         throw AssertionError("시간 초과: $label")
     }
 
-    private fun control(path: String): JSONObject {
-        val connection = URL(config.getString("control_url") + path).openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.connectTimeout = 10_000
-        connection.readTimeout = 90_000
-        connection.setRequestProperty("X-QA-Token", config.getString("control_token"))
-        try {
-            val code = connection.responseCode
-            val body = (if (code == 200) connection.inputStream else connection.errorStream)
-                .bufferedReader().use { it.readText() }
-            assertEquals("QA 제어 API $path: $body", 200, code)
-            return JSONObject(body)
-        } finally {
-            connection.disconnect()
-        }
-    }
+    private fun control(path: String) = demoControl(config, path)
 
     private fun step(name: String, action: () -> Unit) {
         Log.i("DemoFlowQA", "START $name")
