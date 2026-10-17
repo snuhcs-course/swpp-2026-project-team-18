@@ -58,8 +58,6 @@ object TripLiveState {
         /** 이 위치를 받은 시각(벽시계 ms). "몇 분 전 갱신" 에 쓴다 */
         val atMillis: Long,
         val phase: TripGeofence.Phase,
-        /** 목적지 반경 안에서 체류를 채우는 중인가 */
-        val awaitingDwell: Boolean = false,
         /**
          * 이동이 시작된 것으로 판정한 시각(벽시계 ms). 아직 준비 중이면 null.
          *

@@ -14,20 +14,15 @@ from .models import DWELL_CONFIRM_SECONDS, AlarmLog, TripObservation
 
 
 class DwellFilter(admin.SimpleListFilter):
-    """체류 기준을 채운 도착만 골라 본다.
+    """과거 체류 기록 조회용. 즉시 도착 기록도 정상 관측이다."""
 
-    `dwell_confirmed` 는 파생 프로퍼티라 기본 필터로 쓸 수 없다. 그런데 이
-    구분이 학습에서 가장 중요하다 — 2분을 머문 도착과 추적 마감에 밀려
-    확정된 도착을 섞으면 "지나가던 차" 가 도착으로 들어간다.
-    """
-
-    title = "체류 확인"
+    title = "체류 기록"
     parameter_name = "dwell"
 
     def lookups(self, request, model_admin):
         return (
-            ("confirmed", f"기준 충족 ({DWELL_CONFIRM_SECONDS}초 이상)"),
-            ("short", "기준 미달"),
+            ("confirmed", f"{DWELL_CONFIRM_SECONDS}초 이상"),
+            ("short", f"{DWELL_CONFIRM_SECONDS}초 미만 (즉시 도착 포함)"),
             ("none", "값 없음"),
         )
 
@@ -87,8 +82,7 @@ class TripObservationAdmin(admin.ModelAdmin):
     def dwell_display(self, obj):
         if obj.dwell_seconds is None:
             return "—"
-        mark = "✓" if obj.dwell_confirmed else "미달"
-        return f"{obj.dwell_seconds}초 {mark}"
+        return f"{obj.dwell_seconds}초"
 
 
 # Partly AI-generated (Claude)
