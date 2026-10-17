@@ -29,6 +29,7 @@ from rest_framework.views import APIView
 from apps.events.models import Event
 from apps.events.serializers import EventSerializer
 from apps.planning import services as planning_services
+from apps.planning.models import PlanRevision
 
 from .models import BlockObservation, EventBlockSelection, RoutineBlock
 from .serializers import (
@@ -157,7 +158,9 @@ class EventBlockSelectionView(APIView):
                 )
             # 체크가 바뀌면 준비 시간이 바뀐다. 사용자가 즉시 결과를 기대하는
             # 행위라 여기서 재계산한다.
-            planning_services.compute_and_store(event)
+            planning_services.compute_and_store(
+                event, trigger=PlanRevision.Trigger.BLOCKS
+            )  # Partly AI-generated (Claude) — 계획 이력에 "블록 체크 변경" 으로 남긴다
 
         event.refresh_from_db()
         return Response(

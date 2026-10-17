@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swpp.wakeup.ui.common.durationLabel
 import com.swpp.wakeup.ui.events.ScreenHeader
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
@@ -101,7 +102,8 @@ fun SettingsScreen(
 
         SettingRow(
             label = "평소 준비 시간",
-            value = state.onboardingPrepMin?.let { "${it}분" } ?: "아직 설정하지 않음",
+            // 다이얼과 같은 표기("1시간 5분"). 고치는 화면은 ⑮ 를 같이 쓴다.
+            value = state.onboardingPrepMin?.let(::durationLabel) ?: "아직 설정하지 않음",
             action = if (state.onboardingPrepMin == null) "설정" else "변경",
             onClick = onChangePrep,
         )

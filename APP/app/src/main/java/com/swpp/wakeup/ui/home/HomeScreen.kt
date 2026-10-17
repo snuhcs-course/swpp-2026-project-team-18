@@ -158,7 +158,7 @@ fun HomeScreen(
         }
 
         // 항상 보여준다. 일정이 없는 새 계정이 먼저 할 일이 루틴 등록이다 —
-        // 블록이 없으면 준비 시간이 한 덩어리라 확률 계산이 시작되지 않는다.
+        // 블록이 없으면 준비 시간이 한 덩어리라 왜 그 시각인지 설명할 수 없다.
         item(key = "routine") { RoutineShortcut(onRoutineClick) }
 
         item(key = "calendar") { CalendarShortcut(onCalendarClick) }
@@ -244,8 +244,8 @@ private fun CalendarShortcut(onClick: () -> Unit) {
 /**
  * 아침 루틴 편집 입구.
  *
- * 계정 메뉴에 숨기지 않고 목록에 둔다. 루틴 블록이 없으면 확률이 만들어지지
- * 않으므로 이 앱을 쓰는 데 필요한 설정인데, 다이얼로그 안에 있으면 아무도
+ * 계정 메뉴에 숨기지 않고 목록에 둔다. 루틴 블록이 없으면 준비 시간의 근거와
+ * 변동 폭이 없으므로 이 앱을 쓰는 데 필요한 설정인데, 다이얼로그 안에 있으면 아무도
  * 찾지 못한다.
  */
 @Composable
@@ -269,7 +269,7 @@ private fun RoutineShortcut(onClick: () -> Unit) {
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "준비 시간을 항목으로 쪼개면 근거가 생기고 확률 계산이 시작됨",
+                text = "준비 시간을 항목으로 쪼개면 알람 시각의 근거가 보임",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
@@ -506,8 +506,9 @@ private fun EmptyState(onAddEventClick: () -> Unit) {
 /**
  * 가장 임박한 알람.
  *
- * 확률은 관측이 쌓이기 전까지 서버가 null 로 준다. 그때는 "학습 중" 으로
- * 표시한다. 임의의 90% 를 보여주면 화면은 그럴싸해지지만 거짓이다.
+ * 확률은 준비·이동 둘 다 변동 폭이 있어야 서버가 준다. 없으면(null) 확률 줄을
+ * 숨긴다. 임의의 90% 를 보여주면 화면은 그럴싸해지지만 거짓이다. 이유는 근거
+ * 화면(④)이 설명한다.
  */
 @Composable
 private fun NextAlarmCard(event: UpcomingEvent, onClick: () -> Unit) {
@@ -541,41 +542,31 @@ private fun NextAlarmCard(event: UpcomingEvent, onClick: () -> Unit) {
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ProbabilityLabel(event)
+            event.onTimeProbability?.let { ProbabilityLabel(it, event) }
+            // 확률 줄이 없어도 "눌러서 근거 보기" 는 오른쪽 끝에 둔다.
+            Spacer(Modifier.weight(1f))
             Text(text = "눌러서 근거 보기", color = JitColor.TextSecondary, fontSize = 11.sp)
         }
     }
 }
 
+// Partly AI-generated (Claude)
 /**
- * 확률 표시.
+ * 확률 표시. 서버가 준 값이 있을 때만 그린다.
  *
- * null 이면 "학습 중" 이다. 서버가 확률을 만들 재료(관측 분포)를 아직 갖고
- * 있지 않다는 뜻이고, 카카오 경로 응답에도 변동성 정보가 없다.
+ * null 이면 부르지 않는다. 기다리면 생긴다고 약속하지 않고 숫자도 만들지 않는다 —
+ * 서버가 확률을 낼 재료(준비·이동 변동 폭)를 아직 갖고 있지 않다는 뜻이다.
  */
 @Composable
-private fun ProbabilityLabel(event: UpcomingEvent) {
-    val probability = event.onTimeProbability
-    if (probability == null) {
-        JitDotLabel(
-            text = "정시 도착 확률 학습 중",
-            dotColor = JitColor.TextSecondary,
-            textColor = JitColor.TextSecondary,
-            fontSize = 11,
-            bold = false,
-            dotSize = 6.dp,
-        )
-    } else {
-        JitDotLabel(
-            text = "정시 도착 확률 $probability%",
-            dotColor = riskColor(event.risk),
-            fontSize = 11,
-            dotSize = 6.dp,
-        )
-    }
+private fun ProbabilityLabel(probability: Int, event: UpcomingEvent) {
+    JitDotLabel(
+        text = "정시 도착 확률 $probability%",
+        dotColor = riskColor(event.risk),
+        fontSize = 11,
+        dotSize = 6.dp,
+    )
 }
 
 // Partly AI-generated (Claude)
@@ -716,10 +707,12 @@ private fun EventPanel(
         // 오른쪽: 스위치 / 확률. 알람을 계산하지 못한 일정은 확률 자리에 사유를 둔다.
         Column(horizontalAlignment = Alignment.End) {
             AlarmSwitch(event, alarmEnabled, onAlarmToggle)
+            // 확률이 없으면 빈칸이다(숫자를 만들지 않는다). 빈 줄은 남겨 스위치 위치가
+            // 행마다 달라지지 않게 한다.
             Text(
                 text = when {
                     event.planStatus != PLAN_STATUS_OK -> event.planStatusLabel ?: "알람 계산 불가"
-                    else -> event.onTimeProbability?.let { "$it%" } ?: "학습 중"
+                    else -> event.onTimeProbability?.let { "$it%" }.orEmpty()
                 },
                 color = if (event.onTimeProbability == null) JitColor.TextSecondary else accent,
                 fontSize = 11.sp,

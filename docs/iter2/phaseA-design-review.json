@@ -1,0 +1,106 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "counts": { "HIGH": 2, "MEDIUM": 9, "NIT": 11 },
+  "findings": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "area": "A1-5",
+      "title": "onFill 'WCAG 대비가 큰 쪽' 규칙이 자기 테스트(서울 2호선 → ON_VEHICLE)와 모순되고, 지선·2~5·9호선·공항·자동차·자전거까지 글자색을 바꿈",
+      "location": "phaseA-design.md A1-5 마지막 문단, §5 SegmentPaletteTest 추가분; figma-changes.md F-0 transit/on-light, F-4",
+      "fix": "권장 C: Phase A 에서는 onFill 을 바꾸지 않고 부품 이동만 한다. 대안 A: 흰 글자 대비 < 3.0 일 때만 ON_LIGHT_FILL(contrastRatio 순수 함수 + 리뷰의 기대표). 대안 B: '큰 쪽' 규칙을 유지하되 테스트를 서울 1호선으로 바꾸고 어두움 칸 목록 전체를 적는다. A·B 는 사용자 확인 필요."
+    },
+    {
+      "id": 2,
+      "severity": "HIGH",
+      "area": "A1/A4 tests",
+      "title": "PublicSetupTest(qa/demo/run.py 가 모든 모드에서 실행)가 prep_minutes 입력칸, 설정 화면의 '나중에 입력', 목록 안 candidate_route_map + route_confirm 에 의존해 깨짐. RouteDisplayTest 새 흐름도 도보 확인 뒤 대중교통 단계에서 실패",
+      "location": "phaseA-design.md §5 계측 테스트, §6 수정 파일 목록, §5 빌드 확인 명령",
+      "fix": "PublicSetupTest.kt·qa/demo/README.md 를 수정 목록에 넣는다. prep_value + pickDuration 도우미, 취소는 pressBack, 도보는 미리보기 단언 후 route_preview_confirm(좌표 없으면 route_confirm 으로 분기). RouteDisplayTest 는 도보 확인을 마지막으로 옮긴다. :app:assembleDebugAndroidTest 를 넣고 머지 전 qa/demo 재생 모드를 돌린다."
+    },
+    {
+      "id": 3,
+      "severity": "MEDIUM",
+      "area": "A1-5 tests",
+      "title": "SegmentBar 를 TransitVisuals.kt 로 옮기면 RouteChoiceSelectionStyleTest 4개 중 3개가 실패함('private fun SegmentBar' 기준점)",
+      "location": "phaseA-design.md A1-5 '수정 없음', §6 2단계 '각 단계가 따로 빌드·테스트 통과'",
+      "fix": "테스트를 수정 목록에 넣는다. RouteCard 구간은 다음 최상위 함수까지로 자르고, 막대 라벨 검사는 TransitVisuals.kt 의 TransitSegmentBar~barSegments 구간을 읽는다."
+    },
+    {
+      "id": 4,
+      "severity": "MEDIUM",
+      "area": "A1-4",
+      "title": "RoutePreviewScreen 시그니처 없음. weight(1f) 를 쓰려면 스크롤 없는 루트와 CandidateRouteMapCard 의 modifier/showCaption 파라미터가 필요함. MetricCells·배지 칩이 private/인라인. loadMap == null 일 때 동작이 정의되지 않음",
+      "location": "phaseA-design.md A1-2, A1-4 4번·지도 부품 변경, A1-5 이동 목록",
+      "fix": "리뷰의 RoutePreviewScreen/CandidateRouteMapCard 시그니처를 적는다. MetricCells 는 TransitVisuals.kt 의 internal 로, internal RouteBadges 를 뽑는다. 진입 조건은 canPreviewMap && loadMap != null. onPreview/onClosePreview 에 기본값을 준다."
+    },
+    {
+      "id": 5,
+      "severity": "MEDIUM",
+      "area": "A3-3",
+      "title": "#2 새 본문 '지금은 일정 종류의 τ 로 계산함'이 #4(종류 없으면 프로필 기본값)와 모순됨",
+      "location": "phaseA-design.md A3-3 #2; figma-changes.md F-6 ⑤-a 3번",
+      "fix": "'안전·보통·도박 중에서 고르는 기능은 서버 계산이 붙으면 열림. 지금은 위에 적힌 τ 로 계산함'으로 바꾼다."
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "area": "A3-3",
+      "title": "점검 누락: RoutineEditorScreen EmptyCard '집 설정에서 답한 준비 시간'(#8 과 같은 잘못), AlarmActivity '이 기록이 다음 알람을 더 정확하게 만든다'(alarm/ 이 점검 범위 밖)",
+      "location": "phaseA-design.md A3-3 머리말, #7, #8; RoutineEditorScreen.kt 551-553, AlarmActivity.kt 278-281",
+      "fix": "EmptyCard: '항목이 없으면 평소 준비 시간 하나를 한 덩어리로 씀. 쪼개면 왜 그 시각인지 설명됨'. AlarmActivity: '… 이 기록이 쌓이면 이동 시간 보정에 쓰임'. AlarmActivity.kt 를 수정 목록에 넣고 점검 범위를 src/main/java 전체로."
+    },
+    {
+      "id": 7,
+      "severity": "MEDIUM",
+      "area": "A3-2",
+      "title": "travel_only 의 '(보정된 경우 위와 같은 변형)'이 두 가지로 읽히는데 ConfidenceCopyTest 는 정확한 문자열을 단언함",
+      "location": "phaseA-design.md A3-2 확률 없음 표, §5 ConfidenceCopyTest",
+      "fix": "basis 5 × 출처 2 = 10칸 표로 문자열을 모두 적는다. travel_only + observed = '준비 단계가 없는 일정이고 이동 시간은 기록으로 보정됐지만 변동 폭은 아직 모름'."
+    },
+    {
+      "id": 8,
+      "severity": "MEDIUM",
+      "area": "A1-4/A2-2",
+      "title": "guard 는 던져진 예외만 기록함. HTTP 4xx/5xx/429 와 지도 503 은 로그가 남지 않아 오류 표의 '로그' 열이 틀림",
+      "location": "phaseA-design.md A1-4 오류, A2-2 연산별 실패 표",
+      "fix": "failureFrom 에서 code >= 500 || 429 일 때 Log.w(TAG, \"HTTP $code\")(본문 제외)를 남기고 staticMap 도 이를 쓴다. 또는 표를 '없음'으로 고친다."
+    },
+    {
+      "id": 9,
+      "severity": "MEDIUM",
+      "area": "A2-2 tests",
+      "title": "가까운 출발·도착 400 의 화면 배치(줄별 오류, 공통 줄 비우기, retryable, previewKey 재설정)가 AndroidViewModel 안에만 있어 검증되지 않음",
+      "location": "phaseA-design.md A2-2 뷰모델·화면, §5",
+      "fix": "endpointErrorsOf / candidatesRetryable / previewKeyAfterReload 순수 함수를 빼고 EndpointErrorsTest 를 추가한다(710545a 실제 본문 포함)."
+    },
+    {
+      "id": 10,
+      "severity": "MEDIUM",
+      "area": "A4-3",
+      "title": "PREP_MIN/PREP_MAX 가 HomeViewModel 의 private companion 안에 있어 PrepOnboardingScreen 에서 'range = PREP_MIN..PREP_MAX' 가 컴파일되지 않음",
+      "location": "phaseA-design.md A4-3; HomeViewModel.kt 2824",
+      "fix": "PrepOnboardingState.range: IntRange = PREP_MIN..PREP_MAX 를 두고, parsed 와 화면이 같이 쓴다."
+    },
+    {
+      "id": 11,
+      "severity": "MEDIUM",
+      "area": "§6 process",
+      "title": "'Figma 반영 → 코드' 1단계는 이 환경에서 할 수 없는 사람 작업인데, 2~7단계가 그 뒤에 묶여 있어 구현 시작 조건이 모호함",
+      "location": "phaseA-design.md 머리말, §6 구현 순서 1",
+      "fix": "F-0~F-9 는 UI 담당 수동 작업(워크플로우 밖)으로 두고, 2~7 은 figma-changes.md 기준으로 바로 진행한다. PR '막힌 항목'과 최종 보고에 'Figma 미반영'을 적는다."
+    },
+    { "id": 12, "severity": "NIT", "area": "A3-3 #4", "title": "tauSourceLabel null 의미(non-null 로 하거나 '= null' 기본값 + null 일 때 표시 규칙)" },
+    { "id": 13, "severity": "NIT", "area": "A4-2", "title": "꺼진 '확인' 색 TextSecondary 가 '취소'와 같음 → JitColor.Track" },
+    { "id": 14, "severity": "NIT", "area": "A4-2", "title": "0:00 에서 열면 첫 화면부터 빨간 범위 안내가 뜸 → 다이얼을 움직이기 전에는 TextSecondary" },
+    { "id": 15, "severity": "NIT", "area": "A2-2", "title": "failureFrom 은 파일 수준 internal fun 이라고 명시(멤버면 테스트가 ApiClient lateinit 에 걸림)" },
+    { "id": 16, "severity": "NIT", "area": "A4-4", "title": "maybeAskOnboarding 이 PrepOnboarding 을 넣을 때 상태를 초기화(fromSettings 잔존 방지)" },
+    { "id": 17, "severity": "NIT", "area": "A1-5", "title": "색 표에 Kind.UNKNOWN 과 버스 포함 검사 순서 추가" },
+    { "id": 18, "severity": "NIT", "area": "A3", "title": "남은 문구: toConfidence KDoc, RiskChoiceScreen 프리뷰·KDoc, RoutineEditorScreen 프리뷰, PrepOnboardingScreen KDoc, #3 카드 HorizontalDivider, #8 onboarding 전체 문자열" },
+    { "id": 19, "severity": "NIT", "area": "docs", "title": "qa/demo/README.md, docs/demo-checklist.md, task.md 를 수정 목록에. backend/README.md 117 은 R-3 에. docs/instruction.md 는 메인 worktree 에만 있음" },
+    { "id": 20, "severity": "NIT", "area": "A1/A4 a11y", "title": "미리보기 카드 onClickLabel '지도로 보기', JitDurationPickerDialog 제목 파라미터화" },
+    { "id": 21, "severity": "NIT", "area": "A2-2", "title": "submitAdd 시작 시 originError/destinationError 도 지울지 명시" },
+    { "id": 22, "severity": "NIT", "area": "A3-3", "title": "⑬ 시각 유지 근거 '10-05 결정'이 task.md 에서 확인되지 않음(13-b/BE-11 로 고치고 최종 보고에 '유지, 사용자 확인 필요')" }
+  ],
+  "reviewDoc": "c:\\Users\\rlaji\\AndroidStudioProjects\\SWPP-PJ-front-iter2\\docs\\iter2/phaseA-design-review.md"
+}

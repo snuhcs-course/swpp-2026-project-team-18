@@ -34,6 +34,9 @@ import com.swpp.wakeup.ui.theme.JitSpace
  *
  * [accented] 면 강조 테두리를 두른다. Figma 는 "지금 주목해야 하는 카드" 에만
  * 이 테두리를 쓴다(다음 알람, 선택된 리스크 옵션).
+ *
+ * [container] 는 배경색이다. 기본값이 Surface 라 기존 호출은 그대로다. 상세 리포트의
+ * 지각 결과 카드만 [JitColor.SurfaceDanger] 를 쓴다. (Partly AI-generated (Claude))
  */
 @Composable
 fun JitCard(
@@ -41,6 +44,7 @@ fun JitCard(
     accented: Boolean = false,
     padding: Dp = JitSpace.CardPadding,
     gap: Dp = JitSpace.CardGap,
+    container: Color = JitColor.Surface,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(JitRadius.Card)
@@ -48,7 +52,7 @@ fun JitCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(JitColor.Surface)
+            .background(container)
             .then(if (accented) Modifier.border(1.dp, JitColor.Accent, shape) else Modifier)
             .padding(padding),
         verticalArrangement = Arrangement.spacedBy(gap),

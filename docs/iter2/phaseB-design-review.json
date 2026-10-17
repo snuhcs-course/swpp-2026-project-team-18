@@ -1,0 +1,114 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "counts": { "HIGH": 0, "MEDIUM": 11, "NIT": 19 },
+  "findings": [
+    {
+      "id": 1,
+      "severity": "MEDIUM",
+      "area": "§3 예시 · §7 테스트",
+      "title": "예시 '화 10월 7일'/date 2026-10-07·weekday 1 이 달력과 다름(2026-10-07 은 수요일, 주 10/5~10/11 의 화요일은 10/6). 이 예시로 쓴 ReportMappingTest '화 −10'·⑨ 헤더가 실패함",
+      "location": "report-design.md §3 outcomes 예시, §2-1 7, §2-2 1, §7 ReportMappingTest; figma-changes F-10 5, F-11",
+      "fix": "예시를 2026-10-06(화)로 옮긴다(start_at 2026-10-06T00:00:00Z, planned/actual 시각 하루 앞당김, '화 10월 6일'). 규칙 추가: 앱의 요일 글자·칸 위치는 date 로만 정하고(DAYS.between(weekStart, date) 가 0..6 밖이면 제외) weekday 는 읽지 않는다. 주 밖 date 테스트 추가."
+    },
+    {
+      "id": 2,
+      "severity": "MEDIUM",
+      "area": "§2-3 이동",
+      "title": "'⑨ → ⑧ 스크롤 그대로' 가 성립하지 않음. MainActivity AnimatedContent(contentKey = current) 가 ⑧ 을 컴포지션에서 빼고 SaveableStateHolder 가 없어 rememberScrollState 가 버려짐",
+      "location": "report-design.md §2-3, §5-3; MainActivity.kt 344~357",
+      "fix": "MainHost(AnimatedContent 밖)에서 val reportScroll = rememberScrollState() 를 만들고 WeeklyReportScreen(scrollState: ScrollState) 로 넘긴다. LaunchedEffect(reportState.weekly?.weekStart) { reportScroll.scrollTo(0) }, 홈에서 새로 열 때도 토큰으로 맨 위. 이 방식을 안 쓰면 '스크롤 그대로' 를 지운다."
+    },
+    {
+      "id": 3,
+      "severity": "MEDIUM",
+      "area": "§0 반올림 · §4-2 facts",
+      "title": "퍼센트·%p 반올림 규칙이 없음. 파이썬 round() 는 은행가 반올림(62.5→62, 92.5→92), 앱 roundToInt 는 63·93 이라 요약 문장과 타일 숫자가 어긋남",
+      "location": "report-design.md §0, §3 on_time_rate_change_pp, §4-2 build_facts; ReportRepository.percent()",
+      "fix": "§0 에 '퍼센트·%p 도 분과 같은 규칙' 을 적고 서버는 _half_up(x) = copysign(floor(|x| + 0.5), x) 하나로 on_time_pct·target_pct·prev_on_time_pct·change_pp 를 만든다. 서버·앱 테스트에 5/8→63, target 0.925→93, change −22.5→−23."
+    },
+    {
+      "id": 4,
+      "severity": "MEDIUM",
+      "area": "§2-1 · §4-2 지각 분",
+      "title": "1분 안쪽 지각(−0.5<slack<0)이 ⑧ 지각 줄 '0분 늦음', 타일 '정각'/'0분 늦음', 요일 값 '0', 요약 '0분 늦었음' 이 됨(⑨ 만 n=0 처리)",
+      "location": "report-design.md §2-1 4·6·7, §4-2 late_max_min·템플릿 2, §2-2 3",
+      "fix": "§0 에 지각 분 규칙 하나: late_min = max(1, half_up(−slack)) 를 서버 facts·템플릿과 앱 지각 줄·타일·요일 값·⑨ 결과 카드가 공용으로 쓴다(⑨ '1분 안쪽 지각' → '1분 지각'). 대안: '1분 안쪽' 문구를 모든 곳에 쓰고 요일 값 '<1', allowed_numbers 에 1 추가. 양쪽에 slack −0.4 테스트."
+    },
+    {
+      "id": 5,
+      "severity": "MEDIUM",
+      "area": "§4-1 _measure · 원인 분류",
+      "title": "not_from_home 에서 prep_over=None 으로 두면 LatenessCause.unmeasured 에 prep_over 가 들어가 label 이 plan_too_tight 대신 unknown 이 되고, ⑨ 가 숨긴 준비를 '측정 안 됨: 준비'·'준비 항목을 기록하면…' 으로 씀. '집에서 늦게 나섰음' 도 사실이 아님",
+      "location": "report-design.md §4-1, §3 cause·unmeasured, §2-2 5; services.LatenessCause",
+      "fix": "LatenessCause 에 prep_applies: bool = True 를 더하고 unmeasured 는 prep_applies 일 때만 prep_over 를 본다. _measure 가 prep_applies 를 넘긴다(as_dict 키 유지). prep_applies false 의 depart_late 제목은 '출발이 {n}분 늦었음'. 테스트: 해당 없음 + 출발·도착 측정 + 초과 없음 → plan_too_tight, unmeasured []."
+    },
+    {
+      "id": 6,
+      "severity": "MEDIUM",
+      "area": "§2-2 5 · §4-2 제안 g 문구",
+      "title": "원인 못 나눈 지각에 '위치 권한을 켜 두면 출발·도착이 자동으로 기록됨'/'위치 권한을 켜 두고 이동할 것' 은 틀린 안내. 지각 = 도착 기록 있음 = 추적이 권한과 함께 돌았음. 출발 누락은 첫 위치가 집 밖(departureMissed)·집 아닌 출발지·계획 없음 때문",
+      "location": "report-design.md §2-2 5 unknown 행, §4-2 제안 g; AlarmActivity.kt 143, TripTrackingService.kt 327~329, AlarmSchedule.canDetectDeparture",
+      "fix": "경우별 고정 문구: planned.depart_by==null → '그날은 알람 계획이 없어 계획과 비교하지 못했음'; prep_applies false 이고 출발 없음 → '출발지가 집이 아닌 일정이라 출발 시각을 기록하지 않았음'; 출발 없음 → '집 안에서 알람을 해제하면 나서는 시각까지 기록됨'; 준비만 없음 → 지금 문구. 제안 g → '원인을 나누려면 출발 시각이 필요하니 집을 나서기 전에 알람을 해제해 둘 것.'"
+    },
+    {
+      "id": 7,
+      "severity": "MEDIUM",
+      "area": "§2-1 5·8 · §4-2 제안 b · §2-2 3",
+      "title": "알람이 없던 일정(기본 규칙상 하루 첫 알람만 켜짐)은 추적이 시작되지 않아 원래 기록될 수 없는데, 측정 공백 안내·제안 b 가 매주 사용자 할 일로 안내함. ⑨ '알람 7:40'·'이번 주 알람 N개'·'기본값으로 계산됨' 도 사실과 다름",
+      "location": "report-design.md §2-1 5·8, §2-2 3, §3 learning, §4-2 제안 b; apps/events/alarms.alarm_states, EventRepository.kt 1266 toSchedule, AlarmActivity.kt 143",
+      "fix": "outcomes[] 에 alarm_on(bool|null, alarm_states(user) 읽기만) 추가. facts 에 alarm_events·unobserved_with_alarm, 제안 b 는 그 수로 판단. 측정 공백 u 는 알람 켜진 일정만, 알람 없는 미기록 k>0 이면 캡션 '알람이 울리지 않은 일정 {k}건은 출발·도착을 기록하지 않음'. ⑨ '알람 7:40' 은 alarm_on true 일 때만(false '알람 꺼짐'). 기록 반영 문구는 '일정 {N}건의 계획 중 …', 0·0 은 '입력한 준비 시간과 경로 예상 시간으로 계산됨'. 최소안: 문구만 '출발·도착은 알람을 해제한 뒤 이동한 일정만 기록됨' 으로."
+    },
+    {
+      "id": 8,
+      "severity": "MEDIUM",
+      "area": "§4-2 llm_allowed · §2-4",
+      "title": "기록 적은 주(도착 1~2건)도 LLM 으로 가는데 프롬프트에 thin_data 규칙이 없음. §2-4 가 약속한 '기록이 적어 비율로 판단하기는 이름' 과 중립 타일과 달리 LLM 이 '목표 달성' 을 쓸 수 있고 숫자 검사도 통과함",
+      "location": "report-design.md §4-2 llm_allowed, SYSTEM_PROMPT, §2-4 기록 적음 행, §7",
+      "fix": "권장: llm_allowed 를 arrived_count >= THIN_ARRIVALS 로(기록 적은 주는 템플릿만), §7 에 '도착 2건 → template + opener 미호출'. 대안: 프롬프트 규칙 + check_text 가 thin_data 일 때 '달성'·'못 미쳤' 거절."
+    },
+    {
+      "id": 9,
+      "severity": "MEDIUM",
+      "area": "§4-2 check_text",
+      "title": "검사 우회: 한글 수사('두 번')는 숫자 검사를 통과, '10월 7일'·'9시' 처럼 facts 에 우연히 있는 숫자로 만든 날짜·시각도 통과, '학습하는 중'·'학습이 진행 중' 도 통과",
+      "location": "report-design.md §0, §4-2 검증·프롬프트 3·7",
+      "fix": "프롬프트 3 에 '수는 모두 아라비아 숫자로'. 검사 추가: NUMBER_WORD (한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|스무)\\s*(번|건|회|차례|분|시간), DATE_TIME \\d+\\s*월|\\d+\\s*일|\\d+\\s*시|\\d{1,2}\\s*:\\s*\\d{2}, '학습' 포함이면 거절(이유 number_word/date_or_time/learning_word). 템플릿은 그대로 통과. 거절 테스트 3개 추가."
+    },
+    {
+      "id": 10,
+      "severity": "MEDIUM",
+      "area": "§4-5 · §7 테스트 자세",
+      "title": "test.py 가 OPENAI_BASE_URL 을 고정하지 않음. base.py 가 .env 를 읽으므로 사용자가 학교 주소를 채우면(메인 .env 에 이미 빈 OPENAI_BASE_URL 줄 있음) URL 단언·llm 저장 경로 테스트가 개발자 환경에 따라 실패함",
+      "location": "report-design.md §4-5, §7 test_summary; config/settings/base.py 17, test.py 51~52, apps/common/tests/test_settings.py",
+      "fix": "test.py 키 차단 블록에 OPENAI_BASE_URL = 'https://api.openai.com/v1'(.env 무시) 고정, test_settings.py 에 그 값 단언 추가. reports conftest autouse 에서 settings.OPENAI_BASE_URL = llm.DEFAULT_BASE_URL 로 한 번 더 고정해도 됨."
+    },
+    {
+      "id": 11,
+      "severity": "MEDIUM",
+      "area": "§5-1 DTO",
+      "title": "'문자열·목록·객체·소수 nullable, 개수 Int = 0' 규칙이 개수 아닌 정수(on_time_probability, planned.*_minutes, on_time_rate_change_pp, event, weekday)를 정하지 않음. Int = 0 이면 Gson 이 null 대신 0 을 남겨 '정시 확률 0%'·'계획 0분' 이 됨(AT-19 위반)",
+      "location": "report-design.md §5-1",
+      "fix": "Int = 0 은 이름이 개수인 것만(*_count, count, plan_count, prep_from_records, travel_from_records). 그 밖의 수는 전부 nullable + null 기본값(OutcomeDto.event Long?, onTimeProbability Int?, PlannedDto.*Minutes Double? 등, 리뷰 문서의 Kotlin 참고). event == null 이면 지각 줄·⑨ 칩에서 뺀다. NetworkDtoNullSafetyTest 에 null 정수 케이스와 '0%·0분 없음' 단언."
+    },
+    { "id": 12, "severity": "NIT", "area": "§3", "title": "week_complete 와 has_next_week 는 정의상 같은 값", "fix": "하나만 두거나 '같은 값' 이라고 적고 테스트로 같음을 단언." },
+    { "id": 13, "severity": "NIT", "area": "§4-3 endpoint()", "title": "명세('https·localhost 아니면 None')와 테스트('빈 값 → 기본')가 빈 값에서 엇갈림", "fix": "raw = (settings.OPENAI_BASE_URL or '').strip() or DEFAULT_BASE_URL 를 먼저; base.py 도 strip 뒤 비면 기본값; ?api-version= 같은 쿼리 주소는 bad_base_url 이라고 명시." },
+    { "id": 14, "severity": "NIT", "area": "§4-2 allowed_numbers", "title": "late_causes 건수를 '문자열 값' 으로 분류해 범위가 모호함", "fix": "facts 를 재귀로 돌며 dict 값 포함 모든 수 + 모든 문자열 값 속 숫자." },
+    { "id": 15, "severity": "NIT", "area": "§4-2 템플릿", "title": "'결과는 3~5문장' 이지만 빈 주·도착 기록 없음은 2문장(F-12 도 2문장)", "fix": "'2~5문장' 으로." },
+    { "id": 16, "severity": "NIT", "area": "§2-1 8", "title": "출발 줄에 '· {n}회' 가 없음(F-10 6 에는 있음), n = 0 규칙 미명시", "fix": "출발에도 '· {n}회' 와 n = 0 → '측정 안 됨'." },
+    { "id": 17, "severity": "NIT", "area": "§2-1 4 · §5-1", "title": "'지난주 0/0' 과 'null ~ null' 표시 가능", "fix": "지난주 조각은 previous_week.arrived_count > 0 일 때만; rangeLabel 은 날짜를 못 읽으면 '—'." },
+    { "id": 18, "severity": "NIT", "area": "§2-1 · §2-4", "title": "카드별 보이는 조건이 흩어져 있고 '지난 일정 없음'·'구버전 서버' 행이 겹치는 주에서 타일 처리가 다름", "fix": "카드별 가시 조건을 한 표로(예: 타일 event_count > 0, 요일 event_count > 0 && days 비어 있지 않음, 계획 대비 실제 event_count > 0 && deviation != null)." },
+    { "id": 19, "severity": "NIT", "area": "§2-2 2 · §2-3 · loadReport", "title": "⑨ 진입·주 전환 경계(initialEventId 없음, 로딩 중 누름, 실패 뒤 낡은 canGoNext 로 미래 주 진입)", "fix": "없는 eventId 는 대표 일정; 요일 칸·지각 줄은 !loading 일 때만; 로드 실패 시 ReportState.week 를 보이는 주로 되돌림." },
+    { "id": 20, "severity": "NIT", "area": "§2-3", "title": "openReport() 는 마지막으로 본 주를 여는데 문서는 '지난 주'", "fix": "문서를 '마지막으로 본 주(처음은 지난 주)' 로 고치거나 openReport 에서 week = null." },
+    { "id": 21, "severity": "NIT", "area": "§2-2 표기", "title": "일정 시작 HH:mm 과 나머지 H:mm 구분, τ 표기(%.2f 면 0.999 → '1.00'), 음수 부호 미정", "fix": "시작 HH:mm·나머지 H:mm 명시, τ 는 끝 0 만 뺀 최대 3자리, 음수는 U+2212 '−' 로 통일." },
+    { "id": 22, "severity": "NIT", "area": "§2-2 4", "title": "범례 '실제(지각 Red, 그 밖 Green)' 와 줄별 차이 부호로 정하는 막대 색이 다름", "fix": "범례 사각형 TextSecondary 또는 '실제(늘어남 Red · 줄어듦 Green)'." },
+    { "id": 23, "severity": "NIT", "area": "§2-1 2", "title": "꺼진 '›' 색: F-10 은 Track, ArrowButton 은 TextSecondary", "fix": "Track 으로 정해 적는다." },
+    { "id": 24, "severity": "NIT", "area": "§3 prep_applies", "title": "OK 가 아닌 계획의 prep_applies 가 true 로 읽힘", "fix": "계획 없음 또는 status != ok → null, not_from_home → false, 그 밖 true." },
+    { "id": 25, "severity": "NIT", "area": "§4-2 · §3 · collect_outcomes", "title": "동률·경계 규칙(late_max 동률, 템플릿 3 동률, target_met 비교 기준, 다음 주 월 00:00 일정이 두 주에 포함)", "fix": "동률은 시작 이른 것 / 이동→출발→준비; target_met = on_time_pct >= target_pct; 주간 계산은 start_at__lt(끝 미포함)." },
+    { "id": 26, "severity": "NIT", "area": "§4-2 summary_for · §4-3", "title": "FALLBACK·build_facts 예외의 summary_source, DB 조회와 12주 조건 순서, URLError(timeout) 매핑, urllib timeout 은 단계별", "fix": "FALLBACK 도 'template' 명시; 13주 지난 주의 LLM→템플릿 전환 여부 결정; URLError(reason=TimeoutError) → timeout; 표의 '8초 초과' → '단계별 8초'." },
+    { "id": 27, "severity": "NIT", "area": "§4-5 scripts", "title": "check_external_apis 5절은 학교 프록시에 /models 가 없으면 실패, check_app_contract 6.7 새 비교는 빈 계정에서 실패", "fix": "/models 404 → '확인 불가(probe_report_summary)'; outcomes 비었거나 previous_week null 이면 '건너뜀'." },
+    { "id": 28, "severity": "NIT", "area": "§8 · §4-3", "title": "'.env 에 OPENAI_BASE_URL= 줄 추가' 는 이미 되어 있음(메인 .env: BASE_URL 빈 값, API_KEY 빈 값, MODEL gpt-4.1-mini). 학교 API OpenAI 호환 가정이 문서에 없음", "fix": "'키(·주소)를 채우고 probe 한 번' 으로 줄이고, Bearer·/chat/completions·쿼리 없음 가정과 Azure 식이면 llm.py 만 바꾼다는 점을 적는다." },
+    { "id": 29, "severity": "NIT", "area": "§4-2 SYSTEM_PROMPT", "title": "facts 키 설명이 일부만 있음", "fix": "on_time_change_pp(%p), late_max_min(양수=늦은 분), unobserved, thin_data, top_cause*, suggestion 설명 한 줄 추가." },
+    { "id": 30, "severity": "NIT", "area": "접근성", "title": "지각한 날 줄의 역할·설명, ⑨ 칩 터치 영역(~22dp), 요일 칸 폭(~42dp)", "fix": "지각 줄 clickable(role = Button, onClickLabel) + 합친 설명, '›' 장식 처리; 칩 minimumInteractiveComponentSize(); 요일 칸 폭 한계 명시. 전체 WCAG 판정은 보조 기술 실기기 확인 필요." }
+  ],
+  "reviewDoc": "c:\\Users\\rlaji\\AndroidStudioProjects\\SWPP-PJ-front-iter2\\docs\\iter2/phaseB-design-review.md"
+}

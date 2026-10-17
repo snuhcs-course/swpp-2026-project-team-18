@@ -4,7 +4,8 @@ from django import forms
 from django.contrib import admin
 from django.db.models import Count
 
-from apps.planning.models import AlarmPlan
+from apps.observations.models import AlarmLog, TripObservation
+from apps.planning.models import AlarmPlan, PlanRevision
 
 from .models import Event, EventTag, Place
 
@@ -42,6 +43,63 @@ class AlarmPlanInline(admin.StackedInline):
     readonly_fields = ("computed_at",)
 
 
+# Partly AI-generated (Claude)
+class _ReadOnlyRecordInline(admin.TabularInline):
+    """일정 화면에 붙이는 기록 표. 한 일정의 "계획 → 알람 → 출발 → 도착" 을 한 화면에 본다.
+
+    기록은 앱·계산이 남긴 사실이라 여기서 만들거나 고치거나 지우지 않는다
+    (db-schema.md §6 Django admin).
+    """
+
+    extra = 0
+    can_delete = False
+    show_change_link = True
+
+    def get_readonly_fields(self, request, obj=None):
+        return self.fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+class PlanRevisionInline(_ReadOnlyRecordInline):
+    model = PlanRevision
+    verbose_name_plural = "계획 이력"
+    fields = (
+        "computed_at",
+        "trigger",
+        "status",
+        "event_start_at",
+        "alarm_at",
+        "depart_by",
+        "arrive_at",
+        "travel_minutes",
+        "route_minutes_raw",
+        "route_key",
+    )
+    ordering = ("-computed_at", "-id")
+
+
+class AlarmLogInline(_ReadOnlyRecordInline):
+    model = AlarmLog
+    verbose_name_plural = "알람 기록"
+    fields = ("occurred_at", "kind", "alarm_at", "snooze_minutes", "source")
+    ordering = ("occurred_at", "id")
+
+
+class TripObservationInline(_ReadOnlyRecordInline):
+    model = TripObservation
+    verbose_name_plural = "이동 관측"
+    fields = ("observed_at", "kind", "detector", "entered_at", "dwell_seconds", "accuracy_m")
+    ordering = ("observed_at", "id")
+
+
 @admin.register(Event)
 class EventAdmin(admin.ModelAdmin):
     form = EventForm
@@ -55,7 +113,8 @@ class EventAdmin(admin.ModelAdmin):
     search_fields = ("title", "user__email", "user__nickname", "place__name")
     date_hierarchy = "start_at"
     autocomplete_fields = ("place", "user", "tag")
-    inlines = [AlarmPlanInline]
+    # Partly AI-generated (Claude) — 기록 표는 읽기 전용으로 덧붙인다(위 _ReadOnlyRecordInline).
+    inlines = [AlarmPlanInline, PlanRevisionInline, AlarmLogInline, TripObservationInline]
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("user", "place", "tag", "alarm_plan")

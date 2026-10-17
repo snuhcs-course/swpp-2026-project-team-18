@@ -81,7 +81,16 @@ class EventRepository(
 
     sealed interface Result<out T> {
         data class Success<T>(val data: T) : Result<T>
-        data class Failure(val message: String) : Result<Nothing>
+
+        /**
+         * [fields] 는 서버 `error.details` 의 필드별 문구다(첫 항목). 없으면 빈 맵.
+         * 화면이 오류를 그 입력 줄 아래에 붙일 때 쓴다(예: 가까운 출발·도착 400 의
+         * `destination`). 기본값이 있어 기존 호출부는 그대로다.
+         */
+        data class Failure(
+            val message: String,
+            val fields: Map<String, String> = emptyMap(),
+        ) : Result<Nothing>
     }
 
     /** 홈 화면이 한 번에 필요한 것. */
@@ -257,7 +266,9 @@ class EventRepository(
             originLabel = origin?.name,
         )
         val response = api.create(body)
-        unwrap(response)?.let { Result.Success(it) } ?: Result.Failure(errorMessage(response))
+        // 필드별 오류를 살린다. 가까운 출발·도착(710545a)은 `details.destination` 으로 온다.
+        unwrap(response)?.let { Result.Success(it) }
+            ?: failureFrom(response.code(), response.errorBody()?.string())
     }
 
     /**
@@ -280,7 +291,8 @@ class EventRepository(
             originLng = origin?.lng,
             originLabel = origin?.name,
         )
-        val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
+        val body = unwrap(response)
+            ?: return@guard failureFrom(response.code(), response.errorBody()?.string())
 
         // 도착정보가 화면에서 줄어들려면 '언제 받은 값인지' 가 필요하다.
         // 응답을 푼 직후에 한 번만 읽어 모든 후보가 같은 기준을 갖게 한다.
@@ -401,7 +413,9 @@ class EventRepository(
             )
             val body = response.body()
             if (!response.isSuccessful || body == null) {
-                return@guard Result.Failure(errorMessage(response))
+                // 503 map_daily_budget_exhausted / map_unavailable 도 여기로 온다.
+                // failureFrom 이 상태 코드를 남기고 서버 문구를 그대로 돌려준다.
+                return@guard failureFrom(response.code(), response.errorBody()?.string())
             }
 
             // overscan 지도는 수 MB다. bytes()/decode를 Main에서 하면 손가락을
@@ -689,18 +703,10 @@ class EventRepository(
 
     private fun errorMessage(response: Response<*>): String =
         ApiClient.parseErrorMessage(response.errorBody()?.string())
-            ?: when (response.code()) {
-                400 -> "입력값을 확인해야 한다."
-                401 -> "다시 로그인해야 한다."
-                404 -> "대상을 찾을 수 없다."
-                in 500..599 -> "서버에 문제가 생겼다."
-                else -> MESSAGE_UNKNOWN
-            }
+            ?: fallbackErrorMessage(response.code())
 
     private companion object {
-        const val TAG = "EventRepository"
         const val MESSAGE_NETWORK = "서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."
-        const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
 
         /**
          * 메모리에 들고 있을 지도 장수.
@@ -718,6 +724,43 @@ class EventRepository(
          */
         val mapCache = linkedMapOf<String, Bitmap>()
     }
+}
+
+// ---------------------------------------------------------------------------
+// 실패 응답
+// ---------------------------------------------------------------------------
+
+private const val TAG = "EventRepository"
+private const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
+
+// AI-generated (Claude)
+/** 서버가 메시지를 주지 않았을 때(HTML 본문·빈 본문 등) 상태 코드별 문구. */
+private fun fallbackErrorMessage(code: Int): String = when (code) {
+    400 -> "입력값을 확인해야 한다."
+    401 -> "다시 로그인해야 한다."
+    404 -> "대상을 찾을 수 없다."
+    429 -> "요청이 너무 잦음. 잠시 뒤 다시 시도"
+    in 500..599 -> "서버에 문제가 생겼다."
+    else -> MESSAGE_UNKNOWN
+}
+
+// AI-generated (Claude)
+/**
+ * 실패 응답을 [EventRepository.Result.Failure] 로. 메시지와 필드별 오류를 함께 담는다.
+ *
+ * - 본문(`errorBody()`)은 **한 번만** 읽히므로 호출부가 읽은 문자열을 넘긴다
+ *   (`RoutineRepository.failure` 와 같은 이유).
+ * - 5xx·429 는 상태 코드만 로그로 남긴다. 본문에는 장소·좌표가 들어 있어 남기지 않는다.
+ *   네트워크 예외는 `guard` 가 따로 남긴다.
+ * - 규칙(예: 출발·도착 50m)은 서버가 소유한다. 앱은 서버 문구를 그대로 쓴다.
+ *
+ * 파일 수준 함수인 이유는 테스트다. 저장소 인스턴스를 만들면 `ApiClient` 의 초기화
+ * (토큰 저장소)가 필요해 JVM 단위 테스트에서 만들 수 없다.
+ */
+internal fun failureFrom(code: Int, raw: String?): EventRepository.Result.Failure {
+    if (code >= 500 || code == 429) Log.w(TAG, "HTTP $code")
+    val message = ApiClient.parseErrorMessage(raw) ?: fallbackErrorMessage(code)
+    return EventRepository.Result.Failure(message, ApiClient.parseErrorFields(raw))
 }
 
 // ---------------------------------------------------------------------------
@@ -951,11 +994,13 @@ private fun prepNote(plan: AlarmPlanDto, blockCount: Int): String {
         AlarmPlanDto.PREP_DECLARED_RANGE ->
             "신고 범위 기반 · $blocks. 실제 소요가 쌓이면 학습값으로 바뀜"
 
+        // 준비 범위만으로는 확률이 나오지 않는다(이동 분산도 필요).
         AlarmPlanDto.PREP_DECLARED_POINT ->
-            "신고 고정값 · $blocks 의 범위가 한 점임. 범위를 주면 확률이 계산됨"
+            "신고 고정값 · $blocks 의 범위가 한 점임. 범위를 주면 변동 폭이 반영됨"
 
+        // 준비 시간은 ⑮ 준비 시간 화면에서 받는다(집 설정이 아님).
         AlarmPlanDto.PREP_ONBOARDING ->
-            "고정값 · 집 설정에서 답한 값. 루틴 블록을 등록하면 항목별로 쪼개짐"
+            "고정값 · 평소 준비 시간으로 답한 값. 루틴 블록을 등록하면 항목별로 쪼개짐"
 
         else ->
             "고정값 · 기본값을 씀. 루틴 블록을 등록하면 항목별로 쪼개짐"
@@ -995,15 +1040,22 @@ private fun PrepBlockDto.toLine(): PrepBlockLine {
     )
 }
 
+// Partly AI-generated (Claude)
 /**
  * 확률과 그 근거.
  *
- * 확률이 null 인 이유를 `confidence_basis` 로 나눠 적는다. "학습 중" 만
- * 띄우면 사용자는 기다리는 것 말고 할 수 있는 일이 없다고 생각한다. 실제로는
- * 대개 사용자가 할 수 있는 일이 있다 — 블록에 범위를 넣거나 같은 경로를
- * 몇 번 다니는 것이다.
+ * 확률이 null 이면 **숫자를 만들지 않는다.** 대신 왜 없는지를 `confidence_basis`
+ * 와 `travel_time_source` 로 나눠 적는다. 문구는 서버 동작과 맞춘다.
+ *
+ * - 확률은 준비·이동 **둘 다** 분산이 있을 때만 나온다(`compute_alarm_math`).
+ * - 이동 분산은 이동 기록으로 만든 보정(`RouteCorrection`)에서만 온다. 보정은 모든
+ *   사용자의 기록을 경로별·전체로 섞고, 학습 배치가 돌아야 갱신된다(R-3). 그래서
+ *   "같은 경로를 여러 번 다니면" 이 아니라 "이동 기록이 쌓이면" 이 맞는 말이다.
+ * - 출처에 `+observed_*` 가 있으면 소요시간은 보정됐지만 변동 폭은 아직 없는 상태다.
+ *
+ * internal 인 이유는 테스트다(Gson 을 거친 DTO 로 문구를 고정한다, [toOption] 과 같다).
  */
-private fun AlarmPlanDto.toConfidence(): ConfidenceView {
+internal fun AlarmPlanDto.toConfidence(): ConfidenceView {
     val percent = onTimeProbability
     if (percent != null) {
         return ConfidenceView(
@@ -1014,24 +1066,30 @@ private fun AlarmPlanDto.toConfidence(): ConfidenceView {
         )
     }
 
+    // 이동 시간이 기록으로 보정됐는가. 보정돼도 변동 폭(표준편차)은 따로 쌓여야 한다.
+    val corrected = travelTimeSource?.contains("+observed") == true
+    val travelNote = if (corrected) {
+        "이동 시간은 기록으로 보정됐지만 변동 폭은 아직 모름"
+    } else {
+        "이동 시간은 경로 조회값 하나뿐임"
+    }
+
     val (reason, action) = when (confidenceBasis) {
+        // 준비 범위만으로는 확률이 나오지 않는다(이동 분산도 필요). 그래서 "확률 계산이
+        // 시작됨" 이라고 약속하지 않는다.
         AlarmPlanDto.BASIS_POINT_ESTIMATE ->
             "준비·이동 둘 다 단일 추정값이라 분포가 없음" to
-                "루틴 블록에 최소~최대 범위를 넣으면 확률 계산이 시작됨"
+                "루틴 블록에 최소~최대 범위를 넣으면 준비 시간 변동이 반영됨"
 
-        AlarmPlanDto.BASIS_TRAVEL_UNKNOWN ->
-            "준비 시간은 분포가 있지만 이동 시간은 경로 조회값 하나뿐임" to
-                "같은 경로를 몇 번 다니면 이동 변동성이 쌓임"
+        AlarmPlanDto.BASIS_TRAVEL_UNKNOWN -> travelNote to TRAVEL_ACTION
 
         AlarmPlanDto.BASIS_PREP_UNKNOWN ->
-            "이동 시간은 분포가 있지만 준비 시간이 고정값임" to
+            "이동 시간은 변동 폭이 있지만 준비 시간이 고정값임" to
                 "루틴 블록에 최소~최대 범위를 넣으면 됨"
 
         // 집에서 출발하지 않는 일정이다. 준비 시간이 고정값인 것이 아니라
         // 아예 없으므로 "루틴 블록을 등록하라" 고 하면 안 된다.
-        AlarmPlanDto.BASIS_TRAVEL_ONLY ->
-            "준비 단계가 없는 일정이고 이동 시간은 경로 조회값 하나뿐임" to
-                "같은 경로를 몇 번 다니면 이동 변동성이 쌓임"
+        AlarmPlanDto.BASIS_TRAVEL_ONLY -> "준비 단계가 없는 일정이고 $travelNote" to TRAVEL_ACTION
 
         // 확률도 근거도 없는 경우. status != ok 이면 이 카드는 그려지지 않는다.
         else -> "아직 확률을 계산할 근거가 부족함" to null
@@ -1039,10 +1097,38 @@ private fun AlarmPlanDto.toConfidence(): ConfidenceView {
 
     return ConfidenceView(
         percent = null,
-        headline = "정시 도착 확률 학습 중",
+        headline = "정시 도착 확률 · 아직 계산할 수 없음",
         reason = reason,
         action = action,
     )
+}
+
+/** 이동 변동성이 없을 때 사용자가 할 일. 서버 보정은 이동 기록에서 나온다(R-3). */
+private const val TRAVEL_ACTION = "이동 기록이 쌓이면 변동성이 생김"
+
+// AI-generated (Claude)
+/**
+ * ④ 이동 줄의 첫 마디. 이동 시간의 출처(`travel_time_source`)를 사람 말로.
+ *
+ * 예전에는 "실측" 이라고 적었는데, 카카오 경로 추정치를 측정값처럼 읽게 한다.
+ * 출처는 `kakao_*` 에 보정 꼬리(`+observed_route`/`+observed_global`)가 붙는 모양이다.
+ */
+internal fun travelSourceNote(source: String?): String = when {
+    source?.contains("+observed_route") == true -> "카카오 추정 · 이 경로 이동 기록으로 보정"
+    source?.contains("+observed_global") == true -> "카카오 추정 · 전체 이동 기록으로 보정"
+    else -> "카카오 경로 추정"
+}
+
+// AI-generated (Claude)
+/**
+ * τ 가 어디서 왔는지. 서버 `Event.effective_tau` 의 순서(직접 고른 값 → 일정 종류 →
+ * 프로필 기본값)를 따른다. 종류가 없는 일정(캘린더 가져오기·"기타")에 "일정 종류에서
+ * 결정됨" 이라고 쓰면 틀린다.
+ */
+internal fun tauSourceLabel(tauOverride: Double?, tagLabel: String?): String = when {
+    tauOverride != null -> "직접 고른 값"
+    !tagLabel.isNullOrBlank() -> "$tagLabel 일정 기본값"
+    else -> "기본값"
 }
 
 // Partly AI-generated (Claude)
@@ -1059,8 +1145,8 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     val departBy = plan.departBy?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
 
     // 근거 한 줄에 **출처**를 함께 적는다. 세 값의 신뢰도가 다르다 —
-    // 이동 시간만 카카오 실측이고 준비·버퍼는 아직 고정값이다. 구분해 주지
-    // 않으면 셋 다 학습된 값처럼 읽힌다.
+    // 이동 시간은 카카오 추정(이동 기록으로 보정될 수 있음)이고 준비·버퍼는 출처가
+    // 따로 있다. 구분해 주지 않으면 셋 다 측정·학습된 값처럼 읽힌다.
     val prepBlocks = (plan.prepBreakdown ?: emptyList()).map { it.toLine() }
 
     // 집에서 출발하지 않는 일정은 준비 단계가 **해당되지 않는다.** 서버가
@@ -1075,7 +1161,8 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
             val label = plan.travelMode?.takeIf(String::isNotBlank)?.let { m -> "$m 이동" }
                 ?: "이동 시간"
             val bits = buildList {
-                add("실측")
+                // "실측" 이라고 쓰지 않는다. 카카오 추정치를 측정값처럼 읽게 한다.
+                add(travelSourceNote(plan.travelTimeSource))
                 // 집이 아닌 출발지면 **먼저** 밝힌다. 이동 시간이 그 좌표
                 // 기준으로 계산됐는데 화면이 감추면 알람 시각이 설명되지 않는다.
                 originLabel?.takeIf { l -> l.isNotBlank() }?.let { l -> add("${l}에서 출발") }
@@ -1117,6 +1204,7 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         remaining = remaining,
         onTimeProbability = plan.onTimeProbability,
         tauUsed = plan.tauUsed,
+        tauSourceLabel = tauSourceLabel(tauOverride, tag?.label),
         confidence = plan.toConfidence(),
         breakdown = rows,
         prepBlocks = prepBlocks,

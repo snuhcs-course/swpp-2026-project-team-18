@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.swpp.wakeup.data.remote.AlarmLogInput
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import java.time.Instant
 import java.time.ZoneId
@@ -41,7 +42,8 @@ class AlarmScheduler(private val context: Context) {
 
         // 이전에 등록한 것을 먼저 해제한다. eventId 가 PendingIntent 의
         // requestCode 라서 정확히 같은 알람만 지워진다.
-        store.all().forEach { cancelPendingIntent(it.eventId) }
+        val before = store.all()
+        before.forEach { cancelPendingIntent(it.eventId) }
 
         val upcoming = schedules
             .filter { it.alarmAtMillis > now }
@@ -51,6 +53,14 @@ class AlarmScheduler(private val context: Context) {
 
         store.replaceAll(upcoming)
         upcoming.forEach { register(it) }
+
+        // Partly AI-generated (Claude) — 등록 시각이 새로 생기거나 바뀐 일정만 기록한다
+        // (db-schema.md A3 `scheduled`). 같은 시각으로 다시 등록한 것은 남기지 않는다.
+        AlarmLogQueue(context).recordAll(
+            changedRegistrations(before, upcoming).map {
+                alarmLogOf(AlarmLogInput.KIND_SCHEDULED, it, nowMillis = now)
+            }
+        )
 
         Log.i(
             TAG,

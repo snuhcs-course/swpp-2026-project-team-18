@@ -241,7 +241,7 @@ def test_recomputed_alarm_order_updates_first_flag(client, event, monkeypatch):
     first = event()
     later = event(start="2026-10-05T10:00:00+09:00")
 
-    def compute(instance):
+    def compute(instance, **kwargs):  # trigger= 를 받는다(계획 이력). (Partly AI-generated (Claude))
         AlarmPlan.objects.filter(event=instance).update(
             alarm_at=instance.start_at - timedelta(hours=1),
         )

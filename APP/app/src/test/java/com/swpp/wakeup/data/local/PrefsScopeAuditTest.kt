@@ -44,6 +44,9 @@ class PrefsScopeAuditTest {
             "앞 사용자의 출발·도착 시각을 지금 계정의 토큰으로 올리게 된다",
         "alarm/ScheduledAlarmStore.kt" to
             "잠금화면 위에 앞 사용자의 일정 제목이 뜬다",
+        // Partly AI-generated (Claude) — 알람 기록(db-schema.md A3)
+        "alarm/AlarmLogQueue.kt" to
+            "앞 사용자의 알람 울림·끄기 기록을 지금 계정의 토큰으로 올리게 된다",
     )
 
     /**

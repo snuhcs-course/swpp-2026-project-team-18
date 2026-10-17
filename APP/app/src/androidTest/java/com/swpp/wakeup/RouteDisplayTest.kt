@@ -12,7 +12,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** 재생 경로를 제공하는 로컬 QA 서버에서 실제 경로 카드·후보 지도를 확인한다. */
+/**
+ * 재생 경로를 제공하는 로컬 QA 서버에서 실제 경로 카드·후보 지도 미리보기를 확인한다.
+ * 순서: 자전거 미리보기 → 뒤로 → 대중교통 표시 → 도보 미리보기 → "이 경로로 계산".
+ */
 @RunWith(AndroidJUnit4::class)
 class RouteDisplayTest {
     @Test
@@ -36,13 +39,16 @@ class RouteDisplayTest {
             ui.click(By.res("place_search"), "add_event_scroll")
             ui.click(By.res("place_result_$query"), "add_event_scroll")
             ui.click(By.textContains("경로 고르기"), "add_event_scroll")
-            for ((mode, key) in listOf("자전거" to "bicycle", "도보" to "walk")) {
-                ui.click(By.text(mode), "route_scroll")
-                ui.click(By.res("route_$key"), "route_scroll")
-                ui.await(By.res("candidate_route_map"), "route_scroll")
-                ui.await(By.desc("경로 지도"), "route_scroll", 90_000)
-                device.takeScreenshot(File(directory, "candidate-$key.png"))
-            }
+            // Partly AI-generated (Claude)
+            // 자전거: 카드를 누르면 전체 화면 지도 미리보기(⑬-e). 뒤로 = 목록으로 복귀.
+            ui.click(By.text("자전거"), "route_scroll")
+            ui.click(By.res("route_bicycle"), "route_scroll")
+            ui.await(By.res("candidate_route_map"))
+            ui.await(By.desc("경로 지도"), timeout = 90_000)
+            device.takeScreenshot(File(directory, "candidate-bicycle.png"))
+            device.pressBack()
+            ui.await(By.res("route_scroll"))
+            // 대중교통 배지·대체 버스. 도보 확인이 일정 추가로 돌아가므로 그보다 먼저 본다.
             ui.click(By.text("대중교통"), "route_scroll")
             ui.click(By.res("route_transit:5511"), "route_scroll")
             for (badge in listOf("최단 시간", "최소 비용", "최소 환승")) {
@@ -53,6 +59,15 @@ class RouteDisplayTest {
             }
             device.takeScreenshot(File(directory, "route-display.png"))
             device.dumpWindowHierarchy(File(directory, "route-display.xml"))
+            // 도보: 미리보기의 "이 경로로 계산" 이 일정 추가로 바로 돌아간다.
+            ui.click(By.text("도보"), "route_scroll")
+            ui.click(By.res("route_walk"), "route_scroll")
+            ui.await(By.res("candidate_route_map"))
+            ui.await(By.desc("경로 지도"), timeout = 90_000)
+            device.takeScreenshot(File(directory, "candidate-walk.png"))
+            ui.click(By.res("route_preview_confirm"))
+            ui.await(By.res("add_event_scroll"))
+            ui.await(By.textContains("도보"), "add_event_scroll")
             File(directory, "route-display-result.json").writeText(JSONObject()
                 .put("status", "passed").put("badges", "최단 시간 · 최소 비용 · 최소 환승")
                 .put("alternative_buses", "5513 · 643")

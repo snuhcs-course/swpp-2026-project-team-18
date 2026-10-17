@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -50,18 +49,17 @@ import com.swpp.wakeup.ui.theme.JitTheme
 /**
  * 리스크 선택. Figma "5. 리스크 선택" (node 1:53).
  *
- * 원래 의도는 **시각이 아니라 감수할 지각 위험을 정하는 것**이다. τ 를 0.97 로
- * 올리면 더 일찍 일어나고, 0.65 로 내리면 더 자되 지각 확률이 커진다.
+ * 원래 의도는 **시각이 아니라 감수할 지각 위험을 정하는 것**이다. τ 를 올리면
+ * 더 일찍 일어나고, 내리면 더 자되 지각 확률이 커진다.
  *
- * **그런데 지금은 선택지를 만들 수 없다.** τ 별 알람 시각을 계산하려면 소요시간
- * 분포가 있어야 한다. p97 과 p65 가 서로 다른 값이어야 의미가 있는데, 관측이
- * 없으면 둘이 같은 점추정치로 나온다. 카카오 응답에도 변동성 정보가 없다
- * (checklist "BE-P0-06 결론").
+ * **그런데 지금은 선택지를 고를 수 없다.** τ 별 알람 시각·확률은 서버의 옵션
+ * API(task.md BE-16, backend-requests R-2)가 계산해야 하는데 아직 없다. 관측이
+ * 부족해서가 아니다 — `MainActivity` 가 [riskOptions] 를 넘기지 않으므로 사용자가
+ * 보는 것은 항상 빈 상태다.
  *
- * 그래서 선택지는 **서버가 계산해 준 경우에만**([riskOptions], task.md B-5) 그린다.
- * 서버가 옵션을 주지 못하면 **왜 아직 선택할 수 없는지**와 무엇이 쌓이면
- * 가능해지는지를 설명하는 빈 상태를 보여준다. 가짜 97%/90%/65% 세 장을
- * 보여주는 것보다 정직하다.
+ * 그래서 선택지는 **서버가 계산해 준 경우에만**([riskOptions]) 그린다. 그 전에는
+ * "선택지 준비 중" 빈 상태를 보여준다. 가짜 97%/90%/65% 세 장이나 서버에 없는
+ * 기준으로 고정한 진행 막대를 보여주는 것보다 정직하다.
  *
  * @param riskOptions 서버가 준 옵션·분포. null 이거나 옵션이 비면 빈 상태
  * @param onContinue 고른 옵션의 key 로 계속. ⏳ B-5 이후: 저장 API 를 부르고 ④로 돌아간다
@@ -196,14 +194,17 @@ private fun RiskOptionCard(option: RiskOptionView, selected: Boolean, onClick: (
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
             }
-            Text(
-                text = option.probability?.let { "$it%" } ?: "학습 중",
-                color = if (option.probability == null) JitColor.TextSecondary else color,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-            )
+            // 확률이 없으면 글자와 막대를 둘 다 숨긴다. 빈 막대(0%)도 숫자처럼 읽힌다.
+            option.probability?.let {
+                Text(
+                    text = "$it%",
+                    color = color,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
-        JitProgressBar(fraction = (option.probability ?: 0) / 100f, color = color)
+        option.probability?.let { JitProgressBar(fraction = it / 100f, color = color) }
         option.sleepLabel?.let {
             Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
         }
@@ -368,54 +369,39 @@ private fun RiskEmptyState(
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
             }
-            plan?.sensitivityTag?.let {
+            // τ 의 출처. 종류가 없는 일정은 프로필 기본값이라 "{종류} 일정이라" 고 쓰면 틀린다.
+            plan?.tauSourceLabel?.let {
                 Text(
-                    text = "$it 일정이라 τ 가 이렇게 정해졌음",
+                    text = "τ 출처 · $it",
                     color = JitColor.TextSecondary,
                     fontSize = 11.sp,
                 )
             }
         }
 
-        // 왜 아직 선택지를 만들 수 없는지
+        // 왜 아직 고를 수 없는지. 관측 부족이 아니라 옵션 API(BE-16)가 없어서다.
+        // 서버에 없는 기준("며칠")이나 고정 진행 막대는 그리지 않는다.
         JitCard(gap = 9.dp) {
             JitDotLabel(
-                text = "선택지를 만들려면 관측이 필요함",
+                text = "선택지 준비 중",
                 dotColor = JitColor.Amber,
                 fontSize = 13,
                 dotSize = 8.dp,
             )
             Text(
-                text = "τ 를 바꿔 여러 알람 시각을 제시하려면 소요시간이 얼마나 " +
-                    "흔들리는지 알아야 함. 지금은 경로 조회값 하나뿐이라 τ 를 " +
-                    "0.97 로 올려도 0.65 로 내려도 같은 시각이 나옴.",
+                text = "안전·보통·도박 중에서 고르는 기능은 서버 계산이 붙으면 열림. " +
+                    "지금은 위에 적힌 τ 로 계산함",
                 color = JitColor.TextSecondary,
                 fontSize = 11.sp,
             )
-
-            HorizontalDivider(color = JitColor.Track)
-
-            ProgressRow("실제 출발·도착 기록", 0f, "0일 / 14일")
-            Text(
-                text = "며칠 쓰면 준비 시간과 이동 시간이 쌓임. 그때부터 분포로 " +
-                    "확률을 계산할 수 있음",
-                color = JitColor.TextSecondary,
-                fontSize = 10.sp,
-            )
         }
 
-        // 그때 무엇이 생기는지
+        // 열리면 무엇을 고를 수 있는지
         JitCard(gap = 9.dp) {
-            Text("관측이 쌓이면", color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text("열리면 고를 수 있는 것", color = JitColor.TextSecondary, fontSize = 11.sp)
             FutureRow("안전", "일찍 일어나고 지각 확률이 낮음", JitColor.Green)
             FutureRow("보통", "권장값. 수면과 정시 도착의 균형", JitColor.Accent)
             FutureRow("도박", "더 자되 지각 확률을 감수", JitColor.Red)
-            HorizontalDivider(color = JitColor.Track)
-            Text(
-                text = "평균이 아니라 분포를 쓰기 때문에 확률로 말할 수 있음",
-                color = JitColor.TextSecondary,
-                fontSize = 10.sp,
-            )
         }
 
         // 지금도 동작하는 것
@@ -433,21 +419,6 @@ private fun RiskEmptyState(
                 fontSize = 11.sp,
             )
         }
-    }
-}
-
-@Composable
-private fun ProgressRow(label: String, fraction: Float, right: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(label, color = JitColor.TextPrimary, fontSize = 12.sp)
-            Text(right, color = JitColor.TextSecondary, fontSize = 11.sp)
-        }
-        JitProgressBar(fraction = fraction, color = JitColor.Accent)
     }
 }
 
@@ -485,11 +456,12 @@ private fun RiskChoicePreview() {
                 remaining = null,
                 onTimeProbability = null,
                 tauUsed = 0.90,
+                tauSourceLabel = "수업 일정 기본값",
                 confidence = ConfidenceView(
                     percent = null,
-                    headline = "정시 도착 확률 학습 중",
+                    headline = "정시 도착 확률 · 아직 계산할 수 없음",
                     reason = "준비·이동 둘 다 단일 추정값이라 분포가 없음",
-                    action = "루틴 블록에 최소~최대 범위를 넣으면 확률 계산이 시작됨",
+                    action = "루틴 블록에 최소~최대 범위를 넣으면 준비 시간 변동이 반영됨",
                 ),
                 breakdown = emptyList(),
                 totalMinutes = 58,

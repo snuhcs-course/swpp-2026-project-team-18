@@ -46,6 +46,11 @@ data class AlarmPlanView(
     val onTimeProbability: Int?,
     /** 적용된 τ. 예 0.90 */
     val tauUsed: Double?,
+    /**
+     * τ 가 어디서 왔는지. "직접 고른 값" / "수업 일정 기본값" / "기본값".
+     * null 이면(프리뷰 등) ④ 는 τ 값만, ⑤ 는 출처 줄을 숨긴다.
+     */
+    val tauSourceLabel: String? = null,
 
     /**
      * 확률을 그리는 데 필요한 것 전부. 확률이 없을 때의 이유와 사용자가 할
@@ -200,7 +205,7 @@ data class AlarmPlanView(
  * 계산 근거 한 줄.
  *
  * [note] 가 이 앱의 핵심이다. "20분" 만 보여주면 왜 그 값인지 알 수 없다.
- * "카카오 실측 경로 · 20분 · 4.6km · 환승 1회" 처럼 근거를 함께 준다.
+ * "카카오 경로 추정 · 2호선 → 5513 · 4.6km · 환승 1회" 처럼 근거를 함께 준다.
  */
 data class PlanRow(
     val label: String,
@@ -223,14 +228,15 @@ data class PlanRow(
 data class ConfidenceView(
     /** 0~100. null 이면 아직 계산할 수 없다 */
     val percent: Int?,
-    /** "정시 도착 확률 92%" / "정시 도착 확률 학습 중" */
+    /** "정시 도착 확률 92%" / "정시 도착 확률 · 아직 계산할 수 없음" */
     val headline: String,
     /** [percent] 가 null 일 때 그 이유. 있으면 null */
     val reason: String?,
-    /** 사용자가 하면 확률이 생기는 일. 없거나 할 일이 없으면 null */
+    /** 확률에 필요한 재료를 채우는 일. 없거나 할 일이 없으면 null */
     val action: String?,
 ) {
-    val isLearning: Boolean get() = percent == null
+    /** 확률을 아직 계산할 수 없다. 숫자를 만들지 않고 이유만 보여 준다 */
+    val isUnavailable: Boolean get() = percent == null
 
     /** 확률이 목표치를 넘겼는지. 초록/노랑 구분에 쓴다 */
     fun meets(tau: Double?): Boolean {

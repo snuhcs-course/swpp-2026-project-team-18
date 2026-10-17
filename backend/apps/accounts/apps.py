@@ -4,7 +4,8 @@ from django.apps import AppConfig
 class AccountsConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "apps.accounts"
-    verbose_name = "계정"
+    # Partly AI-generated (Claude) — admin 섹션 번호(db-schema.md §6). 데이터가 생기는 순서다.
+    verbose_name = "1. 계정"
 
     def ready(self):
         # 사용자 생성 시 프로필을 함께 만드는 시그널을 등록한다.

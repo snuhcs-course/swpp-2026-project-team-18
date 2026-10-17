@@ -17,8 +17,9 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from .models import TripObservation
+from .models import AlarmLog, TripObservation
 from .serializers import (
+    AlarmLogBatchSerializer,
     TripObservationBatchSerializer,
     TripObservationSerializer,
 )
@@ -124,3 +125,55 @@ class ObservationListView(_UserScopedMixin, ListAPIView):
                 qs = qs.filter(observed_at__lte=dt)
 
         return qs
+
+
+# Partly AI-generated (Claude)
+class AlarmLogBatchView(APIView):
+    """POST /api/alarm-logs/batch — 알람 사건 여러 건 업로드(db-schema.md A3).
+
+    이동 관측 배치와 같은 규칙이다. 같은 `client_uuid` 는 저장하지 않고 `duplicated`
+    로 센다 — 앱은 `accepted + duplicated` 만큼을 큐에서 지운다. 남의 일정이면
+    배치 전체가 404 다(`resolve_alarm_log_events`).
+
+    올리기 전에 지운 일정의 기록은 일정 없이 저장하고 `accepted` 에 넣는다. 그중 몇 건이
+    일정 없이 들어갔는지는 `unlinked` 로 알려 준다. 올린 뒤에 지운 일정(SET_NULL)과 같은
+    모양이고, 배치를 거절하지 않으므로 같은 배치의 다른 기록이 사라지지 않는다.
+
+    조회 API 는 두지 않는다. 이 기록은 학습 배치와 admin 이 읽는다.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "observation"
+
+    def post(self, request):
+        batch = AlarmLogBatchSerializer(data=request.data, context={"request": request})
+        batch.is_valid(raise_exception=True)
+        items = batch.validated_data["logs"]
+
+        created: list[int] = []
+        duplicated = 0
+        unlinked = 0
+        with transaction.atomic():
+            for item in items:
+                defaults = {k: v for k, v in item.items() if k not in _IDENTITY_FIELDS}
+                log, was_created = AlarmLog.objects.get_or_create(
+                    user=request.user,
+                    client_uuid=item["client_uuid"],
+                    defaults={**defaults, "source": AlarmLog.Source.APP},
+                )
+                if was_created:
+                    created.append(log.pk)
+                    if log.event_id is None:
+                        unlinked += 1
+                else:
+                    duplicated += 1
+
+        return Response(
+            {
+                "accepted": len(created),
+                "duplicated": duplicated,
+                "unlinked": unlinked,
+                "results": created,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
