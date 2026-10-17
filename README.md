@@ -49,8 +49,8 @@ What the MVP supports:
    for the next 7 days are registered
 5. **Log the morning** — dismissing the alarm starts one-tap-per-block prep logging and
    GPS trip tracking
-6. **Commute** — departure and arrival are detected on the device (arrival = within
-   50 m of the destination for 2 minutes). While you are moving, the app fetches the
+6. **Commute** — departure and arrival are detected on the device (arrival = the first
+   valid location within 100 m of the destination). While you are moving, the app fetches the
    fastest route from your current position every minute and draws it in purple; the
    progress bar shows a live ETA and colors the lateness outlook
 7. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while

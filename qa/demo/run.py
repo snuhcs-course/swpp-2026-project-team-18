@@ -173,7 +173,8 @@ class Demo:
                 "UI 목적지·경로 선택이 저장 값과 다릅니다.")
         require(event["origin_lat"] is None and event["origin_lng"] is None,
                 "UI 집 선택이 별도 출발지로 저장되어 준비 시간을 제외합니다.")
-        require(event["alarm_enabled"] is True and event["alarm_on"] is True and event["is_first_alarm"] is True,
+        expected_override = None if self.replay_routing else True
+        require(event["alarm_enabled"] is expected_override and event["alarm_on"] is True and event["is_first_alarm"] is True,
                 "UI 알람 스위치 ON이 서버에 저장되지 않았습니다.")
         if self.replay_routing:
             require(event["tag"]["key"] == "exam" and event["lateness_sensitivity"] == "high",
@@ -245,8 +246,21 @@ class Demo:
         def drive():
             try:
                 path = self.event["alarm_plan"]["route_path"]
-                # API의 실제 길을 따라 이동. 마지막은 도로의 스냅 지점 대신 장소 중심이다.
+                # 경로를 따라 가되 목적지 80m 앞에서 멈춘다. 기존 50m·2분 정책은 실패해야 한다.
                 points = [(float(p[0]), float(p[1])) for p in path]
+                place = self.event["place"]
+                destination = (place["lat"], place["lng"])
+                def remaining(point):
+                    return math.hypot((point[0]-destination[0])*111000,
+                                      (point[1]-destination[1])*111000*math.cos(math.radians(destination[0])))
+                boundary = next((i for i, point in enumerate(points) if remaining(point) <= 150), len(points))
+                points = points[:boundary]
+                require(bool(points), "GPS 시나리오는 목적지에서 150m 이상 떨어진 출발지가 필요합니다.")
+                last = points[-1]
+                scale = 80 / remaining(last)
+                target = tuple(b + (a-b)*scale for a, b in zip(last, destination))
+                points.append(target)
+                self.result["gps_target"] = {"lat": target[0], "lng": target[1], "distance_m": 80}
                 distances = [0.0]
                 for a, b in zip(points, points[1:]):
                     distances.append(distances[-1] + math.hypot((b[0]-a[0])*111000,
@@ -256,8 +270,7 @@ class Demo:
                 while not self.gps_stop.is_set():
                     fraction = min((time.monotonic() - started) / duration, 1)
                     if fraction == 1:
-                        place = self.event["place"]
-                        self.gps(place["lat"], place["lng"])
+                        self.gps(*target)
                     else:
                         distance = fraction * distances[-1]
                         i = next((i for i in range(1, len(points)) if distances[i] >= distance), len(points)-1)
@@ -285,8 +298,9 @@ class Demo:
         require(len(observations) == 2 and {o["kind"] for o in observations} == {"depart", "arrive"},
                 "출발·도착 관측이 정확히 한 건씩 저장되지 않았습니다.")
         arrival = next(o for o in observations if o["kind"] == "arrive")
-        require(arrival["dwell_confirmed"] and arrival["dwell_seconds"] >= 120,
-                "실제 2분 체류로 확정된 도착이 아닙니다.")
+        require(50 < arrival["distance_m"] <= 100 and arrival["dwell_seconds"] == 0 and
+                arrival["entered_at"] == arrival["observed_at"],
+                "100m 반경 진입 즉시 도착한 관측이 아닙니다.")
         require(len(blocks) == len(self.blocks) and all(b["observation_count"] == 1 for b in blocks),
                 "실제 루틴 완료 기록이 저장되지 않았습니다.")
         # 미래 일정은 리포트에 안 잡힌다. 실제 관측을 보존한 채 같은 일정의 시각만 마감한다.

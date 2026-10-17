@@ -10,6 +10,10 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
+import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.data.remote.EventCreateRequest
+import com.swpp.wakeup.data.remote.PlaceInput
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.time.LocalDate
 import java.time.YearMonth
@@ -21,6 +25,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -194,6 +199,39 @@ class PublicSetupTest {
                 click(toggle, "home_list")
                 until("ON 기기 예약 복원") { store.find(eventId) != null }
                 assertTrue(ui.withNode(toggle, "home_list") { it.isChecked })
+            }
+            if (config.optBoolean("replay_routing")) step("09_new_event_resets_alarm_choice") {
+                val store = ScheduledAlarmStore(context)
+                val eventId = store.all().single().eventId
+                val api = ApiClient.events
+                val original = runBlocking { requireNotNull(api.get(eventId).body()) }
+                val place = requireNotNull(original.place)
+                val toggle = By.res("event_alarm_$eventId")
+                click(toggle, "home_list")
+                until("초기화 검증 전 OFF 예약 해제") { store.find(eventId) == null }
+
+                // UI와 같은 생성 API를 호출한 뒤 실제 화면·기기 예약을 함께 확인한다.
+                val response = runBlocking { api.create(EventCreateRequest(
+                    title = "QA 초기화 검증", startAt = original.startAt,
+                    place = PlaceInput(place.name, place.lat, place.lng, place.address, place.kakaoPlaceId),
+                    tagKey = original.tag?.key, routeKey = original.routeKey,
+                    originLat = original.originLat, originLng = original.originLng,
+                    originLabel = original.originLabel,
+                )) }
+                assertEquals(201, response.code())
+                val added = requireNotNull(response.body())
+                try {
+                    val reset = runBlocking { requireNotNull(api.get(eventId).body()) }
+                    assertNull(reset.alarmEnabled)
+                    launch()
+                    assertTrue(ui.withNode(toggle, "home_list") { it.isChecked })
+                    assertFalse(ui.withNode(By.res("event_alarm_${added.id}"), "home_list") { it.isChecked })
+                    until("자동 ON 기기 예약 복원") { store.find(eventId) != null }
+                    assertNull(store.find(added.id))
+                } finally {
+                    assertEquals(204, runBlocking { api.delete(added.id).code() })
+                    launch()
+                }
             }
             writeResult("passed")
         } catch (error: Throwable) {

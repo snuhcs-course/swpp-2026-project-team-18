@@ -119,18 +119,14 @@ class DemoFlowTest {
                 find(By.res("trip_status").textStartsWith("이동 중"), "plan_scroll", 15_000)
             }
 
-            step("07_destination_dwell") {
-                until("목적지 반경 진입", 90_000) {
-                    TripLiveState.pointFor(eventId)?.awaitingDwell == true
+            step("07_immediate_arrival") {
+                until("100m 반경 진입 즉시 도착", 90_000) {
+                    TripLiveState.arrivalFor(eventId) != null
                 }
-                assertNull("2분 체류 전에 도착 완료됨", TripLiveState.arrivalFor(eventId))
-                assertNotEquals("도착 완료", ui.text(By.res("trip_status"), "plan_scroll"))
+                assertArrival(eventId)
             }
 
             step("08_arrival_after_service_stop") {
-                until("실제 2분 체류 도착 판정", 180_000) {
-                    TripLiveState.arrivalFor(eventId) != null
-                }
                 until("추적 서비스 종료", 20_000) {
                     TripLiveState.pointFor(eventId) == null &&
                         !Regex("ServiceRecord\\{[^\\n]*TripTrackingService").containsMatchIn(
