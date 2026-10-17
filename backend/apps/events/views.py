@@ -29,6 +29,7 @@ from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
 
+from .alarms import reset_alarm_overrides
 from .geo import validate_route_distance
 from .models import Event, EventTag
 from .serializers import (
@@ -77,12 +78,12 @@ class EventListCreateView(_UserScopedMixin, ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         write = self.get_serializer(data=request.data)
         write.is_valid(raise_exception=True)
-        event = write.save()
-
-        # 생성 시점에 한 번만 계산한다. 목록 조회마다 부르면 카카오 무료
-        # 쿼터(일 1,000건)가 금방 마른다.
-        planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
-        event.refresh_from_db()
+        with transaction.atomic():
+            event = write.save()
+            # 새 일정만 계산한다. 기존 일정은 선택값만 자동으로 돌린다.
+            planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
+            reset_alarm_overrides(event)
+            event.refresh_from_db()
 
         return Response(
             EventSerializer(event, context=self.get_serializer_context()).data,
@@ -144,6 +145,18 @@ class EventRecomputeView(_UserScopedMixin, APIView):
         return Response(EventSerializer(event, context={"request": request}).data)
 
 
+class EventRiskOptionsView(_UserScopedMixin, APIView):
+    """GET /api/events/{id}/risk-options. No upstream calls or plan mutations."""
+
+    def get(self, request, pk: int):
+        from apps.planning.risk_options import build_risk_options
+
+        event = self.get_queryset().filter(pk=pk).first()
+        if event is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(build_risk_options(event))
+
+
 class EventCalendarImportView(_UserScopedMixin, APIView):
     """POST /api/events/import — 기기 캘린더 일정을 가져온다.
 
@@ -197,13 +210,17 @@ class EventCalendarImportView(_UserScopedMixin, APIView):
             }
 
             for row in rows:
-                place = self._resolve_place(row.get("place"))
+                event = existing.get(row["external_id"])
+                # 앱에서 고른 집 목적지는 캘린더 재가져오기로 덮어쓰지 않는다.
+                place = (
+                    None if event is not None and event.destination_is_home
+                    else self._resolve_place(row.get("place"))
+                )
                 tag = (
                     EventTag.objects.filter(key=row["tag_key"]).first()
                     if row.get("tag_key")
                     else None
                 )
-                event = existing.get(row["external_id"])
 
                 if event is None:
                     event = Event.objects.create(
@@ -726,7 +743,7 @@ class PlaceReverseView(APIView):
 
 
 class RouteCandidateView(APIView):
-    """GET /api/routes/candidates?dest_lat=&dest_lng=[&origin_lat=&origin_lng=&origin_label=]
+    """GET /api/routes/candidates?dest_lat=&dest_lng=[&dest_label=&origin_lat=&origin_lng=&origin_label=]
 
     출발지는 **기본이 프로필의 집 위치**이고, 사용자가 다른 곳에서 출발할 때만
     `origin_*` 으로 덮어쓴다. 집에서만 출발한다는 가정이 틀렸기 때문이다 —
@@ -743,8 +760,8 @@ class RouteCandidateView(APIView):
        사용을 제한하지 않으면서, 전 세계 경로 프록시로 쓰이는 길을 막는다.
 
     카카오는 대중교통 후보를 항상 15개 주는데 대부분 같은 버스의 다른 환승
-    조합이다. `clients.route_candidates()` 가 축별 대표만 추려 6개 이하로
-    내린다(자세한 기준은 그 함수의 주석).
+    조합이다. `clients.route_candidates()` 가 대중교통 대표를 최대 3개로 추린다.
+    응답은 수단별 목록과 구버전 앱용 `results`를 함께 제공한다.
 
     **호출 비용** — 한 번에 외부 API 를 최대 4번 부른다. 사용자가 일정 추가
     화면에서 명시적으로 요청할 때만 부르고, 알람 재계산에서는 선택된 수단
@@ -799,11 +816,28 @@ class RouteCandidateView(APIView):
             end_lat=dest_lat,
             end_lng=dest_lng,
         )
+        destination_label = (request.query_params.get("dest_label") or "").strip()[:80] or "도착지"
+        groups = {mode: [] for mode in clients.CANDIDATE_LIMITS}
+        results = []
+        for candidate in candidates:
+            mode = candidate["kind"]
+            if mode not in groups or len(groups[mode]) >= clients.CANDIDATE_LIMITS[mode]:
+                continue
+            item = {
+                **candidate,
+                "guide": clients.candidate_guide(candidate, origin["label"], destination_label),
+            }
+            groups[mode].append(item)
+            results.append(item)
+        # 기존 results와 같은 분·환승 순위와 안정적인 동률 순서를 쓴다.
+        fastest = min(results, key=lambda item: (item["minutes"], item["transfers"]), default=None)
         return Response(
             {
                 "origin": origin,
-                "results": candidates,
+                "results": results,
                 "degraded": degraded,
+                **groups,
+                "fastest_key": fastest["key"] if fastest else None,
             }
         )
 
@@ -885,7 +919,15 @@ class RouteLiveView(_UserScopedMixin, APIView):
             .filter(pk=event_id)
             .first()
         )
-        if event is None or event.place_id is None:
+        if event is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        destination = event.resolve_destination(event.user.profile)
+        if destination is None:
+            if event.destination_is_home:
+                return _error(
+                    "no_home", "도착지로 쓸 집 주소를 먼저 설정해야 한다.",
+                    status.HTTP_400_BAD_REQUEST,
+                )
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         plan = getattr(event, "alarm_plan", None)
@@ -899,8 +941,8 @@ class RouteLiveView(_UserScopedMixin, APIView):
             chosen,
             start_lat=lat,
             start_lng=lng,
-            end_lat=event.place.lat,
-            end_lng=event.place.lng,
+            end_lat=destination[0],
+            end_lng=destination[1],
         )
         if degraded or not route:
             return Response({"route": None, "degraded": True})

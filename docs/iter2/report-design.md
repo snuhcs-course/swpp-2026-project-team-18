@@ -1,5 +1,7 @@
 # Phase B 설계 — 리포트(⑧ 주간 · ⑨ 상세)와 주간 줄글 요약
 
+> 이 문서는 해당 Phase의 설계·리뷰·검증 당시 기록이다. 당시 테스트 수·미구현 설명을 현재 상태로 해석하지 않는다. 2026-10-17 후속 통합 상태는 [최신 TODO](../../task.md), [요청별 완료 상태](backend-requests.md), [최신 검증](account-ranges-and-travel-counts.md)을 따른다.
+
 > 구현은 설계 리뷰·구현 리뷰를 반영한 판이다. 이 본문과 다른 점은 [phaseB-verification.md](phaseB-verification.md) "설계와 다르게 한 것" 에 있다.
 
 - 기준: `front-iter2` HEAD `5a41095`(Phase A 끝). 서버 `APP_VERSION 0.10.0`, 앱 `versionName 0.10.0` → 둘 다 `0.11.0`(§4-5).

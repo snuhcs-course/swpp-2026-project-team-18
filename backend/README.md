@@ -89,6 +89,16 @@ Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정
   경로 조회를 추가하지 않으며 좌표가 없으면 빈 path다. 앱은 선택한 카드의 지도만
   표시하고 기존 일정 지도·GPS 추적 상태를 변경하지 않는다.
 
+## 일정 추가·도착 정책 (BE-25·24)
+
+- 직접 일정 추가가 성공하면 같은 사용자의 같은 현지 시작 날짜에 속한 기존 일정의
+  `alarm_enabled`를 null(자동)로 돌린다. 새 일정의 명시적 선택·다른 날짜·다른 사용자·
+  캘린더 가져오기는 유지한다. 기존 계획은 재계산하지 않으며 감사 로그에 `auto`를 남긴다.
+- 앱은 첫 유효 GPS 위치가 목적지 100m 안이면 도착을 확정한다. 새 관측은
+  `entered_at == observed_at`, `dwell_seconds == 0`이다. `dwell_confirmed`는 과거
+  2분 체류 여부를 읽는 호환 필드이며 현재 도착 유효성·학습·리포트의 조건이 아니다.
+- [전후 검증·직접 테스트](../docs/iter2/alarm-arrival-policy.md).
+
 ## 주소·장소 검색
 
 `GET /api/places/search?q=...`는 도로명·지번 주소를 먼저 찾고, 없으면 기존 장소명 검색을 사용한다.
@@ -96,6 +106,18 @@ Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정
 기준 좌표가 있으면 직선 거리를 표시한다. 지역·도로 중심점은 집 주소 후보에서 제외한다.
 주소 조회가 실패해도 정상 장소 결과는 제공한다. 조회 실패 후 대체 결과도 없으면 `degraded: true`다.
 [카카오 주소 검색](https://developers.kakao.com/docs/ko/local/dev-guide)을 사용하며 새 키·DB 변경은 없다.
+
+## 경로·리스크·집 목적지 (BE-12·7·16·18)
+
+- 후보 응답은 기존 `results`와 함께 `car/transit/walk/bicycle/fastest_key` 및 후보별 `guide`를 제공한다. 자동차 후보 확장은 BE-8로 남는다.
+- `GET /api/events/{id}/risk-options`: 기존 계산 모델의 3개 τ 선택지. 정보가 부족하면 빈 옵션과 이유를 준다. 분포 `bins.mass`는 모형 비율이며 실측 건수가 아니다.
+- 생성·수정의 `destination_is_home:true`는 `place`와 함께 보내지 않는다. 현재 프로필 집을 사용하며 `place` 행을 만들지 않는다. 마이그레이션 `events.0007` 적용이 필요하다.
+- [직접 테스트·전후 검증](../docs/iter2/route-risk-home.md).
+
+## 준비 시간·가입 제한·이동 기록 수 (R-6·R-8·R-1)
+
+프로필 준비 시간은 5~240분(또는 기존 null), 가입은 IP당 10회/시간이다. 계획의 `travel_sample_count`는 실제 계산에 사용한 기존 추정기 표본 수이며 보정이 없으면 0이다. 마이그레이션 `planning.0010`이 필요하다.
+[직접 테스트·전후 검증](../docs/iter2/account-ranges-and-travel-counts.md).
 
 ## 검증과 학습
 
@@ -106,11 +128,11 @@ python -m pytest
 python scripts/run_local_suite.py
 ```
 
-HTTP 스위트는 서버를 자동 실행한다. 기존 서버가 8000 포트를 사용하면 종료하고 다시 실행한다.
+HTTP 스위트는 서버를 자동 실행한다. 대량 가입 검증용 `config.settings.local_suite`는 가입 한도만 해제하며, 운영의 IP당 10회/시간 제한은 전용 테스트·로컬 에뮬레이터에서 확인한다. 기존 서버가 8000 포트를 사용하면 종료하고 다시 실행한다.
 카카오 키가 없으면 관련 항목은 건너뛰므로 실패 수와 건너뜀을 함께 확인한다.
 결과는 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다.
 
 `check_deployed.py`·`check_same_db.py`는 검증 데이터를 만들고,
 `train_models`는 DB에 이동 보정값을 저장한다. 공용 DB에서 실행할 때 팀과 시점을 맞춘다.
 준비 관측은 다음 계산에 직접 반영되며, 이동 보정 학습은 수동 실행 후 일정 재계산이 필요하다.
-변동성 근거가 부족하면 도착 확률은 null이고 앱은 “학습 중”으로 표시한다.
+변동성 근거가 부족하면 도착 확률은 null이다. 앱 홈은 확률을 숨기며 알람 근거에는 “정시 도착 확률 · 아직 계산할 수 없음”과 이유를 표시한다.

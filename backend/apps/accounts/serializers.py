@@ -151,6 +151,9 @@ class ProfileSerializer(serializers.ModelSerializer):
             "timezone",
         )
         read_only_fields = ("shadow_started_at",)
+        extra_kwargs = {
+            "onboarding_prep_min": {"min_value": 5, "max_value": 240},
+        }
 
     def get_has_home(self, obj) -> bool:
         return obj.home_lat is not None and obj.home_lng is not None

@@ -84,6 +84,7 @@ REST_FRAMEWORK = {  # noqa: F405
         "nlp": None,
         "observation": None,
         "password_check": None,
+        "register": None,
     },
 }
 

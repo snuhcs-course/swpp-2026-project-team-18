@@ -27,9 +27,8 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Q
 
-# 도착으로 인정하는 체류 시간(초). 앱 `TripGeofence.DEFAULT_DWELL_MILLIS` 와
-# 같은 값이어야 한다. 서버는 이 값으로 판정하지 않고, 앱이 보낸 체류 시간이
-# 기준을 채웠는지만 되읽는다([TripObservation.dwell_confirmed]).
+# 과거 앱의 체류 기록을 해석하는 참고값. 현재 도착 유효성의 조건이 아니다.
+# BE-24 이후 앱은 100m 진입 즉시 도착하며 체류 시간은 0이다.
 DWELL_CONFIRM_SECONDS = 120
 
 
@@ -77,11 +76,7 @@ class TripObservation(models.Model):
 
     # 목적지 반경 안에서 머문 시간(초). 도착에만 있다.
     #
-    # **판정 근거의 세기다.** 앱은 반경 진입 + 2분 체류로 도착을 본다. 그런데
-    # 추적 마감(일정 시작 후 한 시간)에 걸리면 2분을 못 채운 채 확정한다 —
-    # 버리면 실제로 관측한 도착이 사라지기 때문이다. 이 값이 없으면 둘을
-    # 구분할 수 없고, "지나가는 버스" 와 "도착" 이 같은 행으로 학습에 들어간다.
-    #
+    # 새 앱은 진입 즉시 확정해 0을 보낸다. 과거 앱이 보낸 체류 시간도 보존한다.
     # null 을 허용하는 이유는 두 가지다. 출발 관측에는 머문 시간이 없고,
     # 이 필드가 생기기 전에 올라온 관측도 그대로 남아야 한다.
     dwell_seconds = models.PositiveIntegerField(
@@ -91,10 +86,8 @@ class TripObservation(models.Model):
     # Partly AI-generated (Claude)
     # 목적지 반경에 처음 들어온 fix 의 시각. 도착에만 있다(db-schema.md A1).
     #
-    # `observed_at` 은 반경 진입 + 2분 체류를 채운 판정 fix 의 시각이라 실제 진입보다
-    # 최소 2분 늦다. 그 차이를 나중에 보정할 수 있게 진입 시각을 함께 받는다.
-    # **지금은 학습·리포트가 이 값을 쓰지 않는다** — 어느 시각을 도착으로 볼지는 팀이
-    # 정한다(db-schema.md §5-4). null 인 이유는 `dwell_seconds` 와 같다(출발, 옛 관측).
+    # 새 앱은 `observed_at`과 같은 시각을 보낸다. 과거 앱에서는 체류 시작 시각이다.
+    # 학습·리포트는 `observed_at`을 사용한다. null은 출발 또는 옛 관측이다.
     entered_at = models.DateTimeField("반경 진입 시각", null=True, blank=True)
 
     # 앱이 만드는 멱등 키. 재전송해도 행이 늘지 않는다.
@@ -150,12 +143,7 @@ class TripObservation(models.Model):
 
     @property
     def dwell_confirmed(self) -> bool | None:
-        """체류 기준을 채운 도착인지. 출발이거나 값이 없으면 None.
-
-        앱 `TripGeofence.DEFAULT_DWELL_MILLIS` 와 같은 기준을 본다. 여기서
-        다시 판정하지 않고 앱이 보낸 시간만 재해석한다 — 서버에는 반경 안
-        궤적이 없어서 판정할 재료가 없다.
-        """
+        """과거 2분 체류 여부를 읽는 호환 필드. 도착 유효성·리포트 필터가 아니다."""
         if self.kind != self.Kind.ARRIVE or self.dwell_seconds is None:
             return None
         return self.dwell_seconds >= DWELL_CONFIRM_SECONDS

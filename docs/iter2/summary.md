@@ -1,4 +1,16 @@
-# Iteration 2 프론트(front-iter2) 작업 요약 — 팀 18 JustInTime
+# Iteration 2 통합 상태와 프론트 작업 기록 — 팀 18 JustInTime
+
+## 최신 통합 상태 (2026-10-17)
+
+- 기능 기준: `back-iter2` `d434097`. `front-iter2` Phase A·B·C와 후속 BE-25·24·12·7·16·18·R-6·8·1을 통합했다.
+- 백엔드 1,182건·Android 611건·HTTP 8종 실패 0(외부 키 34건 스킵), lint 오류 0. 실제 에뮬레이터 UI와 로컬 재생 E2E 약 386초 통과.
+- 완료: 경로 그룹·안내, 리스크 옵션·저장·기기 예약, 현재 집 목적지, 알람 수동 선택 초기화, 100m 즉시 도착, 준비 시간 서버 범위, 가입 제한, 실제 보정 표본 수 표시.
+- 남은 필수: R-3 학습 자동 실행, BE-8 자동차 후보 4종, BE-11 시각·운행 조건 경로, BE-20 반복 일정. 선택/후순위: BE-14·21·22, R-5·7. R-9는 삭제 도구 운영 지침이다.
+- 최신 공용 배포·실시간 카카오·실기기 검증은 별도다. [TODO](../../task.md) · [추가 요청](backend-requests.md) · [검증](account-ranges-and-travel-counts.md).
+
+## 2026-10-13 프론트 작업 기록
+
+아래 브랜치·push 상태·테스트 수와 당시 남은 일은 각 Phase 종료 시점의 기록이다. 현재 완료 여부는 위 통합 상태를 따른다.
 
 - 브랜치 `front-iter2`(worktree `SWPP-PJ-front-iter2`), 출발점 `b1eff1f`(main).
 - Phase A·B 는 커밋 뒤 push 했다(`origin/front-iter2` = `71c9f0d`). Phase C 는 로컬 커밋만 했고 push·머지는 하지 않았다.
@@ -44,12 +56,12 @@
 
 테스트(커밋 전 게이트, [phaseC-verification.md](phaseC-verification.md)): 백엔드 pytest 1127 passed(기준 1040), 로컬 스위트 8/8(실패 0), DB 기본값 규칙 검사 20건·위험 0, `makemigrations --check` 변경 없음, 앱 단위 테스트 618건(기준 598, 실패 0), lint 오류 0(경고 62, 기준과 같음).
 
-## 남은 일
+## 당시 남은 일과 후속 상태
 
-- 바뀐 QA 흐름의 기기 위 E2E: 아직 돌리지 않았다(Phase A 재생 모드 `qa/demo/run.py`, Phase B `DemoFlowTest` 리포트 단계, Phase C 알람 기록 큐).
+- 기기 위 E2E: 당시 미실행이었으나 2026-10-17 통합 후 실제 에뮬레이터에서 통과했다(상단 최신 결과).
 - Figma F-0~F-13: 메인 세션이 10-13 에 반영했다. 노드 목록과 명세와 다른 점은 [figma-changes.md](figma-changes.md) 맨 위 "Figma 반영 상태".
 - [backend-requests.md](backend-requests.md) R-1~R-9: 박준하(back-iter2)에게 전달. R-9(머지 뒤 사용자·일정 삭제 도구는 새 모델이 있는 코드로)는 머지 전에 알린다.
 - Phase C 리뷰: APPROVED, 막지 않는 지적 5건 중 #1~#4 를 반영했다(#5 테스트 보강은 남김). [phaseC-verification.md](phaseC-verification.md) "리뷰 반영".
-- 팀 결정 대기: 도착 시각 편향(geofence 진입·체류 기준 도착 시각의 치우침)을 어떻게 다룰지, 실제 도착 시각의 정답값(ground truth)을 어떻게 모을지.
+- 도착 정책: 후속 BE-24에서 100m 진입 즉시 도착으로 확정했다. 실제 건물·착석 도착 정답값 수집과 과거 체류 데이터 보정은 별도 연구·팀 결정이다.
 - 버리는 QA 계정: 공용 서버(Neon)에는 만든 계정이 없다. 로컬 스위트가 실행마다 임시 SQLite 에 만든 계정(Phase C 회귀에서 11명)은 실행이 끝나면 DB 와 함께 사라진다.
 - 배포: 공용 DB 에 `migrate` 하지 않았다. main 머지 뒤 `scripts/db_status.py`·`check_db_defaults.py` 로 확인한다.

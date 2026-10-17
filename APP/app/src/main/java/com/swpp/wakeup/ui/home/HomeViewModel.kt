@@ -50,6 +50,7 @@ import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.sensing.TripLiveState
 import com.swpp.wakeup.sensing.TripObservationQueue
 import com.swpp.wakeup.domain.model.RouteChoice
+import com.swpp.wakeup.domain.model.RiskOptionsView
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.nav.NavState
@@ -682,7 +683,72 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openRiskChoice(eventId: Long) {
+        if (_nav.value.current == AppRoute.RiskChoice(eventId)) return
+        _risk.value = RiskState()
         _nav.update { it.copy(stack = it.stack + AppRoute.RiskChoice(eventId), forward = true) }
+        loadRiskOptions(eventId)
+    }
+
+    data class RiskState(
+        val eventId: Long? = null,
+        val loading: Boolean = false,
+        val saving: Boolean = false,
+        val options: RiskOptionsView? = null,
+        val error: String? = null,
+    )
+
+    private val _risk = MutableStateFlow(RiskState())
+    val risk: StateFlow<RiskState> = _risk.asStateFlow()
+    private var riskJob: Job? = null
+    private var riskGeneration = 0
+
+    fun loadRiskOptions(eventId: Long) {
+        if (_risk.value.saving) return
+        riskJob?.cancel()
+        val generation = ++riskGeneration
+        _risk.value = RiskState(eventId = eventId, loading = true)
+        riskJob = viewModelScope.launch {
+            val result = repository.loadRiskOptions(eventId)
+            if (generation != riskGeneration || _nav.value.current != AppRoute.RiskChoice(eventId)) return@launch
+            _risk.value = when (result) {
+                is EventRepository.Result.Success -> RiskState(eventId, options = result.data)
+                is EventRepository.Result.Failure -> RiskState(eventId, error = result.message)
+            }
+        }
+    }
+
+    fun saveRiskOption(eventId: Long, key: String) {
+        val state = _risk.value
+        if (_nav.value.current != AppRoute.RiskChoice(eventId)
+            || state.eventId != eventId || state.loading || state.saving) return
+        val selected = state.options?.option(key) ?: return
+        val generation = riskGeneration
+        _risk.update { it.copy(saving = true, error = null) }
+        viewModelScope.launch {
+            val error = when (val saved = repository.saveRiskOption(eventId, selected.tau)) {
+                is EventRepository.Result.Failure -> saved.message
+                is EventRepository.Result.Success -> {
+                    if (_nav.value.current == AppRoute.RiskChoice(eventId)
+                        || _nav.value.current == AppRoute.AlarmDecision(eventId)) {
+                        ++planLoadGeneration // Ignore an older in-flight detail request.
+                        _plan.value = saved.data
+                    }
+                    when (val home = repository.loadHome()) {
+                        is EventRepository.Result.Success -> {
+                            if (!home.data.fromCache) {
+                                applyHome(home.data) // Refresh home and device alarms together.
+                                null
+                            } else "선택은 저장됐지만 알람 목록을 갱신하지 못했습니다. 다시 계속하기를 눌러 주세요."
+                        }
+                        is EventRepository.Result.Failure ->
+                            "선택은 저장됐지만 알람 목록을 갱신하지 못했습니다. ${home.message}"
+                    }
+                }
+            }
+            if (generation != riskGeneration || _nav.value.current != AppRoute.RiskChoice(eventId)) return@launch
+            _risk.update { it.copy(saving = false, error = error) }
+            if (error == null) goBack()
+        }
     }
 
     // Partly AI-generated (Claude)
@@ -1849,7 +1915,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val base = current ?: RouteState()
                 val choice = if (keepSelection) {
                     result.data.copy(
-                        selectedKey = _add.value.routeKey ?: result.data.selectedKey
+                        selectedKey = _add.value.routeKey?.takeIf { key ->
+                            result.data.options.any { it.key == key }
+                        } ?: result.data.selectedKey
                     )
                 } else {
                     result.data
@@ -1944,6 +2012,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun goBack() {
+        if (_nav.value.current is AppRoute.RiskChoice) {
+            ++riskGeneration
+            riskJob?.cancel()
+            _risk.value = RiskState()
+        }
         _nav.update {
             if (!it.canGoBack) it
             else it.copy(stack = it.stack.dropLast(1), forward = false)
@@ -2422,6 +2495,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /** 목적지 검색. 집 주소·출발지와 같은 상태를 쓴다 */
         val place: PlaceSearch = PlaceSearch(),
         val selectedPlace: PlaceSearchItem? = null,
+        /** 집 버튼으로 선택한 목적지. 좌표가 같아도 검색한 장소는 일반 목적지다. */
+        val destinationIsHome: Boolean = false,
 
         /** ⑬ 경로 선택에서 고른 값. 비어 있으면 서버가 최단 경로를 쓴다 */
         val routeKey: String? = null,
@@ -2466,6 +2541,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          */
         fun canPickRoute(hasHome: Boolean): Boolean =
             !submitting && selectedPlace != null && (origin != null || hasHome)
+
     }
 
     private val _add = MutableStateFlow(AddState())
@@ -2489,14 +2565,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 목적지가 달라졌는데 이전 경로 key 를 들고 있으면 서버가 그 노선을 찾지
      * 못해 `route_failed` 가 되거나, 운 나쁘면 엉뚱한 노선에 맞아 버린다.
      */
-    fun onAddPlaceSelected(item: PlaceSearchItem?) {
+    fun onAddPlaceSelected(item: PlaceSearchItem?) = selectAddDestination(item, isHome = false)
+
+    fun onAddDestinationHome() {
+        val home = _state.value.homePlace ?: return
+        selectAddDestination(home, isHome = true)
+    }
+
+    private fun selectAddDestination(item: PlaceSearchItem?, isHome: Boolean) {
         _add.update {
             it.copy(
                 selectedPlace = item,
+                destinationIsHome = isHome,
                 place = it.place.copy(results = emptyList(), query = item?.name ?: ""),
                 routeKey = null,
                 routeLabel = null,
-                // 출발지는 이 화면에서 따로 고르므로 남긴다. 줄 오류는 장소가 바뀌었으니 지운다.
                 originError = null,
                 destinationError = null,
             )
@@ -2616,6 +2699,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 tagKey = current.tagKey,
                 routeKey = current.routeKey,
                 origin = current.origin,
+                destinationIsHome = current.destinationIsHome,
             )
             when (result) {
                 is EventRepository.Result.Success -> {

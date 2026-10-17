@@ -114,7 +114,7 @@ class Demo:
         self.result = {"scenario": self.scenario["name"], "mode": mode,
                        "api": self.api_base, "status": "failed", "device": self.device}
         if self.replay_routing:
-            self.result["external_response_mode"] = "recorded_walk_map_and_fixed_transit_cases"
+            self.result["external_response_mode"] = "recorded_walk_map_and_fixed_transit_home_cases"
 
     def shell(self, *args):
         return run(self.adb + ["shell", *args], capture_output=True, timeout=30).stdout.strip()
@@ -173,12 +173,15 @@ class Demo:
                 "UI 목적지·경로 선택이 저장 값과 다릅니다.")
         require(event["origin_lat"] is None and event["origin_lng"] is None,
                 "UI 집 선택이 별도 출발지로 저장되어 준비 시간을 제외합니다.")
-        require(event["alarm_enabled"] is True and event["alarm_on"] is True and event["is_first_alarm"] is True,
+        expected_override = None if self.replay_routing else True
+        require(event["alarm_enabled"] is expected_override and event["alarm_on"] is True and event["is_first_alarm"] is True,
                 "UI 알람 스위치 ON이 서버에 저장되지 않았습니다.")
         if self.replay_routing:
             require(event["tag"]["key"] == "exam" and event["lateness_sensitivity"] == "high",
                     "시험 일정의 서버 지각 민감도 판정이 다릅니다.")
         plan = event["alarm_plan"]
+        if self.replay_routing:
+            require(plan["travel_sample_count"] == 0, "보정 전 이동 기록 수가 0이 아닙니다.")
         require(plan["prep_minutes"] > 0 and plan["prep_source"] != "not_from_home" and
                 len(plan["prep_breakdown"]) == len(blocks), "UI에서 만든 준비 루틴이 알람 계산에 반영되지 않았습니다.")
         require(plan["status"] == "ok" and len(plan["route_path"]) >= 2 and plan["travel_time_source"] == "kakao_walk",
@@ -245,8 +248,21 @@ class Demo:
         def drive():
             try:
                 path = self.event["alarm_plan"]["route_path"]
-                # API의 실제 길을 따라 이동. 마지막은 도로의 스냅 지점 대신 장소 중심이다.
+                # 경로를 따라 가되 목적지 80m 앞에서 멈춘다. 기존 50m·2분 정책은 실패해야 한다.
                 points = [(float(p[0]), float(p[1])) for p in path]
+                place = self.event["place"]
+                destination = (place["lat"], place["lng"])
+                def remaining(point):
+                    return math.hypot((point[0]-destination[0])*111000,
+                                      (point[1]-destination[1])*111000*math.cos(math.radians(destination[0])))
+                boundary = next((i for i, point in enumerate(points) if remaining(point) <= 150), len(points))
+                points = points[:boundary]
+                require(bool(points), "GPS 시나리오는 목적지에서 150m 이상 떨어진 출발지가 필요합니다.")
+                last = points[-1]
+                scale = 80 / remaining(last)
+                target = tuple(b + (a-b)*scale for a, b in zip(last, destination))
+                points.append(target)
+                self.result["gps_target"] = {"lat": target[0], "lng": target[1], "distance_m": 80}
                 distances = [0.0]
                 for a, b in zip(points, points[1:]):
                     distances.append(distances[-1] + math.hypot((b[0]-a[0])*111000,
@@ -256,8 +272,7 @@ class Demo:
                 while not self.gps_stop.is_set():
                     fraction = min((time.monotonic() - started) / duration, 1)
                     if fraction == 1:
-                        place = self.event["place"]
-                        self.gps(place["lat"], place["lng"])
+                        self.gps(*target)
                     else:
                         distance = fraction * distances[-1]
                         i = next((i for i in range(1, len(points)) if distances[i] >= distance), len(points)-1)
@@ -285,8 +300,9 @@ class Demo:
         require(len(observations) == 2 and {o["kind"] for o in observations} == {"depart", "arrive"},
                 "출발·도착 관측이 정확히 한 건씩 저장되지 않았습니다.")
         arrival = next(o for o in observations if o["kind"] == "arrive")
-        require(arrival["dwell_confirmed"] and arrival["dwell_seconds"] >= 120,
-                "실제 2분 체류로 확정된 도착이 아닙니다.")
+        require(50 < arrival["distance_m"] <= 100 and arrival["dwell_seconds"] == 0 and
+                arrival["entered_at"] == arrival["observed_at"],
+                "100m 반경 진입 즉시 도착한 관측이 아닙니다.")
         require(len(blocks) == len(self.blocks) and all(b["observation_count"] == 1 for b in blocks),
                 "실제 루틴 완료 기록이 저장되지 않았습니다.")
         # 미래 일정은 리포트에 안 잡힌다. 실제 관측을 보존한 채 같은 일정의 시각만 마감한다.
@@ -312,6 +328,10 @@ class Demo:
                     self.send_error(403)
                     return
                 actions = {"/arm": demo.arm, "/travel": demo.travel, "/verify": demo.verify_and_close}
+                if demo.replay_routing:
+                    actions.update({"/risk_empty": demo.risk_empty, "/risk_ready": demo.risk_ready,
+                                    "/risk_restore": demo.risk_restore,
+                                    "/register_limit": demo.register_limit})
                 try:
                     require(self.path in actions, "알 수 없는 QA 단계")
                     payload = actions[self.path]()
@@ -324,6 +344,77 @@ class Demo:
                 self.wfile.write(json.dumps(payload).encode())
         self.control = ThreadingHTTPServer(("127.0.0.1", CONTROL_PORT), Handler)
         threading.Thread(target=self.control.serve_forever, daemon=True).start()
+
+    def fixture_db(self, script):
+        require(self.replay_routing and not self.public_server, "QA fixture는 일회용 DB에서만 만듭니다.")
+        return run([str(self.python), "-c", "import django; django.setup(); " + script],
+                   cwd=ROOT / "backend", env=self.env, capture_output=True).stdout.strip()
+
+    def risk_empty(self):
+        self.risk_original = self.api("GET", f"events/{self.event_id}/blocks")["blocks"]
+        self.risk_tau = self.event["tau_override"]
+        self.api("PUT", f"events/{self.event_id}/blocks", {"selections": [
+            {"block": block["id"], "checked": False} for block in self.risk_original]})
+        result = self.api("GET", f"events/{self.event_id}/risk-options")
+        require(not result["options"] and result["unavailable_reason"], "리스크 빈 상태가 아닙니다.")
+        self.result["risk_empty"] = result
+        return {"prepared": True}
+
+    def restore_blocks(self):
+        self.api("PUT", f"events/{self.event_id}/blocks", {"selections": [
+            {"block": block["id"], "checked": block["checked"]} for block in self.risk_original]})
+
+    def risk_ready(self):
+        # Only uncertainty inputs are seeded; the real planner/API computes every choice.
+        self.restore_blocks()
+        self.risk_fixture_id = int(self.fixture_db(
+            "from apps.events.models import Event; from apps.routing.models import RouteCorrection; "
+            f"p=Event.objects.get(pk={self.event_id}).alarm_plan; "
+            "r=RouteCorrection.objects.create(route_signature=p.route_key, mode=p.travel_mode, "
+            "factor=1.5, sd_minutes=8, sample_count=20, hour_bucket=-1, weekday_type='any'); print(r.pk)"))
+        self.api("POST", f"events/{self.event_id}/recompute", {})
+        event = self.api("GET", f"events/{self.event_id}")
+        require(event["alarm_plan"]["travel_sample_count"] == 20, "실제 보정 표본 수가 계획에 없습니다.")
+        result = self.api("GET", f"events/{self.event_id}/risk-options")
+        require(len(result["options"]) == 3 and result["selected_key"] is None,
+                "현재 시험 τ를 유지한 3개 선택지가 아닙니다.")
+        self.result["risk_options"] = result
+        return {"prepared": True}
+
+    def risk_restore(self):
+        if not hasattr(self, "risk_original"):
+            return {"restored": True}
+        event = self.api("GET", f"events/{self.event_id}")
+        require(event["tau_override"] == .9 and event["alarm_plan"]["tau_used"] == .9,
+                "UI 리스크 선택이 저장·계산되지 않았습니다.")
+        self.result["risk_saved"] = event
+        self.fixture_db("from apps.routing.models import RouteCorrection; "
+                        f"RouteCorrection.objects.filter(pk={self.risk_fixture_id}).delete()")
+        self.restore_blocks()
+        self.event = self.api("PATCH", f"events/{self.event_id}", {"tau_override": self.risk_tau})
+        require(self.event["alarm_plan"]["travel_sample_count"] == 0, "보정 제거 뒤 기록 수가 남았습니다.")
+        count = int(self.fixture_db("from apps.events.models import Place; print(Place.objects.count())"))
+        require(count == 1, "집 목적지가 Place 행을 만들었습니다.")
+        self.result["home_place_count"] = count
+        return {"restored": True}
+
+    def register_limit(self):
+        require(self.replay_routing, "가입 제한 시나리오는 일회용 로컬 서버에서만 실행합니다.")
+        # Real invalid attempts fill the production quota without creating accounts.
+        for _ in range(11):
+            request = Request(f"{self.api_base}/api/auth/register", data=b"{}",
+                              headers={"Content-Type": "application/json"}, method="POST")
+            try:
+                with urlopen(request, timeout=15):
+                    raise RuntimeError("빈 가입 요청이 성공했습니다.")
+            except HTTPError as error:
+                if error.code == 429:
+                    result = json.load(error)
+                    require(result["error"]["code"] == "throttled", "가입 제한 오류 코드가 다릅니다.")
+                    self.result["register_limit"] = result
+                    return result
+                require(error.code == 400, f"가입 준비 요청의 예기치 않은 상태: {error.code}")
+        raise RuntimeError("시간당 10회 가입 제한이 적용되지 않았습니다.")
 
     def build_install(self):
         print("[2/5] 독립 QA 앱 · UI 테스트 빌드/설치", flush=True)
@@ -352,6 +443,7 @@ class Demo:
                   "event_title": self.scenario["event_title"], "blocks": self.scenario["blocks"],
                   "block_seconds": self.scenario["block_seconds"],
                   "control_url": f"http://10.0.2.2:{CONTROL_PORT}", "control_token": self.control_token,
+                  "throttle_email": "limited-" + self.email,
                   "public_e2e": self.args.public_e2e, "replay_routing": self.replay_routing}
         config.update(nickname=self.scenario["nickname"], home_query=self.scenario["home_query"],
                       prep_minutes=self.scenario["onboarding_prep_minutes"],
@@ -410,8 +502,18 @@ class Demo:
             self.start_control()
             self.write_config()
             self.gps(self.home["lat"], self.home["lng"])
+            if self.replay_routing:
+                self.result["backend_features_seconds"] = self.execute_test(
+                    "BackendFeaturesTest", "backend-features-instrumentation.txt")
             self.result["flow_seconds"] = self.execute_test("DemoFlowTest", "instrumentation.txt")
             require(self.closed, "백엔드 관측·리포트 검증이 실행되지 않았습니다.")
+            if self.replay_routing:
+                self.result["signup_throttle_seconds"] = self.execute_test(
+                    "SignupThrottleTest", "signup-throttle-instrumentation.txt")
+                created = self.fixture_db("from apps.accounts.models import User; "
+                                          f"print(User.objects.filter(email={'limited-' + self.email!r}).exists())")
+                require(created == "False", "제한된 UI 가입으로 계정이 생성됐습니다.")
+                self.result["register_blocked_account_absent"] = True
         self.result["status"] = "passed"
         self.result["duration_seconds"] = round(time.monotonic() - started, 1)
 

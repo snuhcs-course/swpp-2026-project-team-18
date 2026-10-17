@@ -176,6 +176,7 @@ private fun MainHost(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val nav by viewModel.nav.collectAsStateWithLifecycle()
     val plan by viewModel.plan.collectAsStateWithLifecycle()
+    val risk by viewModel.risk.collectAsStateWithLifecycle()
     val routeMap by viewModel.routeMap.collectAsStateWithLifecycle()
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
@@ -470,9 +471,15 @@ private fun MainHost(
                 }
 
                 is AppRoute.RiskChoice -> RiskChoiceScreen(
-                    plan = plan,
+                    plan = plan?.takeIf { it.eventId == route.eventId },
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
+                    riskOptions = risk.options?.takeIf { risk.eventId == route.eventId },
+                    loading = risk.eventId != route.eventId || risk.loading,
+                    saving = risk.eventId == route.eventId && risk.saving,
+                    error = risk.error?.takeIf { risk.eventId == route.eventId },
+                    onRetry = { viewModel.loadRiskOptions(route.eventId) },
+                    onContinue = { viewModel.saveRiskOption(route.eventId, it) },
                 )
 
                 AppRoute.AddEvent -> AddEventScreen(
@@ -487,6 +494,7 @@ private fun MainHost(
                     onQueryChange = viewModel::onAddQueryChange,
                     onSearch = viewModel::searchPlaces,
                     onPlaceSelect = viewModel::onAddPlaceSelected,
+                    onDestinationHome = viewModel::onAddDestinationHome,
                     onLoadMore = viewModel::loadMoreAddPlaces,
                     onSortChange = viewModel::onAddSortChange,
                     onOpenMap = {

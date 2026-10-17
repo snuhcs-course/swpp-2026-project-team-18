@@ -1,6 +1,7 @@
 """Temporary local E2E upstream replay; application views/services are unchanged."""
 
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -112,7 +113,10 @@ def replay_get(url):
         abs(end_lat - transit_dest["lat"]) < 0.0001
         and abs(end_lng - transit_dest["lng"]) < 0.0001
     )
-    start = (home["lat"], home["lng"])
+    start = (
+        float(params.get("start_y", [home["lat"]])[0]),
+        float(params.get("start_x", [home["lng"]])[0]),
+    )
     end = (end_lat, end_lng)
     if base == clients.TRANSIT_URL:
         first = bus(
@@ -153,11 +157,15 @@ def replay_get(url):
         if base == clients.BICYCLE_URL:
             seconds = 900
         distance = 5000 if display else walk["distance_m"]
-        points = (
-            [[start[1], start[0]], [end[1], end[0]]]
-            if display
-            else [[lng, lat] for lat, lng in walk["path"]]
-        )
+        recorded = start == (home["lat"], home["lng"]) and end == (destination["lat"], destination["lng"])
+        reverse = start == (destination["lat"], destination["lng"]) and end == (home["lat"], home["lng"])
+        path = walk["path"] if recorded else list(reversed(walk["path"])) if reverse else [start, end]
+        points = [[lng, lat] for lat, lng in path]
+        if not (recorded or reverse or display):
+            # Local QA home changes use a fixed geometric upstream fixture.
+            distance = round(math.hypot((end[0] - start[0]) * 111000,
+                                      (end[1] - start[1]) * 88000))
+            seconds = max(60, round(distance / (1.1 if base == clients.WALK_URL else 4)))
         return {
             "status": "OK",
             "route": {

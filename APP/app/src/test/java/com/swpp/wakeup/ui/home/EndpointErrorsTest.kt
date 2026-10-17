@@ -32,6 +32,13 @@ class EndpointErrorsTest {
     }
 
     @Test
+    fun `집 목적지 오류는 도착지 줄로 간다`() {
+        val errors = endpointErrorsOf(failure(mapOf("destination_is_home" to "집 주소를 설정해야 한다.")))
+        assertEquals("집 주소를 설정해야 한다.", errors.destination)
+        assertNull(errors.general)
+    }
+
+    @Test
     fun `출발지 좌표 필드는 출발지 줄로 간다`() {
         assertEquals("a", endpointErrorsOf(failure(mapOf("origin_lat" to "a"))).origin)
         assertEquals("b", endpointErrorsOf(failure(mapOf("origin_lng" to "b"))).origin)

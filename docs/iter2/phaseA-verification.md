@@ -1,5 +1,7 @@
 # Phase A 구현 검증 기록
 
+> 이 문서는 해당 Phase의 설계·리뷰·검증 당시 기록이다. 당시 테스트 수·미구현 설명을 현재 상태로 해석하지 않는다. 2026-10-17 후속 통합 상태는 [최신 TODO](../../task.md), [요청별 완료 상태](backend-requests.md), [최신 검증](account-ranges-and-travel-counts.md)을 따른다.
+
 - 일시: 2026-10-13. worktree `SWPP-PJ-front-iter2`, 브랜치 `front-iter2`, 기준 `b1eff1f`. **커밋하지 않음**(리뷰 승인 뒤 다음 단계에서 커밋).
 - 기준 설계: [phaseA-design.md](phaseA-design.md) + 끝의 "Review resolutions"(설계 리뷰 [phaseA-design-review.md](phaseA-design-review.md) 반영).
 

@@ -7,13 +7,13 @@ import com.swpp.wakeup.sensing.GeoPoint
  * 경로 후보 하나. Figma "⑬ 경로 선택".
  *
  * 서버가 카카오에서 받은 후보를 축별로 추려 내려 준 것이다(back-spec 5.3
- * `/api/routes/candidates`). 앱은 순서를 바꾸지 않는다 — 이미 빠른 순이다.
+ * `/api/routes/candidates`). 앱은 각 수단 안의 서버 순서를 유지한다.
  *
  * **[fareLabel] 이 "요금 미정" 인 경우가 정상이다.** 카카오가 환승 요금을
  * 계산하지 못한 후보가 섞여 온다. 0원으로 바꾸면 "무료" 로 잘못 읽힌다.
  */
 data class RouteOption(
-    /** `walk` / `bicycle` / `car` / `transit:<노선 체인>` */
+    /** `walk` / `bicycle` / `car` / `car:<대안>` / `transit:<노선 체인>` */
     val key: String,
     /** "지하철+도보+버스" */
     val mode: String,
@@ -39,9 +39,11 @@ data class RouteOption(
     val bikeRoadPercent: Int? = null,
     /** 선택 화면에 그릴 경로. 좌표가 없으면 미리보기를 숨긴다. */
     val routePath: List<GeoPoint> = emptyList(),
+    /** 고른 카드 아래에 그대로 보여 줄 서버 안내. 없으면 숨긴다. */
+    val guide: String? = null,
 ) {
     /** 자동차는 요금이 크게 다르므로 화면에서 구분해 표시한다. */
-    val isCar: Boolean get() = key == "car"
+    val isCar: Boolean get() = key == "car" || key.startsWith("car:")
 
     /**
      * 막대를 그릴 값어치가 있는가.
@@ -57,10 +59,10 @@ data class RouteOption(
 
     /** 경로 선택 화면의 어느 탭에 들어가는지. [key] 로 정한다. */
     val travelMode: RouteMode
-        get() = when (key) {
-            "car" -> RouteMode.CAR
-            "walk" -> RouteMode.WALK
-            "bicycle" -> RouteMode.BICYCLE
+        get() = when {
+            isCar -> RouteMode.CAR
+            key == "walk" -> RouteMode.WALK
+            key == "bicycle" -> RouteMode.BICYCLE
             else -> RouteMode.TRANSIT
         }
 
@@ -78,11 +80,11 @@ data class RouteOption(
 
 // AI-generated (Claude)
 /** 경로 선택 화면의 수단 탭. Figma 순서대로 둔다. */
-enum class RouteMode(val label: String) {
-    CAR("자동차"),
-    TRANSIT("대중교통"),
-    WALK("도보"),
-    BICYCLE("자전거"),
+enum class RouteMode(val label: String, val candidateLimit: Int) {
+    CAR("자동차", 4),
+    TRANSIT("대중교통", 3),
+    WALK("도보", 1),
+    BICYCLE("자전거", 1),
 }
 
 /**
@@ -110,12 +112,11 @@ data class RouteChoice(
     /**
      * 한 수단의 후보. 서버가 준 순서(빠른 순)를 그대로 둔다.
      *
-     * 도보·자전거는 **1개만** 보여준다. 카카오 도보·자전거 길찾기가 경로를 1개만
-     * 주므로(task.md 13-0) 여러 개가 오면 앞의 것(가장 빠른 것)만 쓴다.
+     * 수단별 상한을 지킨다. 카카오 도보·자전거 길찾기는 경로를 1개만 준다.
      */
     fun optionsOf(mode: RouteMode): List<RouteOption> {
         val all = options.filter { it.travelMode == mode }
-        return if (mode == RouteMode.WALK || mode == RouteMode.BICYCLE) all.take(1) else all
+        return all.take(mode.candidateLimit)
     }
 
     // AI-generated (Claude)

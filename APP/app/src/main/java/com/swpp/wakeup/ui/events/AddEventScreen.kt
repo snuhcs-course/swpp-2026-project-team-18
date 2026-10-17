@@ -112,6 +112,7 @@ fun AddEventScreen(
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onPlaceSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit,
+    onDestinationHome: () -> Unit,
     onLoadMore: () -> Unit,
     onSortChange: (String) -> Unit,
     onOpenMap: () -> Unit,
@@ -184,6 +185,7 @@ fun AddEventScreen(
             val originIsHome = state.origin == null && homePlace != null
             EndpointRow(
                 label = "출발지",
+                tag = "origin",
                 value = when {
                     state.originLocating -> "현재 위치를 확인하는 중"
                     state.origin != null -> state.origin.name
@@ -247,16 +249,17 @@ fun AddEventScreen(
             val destination = state.selectedPlace
             EndpointRow(
                 label = "도착지",
+                tag = "destination",
                 value = destination?.name ?: "도착지를 검색해 주세요",
                 hasValue = destination != null,
-                isHome = destination != null && homePlace != null && destination.isSameSpot(homePlace),
+                isHome = state.destinationIsHome,
                 homeAvailable = homePlace != null,
                 searching = destinationSearching,
                 enabled = enabled,
                 onHome = {
                     if (homePlace == null) onSetHome()
                     else {
-                        onPlaceSelect(homePlace)
+                        onDestinationHome()
                         destinationSearching = false
                     }
                 },
@@ -935,6 +938,7 @@ private fun RouteRow(
 @Composable
 private fun EndpointRow(
     label: String,
+    tag: String,
     value: String,
     hasValue: Boolean,
     isHome: Boolean,
@@ -963,6 +967,7 @@ private fun EndpointRow(
                 dimmed = !homeAvailable,
                 enabled = enabled,
                 onClick = onHome,
+                modifier = Modifier.testTag("${tag}_home"),
             )
             Spacer(Modifier.width(6.dp))
             EndpointButton(
@@ -971,6 +976,7 @@ private fun EndpointRow(
                 dimmed = false,
                 enabled = enabled,
                 onClick = onSearchToggle,
+                modifier = Modifier.testTag("${tag}_search"),
             )
         }
     }
@@ -984,6 +990,7 @@ private fun EndpointButton(
     dimmed: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Text(
         text = text,
@@ -994,7 +1001,7 @@ private fun EndpointButton(
         },
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(JitRadius.Hint))
             .background(if (active) JitColor.Accent else JitColor.Surface2)
             .clickable(enabled = enabled, onClick = onClick)
@@ -1032,9 +1039,3 @@ private fun NoticeLine(text: String) {
         dotSize = 6.dp,
     )
 }
-
-// AI-generated (Claude)
-/** 같은 지점인지. 검색 결과와 저장된 집은 객체가 달라서 좌표로 비교한다(약 10m). */
-internal fun com.swpp.wakeup.data.remote.PlaceSearchItem.isSameSpot(
-    other: com.swpp.wakeup.data.remote.PlaceSearchItem,
-): Boolean = kotlin.math.abs(lat - other.lat) < 1e-4 && kotlin.math.abs(lng - other.lng) < 1e-4
