@@ -145,6 +145,18 @@ class EventRecomputeView(_UserScopedMixin, APIView):
         return Response(EventSerializer(event, context={"request": request}).data)
 
 
+class EventRiskOptionsView(_UserScopedMixin, APIView):
+    """GET /api/events/{id}/risk-options. No upstream calls or plan mutations."""
+
+    def get(self, request, pk: int):
+        from apps.planning.risk_options import build_risk_options
+
+        event = self.get_queryset().filter(pk=pk).first()
+        if event is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        return Response(build_risk_options(event))
+
+
 class EventCalendarImportView(_UserScopedMixin, APIView):
     """POST /api/events/import — 기기 캘린더 일정을 가져온다.
 

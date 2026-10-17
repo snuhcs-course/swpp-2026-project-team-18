@@ -37,6 +37,7 @@ import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.PlanRow
 import com.swpp.wakeup.domain.model.PrepBlockLine
+import com.swpp.wakeup.domain.model.RiskOptionsView
 import com.swpp.wakeup.domain.model.ScheduledBlock
 import com.swpp.wakeup.domain.model.RouteArrival
 import com.swpp.wakeup.domain.model.RouteChoice
@@ -547,6 +548,20 @@ class EventRepository(
         // 일어나야 하는가" 를 확인하려는 순간이 대개 지하철·엘리베이터 안이다.
         val cached = cache?.event(eventId)?.toPlanView(ZoneId.systemDefault())
         return if (cached != null) Result.Success(cached) else online
+    }
+
+    suspend fun loadRiskOptions(eventId: Long): Result<RiskOptionsView> = guard {
+        val response = api.riskOptions(eventId)
+        val dto = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
+        Result.Success(dto.toView(ZoneId.systemDefault()))
+    }
+
+    suspend fun saveRiskOption(eventId: Long, tau: Double): Result<AlarmPlanView> = guard {
+        val response = api.update(eventId, EventUpdateRequest(tauOverride = tau))
+        val dto = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
+        cache?.saveEvent(dto)
+        dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
+            ?: Result.Failure("선택은 저장했지만 알람 계획을 계산할 수 없습니다.")
     }
 
     /**

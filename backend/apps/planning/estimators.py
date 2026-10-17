@@ -397,6 +397,18 @@ class AlarmMath:
     prep_breakdown: list[dict]
 
 
+def total_distribution(prep: PrepEstimate | None, travel: TravelEstimate) -> dist.Distribution:
+    """Same deterministic convolution for alarm calculation and model previews."""
+    return (
+        travel.distribution
+        if prep is None
+        else dist.convolve(
+            prep.distribution, travel.distribution,
+            rng=random.Random(MONTE_CARLO_SEED),
+        )
+    )
+
+
 def compute_alarm_math(
     prep: PrepEstimate | None,
     travel: TravelEstimate,
@@ -430,12 +442,7 @@ def compute_alarm_math(
     빼고 나면 총 소요가 이동뿐이므로 **이동 변동성만으로 확률을 낼 수 있다.**
     지금까지는 준비 분산이 없으면 확률을 못 냈으니 이쪽이 오히려 낫다.
     """
-    rng = random.Random(MONTE_CARLO_SEED)
-    total_dist = (
-        travel.distribution
-        if prep is None
-        else dist.convolve(prep.distribution, travel.distribution, rng=rng)
-    )
+    total_dist = total_distribution(prep, travel)
 
     q = total_dist.quantile(tau)
     budget = q + buffer_minutes
