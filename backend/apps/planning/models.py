@@ -264,8 +264,8 @@ class PlanRevision(models.Model):
     ## 언제 쌓이나
 
     `compute_and_store` 가 계획을 저장한 바로 뒤, 같은 트랜잭션이다. 결정값
-    ([DECISION_FIELDS])이 그 일정의 마지막 이력과 같으면 쌓지 않는다 — 같은 값으로
-    다시 계산한 것은 결정이 바뀐 것이 아니다. 실패 상태(`route_failed` 등)도 결정이다.
+    ([DECISION_FIELDS])과 경로 입력이 마지막 이력과 같으면 쌓지 않는다.
+    실패 상태(`route_failed` 등)도 결정이다.
 
     **학습·리포트는 아직 이 표를 읽지 않는다.** 바꾸는 것은 팀이 정한다.
     """
@@ -280,7 +280,7 @@ class PlanRevision(models.Model):
         PROFILE = "profile", "프로필 변경"
         BLOCKS = "blocks", "블록 체크 변경"
 
-    # 이 값들이 마지막 이력과 다를 때만 새 줄을 만든다.
+    # 알람 결정값. 이력 중복 검사는 별도로 경로 원값·요청 key도 비교한다.
     DECISION_FIELDS = (
         "status",
         "alarm_at",

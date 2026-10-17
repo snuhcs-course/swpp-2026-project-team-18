@@ -41,6 +41,10 @@ COPIED_FIELDS = (
     "route_distance_m",
 )
 
+# Risk previews reuse these raw inputs. They can change while the rounded alarm
+# decision stays identical, so deduplicate the complete reusable snapshot.
+DEDUP_FIELDS = (*PlanRevision.DECISION_FIELDS, "requested_route_key", "route_minutes_raw")
+
 
 def record_revision(
     event,
@@ -49,7 +53,7 @@ def record_revision(
     trigger: str = "",
     route_minutes_raw: int | None = None,
 ) -> PlanRevision | None:
-    """방금 저장한 계획을 이력에 남긴다. 결정값이 마지막 이력과 같으면 None.
+    """방금 저장한 계획을 이력에 남긴다. 결정값과 경로 입력이 모두 같으면 None.
 
     `event` 는 계산에 쓴 그 객체다. `plan.event` 를 다시 읽지 않는다 — 갱신 경로에서는
     DB 를 한 번 더 조회한다.
@@ -71,11 +75,11 @@ def record_revision(
             last = (
                 PlanRevision.objects.filter(event_id=event.pk)
                 .order_by("-computed_at", "-id")
-                .values(*PlanRevision.DECISION_FIELDS)
+                .values(*DEDUP_FIELDS)
                 .first()
             )
             if last is not None and all(
-                last[name] == values[name] for name in PlanRevision.DECISION_FIELDS
+                last[name] == values[name] for name in DEDUP_FIELDS
             ):
                 return None
             return PlanRevision.objects.create(

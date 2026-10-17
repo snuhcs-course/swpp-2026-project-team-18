@@ -166,3 +166,47 @@ def test_explicit_origin_uses_travel_model_without_home_preparation(context):
     assert plan.prep_minutes == 0
     assert datetime.fromisoformat(normal["alarm_at"]) == plan.alarm_at
     assert normal["probability"] == plan.on_time_probability
+
+
+def test_selecting_same_automatic_route_keeps_risk_snapshot_available(context):
+    client, event = context
+    add_variance(event)
+    plan = services.compute_and_store(event)
+    assert len(get_options(client, event)["options"]) == 3
+
+    selected = client.patch(
+        f"/api/events/{event.pk}", {"route_key": ROUTE["key"]}, format="json",
+    )
+    assert selected.status_code == 200
+    assert datetime.fromisoformat(selected.json()["alarm_plan"]["alarm_at"]) == plan.alarm_at
+    assert len(get_options(client, event)["options"]) == 3
+    latest = event.plan_revisions.first()
+    assert latest.requested_route_key == ROUTE["key"]
+    assert event.plan_revisions.count() == 2
+
+    # Repeated identical recomputations must neither lose that snapshot nor add rows.
+    assert client.post(f"/api/events/{event.pk}/recompute").status_code == 200
+    assert len(get_options(client, event)["options"]) == 3
+    assert event.plan_revisions.count() == 2
+
+
+def test_raw_route_change_refreshes_preview_even_if_rounded_decision_is_identical(context, monkeypatch):
+    client, event = context
+    add_variance(event)
+    # At this factor, raw 20 -> 21 changes the modeled mean by .25 minute while
+    # the current tau's allocated preparation/travel minutes round identically.
+    RouteCorrection.objects.filter(route_signature=ROUTE["key"]).update(factor=.25)
+    route = dict(ROUTE)
+    monkeypatch.setattr(services.clients, "best_route", lambda **kw: (dict(route), False))
+    old_plan = services.compute_and_store(event)
+    decision_fields = [field for field in PlanRevision.DECISION_FIELDS if field != "event_start_at"]
+    old_decision = [getattr(old_plan, field) for field in decision_fields]
+    old_distribution = get_options(client, event)["distribution"]
+
+    route["minutes"] = 21
+    new_plan = services.compute_and_store(event)
+    assert [getattr(new_plan, field) for field in decision_fields] == old_decision
+    new_distribution = get_options(client, event)["distribution"]
+    assert new_distribution != old_distribution
+    assert event.plan_revisions.first().route_minutes_raw == 21
+    assert event.plan_revisions.count() == 2
