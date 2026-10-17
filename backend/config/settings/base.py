@@ -196,6 +196,7 @@ REST_FRAMEWORK = {
         "observation": "600/hour",
         # 글자마다 호출하는 비로그인 검사. 빠른 입력을 허용하되 IP별로 제한한다.
         "password_check": "600/min",
+        "register": "10/hour",
     },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
