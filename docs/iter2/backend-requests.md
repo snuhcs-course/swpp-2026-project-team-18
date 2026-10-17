@@ -4,21 +4,22 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 
 | ID | 요청 | 우선 | 앱 쪽 상태 |
 | --- | --- | --- | --- |
-| R-1 | 이동 보정에 쓴 기록 수 | 보통 | 출처 문구만 표시 |
-| R-2 | 리스크 옵션·분포 API (BE-16) | 높음 | ⑤-a 준비 중 화면 |
+| R-1 | 이동 보정에 쓴 기록 수 | 완료 | 실제 표본 N회 표시 |
+| R-2 | 리스크 옵션·분포 API (BE-16) | 완료 | 조회·저장·기기 예약 연결 |
 | R-3 | 학습 배치(`train_models`) 정기 실행 | 높음 | 문구가 이 전제에 기대고 있음 |
 | R-4 | 개인 학습 요약 | 닫음 (Phase B) | ⑧ 기록 반영(`learning`) |
 | R-5 | 알람 계획 요약에서 걸음·kcal 제외 (선택) | 낮음 | 서버 문구 그대로 표시 중 |
-| R-6 | `onboarding_prep_min` 범위 검증 | 보통 | 앱에만 5~240 |
+| R-6 | `onboarding_prep_min` 범위 검증 | 완료 | 서버·앱 모두 5~240 |
 | R-7 | 가까운 출발·도착 오류 코드 고정 (선택) | 낮음 | `details.destination` 으로 판단 중 |
-| R-8 | 회원가입 요청 빈도 제한 (Phase C) | 보통 | 바꿀 것 없음 |
+| R-8 | 회원가입 요청 빈도 제한 (Phase C) | 완료 | 서버 한국어 429 표시 |
 | R-9 | 머지 뒤 사용자·일정 삭제 도구는 새 모델이 있는 코드로 (Phase C 알림) | 높음 | 바꿀 것 없음 |
 
-## R-1. 이동 보정에 쓴 기록 수
+## R-1. 이동 보정에 쓴 기록 수 — 완료 (2026-10-17)
 
-- 지금: `estimate_travel` 이 `sample_count`·`factor` 를 계산하지만 `AlarmPlan` 에 저장하지 않는다. 앱은 `travel_time_source` 의 `+observed_route`/`+observed_global` 로 "보정됨" 까지만 말할 수 있다.
-- 요청: `AlarmPlan.travel_sample_count`(정수, `db_default=0`)를 저장하고 계획 응답에 내려 준다. 보정이 없으면 0.
-- 앱: 값이 1 이상이면 ④ 이동 줄에 "· 이동 기록 N회로 보정" 을 붙인다. 필드가 없으면(구버전) 붙이지 않는다.
+- 기존 추정기의 `TravelEstimate.sample_count`를 `AlarmPlan`·`PlanRevision.travel_sample_count`에 저장한다(`default=0`, `db_default=0`). 경로별·전역 보정 수는 기존 추정기 의미를 그대로 따른다.
+- 계획 API로 내려 주고 앱 ④ 이동 줄에 "이동 기록 N회로 보정"을 표시한다. 보정 없음·계산 실패는 0이며 구버전 응답은 기존 출처 문구를 유지한다.
+- 계획 이력은 표본 수만 바뀌어도 갱신하며 리스크 미리보기의 알람 결정값 비교는 유지한다.
+- [전후 검증·직접 테스트](account-ranges-and-travel-counts.md).
 
 ## R-2. 리스크 옵션·분포 API (task.md BE-16) — 완료 (2026-10-17)
 
@@ -46,22 +47,21 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 - 지금(`3cd1a1f`): 도보 경로의 `summary` 에 " · 1,600걸음 · 60kcal (거리 기반 추정)" 이 붙는다. `resolve_route`/`best_route` 가 같은 함수를 써서 **알람 계획 `route_summary`** 에도 들어간다. 그래서 홈 다음 알람 카드와 ④ 이동 줄이 길어진다.
 - 요청: 후보 응답(⑬)에만 붙이고 계획 요약에는 넣지 않는다. 앱은 서버 문장을 다시 조립하지 않으므로 서버에서 정해야 한다.
 
-## R-6. `onboarding_prep_min` 범위 검증
+## R-6. `onboarding_prep_min` 범위 검증 — 완료 (2026-10-17)
 
-- 지금: `accounts.Profile.onboarding_prep_min` 은 `PositiveIntegerField` 이고 `ProfileSerializer` 에 범위 검사가 없다. 5~240분은 앱 상수(`HomeViewModel.PREP_MIN/PREP_MAX`, 화면·다이얼은 `PrepOnboardingState.range` 로 읽음)에만 있다.
-- 요청: 서버가 5~240 을 검증하고 벗어나면 400 `{"onboarding_prep_min": ["…"]}`(한국어). 규칙의 주인을 서버로 옮긴다. 앱은 다이얼에서 같은 범위를 막고 있으므로 정상 사용에서는 400 이 나오지 않는다. 범위를 바꾸려면 프론트에 알려 줄 것.
+- 프로필 PATCH에서 5~240분을 양 끝 포함해 검증한다. 범위 밖이면 400과 `error.details.onboarding_prep_min`의 한국어 오류를 반환하며 동반 필드도 저장하지 않는다.
+- 기존 `null`·필드 생략 동작과 앱 다이얼 범위를 유지한다. [검증·직접 테스트](account-ranges-and-travel-counts.md).
 
 ## R-7. (선택) 가까운 출발·도착 오류 코드
 
 - 지금(`710545a`): `ValidationError` 라 `error.code` 가 DRF 기본값 `"invalid"` 이다. 앱은 `details.destination` 이 있는지로 판단한다.
 - 요청: `error.code` 를 `"endpoints_too_close"` 같은 고정 값으로. `details.destination` 과 메시지는 지금처럼 유지. 없어도 앱은 동작한다.
 
-## R-8. 회원가입 요청 빈도 제한 (Phase C)
+## R-8. 회원가입 요청 빈도 제한 — 완료 (2026-10-17)
 
-- 지금: `POST /api/auth/register` 에 throttle 이 없다. 비밀번호 검사(`password_check`)에만 있다.
-- 문제: 스크립트로 계정을 계속 만들 수 있다. 계정마다 LLM 사용자 하루 상한 30회가 새로 생기고(Phase B 리뷰 2번) 행도 쌓인다. Phase C 는 LLM 전체 하루 상한(`db-schema.md` A5)으로 비용만 막는다.
-- 요청: `ScopedRateThrottle` scope `register`(예: IP 당 시간 10회). 넘으면 429 와 한국어 메시지. 값은 백엔드가 정한다.
-- 앱: 429 일 때 보이는 문구만 프론트가 확인한다.
+- `POST /api/auth/register`에 기존 `ScopedRateThrottle` scope `register`를 적용한다. IP당 성공·실패 합산 시간당 10회이며 초과하면 한국어 429와 `Retry-After`를 반환한다.
+- 차단 요청은 계정을 만들지 않으며 다른 IP·비밀번호 검사 한도는 별개다. 앱은 기존 서버 오류 표시를 재사용한다.
+- 대량 가입하는 HTTP 회귀 서버만 `config.settings.local_suite`에서 가입 제한을 끈다. 전용 API 테스트·에뮬레이터는 실제 10/hour 제한을 검증한다. [검증·직접 테스트](account-ranges-and-travel-counts.md).
 
 ## R-9. 머지 뒤 사용자·일정 삭제 도구는 새 모델이 있는 코드로 (Phase C 알림)
 

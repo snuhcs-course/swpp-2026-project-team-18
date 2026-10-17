@@ -114,6 +114,11 @@ Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정
 - 생성·수정의 `destination_is_home:true`는 `place`와 함께 보내지 않는다. 현재 프로필 집을 사용하며 `place` 행을 만들지 않는다. 마이그레이션 `events.0007` 적용이 필요하다.
 - [직접 테스트·전후 검증](../docs/iter2/route-risk-home.md).
 
+## 준비 시간·가입 제한·이동 기록 수 (R-6·R-8·R-1)
+
+프로필 준비 시간은 5~240분(또는 기존 null), 가입은 IP당 10회/시간이다. 계획의 `travel_sample_count`는 실제 계산에 사용한 기존 추정기 표본 수이며 보정이 없으면 0이다. 마이그레이션 `planning.0010`이 필요하다.
+[직접 테스트·전후 검증](../docs/iter2/account-ranges-and-travel-counts.md).
+
 ## 검증과 학습
 
 `backend` 폴더에서 실행한다. 두 명령 모두 공용 DB와 분리된 테스트 DB를 사용한다.
@@ -123,7 +128,7 @@ python -m pytest
 python scripts/run_local_suite.py
 ```
 
-HTTP 스위트는 서버를 자동 실행한다. 기존 서버가 8000 포트를 사용하면 종료하고 다시 실행한다.
+HTTP 스위트는 서버를 자동 실행한다. 대량 가입 검증용 `config.settings.local_suite`는 가입 한도만 해제하며, 운영의 IP당 10회/시간 제한은 전용 테스트·로컬 에뮬레이터에서 확인한다. 기존 서버가 8000 포트를 사용하면 종료하고 다시 실행한다.
 카카오 키가 없으면 관련 항목은 건너뛰므로 실패 수와 건너뜀을 함께 확인한다.
 결과는 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다.
 

@@ -180,6 +180,8 @@ class Demo:
             require(event["tag"]["key"] == "exam" and event["lateness_sensitivity"] == "high",
                     "시험 일정의 서버 지각 민감도 판정이 다릅니다.")
         plan = event["alarm_plan"]
+        if self.replay_routing:
+            require(plan["travel_sample_count"] == 0, "보정 전 이동 기록 수가 0이 아닙니다.")
         require(plan["prep_minutes"] > 0 and plan["prep_source"] != "not_from_home" and
                 len(plan["prep_breakdown"]) == len(blocks), "UI에서 만든 준비 루틴이 알람 계산에 반영되지 않았습니다.")
         require(plan["status"] == "ok" and len(plan["route_path"]) >= 2 and plan["travel_time_source"] == "kakao_walk",
@@ -328,7 +330,8 @@ class Demo:
                 actions = {"/arm": demo.arm, "/travel": demo.travel, "/verify": demo.verify_and_close}
                 if demo.replay_routing:
                     actions.update({"/risk_empty": demo.risk_empty, "/risk_ready": demo.risk_ready,
-                                    "/risk_restore": demo.risk_restore})
+                                    "/risk_restore": demo.risk_restore,
+                                    "/register_limit": demo.register_limit})
                 try:
                     require(self.path in actions, "알 수 없는 QA 단계")
                     payload = actions[self.path]()
@@ -370,6 +373,8 @@ class Demo:
             "r=RouteCorrection.objects.create(route_signature=p.route_key, mode=p.travel_mode, "
             "factor=1.5, sd_minutes=8, sample_count=20, hour_bucket=-1, weekday_type='any'); print(r.pk)"))
         self.api("POST", f"events/{self.event_id}/recompute", {})
+        event = self.api("GET", f"events/{self.event_id}")
+        require(event["alarm_plan"]["travel_sample_count"] == 20, "실제 보정 표본 수가 계획에 없습니다.")
         result = self.api("GET", f"events/{self.event_id}/risk-options")
         require(len(result["options"]) == 3 and result["selected_key"] is None,
                 "현재 시험 τ를 유지한 3개 선택지가 아닙니다.")
@@ -387,10 +392,29 @@ class Demo:
                         f"RouteCorrection.objects.filter(pk={self.risk_fixture_id}).delete()")
         self.restore_blocks()
         self.event = self.api("PATCH", f"events/{self.event_id}", {"tau_override": self.risk_tau})
+        require(self.event["alarm_plan"]["travel_sample_count"] == 0, "보정 제거 뒤 기록 수가 남았습니다.")
         count = int(self.fixture_db("from apps.events.models import Place; print(Place.objects.count())"))
         require(count == 1, "집 목적지가 Place 행을 만들었습니다.")
         self.result["home_place_count"] = count
         return {"restored": True}
+
+    def register_limit(self):
+        require(self.replay_routing, "가입 제한 시나리오는 일회용 로컬 서버에서만 실행합니다.")
+        # Real invalid attempts fill the production quota without creating accounts.
+        for _ in range(11):
+            request = Request(f"{self.api_base}/api/auth/register", data=b"{}",
+                              headers={"Content-Type": "application/json"}, method="POST")
+            try:
+                with urlopen(request, timeout=15):
+                    raise RuntimeError("빈 가입 요청이 성공했습니다.")
+            except HTTPError as error:
+                if error.code == 429:
+                    result = json.load(error)
+                    require(result["error"]["code"] == "throttled", "가입 제한 오류 코드가 다릅니다.")
+                    self.result["register_limit"] = result
+                    return result
+                require(error.code == 400, f"가입 준비 요청의 예기치 않은 상태: {error.code}")
+        raise RuntimeError("시간당 10회 가입 제한이 적용되지 않았습니다.")
 
     def build_install(self):
         print("[2/5] 독립 QA 앱 · UI 테스트 빌드/설치", flush=True)
@@ -419,6 +443,7 @@ class Demo:
                   "event_title": self.scenario["event_title"], "blocks": self.scenario["blocks"],
                   "block_seconds": self.scenario["block_seconds"],
                   "control_url": f"http://10.0.2.2:{CONTROL_PORT}", "control_token": self.control_token,
+                  "throttle_email": "limited-" + self.email,
                   "public_e2e": self.args.public_e2e, "replay_routing": self.replay_routing}
         config.update(nickname=self.scenario["nickname"], home_query=self.scenario["home_query"],
                       prep_minutes=self.scenario["onboarding_prep_minutes"],
@@ -482,6 +507,13 @@ class Demo:
                     "BackendFeaturesTest", "backend-features-instrumentation.txt")
             self.result["flow_seconds"] = self.execute_test("DemoFlowTest", "instrumentation.txt")
             require(self.closed, "백엔드 관측·리포트 검증이 실행되지 않았습니다.")
+            if self.replay_routing:
+                self.result["signup_throttle_seconds"] = self.execute_test(
+                    "SignupThrottleTest", "signup-throttle-instrumentation.txt")
+                created = self.fixture_db("from apps.accounts.models import User; "
+                                          f"print(User.objects.filter(email={'limited-' + self.email!r}).exists())")
+                require(created == "False", "제한된 UI 가입으로 계정이 생성됐습니다.")
+                self.result["register_blocked_account_absent"] = True
         self.result["status"] = "passed"
         self.result["duration_seconds"] = round(time.monotonic() - started, 1)
 

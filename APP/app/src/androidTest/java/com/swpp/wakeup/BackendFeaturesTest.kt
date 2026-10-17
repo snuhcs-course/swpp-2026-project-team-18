@@ -118,9 +118,10 @@ class BackendFeaturesTest {
         demoControl(config, "/risk_empty")
         openRisk()
         ui.await(By.res("risk_unavailable"), "risk_scroll")
+        ui.await(By.res("risk_retry"), "risk_scroll")
         capture("feature-risk-empty")
         demoControl(config, "/risk_ready")
-        openRisk()
+        openRisk(expectedSamples = 20)
         for (key in listOf("safe", "normal", "gamble"))
             ui.await(By.res("risk_option_$key"), "risk_scroll")
         assertFalse("custom τ must require an explicit choice",
@@ -128,6 +129,7 @@ class BackendFeaturesTest {
         ui.await(By.text("예상 총 소요시간 분포 · 모형 계산"), "risk_scroll")
         capture("feature-risk-distribution")
         ui.click(By.res("risk_option_normal"), "risk_scroll")
+        ui.await(By.res("risk_continue").enabled(true), "risk_scroll")
         capture("feature-risk-options")
         ui.click(By.res("risk_continue"), "risk_scroll")
         ui.await(By.res("plan_scroll"))
@@ -146,9 +148,13 @@ class BackendFeaturesTest {
         launch()
     }
 
-    private fun openRisk() {
+    private fun openRisk(expectedSamples: Int? = null) {
         launch()
         ui.click(By.res("next_alarm"), "home_list")
+        expectedSamples?.let {
+            ui.await(By.textContains("이동 기록 ${it}회로 보정"), "plan_scroll")
+            capture("feature-travel-samples")
+        }
         ui.click(By.res("risk_entry"), "plan_scroll")
     }
 

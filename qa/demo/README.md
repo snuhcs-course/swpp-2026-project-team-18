@@ -31,11 +31,12 @@ backend/.venv/bin/python qa/demo/run.py --replay-routing --no-video
 마지막으로 도보 미리보기의 "이 경로로 계산" → 일정 추가 복귀를 확인한다.
 선택 카드·미리보기의 경로 안내도 확인한다. `BackendFeaturesTest`는 집 목적지 UI 생성·현재 집 변경,
 리스크 빈 상태·모형 옵션·선택 저장·기기 알람 동기화를 확인한다. 리스크 검증 입력만 일회용 DB에 준비하며,
-실제 API가 결과를 계산한다. 이후 입력을 복원하고 같은 일정으로 이동 E2E를 이어 간다.
+실제 API가 결과를 계산한다. 이동 보정 표본 20회가 계획 화면에 표시되고 보정 제거 뒤 0으로 초기화되는지도 확인한다. 이후 입력을 복원하고 같은 일정으로 이동 E2E를 이어 간다.
 [직접 테스트와 변경 전후 증거](../../docs/iter2/route-risk-home.md).
 `PublicSetupTest`의 준비 시간 단계는 시계 다이얼(`prep_value` → 24시간제 시:분)로 고르고, 도보 경로는 미리보기가 열리면
 `route_preview_confirm`, 좌표가 없는 응답이면 목록의 `route_confirm` 으로 확정한다.
-결과에는 `external_response_mode`와 `route_display_seconds`를 기록한다.
+마지막 `SignupThrottleTest`는 기존 알람·리포트 완료 후 실제 가입 한도를 채우고 UI의 한국어 429·계정 미생성을 검사한다. 준비 시간은 기존 UI 흐름에서 5분 저장·변경·재로그인 유지를 확인한다. [R-6·R-8·R-1 검증](../../docs/iter2/account-ranges-and-travel-counts.md).
+결과에는 `external_response_mode`·`route_display_seconds`·`signup_throttle_seconds`를 기록한다.
 이 모드는 공용 서버 옵션과 함께 사용할 수 없으며 실시간 카카오 응답 검증을 대신하지 않는다.
 
 ### 공용 서버에서 완주
