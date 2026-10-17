@@ -269,7 +269,7 @@ Three suites run locally and in CI on every push to `main` and every pull reques
 ```bash
 cd backend && python -m pytest                      # 865 unit tests
 cd backend && python scripts/run_local_suite.py     # 8 HTTP suites against a live local server
-cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 529 unit tests + lint + build
+cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # 601 unit tests + lint + build
 ```
 
 CI also measures line coverage and prints a per-layer table in the job summary; the
