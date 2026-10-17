@@ -21,17 +21,20 @@ import org.junit.Test
 import retrofit2.Response
 
 /**
- * 주간 리포트 저장소(서버 응답 → 화면 문구).
+ * 주간 리포트 저장소.
+ *
+ * 응답 → 화면 문구 매핑은 `ReportMapping.kt` 에 있고 [ReportMappingTest] 가 예시 주로
+ * 고정한다. 여기서는 **저장소가 맡은 것**만 본다 — 요청 파라미터, 실제 Gson 을 거친
+ * 응답이 매핑까지 이어지는지, 실패를 예외 대신 문구로 돌려주는지.
  *
  * ## 이 테스트가 지키는 것
  *
  * 리포트의 목적은 **앱이 틀렸는지 보여주는 것**이다. 그래서 가장 위험한 실패는
  * 숫자가 좋게 보이는 것이다.
  *
- * - 측정하지 못한 지각 요인은 0 이 아니라 "측정 안 됨" 으로 적는다. 0 으로 적으면
- *   "그 요인은 괜찮았다" 로 읽혀 엉뚱한 곳을 고친다.
+ * - 도착 기록이 없는 주를 "0%" 로 그리지 않는다. 0% 는 "전부 지각" 으로 읽힌다.
+ * - 날짜를 못 읽으면 범위를 지어내지 않는다.
  * - 표본이 적은 구간은 과신으로 낙인찍지 않는다.
- * - 일정이 없는 요일도 칸을 채운다(요일 축이 비지 않게).
  */
 class ReportRepositoryTest {
 
@@ -40,14 +43,7 @@ class ReportRepositoryTest {
         "event_count":5,"arrived_count":4,"unobserved_count":1,
         "on_time_count":3,"late_count":1,"on_time_rate":0.75,
         "median_slack_minutes":6.5,"tightest_slack_minutes":-3.0,
-        "by_weekday":[{"weekday":0,"total":2,"late":1},{"weekday":4,"total":1,"late":0}],
-        "late_causes":[
-          {"event":11,"late_minutes":4,"prep_over":7.0,"travel_over":-2.0,"depart_late":null,
-           "primary":"prep_over","label":"prep_over","unmeasured":["depart_late"]},
-          {"event":12,"late_minutes":2,"label":"unknown","unmeasured":["prep_over","travel_over","depart_late"]}
-        ],
-        "primary_counts":{"prep_over":1},
-        "calibration":null
+        "week_complete":true,"has_next_week":true
     }"""
 
     private fun weeklyApi(json: String = weeklyJson, onWeek: (String?) -> Unit = {}) =
@@ -67,56 +63,35 @@ class ReportRepositoryTest {
     // --- 주간 요약 ------------------------------------------------------------
 
     @Test
-    fun `주 범위와 정시율을 문구로 만든다`() = runTest {
+    fun `서버 응답을 주 범위와 정시율 문구로 만든다`() = runTest {
         val view = ReportRepository(weeklyApi()).weeklyView()
 
         assertEquals("10월 12일 ~ 10월 18일", view.rangeLabel)
         assertEquals("정시 도착 75%", view.onTimeLabel)
-        assertEquals(0.75f, view.onTimeFraction!!, 1e-6f)
+        assertEquals("3/4", view.onTimeCountLabel)
         assertEquals(5, view.eventCount)
         assertEquals(1, view.unobservedCount)
     }
 
     @Test
-    fun `여유 시간은 부호에 따라 일찍 도착과 늦음으로 나뉜다`() = runTest {
-        val view = ReportRepository(weeklyApi()).weeklyView()
-
-        assertEquals("중간 여유 6.5분 전 도착", view.medianSlackLabel)
-        assertEquals("가장 아슬아슬했던 아침 3분 늦음", view.tightestSlackLabel)
-    }
-
-    @Test
-    fun `정시율이 없으면 문구도 비율도 만들지 않는다`() = runTest {
+    fun `도착 기록이 없는 주는 0퍼센트가 아니라 기록 없음이다`() = runTest {
         // 0% 로 그리면 "전부 지각" 으로 읽힌다. 실제로는 도착 기록이 없었다.
         val empty = """{"week_start":"2026-10-12","week_end":"2026-10-18",
-            "by_weekday":[],"late_causes":[],"primary_counts":{}}"""
+            "event_count":2,"arrived_count":0,"unobserved_count":2,"on_time_rate":0.0}"""
 
         val view = ReportRepository(weeklyApi(empty)).weeklyView()
 
-        assertNull(view.onTimeLabel)
-        assertNull(view.onTimeFraction)
-        assertNull(view.medianSlackLabel)
-        assertTrue(view.causes.isEmpty())
+        assertEquals("정시 도착 · 기록 없음", view.onTimeLabel)
+        assertFalse(view.onTimeLabel.contains("0%"))
     }
 
     @Test
-    fun `요일은 일정이 없는 날까지 월요일부터 일곱 칸을 채운다`() = runTest {
-        val view = ReportRepository(weeklyApi()).weeklyView()
-
-        assertEquals(listOf("월", "화", "수", "목", "금", "토", "일"), view.weekdays.map { it.label })
-        assertEquals(2, view.weekdays[0].total)
-        assertEquals(1, view.weekdays[0].late)
-        assertEquals(0, view.weekdays[1].total)
-        assertEquals(1, view.weekdays[4].total)
-    }
-
-    @Test
-    fun `날짜를 읽지 못하면 서버 문자열을 그대로 보여준다`() = runTest {
+    fun `날짜를 읽지 못하면 범위를 지어내지 않는다`() = runTest {
         val odd = weeklyJson.replace("\"2026-10-12\"", "\"week-42\"")
 
         val view = ReportRepository(weeklyApi(odd)).weeklyView()
 
-        assertEquals("week-42 ~ 2026-10-18", view.rangeLabel)
+        assertEquals("—", view.rangeLabel)
     }
 
     @Test
@@ -129,46 +104,6 @@ class ReportRepositoryTest {
 
         repository.weeklyView(null)
         assertNull("이번 주는 파라미터 없이 서버 기본값에 맡긴다", sent)
-    }
-
-    // --- 지각 원인 -------------------------------------------------------------
-
-    @Test
-    fun `지각 원인은 주된 요인을 제목으로 하고 측정 못 한 요인은 측정 안 됨으로 적는다`() = runTest {
-        val cause = ReportRepository(weeklyApi()).weeklyView().causes[0]
-
-        assertEquals(11L, cause.eventId)
-        assertEquals("4분 늦음", cause.lateLabel)
-        assertEquals("준비가 7분 더 걸렸음", cause.headline)
-        assertEquals("준비 +7분 · 출발 측정 안 됨 · 이동 -2분", cause.detail)
-        assertFalse(cause.unknown)
-    }
-
-    @Test
-    fun `추적이 안 된 아침은 앱 계산이 틀렸다고 하지 않고 측정하지 못했다고 한다`() = runTest {
-        val cause = ReportRepository(weeklyApi()).weeklyView().causes[1]
-
-        assertEquals("원인을 측정하지 못했음", cause.headline)
-        assertEquals("준비 측정 안 됨 · 출발 측정 안 됨 · 이동 측정 안 됨", cause.detail)
-        assertTrue(cause.unknown)
-    }
-
-    @Test
-    fun `원인 종류마다 제목이 다르다`() = runTest {
-        val causes = """[
-            {"event":1,"late_minutes":3,"travel_over":5.0,"label":"travel_over"},
-            {"event":2,"late_minutes":3,"depart_late":2.5,"label":"depart_late"},
-            {"event":3,"late_minutes":1,"prep_over":0.0,"travel_over":0.0,"depart_late":0.0,"label":"plan_too_tight"}
-        ]"""
-        val json = weeklyJson.replace(Regex("\"late_causes\":\\[.*?]\\s*,\\s*\"primary_counts\"", RegexOption.DOT_MATCHES_ALL),
-            "\"late_causes\":$causes,\"primary_counts\"")
-
-        val headlines = ReportRepository(weeklyApi(json)).weeklyView().causes.map { it.headline }
-
-        assertEquals(
-            listOf("이동이 5분 더 걸렸음", "집에서 2.5분 늦게 나섰음", "계획대로 했는데 늦었음 · 여유가 부족했음"),
-            headlines,
-        )
     }
 
     // --- 확률 보정 -------------------------------------------------------------
@@ -221,14 +156,6 @@ class ReportRepositoryTest {
         assertEquals("표본 부족", view.verdictLabel)
         assertEquals("판정하려면 같은 구간에서 4번 이상의 결과가 필요함", view.verdictNote)
         assertFalse(view.isTrustworthy)
-    }
-
-    @Test
-    fun `주간 응답에 보정이 없으면 표본 부족으로 채운다`() = runTest {
-        val view = ReportRepository(weeklyApi()).weeklyView()
-
-        assertEquals("표본 부족", view.calibration.verdictLabel)
-        assertFalse(view.calibration.hasData)
     }
 
     // --- 실패 ---------------------------------------------------------------

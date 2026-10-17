@@ -438,6 +438,7 @@ class EventRepositoryTest {
         val api = object : FakeEventsApi() {
             override suspend fun routeCandidates(
                 destLat: Double, destLng: Double, originLat: Double?, originLng: Double?, originLabel: String?,
+                destLabel: String?,
             ) = ok(fromJson<RouteCandidateResponse>("""{"origin":null,"results":[]}"""))
         }
 

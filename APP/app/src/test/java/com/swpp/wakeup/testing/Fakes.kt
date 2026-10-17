@@ -33,6 +33,7 @@ import com.swpp.wakeup.data.remote.RefreshRequest
 import com.swpp.wakeup.data.remote.RefreshResponse
 import com.swpp.wakeup.data.remote.RegisterRequest
 import com.swpp.wakeup.data.remote.ReportsApi
+import com.swpp.wakeup.data.remote.RiskOptionsDto
 import com.swpp.wakeup.data.remote.RouteCandidateResponse
 import com.swpp.wakeup.data.remote.RoutineBlockDto
 import com.swpp.wakeup.data.remote.RoutineBlockWriteRequest
@@ -228,7 +229,10 @@ open class FakeEventsApi : EventsApi {
         originLat: Double?,
         originLng: Double?,
         originLabel: String?,
+        destLabel: String?,
     ): Response<RouteCandidateResponse> = unexpected("routeCandidates")
+
+    override suspend fun riskOptions(id: Long): Response<RiskOptionsDto> = unexpected("riskOptions")
 
     override suspend fun liveRoute(body: LiveRouteRequest): Response<LiveRouteResponse> =
         unexpected("liveRoute")

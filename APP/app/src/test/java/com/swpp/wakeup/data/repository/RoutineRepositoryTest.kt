@@ -69,7 +69,7 @@ class RoutineRepositoryTest {
     }
 
     @Test
-    fun `범위가 한 점이면 확률 계산에 쓰이지 않는다고 알린다`() = runTest {
+    fun `범위가 한 점이면 변동 폭이 없다고 알린다`() = runTest {
         val point = block(
             """{"id":2,"name":"양치","default_min_minutes":5,"default_max_minutes":5}"""
         )
@@ -77,7 +77,7 @@ class RoutineRepositoryTest {
         val view = RoutineRepository(blocksApi(point)).onlyBlock()
 
         assertEquals("5분", view.rangeLabel)
-        assertEquals("관측 없음 · 범위가 한 점이라 확률 계산에 쓰이지 않음", view.learningNote)
+        assertEquals("관측 없음 · 범위가 한 점이라 변동 폭이 없음", view.learningNote)
     }
 
     @Test
