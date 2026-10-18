@@ -56,7 +56,7 @@ What the MVP supports:
 7. **Choose risk** — server-modeled safe/normal/gamble choices update the alarm and device schedule. Missing uncertainty has an explicit empty state
 8. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
    offline. Prep observations feed the next calculation directly; GitHub Actions schedules
-   travel correction training daily at 03:17 KST ([status and guide](docs/iter2/daily-training.md))
+   travel correction training daily at 23:17 KST ([status and guide](docs/iter2/daily-training.md))
 9. **Review** — a weekly report with a short written summary, a per-day detail (plan
    vs actual, cause of lateness) and calibration: did you arrive as often as τ promised?
 

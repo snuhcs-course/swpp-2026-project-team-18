@@ -215,7 +215,7 @@ erDiagram
 
 ## 4. 학습에 비는 곳
 
-**2026-10-18 후속:** 아래는 최초 점검 당시 문제 목록이다. R-3에서 G1/G2를 수정해 결정 시점 `PlanRevision.route_minutes_raw`를 학습하고, 원값 없는 과거 이동은 제외한다. G7은 GitHub Actions 수동 학습으로 관측 13건의 전역 아티팩트 1건 저장을 확인했다. 정기 실행은 매일 03:17로 설정했으며 실제 예약 이벤트 확인은 남았다. [현재 학습 기준/검증](daily-training.md).
+**2026-10-18 후속:** 아래는 최초 점검 당시 문제 목록이다. R-3에서 G1/G2를 수정해 결정 시점 `PlanRevision.route_minutes_raw`를 학습하고, 원값 없는 과거 이동은 제외한다. G7은 GitHub Actions 수동 학습으로 관측 13건의 전역 아티팩트 1건 저장을 확인했다. 정기 실행은 매일 23:17로 설정했으며 실제 예약 이벤트 확인은 남았다. [현재 학습 기준/검증](daily-training.md).
 
 - **G1. 비교 기준이 바뀐다.** `prediction/learning.py` `collect_travel_samples` 는 **지금** 계획의 `travel_minutes` 를 예측값으로 쓴다. 이동이 끝난 뒤 일정을 고치면 계획이 다시 계산되고, 사용자가 따른 계획이 아닌 값과 비교하게 된다. → A2 계획 이력.
 - **G2. 카카오 원값이 없다.** `travel_minutes` 는 경로 보정과 τ 분위수가 들어간 값이다(`planning/models.py` `alt_faster_minutes` 주석). 그런데 경로 보정 학습은 이 값을 "카카오 예측"으로 놓고 비율을 다시 배운다. 보정이 붙은 값으로 보정을 배우는 셈이다. 카카오가 준 분(`route["minutes"]`)은 저장되지 않는다. → A2 에 `route_minutes_raw` 를 남긴다. 학습이 원값을 쓰게 바꾸는 것은 동작 변경이라 팀이 정한다.

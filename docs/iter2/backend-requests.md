@@ -30,7 +30,7 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 
 ## R-3. 학습 배치 정기 실행 / 실제 예약 확인 대기 (2026-10-18)
 
-- GitHub Actions가 `main`에서 매일 한국 시간 03:17에 `train_models --users --verbosity 0`을 실행한다. DB는 비공개 Secret `TRAINING_DATABASE_URL`을 사용한다. 스키마 누락 시 중단하며 공개 로그에는 집계만 남긴다.
+- GitHub Actions가 `main`에서 매일 한국 시간 23:17에 `train_models --users --verbosity 0`을 실행한다. DB는 비공개 Secret `TRAINING_DATABASE_URL`을 사용한다. 스키마 누락 시 중단하며 공개 로그에는 집계만 남긴다.
 - G1/G2 수정: 첫 알람 울림 전 마지막 계획(없으면 첫 출발 전 계획)의 `route_minutes_raw`로 학습한다. 원값 없는 과거 이동은 제외하며 유효하지 않은 옛 학습 보정은 정리한다. 수동 보정은 보존한다.
 - 학습/조회가 같은 현지 시간대 기준으로 시간/요일 보정을 선택한다. 갱신된 이동 보정은 다음 정상 알람 재계산에 반영한다.
 - GitHub `dry-run`/수동 `train`과 운영 DB 저장(관측 13건)을 확인했다. 일회성 예약을 두 번 설정했으나 실제 `schedule` 이벤트는 확인되지 않아 완료 처리를 보류한다. [설정/실제 실행/전후 검증](daily-training.md).
