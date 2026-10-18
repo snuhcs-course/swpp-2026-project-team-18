@@ -13,6 +13,7 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 | R-7 | 가까운 출발·도착 오류 코드 고정 (선택) | 낮음 | `details.destination` 으로 판단 중 |
 | R-8 | 회원가입 요청 빈도 제한 (Phase C) | 보통 | 바꿀 것 없음 |
 | R-9 | 머지 뒤 사용자·일정 삭제 도구는 새 모델이 있는 코드로 (Phase C 알림) | 높음 | 바꿀 것 없음 |
+| R-10 | 경로 후보가 모든 수단에 `path` 를 싣는다 · 정적 지도 축척 (10-18 알림) | 보통 | 배포 전에는 자동차·대중교통 미리보기 없음 |
 
 ## R-1. 이동 보정에 쓴 기록 수
 
@@ -69,3 +70,10 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 - 문제: 이 모델을 모르는 코드가 공용 DB 에서 ORM 으로 사용자·일정을 지우면, 새 표에 남은 행 때문에 커밋에서 `IntegrityError` 가 나고 삭제 전체가 되돌려진다. 요청 기록은 로그인한 요청마다 생기므로 배포 뒤에는 거의 모든 사용자가 해당된다. 해당하는 것: main 을 받기 전 브랜치에서 돌린 `scripts/purge_test_accounts.py`·`scripts/emu_verify_cleanup.py`, 배포가 겹치는 동안의 옛 인스턴스.
 - 요청: 머지 뒤에는 main 을 받은 브랜치에서만 이 스크립트를 돌린다. 새 코드의 ORM 은 새 표까지 CASCADE·SET_NULL 로 지우므로 따로 고칠 것은 없다.
 - 근거: [db-schema.md](db-schema.md) §10, Phase C 리뷰 #1([phaseC-verification.md](phaseC-verification.md) "리뷰 반영").
+
+## R-10. 경로 후보가 모든 수단에 `path` 를 싣는다 · 정적 지도 축척 (2026-10-18 알림)
+
+- 바뀐 것(이 브랜치 `apps/routing/clients.py`): `route_candidates` 가 자동차·대중교통 후보에도 `path` 를 싣는다. 같은 카카오 응답의 좌표라 호출 수는 그대로다. 모든 후보 경로는 `preview_path`(Douglas–Peucker 1m, 소수 6자리)로 줄이고 `path_distance_m` 을 줄인 점으로 다시 잰다. 신림역 → 서울대에서 카카오가 준 후보 경로 8개를 합하면 1,051점이 656점이 된다. 알람 계획 경로(`resolve_route`·`best_route`)는 바꾸지 않았다.
+- 정적 지도 축척: 마커 없는 지도의 실측은 요청 단위당 `2^(lv-3)` m 다(`STATIC_MAP_BASE_LEVEL` 4 → 3). 예전 값은 마커를 넣은 지도로 쟀는데, 카카오는 마커가 다 보이게 줌·중심을 바꾼다. 서버 로직은 이 상수를 쓰지 않고 문서·테스트만 바뀐다. 앱은 같은 축척과 EPSG:5181 좌표 변환으로 선·핀을 그린다.
+- 요청: back-iter2 에서 같은 함수를 고치고 있으면 머지할 때 이 변경을 살린다. 배포 전 서버는 자동차·대중교통 좌표를 주지 않으므로 앱은 그 카드에 "지도 미리보기를 받지 못했음" 을 보인다.
+- 근거: `apps/routing/tests/test_route_path.py`(후보 경로), `apps/routing/tests/test_place_search.py` `TestScale`(실측 축척), [figma-changes.md](figma-changes.md) F-14.
