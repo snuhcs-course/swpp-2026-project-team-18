@@ -6,7 +6,7 @@
 
 1. 저장소 Actions Secret `TRAINING_DATABASE_URL`에 기존 Neon direct 접속 URL을 직접 등록한다. 로컬 `.env`의 키 이름은 `DATABASE_URL` 그대로 둔다.
 2. 현재 코드의 마이그레이션을 웹서비스 배포에서 적용한다. 배치는 `migrate --check`가 실패하면 학습을 시작하지 않는다.
-3. 검증한 워크플로를 `main`에 반영한다. 작업 브랜치만으로는 정기 실행이 활성화되지 않는다.
+3. 검증한 워크플로를 `main`에 반영한다. 작업 브랜치만으로는 정기 실행이 활성화되지 않는다. 공개 저장소는 60일 동안 저장소 활동이 없으면 예약 워크플로가 비활성화될 수 있으므로 Actions 상태를 확인한다.
 
 기존 웹서비스의 서명 키나 카카오 키는 필요하지 않다. 배치 전용 `config.settings.training`은 명시한 Postgres에만 연결하며 자체 임시 서명 키를 쓴다.
 
@@ -39,3 +39,6 @@ python -m pytest apps/prediction apps/planning/tests/test_plan_revision.py -q
 ```
 
 변경 전 실제 실패한 G1/G2/원값 누락/공개 로그 노출 6건을 수정 후 통과시켰다. 리뷰에서 발견한 오래된 학습 보정 잔존 2건도 실패 재현 후 수정했다. 전체 백엔드 1,237건 / HTTP 8종 실패 0을 확인했다.
+
+
+설정 근거: [GitHub 예약 실행](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule). 워크플로는 기본 브랜치에서 실행되며 정각 부하로 지연될 수 있어 분 17을 사용한다.

@@ -3,6 +3,7 @@ name: Daily model training
 on:
   schedule:
     - cron: '17 18 * * *' # 매일 한국 시간 03:17 (UTC 18:17)
+    - cron: '21 11 18 10 *' # 실제 schedule 검증 1회 / 검증 후 즉시 제거
   workflow_dispatch:
     inputs:
       mode:
@@ -58,7 +59,8 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'schedule' ||
-       (github.event_name == 'workflow_dispatch' && inputs.mode != 'verify'))
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.mode == 'dry-run' || inputs.mode == 'train')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
