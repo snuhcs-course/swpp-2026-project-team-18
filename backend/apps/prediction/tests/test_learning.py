@@ -17,6 +17,7 @@ import pytest
 
 from apps.events.models import Event, Place
 from apps.observations.models import TripObservation
+from apps.planning import history
 from apps.planning.models import AlarmPlan
 from apps.prediction import learning
 from apps.prediction.models import ModelArtifact
@@ -82,7 +83,7 @@ def make_trip(
         title="이동",
         start_at=depart_at + timedelta(minutes=predicted + 30),
     )
-    AlarmPlan.objects.create(
+    plan = AlarmPlan.objects.create(
         user=user,
         event=event,
         status=AlarmPlan.Status.OK,
@@ -95,6 +96,9 @@ def make_trip(
         travel_mode=mode,
         route_key=route_key,
     )
+    # 실제 계산과 같은 경로 원값 이력을 출발 전 시각에 남긴다.
+    plan.computed_at = depart_at - timedelta(minutes=1)
+    history.record_revision(event, plan, route_minutes_raw=predicted)
     TripObservation.objects.create(
         user=user, event=event, kind=TripObservation.Kind.DEPART,
         detector=TripObservation.Detector.GPS, observed_at=depart_at,
@@ -188,7 +192,7 @@ class TestCollectTravelSamples:
             )
         samples, dropped = learning.collect_travel_samples()
         assert samples == []
-        assert dropped["예측값 없음"] == 1
+        assert dropped["경로 원값 없음"] == 1
 
     def test_user_filter(self, user, place, django_user_model):
         other = django_user_model.objects.create_user(

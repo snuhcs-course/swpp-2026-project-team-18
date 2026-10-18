@@ -28,7 +28,7 @@ SQLite 에는 `STDDEV` 집계가 없다. `django.db.models.StdDev` 는 Postgres 
 | 도착이 출발보다 이르다 | 순서가 뒤집힌 관측. GPS 오판 |
 | 정확도가 150m 를 넘는다 | 오차 150m 인 fix 로 "반경 진입" 을 말할 수 없다 |
 | 실제/예측 비율이 0.25~4.0 밖 | 중간에 딴 데 들렀거나 판정 오류 |
-| 예측값이 없다 | 비교 대상이 없어 보정을 만들 수 없다 |
+| 결정 시점 경로 원값이 없다 | 현재 보정값을 다시 학습하면 중복 보정이 됨 |
 | 실제 소요가 0분 | 출발·도착이 같은 fix 로 판정됐다 |
 """
 
@@ -43,6 +43,8 @@ from datetime import datetime, timezone
 from django.db import transaction
 from django.utils import timezone as dj_tz
 
+from apps.planning import history
+from apps.planning.models import AlarmPlan
 from apps.routing.models import (
     GLOBAL_SIGNATURE,
     MAX_FACTOR,
@@ -104,9 +106,7 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
     """
     from apps.observations.models import TripObservation
 
-    qs = TripObservation.objects.select_related(
-        "event", "event__alarm_plan"
-    ).order_by("event_id", "observed_at")
+    qs = TripObservation.objects.order_by("event_id", "observed_at", "id")
     if user is not None:
         qs = qs.filter(user=user)
 
@@ -123,6 +123,7 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
         if obs.kind not in slot:
             slot[obs.kind] = obs
 
+    revisions = history.decision_revisions(by_event)
     samples: list[TravelSample] = []
     for event_id, pair in by_event.items():
         depart = pair.get(TripObservation.Kind.DEPART)
@@ -136,10 +137,10 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
             dropped["소요 0분 또는 역순"] += 1
             continue
 
-        plan = getattr(depart.event, "alarm_plan", None)
-        predicted = getattr(plan, "travel_minutes", None) if plan else None
-        if not predicted:
-            dropped["예측값 없음"] += 1
+        revision = revisions.get(event_id)
+        predicted = revision.route_minutes_raw if revision is not None else None
+        if revision is None or revision.status != AlarmPlan.Status.OK or not predicted:
+            dropped["경로 원값 없음"] += 1
             continue
 
         ratio = actual / predicted
@@ -149,8 +150,8 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
 
         samples.append(
             TravelSample(
-                signature=(plan.route_key or "")[:120],
-                mode=(plan.travel_mode or "")[:20],
+                signature=(revision.route_key or "")[:120],
+                mode=(revision.travel_mode or "")[:20],
                 hour=dj_tz.localtime(depart.observed_at).hour,
                 weekday_type=_weekday_type(dj_tz.localtime(depart.observed_at)),
                 predicted_minutes=float(predicted),
@@ -189,9 +190,6 @@ def update_route_corrections(user=None) -> dict:
     않는다 — 2호선이 아침에 얼마나 지연되는지는 누가 타도 같다.
     """
     samples, dropped = collect_travel_samples(user=user)
-    if not samples:
-        return {"written": 0, "samples": 0, "dropped": dropped}
-
     buckets: dict[tuple[str, str, int, str], list[TravelSample]] = defaultdict(list)
     for s in samples:
         # 경로·수단·시간대·요일
@@ -203,7 +201,7 @@ def update_route_corrections(user=None) -> dict:
         # 수단까지 무시한 최후의 전역. 새 수단을 처음 쓸 때 쓸 값이다.
         buckets[(GLOBAL_SIGNATURE, "", -1, RouteCorrection.WeekdayType.ANY)].append(s)
 
-    written = 0
+    written_ids = []
     for (signature, mode, hour, weekday), rows in buckets.items():
         # 경로 전용 보정은 표본이 모여야 만든다. 전역은 항상 만든다.
         if signature != GLOBAL_SIGNATURE and len(rows) < MIN_ROUTE_SAMPLES:
@@ -213,7 +211,7 @@ def update_route_corrections(user=None) -> dict:
         # DB CheckConstraint 범위로 자른다. 밖으로 나가면 저장이 터진다.
         factor = min(max(factor, MIN_FACTOR), MAX_FACTOR)
 
-        RouteCorrection.objects.update_or_create(
+        row, _ = RouteCorrection.objects.update_or_create(
             route_signature=signature,
             mode=mode,
             hour_bucket=hour,
@@ -224,9 +222,15 @@ def update_route_corrections(user=None) -> dict:
                 "sample_count": n,
             },
         )
-        written += 1
+        written_ids.append(row.pk)
 
-    return {"written": written, "samples": len(samples), "dropped": dropped}
+    removed = 0
+    if user is None:
+        # 전체 재학습에서 사라진 버킷을 남기면 과거 보정이 새 전역값보다 우선한다.
+        # n=0 수동 보정과 일부 사용자만 학습한 경우의 공유 보정은 지우지 않는다.
+        removed, _ = RouteCorrection.objects.filter(sample_count__gt=0).exclude(pk__in=written_ids).delete()
+    return {"written": len(written_ids), "removed": removed,
+            "samples": len(samples), "dropped": dropped}
 
 
 # ---------------------------------------------------------------------------

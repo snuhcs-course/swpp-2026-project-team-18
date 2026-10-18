@@ -160,6 +160,15 @@ class TestDryRun:
 
 
 class TestPersonalArtifacts:
+    def test_quiet_batch_output_contains_no_block_names_or_email(self, user):
+        add_days(user, "PRIVATE_BLOCK_LABEL", learning.MIN_PERSONAL_OBSERVATIONS)
+
+        out = run("--users", "--verbosity", "0")
+
+        assert "PRIVATE_BLOCK_LABEL" not in out
+        assert user.email not in out
+        assert "개인 아티팩트 1개" in out
+
     def test_only_users_with_enough_observations_get_one(self, user, django_user_model):
         add_days(user, "샤워", learning.MIN_PERSONAL_OBSERVATIONS)
         few = django_user_model.objects.create_user(
