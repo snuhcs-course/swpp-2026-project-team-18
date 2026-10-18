@@ -218,6 +218,7 @@ class TestWithFullVariance:
 
 
 class TestTravelSampleCount:
+    @pytest.mark.integration
     @pytest.mark.parametrize("specific,global_,expected", [(0, 0, 0), (7, 0, 7), (0, 40, 40), (7, 40, 47)])
     def test_api_exposes_the_count_actually_used(self, user, place, stub_route, specific, global_, expected):
         from rest_framework.test import APIClient

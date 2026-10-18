@@ -232,6 +232,7 @@ def test_walk_segments_do_not_acquire_vehicle_fields():
     assert all("alt_vehicles" not in segment for segment in segments)
 
 
+@pytest.mark.integration
 @pytest.mark.django_db
 def test_candidates_api_keeps_transit_badges_when_car_is_faster(
     monkeypatch, django_user_model

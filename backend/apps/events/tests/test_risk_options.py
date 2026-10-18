@@ -12,7 +12,7 @@ from apps.planning.models import PlanRevision
 from apps.routing.models import RouteCorrection
 from apps.routines.models import RoutineBlock
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 KST = timezone(timedelta(hours=9))
 ROUTE = {"minutes": 20, "mode": "transit", "key": "transit:test", "source": "kakao"}
 

@@ -63,6 +63,7 @@ def event(user):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("meters", [0, 1, 49.9])
 @pytest.mark.parametrize("custom_origin", [False, True])
 def test_rejects_close_creation_without_rows_or_route_calls(
@@ -77,6 +78,7 @@ def test_rejects_close_creation_without_rows_or_route_calls(
     compute.assert_not_called()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("meters", [50.1, 100])
 def test_accepts_valid_distance(api, compute, meters):
     response = api.post("/api/events", payload(north(meters)), format="json")
@@ -84,6 +86,7 @@ def test_accepts_valid_distance(api, compute, meters):
     compute.assert_called_once()
 
 
+@pytest.mark.integration
 def test_custom_origin_takes_precedence_over_home(api, compute):
     response = api.post(
         "/api/events",
@@ -93,6 +96,7 @@ def test_custom_origin_takes_precedence_over_home(api, compute):
     assert response.status_code == 201
 
 
+@pytest.mark.integration
 def test_patch_destination_uses_saved_origin(api, event, compute):
     event.origin_lat, event.origin_lng = DEST
     event.save()
@@ -106,6 +110,7 @@ def test_patch_destination_uses_saved_origin(api, event, compute):
     compute.assert_not_called()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
     "place",
     [
@@ -129,6 +134,7 @@ def test_incomplete_nested_place_patch_is_400_without_writes(
     compute.assert_not_called()
 
 
+@pytest.mark.integration
 def test_patch_origin_uses_saved_destination(api, event, compute):
     response = api.patch(
         f"/api/events/{event.pk}",
@@ -141,6 +147,7 @@ def test_patch_origin_uses_saved_destination(api, event, compute):
     compute.assert_not_called()
 
 
+@pytest.mark.integration
 def test_patch_one_coordinate_merges_saved_pair(api, event, compute):
     event.origin_lat, event.origin_lng = HOME[0], DEST[1]
     event.save()
@@ -153,6 +160,7 @@ def test_patch_one_coordinate_merges_saved_pair(api, event, compute):
     compute.assert_not_called()
 
 
+@pytest.mark.integration
 def test_reset_origin_to_home_validates_distance(api, event, compute):
     event.place.lat, event.place.lng = HOME
     event.place.save()
@@ -167,6 +175,7 @@ def test_reset_origin_to_home_validates_distance(api, event, compute):
     compute.assert_not_called()
 
 
+@pytest.mark.integration
 def test_valid_patch_moves_both_endpoints_together(api, event, compute):
     event.origin_lat, event.origin_lng = HOME
     event.save()
@@ -179,6 +188,7 @@ def test_valid_patch_moves_both_endpoints_together(api, event, compute):
     compute.assert_called_once()
 
 
+@pytest.mark.integration
 def test_existing_close_schedule_can_still_be_disabled(api, event, compute):
     event.place.lat, event.place.lng = HOME
     event.place.save()
@@ -189,6 +199,7 @@ def test_existing_close_schedule_can_still_be_disabled(api, event, compute):
     compute.assert_not_called()
 
 
+@pytest.mark.integration
 def test_missing_home_or_destination_does_not_block_draft(api, user, compute):
     user.profile.home_lat = user.profile.home_lng = None
     user.profile.save()
@@ -198,6 +209,7 @@ def test_missing_home_or_destination_does_not_block_draft(api, user, compute):
     )
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("meters,status", [(0, 400), (49.9, 400), (50.1, 200)])
 @pytest.mark.parametrize("custom_origin", [False, True])
 def test_candidate_lookup_uses_same_boundary_without_upstream(

@@ -54,6 +54,7 @@ def states(client, query=""):
     return {row["id"]: (row["alarm_on"], row["is_first_alarm"]) for row in response.data["results"]}
 
 
+@pytest.mark.integration
 def test_automatic_uses_alarm_time_not_event_start(client, event):
     earlier_start = event(alarm="2026-10-05T08:00:00+09:00")
     earlier_alarm = event(start="2026-10-05T10:00:00+09:00", alarm="2026-10-05T07:00:00+09:00")
@@ -64,12 +65,14 @@ def test_automatic_uses_alarm_time_not_event_start(client, event):
     assert response.data["is_first_alarm"] is True
 
 
+@pytest.mark.integration
 def test_equal_alarm_times_use_id_even_if_start_order_differs(client, event):
     first = event(start="2026-10-05T10:00:00+09:00", alarm="2026-10-05T07:00:00+09:00")
     second = event(alarm="2026-10-05T07:00:00+09:00")
     assert states(client) == {first.pk: (True, True), second.pk: (False, False)}
 
 
+@pytest.mark.integration
 def test_turning_off_cascades_and_null_restores_automatic(client, event, monkeypatch):
     first = event()
     second = event(start="2026-10-05T10:00:00+09:00")
@@ -92,6 +95,7 @@ def test_turning_off_cascades_and_null_restores_automatic(client, event, monkeyp
     compute.assert_not_called()
 
 
+@pytest.mark.integration
 def test_explicit_on_can_coexist_with_earlier_automatic(client, event):
     automatic = event()
     later = event(start="2026-10-05T10:00:00+09:00")
@@ -103,12 +107,14 @@ def test_explicit_on_can_coexist_with_earlier_automatic(client, event):
     assert states(client) == {automatic.pk: (True, True), later.pk: (True, False)}
 
 
+@pytest.mark.integration
 def test_all_explicit_off_has_no_first_alarm(client, event):
     first = event(enabled=False)
     second = event(start="2026-10-05T10:00:00+09:00", enabled=False)
     assert states(client) == {first.pk: (False, False), second.pk: (False, False)}
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("status", [None, "no_home", "no_place", "route_failed"])
 def test_unschedulable_is_off_even_when_explicitly_enabled(client, event, status):
     invalid = event(enabled=True, status=status)
@@ -116,12 +122,14 @@ def test_unschedulable_is_off_even_when_explicitly_enabled(client, event, status
     assert states(client) == {invalid.pk: (False, False), valid.pk: (True, True)}
 
 
+@pytest.mark.integration
 def test_missing_alarm_timestamp_is_not_eligible(client, event):
     invalid = event(enabled=True, status="no_home")
     AlarmPlan.objects.filter(event=invalid).update(alarm_at=None)
     assert states(client) == {invalid.pk: (False, False)}
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("tz,first_start,second_start,first_alarm,second_alarm,second_on", [
     ("Asia/Seoul", "2026-10-05T23:30:00+09:00", "2026-10-06T00:30:00+09:00",
      "2026-10-05T23:00:00+09:00", "2026-10-05T23:30:00+09:00", True),
@@ -140,6 +148,7 @@ def test_group_by_profile_timezone_event_start_date(
     assert states(client) == {first.pk: (True, True), second.pk: (second_on, second_on)}
 
 
+@pytest.mark.integration
 def test_invalid_saved_timezone_falls_back_to_server_timezone(client, event, user):
     user.profile.timezone = "not/a-zone"
     user.profile.save()
@@ -147,6 +156,7 @@ def test_invalid_saved_timezone_falls_back_to_server_timezone(client, event, use
     assert states(client)[first.pk] == (True, True)
 
 
+@pytest.mark.integration
 def test_filtered_list_keeps_hidden_first_alarm(client, event):
     event()
     later = event(start="2026-10-05T10:00:00+09:00")
@@ -156,12 +166,14 @@ def test_filtered_list_keeps_hidden_first_alarm(client, event):
     assert detail.data["is_first_alarm"] is False
 
 
+@pytest.mark.integration
 def test_paginated_list_keeps_first_from_other_page(client, event):
     event()
     later = event(start="2026-10-05T10:00:00+09:00")
     assert states(client, "?limit=1&offset=1") == {later.pk: (False, False)}
 
 
+@pytest.mark.integration
 def test_other_user_does_not_affect_selection_and_cannot_toggle(client, event, django_user_model):
     owner = django_user_model.objects.create_user(email="other@example.com", password="test")
     foreign = event(start="2026-10-05T07:00:00+09:00", owner=owner)
@@ -173,6 +185,7 @@ def test_other_user_does_not_affect_selection_and_cannot_toggle(client, event, d
     assert foreign.alarm_enabled is None
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("enabled", [None, True, False])
 def test_create_accepts_override(client, monkeypatch, enabled):
     monkeypatch.setattr(services, "compute_and_store", Mock())
@@ -185,6 +198,7 @@ def test_create_accepts_override(client, monkeypatch, enabled):
     assert response.data["alarm_on"] is False  # 아직 계산된 계획 없음.
 
 
+@pytest.mark.integration
 def test_create_without_override_defaults_to_automatic(client, monkeypatch):
     monkeypatch.setattr(services, "compute_and_store", Mock())
     response = client.post("/api/events", {
@@ -194,6 +208,7 @@ def test_create_without_override_defaults_to_automatic(client, monkeypatch):
     assert response.data["alarm_enabled"] is None
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("zone,day", [
     ("Asia/Seoul", "2026-10-05"),
     ("America/New_York", "2026-11-01"),  # 25시간인 날도 현지 날짜로 묶는다.
@@ -236,6 +251,7 @@ def test_be25_creation_resets_only_owners_same_local_day(
     compute.assert_called_once()  # 기존 일정 경로는 재조회하지 않는다.
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("failure", ["validation", "planning"])
 def test_be25_failed_creation_preserves_existing_choices(client, event, monkeypatch, failure):
     original = event(enabled=False)
@@ -252,6 +268,7 @@ def test_be25_failed_creation_preserves_existing_choices(client, event, monkeypa
     assert not AlarmLog.objects.filter(kind=AlarmLog.Kind.AUTO).exists()
 
 
+@pytest.mark.integration
 def test_be25_calendar_import_preserves_manual_choices(client, event, monkeypatch):
     original = event(start=(timezone.now() + timedelta(days=2)).isoformat(), enabled=False)
     monkeypatch.setattr(services, "compute_and_store", Mock())
@@ -263,6 +280,7 @@ def test_be25_calendar_import_preserves_manual_choices(client, event, monkeypatc
     assert original.alarm_enabled is False
 
 
+@pytest.mark.integration
 def test_invalid_override_is_rejected_without_changing_event(client, event):
     instance = event()
     response = client.patch(f"/api/events/{instance.pk}", {"alarm_enabled": "unknown"}, format="json")
@@ -272,6 +290,7 @@ def test_invalid_override_is_rejected_without_changing_event(client, event):
     assert instance.alarm_enabled is None
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("data", [
     {"start_at": "2026-10-05T12:00:00+09:00"},
     {"alarm_enabled": False, "start_at": "2026-10-05T12:00:00+09:00"},
@@ -286,6 +305,7 @@ def test_regular_and_mixed_updates_still_recompute(client, event, monkeypatch, d
     assert compute.call_args.args[0].pk == instance.pk
 
 
+@pytest.mark.integration
 def test_list_query_count_does_not_grow_per_event(client, event, django_assert_num_queries):
     # request.user.profile을 미리 불러오면 목록/count/그룹 판정의 3개 조회만 필요하다.
     event()
@@ -309,6 +329,7 @@ def test_old_insert_without_alarm_column_stays_automatic(user):
     assert Event.objects.get(user=user, title="구버전").alarm_enabled is None
 
 
+@pytest.mark.integration
 def test_recomputed_alarm_order_updates_first_flag(client, event, monkeypatch):
     first = event()
     later = event(start="2026-10-05T10:00:00+09:00")

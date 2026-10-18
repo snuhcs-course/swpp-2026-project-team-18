@@ -16,7 +16,7 @@ from apps.events.models import Event, Place
 from apps.routines.models import BlockObservation, EventBlockSelection, RoutineBlock
 
 KST = timezone(timedelta(hours=9))
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 BLOCKS_URL = "/api/routines/blocks"
 OBS_URL = "/api/routines/observations/batch"

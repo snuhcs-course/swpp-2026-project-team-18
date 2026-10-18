@@ -810,6 +810,7 @@ class TestSummaryFor:
         assert not any(ch.isdigit() for ch in summary.FALLBACK)
 
 
+@pytest.mark.integration
 @pytest.mark.django_db
 class TestApiWithFakeLlm:
     """뷰 → 서비스 → 요약까지 실제 데이터로 한 번. LLM 자리만 가짜다."""

@@ -134,6 +134,7 @@ class TestEveryApiRouteRequiresAuth:
         routes = api_routes()
         assert len(routes) >= 15, f"경로를 {len(routes)}개만 찾았다. 열거 로직 확인: {routes}"
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("path", api_routes())
     def test_unauthenticated_request_is_rejected(self, path):
         client = APIClient()
@@ -268,6 +269,7 @@ def alice_event(alice, stub_route):
     )
 
 
+@pytest.mark.integration
 class TestCrossUserIsolation:
     """남의 자원은 **404** 여야 한다.
 
@@ -385,6 +387,7 @@ class TestCrossUserIsolation:
         assert res.data["home_label"] != "앨리스집"
 
 
+@pytest.mark.integration
 class TestMassAssignment:
     """`user` 를 본문에 넣어도 무시돼야 한다.
 
@@ -447,6 +450,7 @@ class TestMassAssignment:
         assert RoutineBlock.objects.get(pk=res.data["id"]).user_id == alice.pk
 
 
+@pytest.mark.integration
 class TestNoFiveHundredOnBadInput:
     """잘못된 입력에 500 이 나면 안 된다.
 
@@ -573,6 +577,7 @@ class TestNoFiveHundredOnBadInput:
         assert res.status_code < 500
 
 
+@pytest.mark.integration
 class TestErrorFormatDoesNotLeakInternals:
     """에러 본문에 내부 정보가 실리지 않아야 한다."""
 

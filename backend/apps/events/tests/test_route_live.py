@@ -31,7 +31,7 @@ from apps.events.models import Event, Place
 from apps.planning import services
 
 KST = timezone(timedelta(hours=9))
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 HOME = (37.484267, 126.929745)      # 신림역
 HERE = (37.497942, 127.027621)      # 강남역 — 이동 중에 잡힌 현재 위치

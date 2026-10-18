@@ -18,7 +18,7 @@ from apps.observations.models import TripObservation
 from apps.observations.serializers import MAX_DWELL_SECONDS
 
 KST = timezone(timedelta(hours=9))
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 BATCH_URL = "/api/observations/batch"
 LIST_URL = "/api/observations"

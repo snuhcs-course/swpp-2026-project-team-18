@@ -65,6 +65,7 @@ def log(event, uid, kind, *, at=ALARM, **kw):
     return body
 
 
+@pytest.mark.integration
 class TestBatch:
     def test_stores_one_morning(self, client, event):
         logs = [
@@ -209,6 +210,7 @@ class TestServerSwitch:
         assert res.status_code == 200
         return res
 
+    @pytest.mark.integration
     def test_switch_changes_are_logged_by_the_server(self, client, event):
         self.patch(client, event, False)
         self.patch(client, event, True)
@@ -220,10 +222,12 @@ class TestServerSwitch:
         assert {r.alarm_at for r in rows} == {ALARM}
         assert all(r.client_uuid.startswith("srv-") for r in rows)
 
+    @pytest.mark.integration
     def test_same_value_is_not_logged(self, client, event):
         self.patch(client, event, None)  # 처음부터 자동이다
         assert not AlarmLog.objects.exists()
 
+    @pytest.mark.integration
     def test_other_edits_are_not_logged(self, client, event, monkeypatch):
         from apps.planning import services
 
@@ -232,6 +236,7 @@ class TestServerSwitch:
         assert res.status_code == 200
         assert not AlarmLog.objects.exists()
 
+    @pytest.mark.integration
     def test_log_failure_keeps_the_edit(self, client, event, monkeypatch):
         """기록은 학습 재료다. 사용자가 지금 바꾸려는 스위치를 막지 않는다."""
 

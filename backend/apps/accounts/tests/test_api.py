@@ -46,6 +46,7 @@ def client(user):
 
 
 class TestRegister:
+    @pytest.mark.integration
     def test_creates_user_and_profile(self, django_user_model):
         res = APIClient().post(
             "/api/auth/register",
@@ -64,6 +65,7 @@ class TestRegister:
         assert Profile.objects.filter(user=u).exists()
         assert res.data.get("access")
 
+    @pytest.mark.integration
     def test_rejects_duplicate_email_case_insensitively(self, user):
         res = APIClient().post(
             "/api/auth/register",
@@ -79,6 +81,7 @@ class TestRegister:
         assert res.status_code == 400
         assert "email" in error_fields(res)
 
+    @pytest.mark.integration
     def test_rejects_mismatched_confirmation(self):
         res = APIClient().post(
             "/api/auth/register",
@@ -94,6 +97,7 @@ class TestRegister:
         assert res.status_code == 400
         assert "password_confirm" in error_fields(res)
 
+    @pytest.mark.integration
     def test_accepts_password_similar_to_email_and_nickname(self):
         res = APIClient().post(
             "/api/auth/register",
@@ -108,6 +112,7 @@ class TestRegister:
         )
         assert res.status_code == 201
 
+    @pytest.mark.integration
     def test_rejects_short_password(self):
         res = APIClient().post(
             "/api/auth/register",
@@ -122,6 +127,7 @@ class TestRegister:
         )
         assert res.status_code == 400
 
+    @pytest.mark.integration
     def test_password_is_hashed(self, django_user_model):
         APIClient().post(
             "/api/auth/register",
@@ -138,6 +144,7 @@ class TestRegister:
         assert u.password != PASSWORD
         assert u.check_password(PASSWORD)
 
+    @pytest.mark.integration
     def test_blank_nickname_is_rejected(self):
         res = APIClient().post(
             "/api/auth/register",
@@ -152,6 +159,7 @@ class TestRegister:
         )
         assert res.status_code == 400
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "terms",
         [
@@ -178,6 +186,7 @@ class TestRegister:
         assert "terms_agreed" in error_fields(res)
         assert not django_user_model.objects.filter(email="terms@example.com").exists()
 
+    @pytest.mark.integration
     def test_records_agreement_time(self, django_user_model):
         from django.utils import timezone
 
@@ -225,6 +234,7 @@ class TestRegister:
         assert not django_user_model.objects.filter(email="rollback@example.com").exists()
 
 
+@pytest.mark.integration
 class TestLogin:
     def test_returns_tokens_and_user(self, user):
         res = APIClient().post(
@@ -308,6 +318,7 @@ class TestProfileCoordinateValidation:
     카카오를 불가능한 좌표로 불렀다. 쿼터를 쓰고 실패한다.
     """
 
+    @pytest.mark.integration
     def test_valid_domestic_home_is_accepted(self, client):
         res = client.patch(
             "/api/profile",
@@ -317,6 +328,7 @@ class TestProfileCoordinateValidation:
         assert res.status_code == 200
         assert res.data["has_home"] is True
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "lat,lng,label",
         [
@@ -333,6 +345,7 @@ class TestProfileCoordinateValidation:
         )
         assert res.status_code == 400, f"{label} 이 통과했다"
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "lat,lng,label",
         [
@@ -348,10 +361,12 @@ class TestProfileCoordinateValidation:
         )
         assert res.status_code == 400, f"{label} 이 통과했다"
 
+    @pytest.mark.integration
     def test_half_coordinate_is_rejected(self, client):
         res = client.patch("/api/profile", {"home_lat": 37.5}, format="json")
         assert res.status_code == 400
 
+    @pytest.mark.integration
     def test_clearing_both_is_allowed(self, client):
         client.patch(
             "/api/profile", {"home_lat": 37.5, "home_lng": 127.0}, format="json"
@@ -384,6 +399,7 @@ class TestProfileCoordinateValidation:
                 profile.save()
 
 
+@pytest.mark.integration
 class TestProfileOtherFields:
     @pytest.mark.parametrize("tau", [0.4, 1.0, 1.5, -1.0])
     def test_tau_outside_range_is_rejected(self, client, tau):
@@ -450,6 +466,7 @@ class TestProfileOtherFields:
         assert res.data["shadow_started_at"] is None
 
 
+@pytest.mark.integration
 class TestHomeChangeRecomputesAlarms:
     def test_setting_home_recomputes_pending_events(self, client, user, monkeypatch):
         """집이 없어 `no_home` 이던 계획들이 한꺼번에 계산돼야 한다."""

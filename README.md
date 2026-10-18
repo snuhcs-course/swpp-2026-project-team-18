@@ -271,14 +271,21 @@ Four suites run locally and in CI on every push to `main` and every pull request
 ([`ci.yml`](.github/workflows/ci.yml)). CI uses no secrets. Local feature checks can use `:app:testE2eUnitTest` and `:app:lintE2e` with `-PjitE2e=true`; see [QA setup](qa/demo/README.md).
 
 ```bash
-cd backend && python -m pytest                      # backend unit tests
+cd backend && python -m pytest                      # backend unit + integration tests
+cd backend && python -m pytest -m "not integration" # backend unit tests only
+cd backend && python -m pytest -m integration       # backend API integration tests only
 cd backend && python scripts/run_local_suite.py     # 8 HTTP suites against a live local server
 cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # Android unit tests + lint + build
 cd APP     && ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.package=com.swpp.wakeup.integration
                                                     # Android integration tests on a running emulator (API 34+)
 ```
 
-The integration tests (`app/src/androidTest/.../integration`) run screens, the Room
+Backend integration tests are the ones that send a request through the Django test
+client (URL → view → serializer → permission → DB) and carry `@pytest.mark.integration`.
+[`backend/conftest.py`](backend/conftest.py) fails a test whose marker doesn't match what
+it actually did, so the two counts stay accurate.
+
+The Android integration tests (`app/src/androidTest/.../integration`) run screens, the Room
 cache and the repository together on a real Android runtime, with fake APIs and no
 server. They log the debug app out on the emulator they run on. The package filter
 leaves out the end-to-end tests in the same folder, which need the QA build and the

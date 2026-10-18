@@ -8,6 +8,8 @@ from django.core.cache import cache
 from rest_framework.test import APIClient
 from rest_framework.throttling import ScopedRateThrottle
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.django_db
 def test_register_bounds_attempts_per_ip_without_blocking_password_checks(

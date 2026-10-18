@@ -25,7 +25,7 @@ from rest_framework.test import APIClient
 
 from apps.events.models import Event
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 ROUTE = {
     "minutes": 20,

@@ -55,6 +55,7 @@ def payload(**extra):
     }
 
 
+@pytest.mark.integration
 def test_create_home_destination_computes_route_without_place_row(api, route):
     response = api.post("/api/events", payload(), format="json")
     assert response.status_code == 201
@@ -68,6 +69,7 @@ def test_create_home_destination_computes_route_without_place_row(api, route):
     assert route.call_args.kwargs["end_lat"] == HOME[0]
 
 
+@pytest.mark.integration
 def test_profile_move_recomputes_home_destination_and_response(api, route):
     created = api.post("/api/events", payload(), format="json")
     response = api.patch("/api/profile", {"home_lat": NEW_HOME[0], "home_lng": NEW_HOME[1], "home_label": "새 집"}, format="json")
@@ -80,6 +82,7 @@ def test_profile_move_recomputes_home_destination_and_response(api, route):
     assert Place.objects.count() == 0
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("extra,field", [
     ({"place": {"name": "별도 장소", "lat": 37.45, "lng": 126.94}}, "destination_is_home"),
     ({"origin_lat": HOME[0], "origin_lng": HOME[1]}, "destination"),
@@ -92,6 +95,7 @@ def test_home_destination_rejects_conflict_or_close_origin_before_writes(api, ro
     route.assert_not_called()
 
 
+@pytest.mark.integration
 def test_missing_home_rejects_only_home_target_creation(api, user, route):
     profile = user.profile
     profile.home_lat = profile.home_lng = None
@@ -107,6 +111,7 @@ def test_missing_home_rejects_only_home_target_creation(api, user, route):
     assert draft.data["alarm_plan"]["status"] == "no_place"
 
 
+@pytest.mark.integration
 def test_patch_home_clears_old_place_then_explicit_place_clears_flag(api, route):
     place = {"name": "직장", "lat": 37.45, "lng": 126.94}
     created = api.post("/api/events", payload(destination_is_home=False, place=place), format="json")
@@ -123,6 +128,7 @@ def test_patch_home_clears_old_place_then_explicit_place_clears_flag(api, route)
     assert Place.objects.count() == 1
 
 
+@pytest.mark.integration
 def test_home_patch_merges_saved_origin_for_distance_validation(api, route):
     created = api.post("/api/events", payload(), format="json")
     response = api.patch(f'/api/events/{created.data["id"]}', {"origin_lat": HOME[0], "origin_lng": HOME[1]}, format="json")
@@ -135,6 +141,7 @@ def test_home_patch_merges_saved_origin_for_distance_validation(api, route):
     route.assert_not_called()
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("home,status", [(None, "no_home"), (ORIGIN, "route_failed")])
 def test_profile_change_clears_invalid_plan_and_route_without_upstream(api, route, home, status):
     created = api.post("/api/events", payload(), format="json")
@@ -156,6 +163,7 @@ def test_profile_change_clears_invalid_plan_and_route_without_upstream(api, rout
     route.assert_not_called()
 
 
+@pytest.mark.integration
 def test_live_route_uses_current_home_and_enforces_ownership(api, route, django_user_model):
     created = api.post("/api/events", payload(route_key="walk"), format="json")
     api.patch("/api/profile", {"home_lat": NEW_HOME[0], "home_lng": NEW_HOME[1]}, format="json")
@@ -174,6 +182,7 @@ def test_live_route_uses_current_home_and_enforces_ownership(api, route, django_
     route.assert_not_called()
 
 
+@pytest.mark.integration
 def test_calendar_reimport_preserves_manual_home_target_without_resolving_place(api, route):
     start_at = payload()["start_at"]
     imported = api.post("/api/events/import", {"events": [{"external_id": "calendar-home", "title": "귀가", "start_at": start_at}]}, format="json")

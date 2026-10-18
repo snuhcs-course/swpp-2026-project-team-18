@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 from apps.routing import clients
 from apps.routing.tests.test_transit_display import END, START, route
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 
 @pytest.fixture

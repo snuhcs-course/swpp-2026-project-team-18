@@ -9,7 +9,7 @@ from rest_framework.throttling import ScopedRateThrottle
 
 from apps.accounts.views import PasswordCheckView
 
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 CHECK = "/api/auth/password/check"
 
 
