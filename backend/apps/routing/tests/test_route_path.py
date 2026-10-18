@@ -226,6 +226,102 @@ def test_보관한_좌표의_길이를_쓴다_카카오_신고값이_아니다(m
     assert abs(items[0]["path_distance_m"] - 1113) < 3
 
 
+# Partly AI-generated (Claude)
+# --- 후보 목록의 경로(지도 미리보기) ------------------------------------------
+
+
+def _bend(n: int = 200) -> list[list[float]]:
+    """동쪽으로 1km 갔다가 북쪽으로 1km 가는 꺾인 길. 점이 촘촘하다."""
+    half = n // 2
+    east = [[37.4800, 126.9300 + i * (0.0113 / half)] for i in range(half)]
+    north = [[37.4800 + i * (0.0090 / half), 126.9413] for i in range(half + 1)]
+    return east + north
+
+
+def test_미리보기_경로는_모양을_지키고_점을_줄인다():
+    path = _bend()
+    out = clients.preview_path(path)
+
+    # 곧은 두 변은 끝점만 남는다. 꺾인 점은 반드시 남는다.
+    assert len(out) <= 4 < len(path)
+    assert out[0] == [round(v, 6) for v in path[0]]
+    assert out[-1] == [round(v, 6) for v in path[-1]]
+    assert any(abs(lat - 37.48) < 1e-6 and abs(lng - 126.9413) < 1e-6 for lat, lng in out)
+
+
+def test_미리보기_경로는_원래_선에서_1m_안쪽이다():
+    # 지그재그로 흔들리는 길. 1m 넘게 벗어나는 점은 남겨야 한다.
+    path = [[37.48 + i * 0.0001, 126.93 + (0.00005 if i % 2 else 0.0)] for i in range(60)]
+    out = clients.preview_path(path)
+
+    cos = math.cos(math.radians(37.48))
+
+    def off(p, a, b):
+        ax, ay = a[1] * clients.METERS_PER_DEGREE * cos, a[0] * clients.METERS_PER_DEGREE
+        bx, by = b[1] * clients.METERS_PER_DEGREE * cos, b[0] * clients.METERS_PER_DEGREE
+        px, py = p[1] * clients.METERS_PER_DEGREE * cos, p[0] * clients.METERS_PER_DEGREE
+        dx, dy = bx - ax, by - ay
+        t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+        return math.hypot(px - ax - t * dx, py - ay - t * dy)
+
+    for p in path:
+        nearest = min(off(p, out[i], out[i + 1]) for i in range(len(out) - 1))
+        assert nearest <= clients.PREVIEW_TOLERANCE_M + 0.05
+
+
+def test_미리보기_경로는_소수_6자리다():
+    out = clients.preview_path([[37.48425493213517, 126.92973507774951], [37.45024129123998, 126.95197623469997]])
+    assert out == [[37.484255, 126.929735], [37.450241, 126.951976]]
+
+
+def test_후보_목록은_모든_수단에_줄인_경로를_담는다(monkeypatch):
+    """경로 선택 화면이 자동차·대중교통도 지도로 미리 보여 준다(2026-10-18)."""
+    bend = _bend()
+    lnglat = [[lng, lat] for lat, lng in bend]
+    flat = [v for lng, lat in lnglat for v in (lng, lat)]
+    walk_like = {
+        "status": "OK",
+        "route": {
+            "properties": {"totalTime": 3600, "totalDistance": 5000},
+            "legs": [{"steps": [{"path": {"points": lnglat}}]}],
+        },
+    }
+    responses = {
+        clients.WALK_URL: walk_like,
+        clients.BICYCLE_URL: walk_like,
+        clients.TRANSIT_URL: {
+            "status": "OK",
+            "routes": [{
+                "properties": {"totalTime": 1500, "totalDistance": 5000, "transfers": 0, "fare": {"value": 1500}},
+                "steps": [{
+                    "properties": {
+                        "type": "BUS", "time": 1500,
+                        "vehicles": [{"name": "5516", "type": "간선"}],
+                        "stops": [{"name": "신림역"}, {"name": "서울대"}],
+                    },
+                    "path": {"points": lnglat},
+                }],
+            }],
+        },
+        clients.CAR_URL: {"routes": [{
+            "summary": {"duration": 780, "distance": 4300, "fare": {"taxi": 7400}},
+            "sections": [{"roads": [{"vertexes": flat}]}],
+        }]},
+    }
+    monkeypatch.setattr(clients, "_get", lambda url: (responses[url.split("?")[0]], False))
+    monkeypatch.setattr("apps.routing.realtime.enrich_candidates", lambda items: None)
+
+    candidates, degraded = clients.route_candidates(37.48, 126.93, 37.489, 126.9413)
+
+    assert not degraded
+    by_kind = {item["kind"]: item for item in candidates}
+    assert {"car", "transit", "bicycle"} <= set(by_kind)
+    for item in candidates:
+        assert item["path"] == clients.preview_path(clients._decimate(bend)), item["key"]
+        assert item["path_distance_m"] == clients.path_length_m(item["path"])
+        assert len(item["path"]) < len(bend)
+
+
 def test_도보_자전거_후보는_기존_호출에서_경로를_담는다(monkeypatch):
     raw = {
         "status": "OK",

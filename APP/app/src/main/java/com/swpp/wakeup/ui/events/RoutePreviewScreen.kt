@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.data.repository.EventRepository
@@ -29,7 +30,9 @@ import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitSpace
 
 /**
- * 도보·자전거 후보의 전체 화면 지도(Figma ⑬-e). ⑬ 카드를 누르면 같은 경로 안에서 열린다.
+ * 경로 후보의 전체 화면 지도(Figma ⑬-e). 수단과 상관없이 좌표가 있는 후보면 열린다.
+ * 자동차·도보·자전거는 ⑬ 카드를 누르면, 대중교통은 카드의 "지도로 보기" 를 누르면
+ * 같은 경로 안에서 열린다.
  *
  * ## 일정 지도·추적과 섞이지 않는다
  *
@@ -84,8 +87,17 @@ internal fun RoutePreviewScreen(
             )
             Spacer(Modifier.width(8.dp))
             // 목록에는 탭이 수단을 말하지만 여기에는 탭이 없다. 수단 이름을 적는다.
-            Text(text = option.mode, color = JitColor.TextSecondary, fontSize = 13.sp)
-            Spacer(Modifier.weight(1f))
+            // 대중교통은 "지하철+도보+버스" 처럼 길고 배지가 셋까지 붙는다 — 배지 자리를
+            // 남기고 이름을 줄인다.
+            Text(
+                text = option.mode,
+                color = JitColor.TextSecondary,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
             RouteBadges(option.badges)
         }
 
@@ -103,11 +115,17 @@ internal fun RoutePreviewScreen(
             )
         }
 
+        // 대중교통은 목록 카드와 같은 구간 막대를 지도 아래에 둔다. 선은 한 색이라
+        // 어디서 타고 내리는지는 막대가 말한다.
+        if (option.travelMode == RouteMode.TRANSIT && option.hasSegmentBar) {
+            TransitSegmentBar(option.segments)
+        }
         if (option.travelMode == RouteMode.BICYCLE) {
             MetricCells(bicycleMetrics(option))
         } else if (option.detailLine.isNotBlank()) {
-            // 도보는 서버 문구 그대로("1.2km · 1,600걸음 · 60kcal (거리 기반 추정)").
-            // 앱이 걸음·kcal 을 다시 계산하지 않는다.
+            // 서버 문구 그대로. 도보 "1.2km · 1,600걸음 · 60kcal (거리 기반 추정)",
+            // 자동차 "택시 예상액 · 4.3km · 7,400원", 대중교통 "2호선 → 5513 · 5.1km · …".
+            // 앱이 걸음·kcal·요금을 다시 계산하지 않는다.
             Text(text = option.detailLine, color = JitColor.TextSecondary, fontSize = 12.sp)
         }
 

@@ -722,6 +722,66 @@ def car_route_path(data: dict) -> list[list[float]]:
     return _decimate(out)
 
 
+# Partly AI-generated (Claude)
+# 후보 목록에 싣는 경로를 줄일 때 원래 선에서 벗어나도 되는 거리(m). 지도 미리보기 전용이다.
+#
+# 1m 는 가장 확대한 지도(lv3, 한 단위 1m)에서도 한 칸이다. 실측(신림역→서울대, 카카오가 준
+# 후보 경로 8개의 합): 1,051점 → 656점.
+PREVIEW_TOLERANCE_M = 1.0
+
+
+def preview_path(
+    points: list[list[float]], tolerance_m: float = PREVIEW_TOLERANCE_M
+) -> list[list[float]]:
+    """후보 목록에 싣는 경로. 모양은 지키고 점과 자릿수를 줄인다.
+
+    경로 선택 화면은 후보마다 지도 미리보기를 연다. 후보가 최대 [CANDIDATE_LIMIT] 개이고
+    좌표도 그만큼 실리므로, 그대로 실으면 응답이 커진다. 그래서 둘을 줄인다.
+
+    - **점**: 원래 선에서 [tolerance_m] 안쪽인 점을 뺀다(더글러스-포이커). 고르게
+      솎으면([_decimate]) 굽은 길에서 선이 길을 벗어나지만, 이 방법은 굽은 곳의 점을 남긴다.
+      처음과 끝은 반드시 남는다.
+    - **자릿수**: 소수 6자리(약 0.1m)로 자른다. 카카오 자동차 좌표는 14자리가 온다.
+
+    알람 계획에 저장하는 경로(`resolve_route`·`best_route`)에는 쓰지 않는다.
+    """
+    kept = _simplify(points, tolerance_m)
+    return [[round(lat, 6), round(lng, 6)] for lat, lng in kept]
+
+
+def _simplify(points: list[list[float]], tolerance_m: float) -> list[list[float]]:
+    """더글러스-포이커. 거리는 경로 가운데 위도의 평면(m)에서 잰다."""
+    n = len(points)
+    if n < 3:
+        return [list(p) for p in points]
+    cos = math.cos(math.radians(sum(p[0] for p in points) / n))
+    xy = [(p[1] * METERS_PER_DEGREE * cos, p[0] * METERS_PER_DEGREE) for p in points]
+    keep = [False] * n
+    keep[0] = keep[-1] = True
+    stack = [(0, n - 1)]
+    while stack:
+        i, j = stack.pop()
+        if j - i < 2:
+            continue
+        (ax, ay), (bx, by) = xy[i], xy[j]
+        dx, dy = bx - ax, by - ay
+        length_sq = dx * dx + dy * dy
+        worst, at = -1.0, -1
+        for k in range(i + 1, j):
+            px, py = xy[k]
+            t = 0.0 if length_sq == 0 else max(
+                0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length_sq)
+            )
+            d = math.hypot(px - ax - t * dx, py - ay - t * dy)
+            if d > worst:
+                worst, at = d, k
+        if worst > tolerance_m:
+            keep[at] = True
+            stack.append((i, at))
+            stack.append((at, j))
+    return [list(p) for p, k in zip(points, keep) if k]
+
+
 def _decimate(points: list[list[float]], cap: int = MAX_PATH_POINTS) -> list[list[float]]:
     """점이 너무 많으면 고르게 솎아 낸다. 처음과 끝은 반드시 남긴다.
 
@@ -958,10 +1018,10 @@ def _transit_candidates(
 ) -> tuple[list[dict], bool]:
     """대중교통 후보. 중복을 합치고 축별 대표만 남긴다.
 
-    ``with_path`` 는 경로 폴리라인을 함께 담는다. **기본값이 False 인 것이
-    중요하다.** 후보는 최대 15개이고 하나가 300점을 넘으므로, 목록 응답에 전부
-    실으면 사용자가 경로를 고르기만 해도 수십 KB를 내려받는다. 지도에 그릴
-    경로는 **고른 하나**뿐이라 `resolve_route` 에서만 켠다.
+    ``with_path`` 는 경로 폴리라인을 함께 담는다. 기본값은 False 다. 켜는 곳은 둘이다.
+    `resolve_route` 는 알람 지도에 쓸 고른 하나를, `route_candidates` 는 경로 선택
+    화면의 미리보기를 위해 추린 후보 전부를 받는다. 후보 목록은 카카오가 준 15개가
+    아니라 추린 5개 이하만 내리고, 거기서도 [preview_path] 로 점과 자릿수를 줄인다.
     """
     qs = urllib.parse.urlencode(
         {
@@ -1211,6 +1271,10 @@ def route_candidates(
 
     도보가 [WALK_CANDIDATE_MAX_MINUTES] 를 넘으면 목록에서 뺀다. 64분 걸어가는
     선택지는 아무도 고르지 않고 자리만 차지한다.
+
+    **모든 후보에 경로 좌표(`path`)를 싣는다.** 경로 선택 화면이 수단마다 지도
+    미리보기를 연다(도보·자전거 BE-23, 자동차·대중교통 2026-10-18). 같은 응답의 좌표라
+    카카오 호출은 늘지 않는다. 응답 크기는 [preview_path] 로 줄인다.
     """
     candidates: list[dict] = []
 
@@ -1223,10 +1287,10 @@ def route_candidates(
     # 짧은 거리에서 대중교통은 대기·환승 때문에 오히려 느리다.
     if walk and (walk.get("distance_m") or 0) <= WALK_ONLY_METERS:
         walk["reason"] = "걸어갈 수 있는 거리"
-        return [walk], False
+        return _with_preview_paths([walk]), False
 
     transit, transit_degraded = _transit_candidates(
-        start_lat, start_lng, end_lat, end_lng
+        start_lat, start_lng, end_lat, end_lng, with_path=True
     )
     candidates.extend(transit)
 
@@ -1240,7 +1304,7 @@ def route_candidates(
     if bicycle:
         candidates.append(bicycle)
 
-    car = _car_candidate(start_lat, start_lng, end_lat, end_lng)
+    car = _car_candidate(start_lat, start_lng, end_lat, end_lng, with_path=True)
     if car:
         candidates.append(car)
 
@@ -1273,7 +1337,16 @@ def route_candidates(
     from apps.routing.realtime import enrich_candidates
 
     enrich_candidates(candidates)
-    return candidates, transit_degraded and not transit
+    return _with_preview_paths(candidates), transit_degraded and not transit
+
+
+def _with_preview_paths(candidates: list[dict]) -> list[dict]:
+    """최종 후보의 경로를 [preview_path] 로 줄인다. 길이도 줄인 점으로 다시 잰다."""
+    for item in candidates:
+        if "path" in item:
+            item["path"] = preview_path(item.get("path") or [])
+            item["path_distance_m"] = path_length_m(item["path"])
+    return candidates
 
 
 def _transit_label(route_key: str) -> str:

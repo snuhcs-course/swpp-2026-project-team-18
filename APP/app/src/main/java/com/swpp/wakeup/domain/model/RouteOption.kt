@@ -64,16 +64,26 @@ data class RouteOption(
             else -> RouteMode.TRANSIT
         }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 지도 미리보기를 열 수 있는가. 수단과 상관없이 좌표가 있으면 연다.
+     *
+     * 서버는 모든 후보에 좌표(`path`)를 준다(도보·자전거는 BE-23, 자동차·대중교통은
+     * 2026-10-18). 구버전 서버는 자동차·대중교통에 주지 않는다. 점이 둘 미만이면 선이
+     * 되지 않는다.
+     */
+    val canPreviewMap: Boolean get() = routePath.size >= 2
+
     // AI-generated (Claude)
     /**
-     * 카드를 눌러 지도 미리보기를 열 수 있는가.
+     * 카드를 누르면 바로 지도로 가는가.
      *
-     * 서버는 도보·자전거 후보에만 좌표(`path`)를 준다(BE-23). 대중교통·자동차는 좌표가
-     * 없고, 구버전 서버는 도보·자전거에도 주지 않는다. 점이 둘 미만이면 선이 되지 않는다.
+     * 자동차·도보·자전거는 탭에 경로가 하나뿐이라 고르는 것이 곧 그 경로를 보는 것이다
+     * (도보·자전거는 카카오가 하나만 주고, 자동차는 B-4 전까지 서버가 하나만 준다).
+     * 대중교통은 후보가 여럿이라 누르면 **고르기만** 하고(정류장 목록이 펼쳐진다), 지도는
+     * 카드의 "지도로 보기" 로 연다. 누를 때마다 전체 화면으로 가면 후보를 비교할 수 없다.
      */
-    val canPreviewMap: Boolean
-        get() = (travelMode == RouteMode.WALK || travelMode == RouteMode.BICYCLE) &&
-            routePath.size >= 2
+    val opensPreviewOnTap: Boolean get() = canPreviewMap && travelMode != RouteMode.TRANSIT
 }
 
 // AI-generated (Claude)

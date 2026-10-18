@@ -59,6 +59,14 @@ class RouteDisplayTest {
             }
             device.takeScreenshot(File(directory, "route-display.png"))
             device.dumpWindowHierarchy(File(directory, "route-display.xml"))
+            // Partly AI-generated (Claude)
+            // 대중교통은 카드가 고르기라서 "지도로 보기" 로 지도를 연다(10-13). 뒤로 = 목록.
+            ui.click(By.res("route_preview_transit:5511"), "route_scroll")
+            ui.await(By.res("candidate_route_map"))
+            ui.await(By.desc("경로 지도"), timeout = 90_000)
+            device.takeScreenshot(File(directory, "candidate-transit.png"))
+            device.pressBack()
+            ui.await(By.res("route_scroll"))
             // 도보: 미리보기의 "이 경로로 계산" 이 일정 추가로 바로 돌아간다.
             ui.click(By.text("도보"), "route_scroll")
             ui.click(By.res("route_walk"), "route_scroll")
@@ -71,7 +79,7 @@ class RouteDisplayTest {
             File(directory, "route-display-result.json").writeText(JSONObject()
                 .put("status", "passed").put("badges", "최단 시간 · 최소 비용 · 최소 환승")
                 .put("alternative_buses", "5513 · 643")
-                .put("candidate_maps", "bicycle · walk")
+                .put("candidate_maps", "bicycle · transit · walk")
                 .put("duration_ms", System.currentTimeMillis() - started).toString(2))
         } catch (error: Throwable) {
             device.takeScreenshot(File(directory, "route-display-failure.png"))

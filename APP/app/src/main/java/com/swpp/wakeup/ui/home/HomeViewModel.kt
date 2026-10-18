@@ -1891,7 +1891,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // AI-generated (Claude)
     /**
-     * 도보·자전거 후보의 지도 미리보기를 연다. 그 후보를 고른 상태로 만든다.
+     * 경로 후보의 지도 미리보기를 연다(수단 무관, 좌표가 있을 때). 그 후보를 고른 상태로
+     * 만든다 — 닫고 목록으로 돌아오면 그 카드가 골라져 있다.
      *
      * 일정 지도(`_routeMap`)·추적 상태는 건드리지 않는다. 지도 상태는 미리보기 화면
      * 안에서만 산다(`CandidateRouteMapCard`).
