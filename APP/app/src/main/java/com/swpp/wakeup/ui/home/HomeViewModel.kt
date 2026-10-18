@@ -41,6 +41,7 @@ import com.swpp.wakeup.domain.model.RoutineEditorState
 import com.swpp.wakeup.sensing.BlockObservationQueue
 import com.swpp.wakeup.sensing.CurrentLocation
 import com.swpp.wakeup.domain.model.PlanRow
+import com.swpp.wakeup.domain.model.KakaoMapProjection
 import com.swpp.wakeup.domain.model.MapCameraMath
 import com.swpp.wakeup.domain.model.RouteMapProjection
 import com.swpp.wakeup.domain.model.StaticMapScale
@@ -64,7 +65,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.OffsetDateTime
-import kotlin.math.cos
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -1652,17 +1652,27 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val query = placeSearchOf(target).query.trim()
         if (query.isBlank()) return
 
-        val halfLatDeg =
-            (viewHeightPx / 2.0 * metersPerPixel) / StaticMapScale.METERS_PER_DEGREE
-        val halfLngDeg = (viewWidthPx / 2.0 * metersPerPixel) /
-            (StaticMapScale.METERS_PER_DEGREE *
-                cos(Math.toRadians(state.center.lat)).coerceAtLeast(0.01))
+        // 보이는 사각형은 지도 좌표(KakaoMapProjection)의 사각형이다. 네 모서리를
+        // 위·경도로 되돌려 그것을 모두 담는 범위를 보낸다.
+        val halfWidthM = viewWidthPx / 2.0 * metersPerPixel
+        val halfHeightM = viewHeightPx / 2.0 * metersPerPixel
+        val centerTm = KakaoMapProjection.forward(state.center)
+        val corners = listOf(-1.0, 1.0).flatMap { sx ->
+            listOf(-1.0, 1.0).map { sy ->
+                KakaoMapProjection.inverse(
+                    KakaoMapProjection.Tm(
+                        centerTm.x + sx * halfWidthM,
+                        centerTm.y + sy * halfHeightM,
+                    )
+                )
+            }
+        }
 
         val rect = listOf(
-            state.center.lng - halfLngDeg,
-            state.center.lat - halfLatDeg,
-            state.center.lng + halfLngDeg,
-            state.center.lat + halfLatDeg,
+            corners.minOf { it.lng },
+            corners.minOf { it.lat },
+            corners.maxOf { it.lng },
+            corners.maxOf { it.lat },
         ).joinToString(",") { "%.6f".format(Locale.ROOT, it) }
 
         _mapPick.update { it?.copy(searching = true, error = null) }

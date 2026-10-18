@@ -14,14 +14,15 @@ import org.junit.Test
  * 좌표 변환이 여기 있고, 틀려도 **에러가 나지 않는다** — 지도와 겹쳐 보면
  * 그럴싸한 모양이 나와서 눈으로는 알아채기 어렵다. 그래서 수치로 고정한다.
  *
- * 같은 식이 `jit-tools/make_route_map.py` 에 있고 피그마 경로 지도를 그것으로
- * 그렸다. 둘이 어긋나면 디자인과 구현이 다른 그림이 된다.
+ * 실제로 그렇게 틀렸었다. 축척을 두 배로 잘못 알고 있어서 경로선이 지도 중심에서
+ * 두 배 멀리 그려졌다(신림역→서울대 301동의 끝이 관악산 능선). 2026-10-18 에 마커
+ * 없는 지도 두 장의 위상 상관으로 축척을 다시 쟀다([StaticMapScale]).
  */
 class RouteMapProjectionTest {
 
     private val center = GeoPoint(37.4867, 126.9789)
 
-    /** 실측 조건: lv9, 360 요청 단위, 화면도 360px(밀도 1 가정) */
+    /** lv9, 360 요청 단위, 화면도 360px(밀도 1 가정) */
     private fun viewport(level: Int = 9, viewPx: Int = 360, heightPx: Int = 260) =
         RouteMapProjection.Viewport(
             center = center,
@@ -59,17 +60,49 @@ class RouteMapProjectionTest {
     // --- 축척 --------------------------------------------------------------
 
     @Test
-    fun `lv9 에서 한 픽셀은 32미터다`() {
-        // 실측값. lv4 가 1.0 이고 레벨당 두 배이므로 2^5 = 32.
-        assertEquals(32.0, viewport().metersPerPixel, 0.001)
+    fun `lv9 에서 한 픽셀은 64미터다`() {
+        // 실측값. lv3 이 1.0 이고 레벨당 두 배이므로 2^6 = 64.
+        assertEquals(64.0, viewport().metersPerPixel, 0.001)
     }
 
     @Test
-    fun `위도 0_01도는 lv9 에서 약 35픽셀이다`() {
-        // 0.01 × 111320 = 1113.2m, ÷ 32 = 34.8px
+    fun `축척은 마커 없는 실측과 같다`() {
+        // 중심만 북쪽으로 50단위만큼 옮긴 두 장이 lv4·6·8·10 모두 정확히 50단위 밀렸다.
+        assertEquals(1.0, StaticMapScale.metersPerUnit(3), 1e-9)
+        assertEquals(2.0, StaticMapScale.metersPerUnit(4), 1e-9)
+        assertEquals(8.0, StaticMapScale.metersPerUnit(6), 1e-9)
+        assertEquals(32.0, StaticMapScale.metersPerUnit(8), 1e-9)
+        assertEquals(128.0, StaticMapScale.metersPerUnit(10), 1e-9)
+        assertEquals(0.25, StaticMapScale.metersPerUnit(1), 1e-9)
+    }
+
+    @Test
+    fun `위도 0_01도는 lv9 에서 약 17픽셀이다`() {
+        // 지도 좌표로 1,109.9m(위도 1도 ≈ 110,990m), ÷ 64 = 17.34px.
         val north = GeoPoint(center.lat + 0.01, center.lng)
         val px = RouteMapProjection.toPx(north, viewport())
-        assertEquals(130f - 34.8f, px.y, 0.5f)
+        assertEquals(130f - 17.34f, px.y, 0.02f)
+        assertEquals(180f, px.x, 0.02f)
+    }
+
+    @Test
+    fun `카카오 마커와 같은 자리에 그린다`() {
+        // 실측: lv8, 500단위 지도 중심(37.46, 126.952)에서 동쪽 4.8km 마커의 끝이
+        // 중심에서 149.6단위 오른쪽, 높이 차이 없음(핀 끝 검출 오차 ±0.5단위).
+        val vp = RouteMapProjection.Viewport(GeoPoint(37.46, 126.952), 8, 500, 500, 500)
+        val px = RouteMapProjection.toPx(GeoPoint(37.46, 127.00625), vp)
+        assertEquals(250f + 149.65f, px.x, 0.6f)
+        assertEquals(250f, px.y, 0.6f)
+    }
+
+    @Test
+    fun `부산에서는 지도 좌표의 북쪽이 화면 위다`() {
+        // 진북으로 그리면 같은 위도의 동쪽 점이 중심과 같은 높이에 찍힌다. 실제 지도에서는
+        // 3단위 위에 있다(KakaoMapProjectionTest).
+        val vp = RouteMapProjection.Viewport(GeoPoint(35.1796, 129.0756), 8, 500, 500, 500)
+        val px = RouteMapProjection.toPx(GeoPoint(35.1796, 129.1283), vp)
+        assertEquals(250f + 150.05f, px.x, 0.05f)
+        assertEquals(250f - 3.17f, px.y, 0.05f)
     }
 
     @Test
@@ -77,7 +110,7 @@ class RouteMapProjectionTest {
         // 요청은 360 단위인데 화면이 1080px 이면 한 픽셀이 담는 거리가 1/3 이다.
         // 이걸 무시하면 경로가 화면의 1/3 크기로 그려진다.
         val dense = viewport(viewPx = 1080)
-        assertEquals(32.0 / 3, dense.metersPerPixel, 0.001)
+        assertEquals(64.0 / 3, dense.metersPerPixel, 0.001)
     }
 
     @Test
@@ -97,22 +130,29 @@ class RouteMapProjectionTest {
     }
 
     @Test
-    fun `중심은 경로 범위의 가운데다`() {
+    fun `중심은 경로의 지도 좌표 범위 가운데다`() {
         val path = listOf(GeoPoint(37.48, 126.93), GeoPoint(37.50, 127.03))
         val (c, _) = RouteMapProjection.fit(path, 360, 260)!!
-        assertEquals(37.49, c.lat, 1e-9)
-        assertEquals(126.98, c.lng, 1e-9)
+        val a = KakaoMapProjection.forward(path[0])
+        val b = KakaoMapProjection.forward(path[1])
+        val mid = KakaoMapProjection.forward(c)
+        assertEquals((a.x + b.x) / 2, mid.x, 0.01)
+        assertEquals((a.y + b.y) / 2, mid.y, 0.01)
+        // 서울에서는 위·경도 가운데와 몇 m 차이다.
+        assertEquals(37.49, c.lat, 1e-4)
+        assertEquals(126.98, c.lng, 1e-4)
     }
 
     @Test
-    fun `신림에서 강남까지는 lv9 로 맞는다`() {
-        // 실측으로 확인한 값. make_route_map.py 가 같은 입력에 lv9 를 골랐다.
+    fun `신림에서 강남까지는 lv8 로 맞는다`() {
+        // 동서 8.6km. 360 단위 화면의 반(여백 18 제외 162단위)에 4.3km 가 들어가려면
+        // 한 단위 26.7m 이상 — lv8(32m).
         val path = listOf(
             GeoPoint(37.484267, 126.929745),
             GeoPoint(37.497942, 127.027621),
         )
         val (_, level) = RouteMapProjection.fit(path, 360, 260)!!
-        assertEquals(9, level)
+        assertEquals(8, level)
     }
 
     @Test
@@ -172,12 +212,23 @@ class RouteMapProjectionTest {
 
     @Test
     fun `수원에서 서울대 정도 거리도 한 화면에 들어온다`() {
-        // 장소 고르기 상한(레벨 10)은 360 단위 폭이 23km 라 이 경로가 잘린다.
-        // 통학 경로로 실제로 있을 거리다.
+        // 남북 21.8km. 260 단위 높이에 들어가려면 lv10(128m) 이다. 통학 경로로 실제로 있을 거리다.
         val path = listOf(GeoPoint(37.2636, 127.0286), GeoPoint(37.4599, 126.9519))
         val (c, level) = RouteMapProjection.fit(path, 360, 260)!!
-        assertTrue("레벨 10 이하로는 이 경로가 안 들어간다", level > StaticMapScale.MAX_LEVEL)
+        assertEquals(10, level)
+        assertInside(path, c, level)
+    }
 
+    @Test
+    fun `천안에서 서울대 같은 장거리는 장소 고르기 상한보다 축소한다`() {
+        // 장소 고르기 상한(레벨 10)으로 자르면 남북 72km 가 화면에 안 들어간다.
+        val path = listOf(GeoPoint(36.8099, 127.1462), GeoPoint(37.4599, 126.9519))
+        val (c, level) = RouteMapProjection.fit(path, 360, 260)!!
+        assertTrue("레벨 10 이하로는 이 경로가 안 들어간다 ($level)", level > StaticMapScale.MAX_LEVEL)
+        assertInside(path, c, level)
+    }
+
+    private fun assertInside(path: List<GeoPoint>, c: GeoPoint, level: Int) {
         val vp = RouteMapProjection.Viewport(c, level, 360, 360, 260)
         for (p in path) {
             val px = RouteMapProjection.toPx(p, vp)

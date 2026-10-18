@@ -2,8 +2,6 @@ package com.swpp.wakeup.domain.model
 
 import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.sensing.GeoPoint
-import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -72,7 +70,8 @@ object MapCameraMath {
      * 끝난 pan/pinch를 새 카메라로 확정한다.
      *
      * 이동 거리는 **새 줌 레벨의** 축척으로 계산한다. 그래야 pan과 pinch를 함께
-     * 했을 때 손을 떼는 순간 지도가 옆으로 튀지 않는다.
+     * 했을 때 손을 떼는 순간 지도가 옆으로 튀지 않는다. 끈 거리는 지도 좌표
+     * ([KakaoMapProjection])에서 옮긴다 — 화면에 보이는 그림이 그 좌표로 그려져 있다.
      */
     fun finishGesture(
         center: GeoPoint,
@@ -88,16 +87,19 @@ object MapCameraMath {
         val actualDelta = nextLevel - level
         val nextMetersPerPixel = metersPerPixel * 2.0.pow(actualDelta)
 
-        // 지도를 오른쪽으로 끌면 카메라는 서쪽으로 이동한다.
-        val dLat = (panPx.y * nextMetersPerPixel) / StaticMapScale.METERS_PER_DEGREE
-        val longitudeMeters = StaticMapScale.METERS_PER_DEGREE *
-            cos(Math.toRadians(center.lat)).coerceAtLeast(0.01)
-        val dLng = (-panPx.x * nextMetersPerPixel) / longitudeMeters
+        // 지도를 오른쪽으로 끌면 카메라는 서쪽으로, 아래로 끌면 북쪽으로 이동한다.
+        val from = KakaoMapProjection.forward(center)
+        val moved = KakaoMapProjection.inverse(
+            KakaoMapProjection.Tm(
+                x = from.x - panPx.x * nextMetersPerPixel,
+                y = from.y + panPx.y * nextMetersPerPixel,
+            )
+        )
 
         return Camera(
             center = GeoPoint(
-                lat = (center.lat + dLat).coerceIn(-89.0, 89.0),
-                lng = normalizeLongitude(center.lng + dLng),
+                lat = moved.lat.coerceIn(-89.0, 89.0),
+                lng = moved.lng,
             ),
             level = nextLevel,
         )
@@ -110,12 +112,11 @@ object MapCameraMath {
         metersPerPixel: Double,
     ): Offset {
         if (metersPerPixel <= 0.0 || !metersPerPixel.isFinite()) return Offset.Zero
-        val latitudeMeters = (point.lat - center.lat) * StaticMapScale.METERS_PER_DEGREE
-        val longitudeMeters = shortestLongitudeDelta(point.lng, center.lng) *
-            StaticMapScale.METERS_PER_DEGREE * cos(Math.toRadians(center.lat))
+        val p = KakaoMapProjection.forward(point)
+        val c = KakaoMapProjection.forward(center)
         return Offset(
-            x = (longitudeMeters / metersPerPixel).toFloat(),
-            y = (-latitudeMeters / metersPerPixel).toFloat(),
+            x = ((p.x - c.x) / metersPerPixel).toFloat(),
+            y = (-(p.y - c.y) / metersPerPixel).toFloat(),
         )
     }
 
@@ -161,17 +162,4 @@ object MapCameraMath {
     }
 
     private fun log2(value: Double): Double = ln(value) / ln(2.0)
-
-    private fun normalizeLongitude(value: Double): Double {
-        var normalized = value
-        while (normalized > 180.0) normalized -= 360.0
-        while (normalized < -180.0) normalized += 360.0
-        return normalized
-    }
-
-    private fun shortestLongitudeDelta(value: Double, center: Double): Double {
-        var delta = value - center
-        if (abs(delta) > 180.0) delta -= 360.0 * kotlin.math.sign(delta)
-        return delta
-    }
 }

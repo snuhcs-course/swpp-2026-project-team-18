@@ -11,21 +11,23 @@ import org.junit.Test
  * 검색하고, 지도를 끌면 손가락보다 많거나 적게 움직인다. 둘 다 에러가 나지
  * 않아서 "왜 안 보이던 게 나오지" 로만 드러난다.
  *
- * 그래서 실측값을 못 박는다. 측정은 `jit-tools/calibrate_staticmap.py` 가
- * 같은 이미지에 마커 두 개를 알려진 위도 차로 찍고 픽셀 간격을 재는 방식으로
- * 했다.
+ * 그래서 실측값을 못 박는다. 2026-10-18 에 **마커 없이** 다시 쟀다 — 같은 크기의
+ * 지도를 중심만 알려진 거리만큼 옮겨 두 장 받고 위상 상관으로 그림이 밀린 픽셀
+ * 수를 쟀다. 예전 측정(마커 두 개의 간격)은 두 배 틀렸다. 카카오는 마커를 주면
+ * 마커가 다 보이도록 줌을 바꾸기 때문이다.
  */
 class StaticMapScaleTest {
 
     @Test
     fun `기준 레벨에서 한 단위가 1미터다`() {
-        assertEquals(1.0, StaticMapScale.metersPerUnit(StaticMapScale.BASE_LEVEL), 0.001)
+        assertEquals(3, StaticMapScale.REFERENCE_LEVEL)
+        assertEquals(1.0, StaticMapScale.metersPerUnit(StaticMapScale.REFERENCE_LEVEL), 0.001)
     }
 
     @Test
     fun `레벨 하나가 정확히 두 배다`() {
-        // 실측에서 lv4→lv7 이 8.012배, lv7→lv10 이 7.989배였다. 두 배가 맞다.
-        for (level in StaticMapScale.BASE_LEVEL until 14) {
+        // 재측정에서 lv1~15 모두 두 배였다.
+        for (level in 1 until StaticMapScale.ROUTE_MAX_LEVEL) {
             val here = StaticMapScale.metersPerUnit(level)
             val next = StaticMapScale.metersPerUnit(level + 1)
             assertEquals("lv$level → lv${level + 1}", here * 2, next, 0.0001)
@@ -33,18 +35,18 @@ class StaticMapScaleTest {
     }
 
     @Test
-    fun `기준 레벨 아래로는 더 확대되지 않는다`() {
-        // lv1~4 를 모두 1.00 으로 측정했다. 카카오가 그 아래를 잘라 낸다.
-        for (level in 1..StaticMapScale.BASE_LEVEL) {
-            assertEquals("lv$level", 1.0, StaticMapScale.metersPerUnit(level), 0.001)
+    fun `실제로 측정한 지점과 맞는다`() {
+        // 마커 없는 두 장의 위상 상관(scale 1·2 같음).
+        val measured = mapOf(1 to 0.25, 2 to 0.5, 3 to 1.0, 4 to 2.0, 6 to 8.0, 8 to 32.0, 10 to 128.0, 15 to 4096.0)
+        for ((level, metersPerUnit) in measured) {
+            assertEquals("lv$level", metersPerUnit, StaticMapScale.metersPerUnit(level), 1e-9)
         }
     }
 
     @Test
-    fun `실제로 측정한 지점과 맞는다`() {
-        // calibrate_staticmap.py 결과: lv7 = 8.03, lv10 = 64.15
-        assertEquals(8.0, StaticMapScale.metersPerUnit(7), 0.1)
-        assertEquals(64.0, StaticMapScale.metersPerUnit(10), 0.5)
+    fun `장소 고르기 기본 줌은 360단위 폭이 약 3km 다`() {
+        val widthM = 360 * StaticMapScale.metersPerUnit(StaticMapScale.DEFAULT_LEVEL)
+        assertEquals(2_880.0, widthM, 1.0)
     }
 
     @Test
