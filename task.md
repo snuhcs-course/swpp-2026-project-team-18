@@ -323,7 +323,7 @@ Figma 공통: "‹ 경로 선택" → "어떻게 갈까?" / "출발지 → 도�
 
 ## 18. 캘린더 연동 (Figma node 402:9, 2026-10-18 신규) — `ui/calendar/CalendarLinkScreen.kt`
 
-요청: 가입할 때 ⑮ 준비 시간 다음에 캘린더 연동 화면에서 캘린더를 고르고, ⑯ 설정에서 고른 캘린더를 스위치로 켜고 끈다. Figma 반영은 `docs/iter2/figma-changes.md` F-15(상태 변형 `403:9`, ⑯ 캘린더 칸).
+요청: 가입할 때 ⑮ 준비 시간 다음에 캘린더 연동 화면에서 캘린더를 고르고, ⑯ 설정에서 고른 캘린더를 스위치로 켜고 끈다. Figma 반영은 `docs/iter2/figma-changes.md` F-15(상태 변형 `403:9`, ⑯ 캘린더 칸)와 F-16("캘린더가 안 보이면" 안내).
 
 ### 🔴 백엔드 (→ `docs/iter2/backend-requests.md` R-11 ~ R-14)
 - 지금 앱은 서버 변경 없이 동작한다. 연동 목록은 기기에만 둔다(기기 캘린더 id 가 기기마다 다름).
@@ -336,6 +336,22 @@ Figma 공통: "‹ 경로 선택" → "어떻게 갈까?" / "출발지 → 도�
 - [x] 캘린더 가져오기: 연동한 캘린더의 일정만 읽는다(`DeviceCalendar.read(calendarIds)`, 질의 단계에서 거름). 연동한 것이 없으면 화면 위에 스위치를 먼저 보이고, 켜면 아래에 일정이 나온다. 여기서 켠 것은 ⑯ 에도 켜진다(같은 저장소).
 - [x] 저장소 `CalendarLinkStore`: 계정 소유자 표시(`editOwned`/`discardIfForeign`), 로그아웃·로그인 때 `LocalStores.wipeAll` 이 지움, Android 백업·기기 이전에서 제외(다른 기기에서는 id 가 다른 캘린더를 가리킨다). `PrefsScopeAuditTest` 목록에 넣었다.
 - [ ] ⏳ 팀 결정 뒤(R-11~R-14): 연동한 캘린더를 자동으로 따라가는 동기화, `external_id` 를 iCal UID 기반으로 바꾸기, 동기화로 들어온 일정의 장소 확인 화면.
+
+### 연동할 수 있는 캘린더 (조사 2026-10-18)
+
+지금 방식은 **기기 캘린더 읽기**(`CalendarContract`, `READ_CALENDAR`)다. 휴대폰 캘린더에 들어 있으면 출처와 상관없이 읽힌다. PM 지시로 에브리타임은 이번에 다루지 않고 구글·카카오만 정리했다.
+
+| 서비스 | 지금 앱 | 공식 API | 결론 |
+| --- | --- | --- | --- |
+| 구글 캘린더 | 됨(휴대폰에 구글 계정 + 캘린더 동기화) | Google Calendar API. 캘린더 읽기는 "민감한 범위"라 공개 배포 전 구글 앱 검증이 필요하고, 검증 전에는 등록한 테스트 사용자만 쓴다 | 지금 방식 유지. API 직접 연동은 서버 자동 동기화(R-11)를 하게 되면 검토 |
+| 카카오 톡캘린더 | 기기 캘린더에 들어오는 것을 확인하지 못함 | 톡캘린더 REST API. 카카오 로그인·동의항목 `talk_calendar`·권한 신청(승인 전에는 앱 팀원만). **우리 서비스가 만들지 않은 일정은 시간만 준다**(제목·장소 없음), 조회 기간 31일 이내 | 가져오기(읽기)는 불가. 할 수 있는 것은 우리 일정을 톡캘린더에 **쓰기**뿐이고 카카오 로그인이 먼저다 |
+
+근거: Google 도움말 "다른 앱과의 Google Calendar 데이터 공유 제어하기"(support.google.com/calendar/answer/16089827), Google "Sensitive scope verification"(developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification), Kakao Developers 톡캘린더 개념·REST API(developers.kakao.com/docs/en/talkcalendar/common, …/rest-api).
+
+- [x] (10-18) 구글: 목록에서 동기화를 끈 캘린더(`SYNC_EVENTS = 0`)를 뺀다. ⑱·⑯·가져오기·"기기에 캘린더 없음" 에 "캘린더가 안 보이면" 안내(휴대폰 계정 동기화, 구글 캘린더 앱의 '다른 앱과 Google Calendar 데이터 공유')와 "동기화 설정 열기"·"Google Calendar 열기" 버튼. 구글 캘린더 앱 설치 여부는 매니페스트 `<queries>` 로 본다. 화면으로 돌아오면 목록을 다시 읽는다. Figma F-16.
+- [x] (10-18) 카카오: 기기 목록에 카카오 캘린더가 없으면 같은 안내에 "카카오 톡캘린더 · 휴대폰 캘린더에 들어오지 않아 가져올 수 없음" 을 적는다(판정 `CalendarSources.isKakao`, 테스트 `CalendarSourcesTest`). 있으면 다른 캘린더처럼 켜서 쓴다.
+- [ ] ⏳ 카카오 실기기 확인: 카카오톡이 깔린 기기에서 ⑱ 목록에 톡캘린더가 뜨는지. 뜨면 계정 종류 문자열을 `isKakao` 에 넣고 안내 문구를 고친다.
+- [ ] ⏳ 팀 결정: 우리 일정을 톡캘린더에 쓰기. 필요한 것 — 카카오 로그인(Android SDK, 네이티브 앱 키, 패키지 이름·키 해시 등록), 동의항목 `talk_calendar`, 카카오 권한 신청. 앱 로그인을 카카오로도 받을지(소셜 로그인, 서버 작업)와는 별개로 "캘린더용 카카오 계정 연결" 만 할 수도 있다.
 
 ---
 
