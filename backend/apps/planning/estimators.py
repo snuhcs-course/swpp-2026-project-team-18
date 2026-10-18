@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from django.db.models import QuerySet
+from django.utils import timezone as dj_tz
 
 from apps.routines.models import RoutineBlock
 
@@ -298,6 +299,8 @@ def _lookup_correction(signature: str, mode: str, when: datetime):
     """가장 구체적인 보정부터 찾아 (경로별, 전역) 쌍으로 돌려준다."""
     from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection
 
+    if when is not None and dj_tz.is_aware(when):
+        when = dj_tz.localtime(when)
     hour = when.hour if when else -1
     weekday = (
         RouteCorrection.WeekdayType.WEEKEND

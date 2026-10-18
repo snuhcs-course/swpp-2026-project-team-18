@@ -326,6 +326,9 @@ class TestEstimateTravel:
         est = estimate_travel(20.0, "transit:2호선", "transit",
                               datetime(2026, 9, 21, 8, 30, tzinfo=KST))  # 월요일 8시
         assert est.distribution.mean == pytest.approx(26.0)
+        same_instant_utc = datetime(2026, 9, 21, 8, 30, tzinfo=KST).astimezone(timezone.utc)
+        from_db = estimate_travel(20.0, "transit:2호선", "transit", same_instant_utc)
+        assert from_db.distribution.mean == pytest.approx(26.0)
 
     def test_signature_is_trimmed_and_bounded(self):
         assert route_signature("  transit:2호선  ") == "transit:2호선"
