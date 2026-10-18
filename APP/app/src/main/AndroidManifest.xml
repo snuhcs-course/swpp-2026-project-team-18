@@ -52,6 +52,15 @@
     -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
 
+    <!--
+      구글 캘린더 앱이 깔려 있는지만 본다(⑱ · ⑯ "Google Calendar 열기").
+      '다른 앱과 Google Calendar 데이터 공유' 설정이 그 앱 안에만 있다.
+      Android 11+ 는 여기 적은 패키지만 설치 여부를 알려 준다.
+    -->
+    <queries>
+        <package android:name="com.google.android.calendar" />
+    </queries>
+
     <!-- 위치 없이도 앱은 쓸 수 있다. 판별 기능만 비활성된다. -->
     <uses-feature
         android:name="android.hardware.location.gps"

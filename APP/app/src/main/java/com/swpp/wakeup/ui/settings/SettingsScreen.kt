@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.CalendarLinkState
 import com.swpp.wakeup.domain.model.CalendarPermission
+import com.swpp.wakeup.ui.calendar.CalendarHelpActions
+import com.swpp.wakeup.ui.calendar.CalendarHelpToggle
 import com.swpp.wakeup.ui.calendar.CalendarLinkStatus
 import com.swpp.wakeup.ui.calendar.CalendarRowControl
 import com.swpp.wakeup.ui.calendar.CalendarSourceList
@@ -69,6 +71,8 @@ fun SettingsScreen(
     calendarLink: CalendarLinkState = CalendarLinkState(),
     onCalendarToggle: (id: Long, on: Boolean) -> Unit = { _, _ -> },
     onRequestCalendarPermission: () -> Unit = {},
+    /** "캘린더가 안 보이면" 안내의 버튼. null 이면 안내를 그리지 않는다 */
+    calendarHelp: CalendarHelpActions? = null,
 ) {
     Column(
         modifier = modifier
@@ -124,6 +128,7 @@ fun SettingsScreen(
             link = calendarLink,
             onToggle = onCalendarToggle,
             onRequestPermission = onRequestCalendarPermission,
+            help = calendarHelp,
         )
 
         SectionLabel("지금 상태")
@@ -271,6 +276,7 @@ private fun CalendarSection(
     link: CalendarLinkState,
     onToggle: (Long, Boolean) -> Unit,
     onRequestPermission: () -> Unit,
+    help: CalendarHelpActions?,
 ) {
     when {
         link.permission == CalendarPermission.MISSING ||
@@ -297,9 +303,11 @@ private fun CalendarSection(
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
+            // 설정은 이미 길다. 안내는 접어 두고 필요할 때 펼친다.
+            help?.let { CalendarHelpToggle(showKakao = !link.hasKakaoCalendar, actions = it) }
         }
 
-        else -> CalendarLinkStatus(link = link, onRequestPermission = onRequestPermission)
+        else -> CalendarLinkStatus(link = link, onRequestPermission = onRequestPermission, help = help)
     }
 }
 

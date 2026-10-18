@@ -130,6 +130,11 @@ object DeviceCalendar {
      * 안 보기로 한 것이라 여기서 다시 묻지 않는다. 일정은 읽지 않는다 — 목록에는
      * 캘린더 이름과 계정만 필요하다.
      *
+     * **동기화를 끈 캘린더도 뺀다**(`SYNC_EVENTS = 0`). 구글 캘린더 앱에서 캘린더별
+     * 동기화를 끄면 그 일정은 휴대폰에 저장되지 않는다. 목록에 두면 켜도 가져올 일정이
+     * 나오지 않아 사용자는 앱이 고장 났다고 읽는다. 다시 켜는 길은 화면의 "캘린더가 안
+     * 보이면" 안내가 말한다.
+     *
      * 권한이 없거나 조회가 실패하면 빈 목록을 준다. [read] 와 같은 이유다.
      */
     fun listCalendars(context: Context): List<DeviceCalendarSource> {
@@ -138,8 +143,11 @@ object DeviceCalendar {
             context.contentResolver.query(
                 CalendarContract.Calendars.CONTENT_URI,
                 CALENDAR_PROJECTION,
+                // NULL 은 통과시킨다. 값을 기록하지 않는 캘린더 제공자가 있다.
                 "(${CalendarContract.Calendars.VISIBLE} IS NULL OR " +
-                    "${CalendarContract.Calendars.VISIBLE} = 1)",
+                    "${CalendarContract.Calendars.VISIBLE} = 1) AND " +
+                    "(${CalendarContract.Calendars.SYNC_EVENTS} IS NULL OR " +
+                    "${CalendarContract.Calendars.SYNC_EVENTS} = 1)",
                 null,
                 null,
             )?.use { cursor ->
@@ -152,6 +160,8 @@ object DeviceCalendar {
                     cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR)
                 val primaryIndex =
                     cursor.getColumnIndexOrThrow(CalendarContract.Calendars.IS_PRIMARY)
+                val accountTypeIndex =
+                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_TYPE)
                 buildList {
                     while (cursor.moveToNext()) {
                         val account = cursor.getString(accountIndex)?.trim()?.takeIf { it.isNotEmpty() }
@@ -165,6 +175,8 @@ object DeviceCalendar {
                                 accountName = account,
                                 color = if (cursor.isNull(colorIndex)) null else cursor.getInt(colorIndex),
                                 primary = !cursor.isNull(primaryIndex) && cursor.getInt(primaryIndex) == 1,
+                                accountType = cursor.getString(accountTypeIndex)?.trim()
+                                    ?.takeIf { it.isNotEmpty() },
                             )
                         )
                     }
@@ -269,7 +281,20 @@ object DeviceCalendar {
         CalendarContract.Calendars.ACCOUNT_NAME,
         CalendarContract.Calendars.CALENDAR_COLOR,
         CalendarContract.Calendars.IS_PRIMARY,
+        CalendarContract.Calendars.ACCOUNT_TYPE,
     )
+
+    // Partly AI-generated (Claude)
+    /**
+     * 구글 캘린더 앱. ⑱ · ⑯ 의 "Google Calendar 열기" 가 쓴다.
+     *
+     * '다른 앱과 Google Calendar 데이터 공유' 설정이 이 앱 안에만 있다. 끄면 캘린더 권한을
+     * 받은 앱도 캘린더 제공자로 구글 일정을 읽지 못할 수 있다
+     * (support.google.com/calendar/answer/16089827). 앱이 그 화면으로 바로 보내는 공개
+     * 인텐트는 없어서 앱을 연다. 매니페스트 `<queries>` 에 같은 이름을 적어야 설치 여부를
+     * 알 수 있다(Android 11+ 패키지 가시성).
+     */
+    const val GOOGLE_CALENDAR_PACKAGE = "com.google.android.calendar"
 }
 
 // Partly AI-generated (Claude)
@@ -289,6 +314,11 @@ data class DeviceCalendarSource(
     val color: Int?,
     /** 계정의 기본 캘린더인가 */
     val primary: Boolean,
+    /**
+     * 동기화 계정 종류(`com.google` 등). 카카오 캘린더가 기기에 있는지 가릴 때 쓴다
+     * ([com.swpp.wakeup.domain.model.CalendarSources.isKakao]).
+     */
+    val accountType: String? = null,
 )
 
 /**

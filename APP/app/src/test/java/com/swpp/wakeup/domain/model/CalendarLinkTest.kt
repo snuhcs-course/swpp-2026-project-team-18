@@ -53,6 +53,21 @@ class CalendarLinkStateTest {
     }
 
     @Test
+    fun `기기에 카카오 캘린더가 있을 때만 톡캘린더 안내를 숨긴다`() {
+        // 들어와 있으면 켜서 쓰면 된다. 없을 때만 "가져올 수 없음" 이 사실이다.
+        val google = CalendarLinkState(
+            permission = CalendarPermission.GRANTED,
+            calendars = listOf(cal(1, account = "a@gmail.com")),
+        )
+        assertFalse(google.hasKakaoCalendar)
+
+        val withKakao = google.copy(
+            calendars = google.calendars + DeviceCalendarSource(2, "톡캘린더", null, null, false),
+        )
+        assertTrue(withKakao.hasKakaoCalendar)
+    }
+
+    @Test
     fun `다시 읽는 중에도 이미 받은 목록은 그대로 그린다`() {
         val reloading = CalendarLinkState(
             permission = CalendarPermission.GRANTED,
@@ -116,6 +131,20 @@ class CalendarSourcesTest {
             )
         )
         assertEquals(listOf(3L, 2L, 5L, 1L, 4L), ordered.map { it.id })
+    }
+
+    @Test
+    fun `카카오 캘린더는 계정 종류·계정·이름 어디로든 알아본다`() {
+        // 카카오가 기기 캘린더에 쓰는 계정 종류 문자열을 확인하지 못해 넓게 잡는다.
+        fun src(name: String, account: String? = null, type: String? = null) =
+            DeviceCalendarSource(1, name, account, null, false, accountType = type)
+
+        assertTrue(CalendarSources.isKakao(src("내 캘린더", type = "com.kakao.talk")))
+        assertTrue(CalendarSources.isKakao(src("내 캘린더", account = "user@kakao.com")))
+        assertTrue(CalendarSources.isKakao(src("톡캘린더")))
+        assertTrue(CalendarSources.isKakao(src("카카오 일정")))
+        assertFalse(CalendarSources.isKakao(src("수업 시간표", "a@gmail.com", "com.google")))
+        assertFalse(CalendarSources.isKakao(src("휴대전화", null, "LOCAL")))
     }
 
     @Test

@@ -58,6 +58,7 @@ import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
 import com.swpp.wakeup.ui.alarm.arrivalClockLabel
 import com.swpp.wakeup.ui.alarm.freshnessLabel
+import com.swpp.wakeup.ui.calendar.CalendarHelpActions
 import com.swpp.wakeup.ui.calendar.CalendarImportScreen
 import com.swpp.wakeup.ui.calendar.CalendarLinkScreen
 import com.swpp.wakeup.ui.common.durationLabel
@@ -385,6 +386,27 @@ private fun MainHost(
         }
     }
 
+    // Partly AI-generated (Claude)
+    // "캘린더가 안 보이면" 안내의 버튼. 돌아오면 onCalendarScreenResumed 가 목록을 다시 읽는다.
+    // 구글 캘린더 앱이 없으면 그 버튼은 그리지 않는다(매니페스트 <queries> 로 확인).
+    val googleCalendarLaunch = remember(activityContext) {
+        activityContext.packageManager.getLaunchIntentForPackage(DeviceCalendar.GOOGLE_CALENDAR_PACKAGE)
+    }
+    val calendarHelp = remember(activityContext, googleCalendarLaunch) {
+        CalendarHelpActions(
+            openSyncSettings = {
+                // 계정 동기화 화면이 없는 기기도 있다. 그때는 설정 첫 화면이라도 연다.
+                val opened = runCatching {
+                    activityContext.startActivity(Intent(Settings.ACTION_SYNC_SETTINGS))
+                }.isSuccess
+                if (!opened) runCatching { activityContext.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+            },
+            openGoogleCalendar = googleCalendarLaunch?.let { intent ->
+                { runCatching { activityContext.startActivity(intent) } }
+            },
+        )
+    }
+
     Scaffold(
         modifier = Modifier.semantics { testTagsAsResourceId = true },
         containerColor = JitColor.Bg,
@@ -601,6 +623,7 @@ private fun MainHost(
                     onSubmit = viewModel::submitCalendarOnboarding,
                     onSkip = viewModel::skipCalendarOnboarding,
                     modifier = Modifier.padding(innerPadding),
+                    help = calendarHelp,
                 )
 
                 AppRoute.HomeSetup -> HomeSetupScreen(
@@ -636,6 +659,7 @@ private fun MainHost(
                     calendarLink = calendarLinkState,
                     onCalendarToggle = viewModel::setCalendarLinked,
                     onRequestCalendarPermission = requestCalendarPermission,
+                    calendarHelp = calendarHelp,
                     // 빌드에 박힌 값이 아니라 실제로 쓰는 주소를 보여준다.
                     // 에뮬레이터면 10.0.2.2 로 바뀌어 있다.
                     devInfo = if (BuildConfig.DEV_TOOLS) {
@@ -680,6 +704,7 @@ private fun MainHost(
                     modifier = Modifier.padding(innerPadding),
                     link = calendarLinkState,
                     onCalendarToggle = viewModel::setCalendarLinked,
+                    help = calendarHelp,
                 )
 
                 AppRoute.WeeklyReport -> WeeklyReportScreen(

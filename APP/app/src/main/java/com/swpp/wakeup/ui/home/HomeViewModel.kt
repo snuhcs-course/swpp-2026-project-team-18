@@ -1108,8 +1108,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 화면으로 돌아왔을 때. 사용자가 기기 설정에서 권한을 바꾸고 왔을 수 있다.
      *
-     * 권한이 실제로 바뀐 경우에만 다시 읽는다. 화면이 돌아올 때마다 목록을 읽으면
-     * 스위치를 누르는 사이에도 목록이 깜빡인다.
+     * 권한이 바뀌었으면 목록과(가져오기 화면이면) 일정까지 다시 읽는다.
+     *
+     * 권한이 그대로여도 **캘린더 목록은 다시 읽는다.** "캘린더가 안 보이면" 안내를 따라
+     * 휴대폰 설정에서 동기화를 켜거나 구글 캘린더 앱에서 공유를 켜고 왔을 수 있다. 이미
+     * 받은 목록은 그대로 그리므로 깜빡이지 않는다. 가져오기의 일정 목록은 서버 조회와 장소
+     * 검색이 따라오므로 이 경우에는 다시 읽지 않는다 — 새 캘린더를 켜면 그때 읽는다.
+     * (Partly AI-generated (Claude))
      */
     fun onCalendarScreenResumed() {
         val current = _nav.value.current
@@ -1118,10 +1123,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         ) return
         val granted = DeviceCalendar.hasPermission(getApplication())
         val known = _calendarLink.value.permission == CalendarPermission.GRANTED
-        if (granted == known) return
-        if (granted) _calendarLink.update { it.copy(permission = CalendarPermission.GRANTED) }
-        loadCalendarSources()
-        if (current == AppRoute.CalendarImport) loadCalendarCandidates()
+        if (granted != known) {
+            if (granted) _calendarLink.update { it.copy(permission = CalendarPermission.GRANTED) }
+            loadCalendarSources()
+            if (current == AppRoute.CalendarImport) loadCalendarCandidates()
+            return
+        }
+        if (granted) loadCalendarSources()
     }
 
     /** 거절된 뒤라 시스템이 대화상자를 다시 띄우지 않을 수 있는가. 화면이 기기 설정으로 보낸다 */

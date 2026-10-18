@@ -54,6 +54,12 @@ data class CalendarLinkState(
     /** 목록을 그릴 수 있는가 */
     val showList: Boolean
         get() = permission == CalendarPermission.GRANTED && calendars.isNotEmpty()
+
+    /**
+     * 카카오 캘린더가 기기 캘린더에 들어와 있는가. 있으면 다른 캘린더처럼 목록에서 켜면
+     * 되므로 "톡캘린더는 가져올 수 없음" 안내를 띄우지 않는다. 판정은 [CalendarSources.isKakao].
+     */
+    val hasKakaoCalendar: Boolean get() = calendars.any(CalendarSources::isKakao)
 }
 
 // Partly AI-generated (Claude)
@@ -107,4 +113,26 @@ object CalendarSources {
         listOfNotNull(source.accountName, "기본".takeIf { source.primary })
             .joinToString(" · ")
             .takeIf { it.isNotEmpty() }
+
+    /**
+     * 카카오(톡캘린더)에서 온 캘린더로 보이는가.
+     *
+     * ## 왜 따로 가리는가
+     *
+     * 톡캘린더 일정을 다른 앱이 읽을 공식 경로가 없다. 카카오 톡캘린더 API 는 우리
+     * 서비스가 만들지 않은 일정에 대해 **시간만** 돌려준다(제목·장소 없음,
+     * developers.kakao.com/docs/en/talkcalendar/rest-api "Retrieve list of events").
+     * 기기 캘린더에 톡캘린더가 들어오는지는 확인하지 못했다. 그래서 기기 목록에 카카오
+     * 캘린더가 **보이지 않을 때만** "가져올 수 없음" 을 말한다. 들어와 있으면 다른
+     * 캘린더와 똑같이 켜서 쓰면 된다.
+     *
+     * 계정 종류·계정 이름·캘린더 이름 중 하나에 "kakao", "카카오", "톡캘린더" 가 있으면
+     * 카카오로 본다. 카카오가 쓰는 계정 종류 문자열을 확인하지 못해 넓게 잡았다.
+     */
+    fun isKakao(source: DeviceCalendarSource): Boolean =
+        listOfNotNull(source.accountType, source.accountName, source.name).any { field ->
+            KAKAO_MARKERS.any { field.contains(it, ignoreCase = true) }
+        }
+
+    private val KAKAO_MARKERS = listOf("kakao", "카카오", "톡캘린더")
 }

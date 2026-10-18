@@ -59,6 +59,8 @@ fun CalendarLinkScreen(
     onSubmit: () -> Unit,
     onSkip: () -> Unit,
     modifier: Modifier = Modifier,
+    /** "캘린더가 안 보이면" 안내의 버튼(기기 설정·구글 캘린더 앱). null 이면 안내를 그리지 않는다 */
+    help: CalendarHelpActions? = null,
 ) {
     Column(
         modifier = modifier
@@ -111,8 +113,11 @@ fun CalendarLinkScreen(
                     color = JitColor.TextSecondary,
                     fontSize = 11.sp,
                 )
+                // 처음 캘린더를 고르는 곳이라 펼쳐 둔다. 구글 계정이 있는데 목록에 없는
+                // 경우가 가장 흔한 막힘이다(동기화·공유 설정).
+                help?.let { CalendarHelp(showKakao = !link.hasKakaoCalendar, actions = it) }
             } else {
-                CalendarLinkStatus(link = link, onRequestPermission = onRequestPermission)
+                CalendarLinkStatus(link = link, onRequestPermission = onRequestPermission, help = help)
             }
         }
 
@@ -156,6 +161,7 @@ private fun CalendarLinkPreview() {
             onRequestPermission = {},
             onSubmit = {},
             onSkip = {},
+            help = CalendarHelpActions(openSyncSettings = {}, openGoogleCalendar = {}),
         )
     }
 }

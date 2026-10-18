@@ -70,6 +70,8 @@ fun CalendarImportScreen(
     /** 연동한 캘린더(⑱ · ⑯). 하나도 없으면 화면 위에서 바로 켠다 */
     link: CalendarLinkState = CalendarLinkState(),
     onCalendarToggle: (id: Long, on: Boolean) -> Unit = { _, _ -> },
+    /** "캘린더가 안 보이면" 안내의 버튼. null 이면 안내를 그리지 않는다 */
+    help: CalendarHelpActions? = null,
 ) {
     LazyColumn(
         modifier = modifier
@@ -118,7 +120,7 @@ fun CalendarImportScreen(
         // 연동한 캘린더 없이 열었으면 여기서 켠다(Figma ⑱ 상태 변형 "가져오기 · 연동 없음").
         // 다른 화면(⑯)으로 보내면 돌아오는 길에 목록이 낡는다.
         if (state.linkPicker) {
-            item(key = "link") { LinkPicker(state, link, onCalendarToggle, onRequestPermission) }
+            item(key = "link") { LinkPicker(state, link, onCalendarToggle, onRequestPermission, help) }
         }
         if (state.needsLink) return@LazyColumn
 
@@ -181,6 +183,7 @@ private fun LinkPicker(
     link: CalendarLinkState,
     onToggle: (Long, Boolean) -> Unit,
     onRequestPermission: () -> Unit,
+    help: CalendarHelpActions?,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(JitSpace.Section)) {
         JitCard(padding = 16.dp, gap = 7.dp) {
@@ -209,8 +212,9 @@ private fun LinkPicker(
                 control = CalendarRowControl.SWITCH,
                 enabled = !state.importing,
             )
+            help?.let { CalendarHelpToggle(showKakao = !link.hasKakaoCalendar, actions = it) }
         } else {
-            CalendarLinkStatus(link = link, onRequestPermission = onRequestPermission)
+            CalendarLinkStatus(link = link, onRequestPermission = onRequestPermission, help = help)
         }
     }
 }
