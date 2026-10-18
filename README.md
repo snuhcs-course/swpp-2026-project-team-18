@@ -55,7 +55,8 @@ What the MVP supports:
    progress bar shows a live ETA and colors the lateness outlook
 7. **Choose risk** — server-modeled safe/normal/gamble choices update the alarm and device schedule. Missing uncertainty has an explicit empty state
 8. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
-   offline. Prep observations feed the next calculation directly
+   offline. Prep observations feed the next calculation directly; GitHub Actions schedules
+   travel correction training daily at 03:17 KST ([status and guide](docs/iter2/daily-training.md))
 9. **Review** — a weekly report with a short written summary, a per-day detail (plan
    vs actual, cause of lateness) and calibration: did you arrive as often as τ promised?
 
@@ -84,8 +85,6 @@ make the screen look finished while being untrue.
 - Weekly and detailed reports ⑧⑨ — built; the Figma panels for sleep, alarm snoozes and
   per-weekday auto-adjustment are left out because nothing records that data yet
 - Sign-in — email and password only; the social buttons show a notice
-- Route learning — corrections update only when someone runs
-  `python manage.py train_models`; there is no scheduler on Render's free plan
 
 **Not started**
 
