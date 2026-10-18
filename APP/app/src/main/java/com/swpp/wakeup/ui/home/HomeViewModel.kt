@@ -2490,6 +2490,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val date: LocalDate = LocalDate.now().plusDays(1),
         val hour: Int = 9,
         val minute: Int = 0,
+        val repeatWeekdays: Set<Int> = emptySet(),
         /** null 이면 "기타" — 서버에서 태그를 비우고 프로필 기본 τ 를 쓴다 */
         val tagKey: String? = "class",
         /** 목적지 검색. 집 주소·출발지와 같은 상태를 쓴다 */
@@ -2555,6 +2556,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun onAddTitleChange(v: String) = _add.update { it.copy(title = v, error = null) }
     fun onAddDateChange(v: LocalDate) = _add.update { it.copy(date = v) }
     fun onAddTimeChange(h: Int, m: Int) = _add.update { it.copy(hour = h, minute = m) }
+    fun onAddRepeatDayToggle(day: Int) = _add.update {
+        val days = it.repeatWeekdays
+        it.copy(repeatWeekdays = if (day in days) days - day else days + day)
+    }
     fun onAddTagChange(key: String?) = _add.update { it.copy(tagKey = key) }
     fun onAddQueryChange(v: String) =
         _add.update { it.copy(place = it.place.withQuery(v)) }
@@ -2700,6 +2705,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 routeKey = current.routeKey,
                 origin = current.origin,
                 destinationIsHome = current.destinationIsHome,
+                repeatWeekdays = current.repeatWeekdays,
             )
             when (result) {
                 is EventRepository.Result.Success -> {

@@ -242,6 +242,7 @@ fun AlarmDecisionScreen(
                 color = JitColor.Red,
                 fontSize = 12.sp,
                 modifier = Modifier
+                    .testTag("event_delete")
                     .clip(RoundedCornerShape(8.dp))
                     .clickable(onClick = onDelete)
                     .padding(horizontal = 12.dp, vertical = 8.dp),

@@ -39,7 +39,8 @@ What the MVP supports:
 1. **Sign up and onboard** — server-checked password, terms consent, home address, prep time (5–240 minutes); sign-up allows 10 attempts per IP per hour
 2. **Add an event** — title, time, category (which sets τ), destination (Kakao place
    search, a pick on the map, or your current home), origin (home by default), and a route chosen from
-   grouped Kakao candidates: transit, walk, bicycle or car, with server-written guidance
+   grouped Kakao candidates: transit, walk, bicycle or car, with server-written guidance.
+   [Weekly repeats](docs/iter2/weekly-recurrence.md) show seven days ahead, with an independent alarm for each occurrence
 3. **See the alarm and why** — the server computes it; the decision screen breaks out
    prep, travel and buffer, each labeled as estimated, observed or fixed, with a progress bar and
    a route map. A faster alternative from the origin is drawn on the map
@@ -93,7 +94,7 @@ make the screen look finished while being untrue.
 - Editing a saved event — schedule changes via `PATCH /api/events/{id}` recompute, but the
   app has no edit screen
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
-- Recurring events (BE-20), user-defined tags (BE-21) and sleep-time calculation (BE-22)
+- User-defined tags (BE-21) and sleep-time calculation (BE-22)
 - Encrypted token storage — tokens sit in plain SharedPreferences; required before a
   real release
 - Battery-optimization guidance
@@ -263,7 +264,7 @@ budget for static maps.
 
 ## Verification
 
-Latest local integration evidence (2026-10-17, `back-iter2` feature baseline `d434097`): **1,182 backend tests, 611 Android tests, 8 HTTP suites with zero failures (34 external-key skips), lint zero errors, emulator E2E 386 seconds**. This is recorded/fixed upstream routing replay, not a claim about the current public deployment. See the [current checklist](docs/demo-checklist.md), [TODO](task.md) and [direct tests](docs/iter2/account-ranges-and-travel-counts.md).
+Latest local integration evidence (2026-10-19, BE-20 integration): **1,250 backend tests, 231 PostgreSQL event/plan-history regressions, 677 Android JVM tests, 8 HTTP suites with zero failures (2 skips), lint zero errors, emulator E2E 597 seconds**. Weekly recurrence selection, per-occurrence OFF/deletion and device alarm schedules were checked on the actual emulator UI. This uses recorded/fixed upstream routing replay; public deployment and live upstream validation are separate. See the [current checklist](docs/demo-checklist.md), [TODO](task.md) and [direct tests](docs/iter2/weekly-recurrence.md).
 
 
 Four suites run locally and in CI on every push to `main` and every pull request

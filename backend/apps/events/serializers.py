@@ -6,6 +6,7 @@ import json
 from functools import cached_property
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
 from .alarms import alarm_states
@@ -181,6 +182,7 @@ class EventSerializer(serializers.ModelSerializer):
     alarm_plan = serializers.SerializerMethodField()
     alarm_on = serializers.SerializerMethodField()
     is_first_alarm = serializers.SerializerMethodField()
+    repeat_weekdays = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
@@ -193,6 +195,9 @@ class EventSerializer(serializers.ModelSerializer):
             # 클라이언트가 "이미 가져온 일정" 을 알아야 목록에서 중복 선택을
             # 막을 수 있다.
             "external_id",
+            "recurrence_id",
+            "recurrence_date",
+            "repeat_weekdays",
             "place",
             "destination_is_home",
             "tag",
@@ -221,6 +226,9 @@ class EventSerializer(serializers.ModelSerializer):
             "id": None, "name": label, "address": "", "lat": lat, "lng": lng,
             "kakao_place_id": None,
         }
+
+    def get_repeat_weekdays(self, obj):
+        return obj.recurrence.weekdays if obj.recurrence_id is not None else []
 
     def get_lateness_sensitivity(self, obj) -> str:
         tau = obj.effective_tau
@@ -316,6 +324,10 @@ class EventWriteSerializer(serializers.ModelSerializer):
 
     place = PlaceInputSerializer(required=False, allow_null=True)
     tag_key = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    repeat_weekdays = serializers.ListField(
+        child=serializers.IntegerField(min_value=0, max_value=6), required=False,
+        max_length=7, default=list,
+    )
 
     class Meta:
         model = Event
@@ -328,6 +340,7 @@ class EventWriteSerializer(serializers.ModelSerializer):
             "tag_key",
             "tau_override",
             "alarm_enabled",
+            "repeat_weekdays",
             "route_key",
             "origin_lat",
             "origin_lng",
@@ -353,6 +366,13 @@ class EventWriteSerializer(serializers.ModelSerializer):
 
         부분 수정(PATCH)에서는 저장된 값과 합쳐서 판단한다.
         """
+        if self.instance is not None and "repeat_weekdays" in attrs:
+            raise serializers.ValidationError({"repeat_weekdays": "반복 규칙은 생성할 때 설정하며, 수정은 현재 회차에만 적용된다."})
+        days = attrs.get("repeat_weekdays")
+        if days:
+            if attrs["start_at"] < timezone.now():
+                raise serializers.ValidationError({"start_at": "반복 시작은 현재 이후로 설정해야 한다."})
+            attrs["repeat_weekdays"] = sorted(set(days))
         lat = attrs.get("origin_lat", getattr(self.instance, "origin_lat", None))
         lng = attrs.get("origin_lng", getattr(self.instance, "origin_lng", None))
         if (lat is None) != (lng is None):
@@ -434,6 +454,13 @@ class EventWriteSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        from . import recurrence
+
+        weekdays = validated_data.pop("repeat_weekdays", [])
+        if weekdays:
+            validated_data["start_at"] = recurrence.first_start(
+                validated_data["start_at"], weekdays, self.context["request"].user,
+            )
         place_data = validated_data.pop("place", None)
         tag_key = validated_data.pop("tag_key", None)
 
@@ -445,6 +472,8 @@ class EventWriteSerializer(serializers.ModelSerializer):
         event.place = self._resolve_place(place_data)
         event.tag = EventTag.objects.filter(key=tag_key).first() if tag_key else None
         event.save()
+        if weekdays:
+            recurrence.attach(event, weekdays)
         return event
 
     @transaction.atomic

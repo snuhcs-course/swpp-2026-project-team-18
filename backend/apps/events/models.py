@@ -94,6 +94,22 @@ class EventTag(models.Model):
         return self.label
 
 
+class EventRecurrence(models.Model):
+    """Weekly rule and immutable event inputs; concrete occurrences stay normal Events."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="event_recurrences")
+    start_at = models.DateTimeField()
+    timezone = models.CharField(max_length=64)
+    weekdays = models.JSONField(default=list)
+    template = models.JSONField(default=dict)
+    place = models.ForeignKey(Place, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    tag = models.ForeignKey(EventTag, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    excluded_dates = models.JSONField(default=list)
+
+    class Meta:
+        db_table = "events_recurrence"
+
+
 class Event(models.Model):
     """일정. 사용자별로 격리된다."""
 
@@ -111,6 +127,12 @@ class Event(models.Model):
     source = models.CharField(
         "출처", max_length=10, choices=Source.choices, default=Source.MANUAL
     )
+    recurrence = models.ForeignKey(
+        EventRecurrence, on_delete=models.CASCADE, null=True, blank=True,
+        default=None, db_default=None, related_name="occurrences",
+    )
+    # Original local slot survives a one-occurrence time edit.
+    recurrence_date = models.DateField(null=True, blank=True, default=None, db_default=None)
     # 캘린더 동기화용 외부 식별자. 직접 입력이면 null.
     external_id = models.CharField(
         "외부 ID", max_length=120, null=True, blank=True
@@ -213,6 +235,12 @@ class Event(models.Model):
             models.Index(fields=["user", "start_at"], name="events_user_start_idx"),
         ]
         constraints = [
+            models.UniqueConstraint(fields=["recurrence", "recurrence_date"], name="events_recurrence_date_unique"),
+            models.CheckConstraint(
+                condition=(Q(recurrence__isnull=True) & Q(recurrence_date__isnull=True))
+                | (Q(recurrence__isnull=False) & Q(recurrence_date__isnull=False)),
+                name="events_recurrence_slot_pair",
+            ),
             models.CheckConstraint(
                 condition=Q(destination_is_home=False) | Q(place__isnull=True),
                 name="events_event_home_without_place",

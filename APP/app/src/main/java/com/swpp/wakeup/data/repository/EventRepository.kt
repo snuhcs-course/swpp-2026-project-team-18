@@ -248,6 +248,7 @@ class EventRepository(
         routeKey: String? = null,
         origin: PlaceSearchItem? = null,
         destinationIsHome: Boolean = false,
+        repeatWeekdays: Set<Int> = emptySet(),
     ): Result<EventDto> = guard {
         val body = EventCreateRequest(
             title = title.trim(),
@@ -269,6 +270,7 @@ class EventRepository(
             originLng = origin?.lng,
             originLabel = origin?.name,
             destinationIsHome = destinationIsHome,
+            repeatWeekdays = repeatWeekdays.sorted(),
         )
         val response = api.create(body)
         // 필드별 오류를 살린다. 가까운 출발·도착(710545a)은 `details.destination` 으로 온다.

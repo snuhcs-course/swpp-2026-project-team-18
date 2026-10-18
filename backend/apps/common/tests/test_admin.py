@@ -28,6 +28,7 @@ from django.urls import reverse
 
 from apps.common.models import ApiRequestLog
 from apps.events.models import Event, Place
+from apps.events.recurrence import attach
 from apps.observations.models import AlarmLog, TripObservation
 from apps.planning.models import PlanRevision
 from apps.reports.models import LlmCall
@@ -68,6 +69,7 @@ def seeded(django_user_model):
         user=user, place=place, title="수업",
         start_at=datetime(2026, 10, 5, 9, 0, tzinfo=KST),
     )
+    attach(event, [0])
     TripObservation.objects.create(
         user=user, event=event, kind="arrive", detector="gps",
         observed_at=datetime(2026, 10, 5, 8, 55, tzinfo=KST),
@@ -174,6 +176,7 @@ class TestEveryAdminOpens:
         closed = {
             "alarmplan", "tripobservation", "weeklysummary",
             "planrevision", "alarmlog", "llmcall", "apirequestlog",
+            "eventrecurrence",
         }
         broken = []
         for model in registered_models():

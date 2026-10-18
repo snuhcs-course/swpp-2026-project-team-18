@@ -119,6 +119,10 @@ Windows에서는 `Invoke-RestMethod`를 쓸 수 있다. health는 DB·인증 정
 프로필 준비 시간은 5~240분(또는 기존 null), 가입은 IP당 10회/시간이다. 계획의 `travel_sample_count`는 실제 계산에 사용한 기존 추정기 표본 수이며 보정이 없으면 0이다. 마이그레이션 `planning.0010`이 필요하다.
 [직접 테스트·전후 검증](../docs/iter2/account-ranges-and-travel-counts.md).
 
+## 주간 반복 일정 (BE-20)
+
+BE-20 주간 반복은 `repeat_weekdays`(0=월~6=일)로 생성하며, 7일 범위의 회차마다 기존 일정/알람을 사용한다. 회차별 OFF/삭제를 지원하고 삭제 날짜는 다시 생성하지 않는다. 마이그레이션 `events.0008`이 필요하다. [API/직접 테스트/검증](../docs/iter2/weekly-recurrence.md).
+
 ## 검증과 학습
 
 `backend` 폴더에서 실행한다. 두 명령 모두 공용 DB와 분리된 테스트 DB를 사용한다.

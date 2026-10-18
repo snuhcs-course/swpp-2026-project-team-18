@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.UiDevice
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
 import com.swpp.wakeup.data.remote.ApiClient
@@ -36,16 +37,18 @@ class BackendFeaturesTest {
     private val config = JSONObject(File(context.filesDir, "demo-qa-config.json").readText())
 
     @Test
-    fun homeDestinationAndRiskChoices() {
+    fun connectedBackendFeatures() {
         assertEquals("com.swpp.wakeup.qa", context.packageName)
         assertEquals("http://10.0.2.2:8765/", BuildConfig.BASE_URL)
         val started = System.currentTimeMillis()
         try {
             checkHomeDestination()
             checkRiskChoices()
+            checkWeeklyRecurrence()
             File(directory, "backend-features-result.json").writeText(JSONObject()
                 .put("status", "passed").put("home", "UI create → current-home update; no Place row")
                 .put("risk", "empty → modeled choices → explicit save → device alarm sync")
+                .put("repeat", "UI weekdays → independent instances → device schedules → single OFF/delete persists")
                 .put("duration_ms", System.currentTimeMillis() - started).toString(2))
         } catch (error: Throwable) {
             capture("backend-features-failure")
@@ -60,16 +63,7 @@ class BackendFeaturesTest {
             launch()
             ui.click(By.text("+  일정 추가"), "home_list")
             ui.input("event_title", "QA 집 도착")
-            ui.click(By.res("event_date"))
-            val date = LocalDate.parse(config.getString("event_date"))
-            if (YearMonth.from(date) != YearMonth.now())
-                ui.click(By.desc(Pattern.compile("Change to next month|다음 달.*")))
-            ui.click(By.textContains(date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
-                .withLocale(Locale.getDefault()))))
-            ui.click(By.text("확인"))
-            ui.click(By.res("event_time"))
-            ui.pickTime(config.getString("event_time"))
-            ui.click(By.text("확인"))
+            pickStart()
             // Close the default destination search before opening the origin search.
             ui.click(By.res("destination_home"), "add_event_scroll")
             ui.click(By.res("origin_search"), "add_event_scroll")
@@ -103,6 +97,8 @@ class BackendFeaturesTest {
             assertEquals("ok", requireNotNull(updated.alarmPlan).status)
             launch()
             ui.click(By.text("QA 집 도착"), "home_list")
+            ui.await(By.res("plan_scroll"))
+            ui.await(By.textContains("QA 집 도착"))
             ui.await(By.textContains("QA 바뀐 집"), "plan_scroll")
             capture("feature-home-updated")
         } finally {
@@ -151,11 +147,110 @@ class BackendFeaturesTest {
     private fun openRisk(expectedSamples: Int? = null) {
         launch()
         ui.click(By.res("next_alarm"), "home_list")
+        ui.await(By.res("plan_scroll"))
+        ui.await(By.textContains(config.getString("event_title")))
         expectedSamples?.let {
             ui.await(By.textContains("이동 기록 ${it}회로 보정"), "plan_scroll")
             capture("feature-travel-samples")
         }
         ui.click(By.res("risk_entry"), "plan_scroll")
+    }
+
+    private fun checkWeeklyRecurrence() {
+        val api = ApiClient.events
+        val date = LocalDate.parse(config.getString("event_date"))
+        val days = listOf(date.dayOfWeek.value - 1, date.plusDays(1).dayOfWeek.value - 1).sorted()
+        val title = "QA 반복 수업"
+        val store = ScheduledAlarmStore(context)
+        try {
+            launch()
+            ui.click(By.text("+  일정 추가"), "home_list")
+            ui.input("event_title", title)
+            pickStart()
+            for (day in days) {
+                ui.click(By.res("repeat_day_$day"), "add_event_scroll")
+                assertTrue(ui.withNode(By.res("repeat_day_$day")) { it.isChecked })
+            }
+            ui.await(By.res("repeat_summary").text(days.joinToString(" · ") {
+                listOf("월", "화", "수", "목", "금", "토", "일")[it]
+            }))
+            capture("feature-repeat-selected")
+            val query = config.getString("destination_query")
+            ui.input("place_query", query, "add_event_scroll")
+            ui.click(By.res("place_search"), "add_event_scroll")
+            ui.click(By.res("place_result_$query"), "add_event_scroll")
+            ui.click(By.res("event_submit"), "add_event_scroll")
+            ui.await(By.res("home_list"))
+            val added = runBlocking { requireNotNull(api.list().body()).results.filter { it.title == title } }
+            assertEquals(2, added.size)
+            assertTrue(added.all { it.repeatWeekdays == days && it.recurrenceId != null })
+            assertTrue(added.all { requireNotNull(it.alarmPlan).status == "ok" })
+            assertEquals(added.map { it.id }, runBlocking {
+                requireNotNull(api.list().body()).results.filter { it.title == title }.map { it.id }
+            })
+            val first = added.first()
+            val later = added.last()
+            if (first.alarmOn != true) ui.click(By.res("event_alarm_${first.id}"), "home_list")
+            until { store.find(first.id) != null && store.find(later.id) != null }
+            capture("feature-repeat-home")
+            ui.click(By.res("event_alarm_${later.id}"), "home_list")
+            until { store.find(later.id) == null }
+            assertTrue(store.find(first.id) != null)
+            assertFalse(runBlocking { requireNotNull(api.get(later.id).body()).alarmOn } == true)
+            launch()
+            ui.withNode(By.res("home_list")) { it.scroll(Direction.DOWN, 1f) }
+            assertFalse(ui.withNode(By.res("event_alarm_${later.id}"), timeout = 90_000) { it.isChecked })
+            capture("feature-repeat-single-off")
+            ui.click(By.text(title))
+            ui.await(By.res("plan_scroll"))
+            ui.await(By.textContains(title))
+            // Swipe in the screen padding so the embedded map cannot consume it.
+            repeat(4) {
+                ui.withNode(By.res("plan_scroll")) { container ->
+                    val bounds = container.visibleBounds
+                    val x = bounds.left + 30
+                    device.swipe(x, bounds.bottom - 100, x, bounds.top + 100, 40)
+                }
+                device.waitForIdle()
+            }
+            capture("feature-repeat-delete-ready")
+            ui.click(By.res("event_delete"), timeout = 90_000)
+            ui.await(By.res("home_list"))
+            until { store.find(first.id) == null }
+            val remaining = runBlocking { requireNotNull(api.list().body()).results.filter { it.title == title } }
+            assertEquals(listOf(later.id), remaining.map { it.id })
+            assertFalse(remaining.single().alarmOn == true)
+            capture("feature-repeat-single-delete")
+        } catch (error: Throwable) {
+            capture("feature-repeat-failure")
+            throw error
+        } finally {
+            runBlocking {
+                requireNotNull(api.list().body()).results.filter { it.title == title }.forEach {
+                    assertEquals(204, api.delete(it.id).code())
+                }
+            }
+            launch()
+        }
+    }
+
+    private fun pickStart() {
+        ui.click(By.res("event_date"))
+        val date = LocalDate.parse(config.getString("event_date"))
+        if (YearMonth.from(date) != YearMonth.now())
+            ui.click(By.desc(Pattern.compile("Change to next month|다음 달.*")))
+        ui.click(By.textContains(date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
+            .withLocale(Locale.getDefault()))))
+        ui.click(By.text("확인"))
+        ui.click(By.res("event_time"))
+        ui.pickTime(config.getString("event_time"))
+        ui.click(By.text("확인"))
+    }
+
+    private fun until(condition: () -> Boolean) {
+        val deadline = System.currentTimeMillis() + 30_000
+        while (!condition() && System.currentTimeMillis() < deadline) Thread.sleep(200)
+        assertTrue("device alarm schedules did not converge", condition())
     }
 
     private fun launch() {

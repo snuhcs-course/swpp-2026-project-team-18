@@ -365,13 +365,16 @@ def recompute_for_user(user, only_future: bool = True, *, trigger: str = "") -> 
     1,000건이므로 일정이 많으면 한 번에 다 쓰지 않게 상한을 둔다.
     """
     from django.utils import timezone
+    from apps.events.recurrence import in_window
 
-    qs = Event.objects.filter(user=user).select_related("place", "tag", "user__profile")
+    qs = Event.objects.filter(user=user).select_related("place", "tag", "user__profile", "recurrence")
     if only_future:
         qs = qs.filter(start_at__gte=timezone.now())
 
     count = 0
     for event in qs[:50]:
+        if not in_window(event):
+            continue
         compute_and_store(event, trigger=trigger)
         count += 1
     return count

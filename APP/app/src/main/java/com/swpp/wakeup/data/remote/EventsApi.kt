@@ -289,6 +289,8 @@ data class EventDto(
     @SerializedName("lateness_sensitivity") val latenessSensitivity: String? = null,
     /** 집 목적지의 place 는 서버가 현재 프로필 좌표로 펼쳐 준다. */
     @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
+    @SerializedName("repeat_weekdays") val repeatWeekdays: List<Int>? = null,
+    @SerializedName("recurrence_id") val recurrenceId: Long? = null,
 )
 
 /**
@@ -865,6 +867,8 @@ data class EventCreateRequest(
     @SerializedName("origin_lng") val originLng: Double? = null,
     @SerializedName("origin_label") val originLabel: String? = null,
     @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
+    /** 0 = 월요일 / 6 = 일요일. 비어 있으면 한 번짜리 일정이다. */
+    @SerializedName("repeat_weekdays") val repeatWeekdays: List<Int> = emptyList(),
 )
 
 data class EventUpdateRequest(

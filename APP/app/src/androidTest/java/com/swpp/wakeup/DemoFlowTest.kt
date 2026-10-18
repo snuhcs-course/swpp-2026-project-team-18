@@ -62,7 +62,6 @@ class DemoFlowTest {
 
             step("02_plan_and_map") {
                 openPlan()
-                find(By.textContains(config.getString("event_title")), "plan_scroll")
                 find(By.res("trip_status"), "plan_scroll")
                 find(By.desc("경로 지도"), "plan_scroll", timeout = 45_000)
             }
@@ -175,13 +174,14 @@ class DemoFlowTest {
 
     private fun openPlan() {
         ui.click(By.res("next_alarm"), "home_list")
-        find(By.text("알람 결정"))
+        find(By.res("plan_scroll"), timeout = 90_000)
+        find(By.textContains(config.getString("event_title")), timeout = 90_000)
     }
 
     private fun assertArrival(eventId: Long) {
         find(By.res("trip_status").text("도착 완료"), "plan_scroll", 15_000)
         val arrival = TripLiveState.arrivalFor(eventId)!!
-        val clock = SimpleDateFormat("HH:mm", Locale.KOREA).format(Date(arrival.atMillis))
+        val clock = SimpleDateFormat("H:mm", Locale.KOREA).format(Date(arrival.atMillis))
         assertEquals("실제 도착 시각 UI", clock, ui.text(By.res("trip_arrival_time"), "plan_scroll"))
     }
 

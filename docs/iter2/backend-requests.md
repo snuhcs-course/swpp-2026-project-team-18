@@ -64,6 +64,8 @@ Phase A(프론트)는 서버 코드를 고치지 않는다. 앱이 보여 줄 �
 
 ## R-9. 머지 뒤 사용자·일정 삭제 도구는 새 모델이 있는 코드로 (Phase C 알림)
 
+- BE-20 후속(2026-10-18): `events.0008`은 반복 규칙 `events_recurrence`와 날짜별 회차 연결을 추가한다. 사용자 삭제 도구는 이 모델도 아는 최신 코드에서 실행한다. 회차 삭제 예외는 기존 일정 DELETE API가 기록한다. [반복 일정](weekly-recurrence.md).
+
 - 바뀌는 것: 이 브랜치가 main 에 머지되면 Render 가 새 표 넷을 만든다 — 계획 이력 `planning_plan_revision`, 알람 기록 `observations_alarm_log`, API 요청 기록 `common_api_request_log`, LLM 호출 `reports_llm_call`. 넷 다 사용자(앞의 둘은 일정도)를 FK 로 가리킨다. FK 는 기존 표처럼 Django 기본(`DEFERRABLE INITIALLY DEFERRED`, DB 수준 `ON DELETE` 없음)이다.
 - 문제: 이 모델을 모르는 코드가 공용 DB 에서 ORM 으로 사용자·일정을 지우면, 새 표에 남은 행 때문에 커밋에서 `IntegrityError` 가 나고 삭제 전체가 되돌려진다. 요청 기록은 로그인한 요청마다 생기므로 배포 뒤에는 거의 모든 사용자가 해당된다. 해당하는 것: main 을 받기 전 브랜치에서 돌린 `scripts/purge_test_accounts.py`·`scripts/emu_verify_cleanup.py`, 배포가 겹치는 동안의 옛 인스턴스.
 - 요청: 머지 뒤에는 main 을 받은 브랜치에서만 이 스크립트를 돌린다. 새 코드의 ORM 은 새 표까지 CASCADE·SET_NULL 로 지우므로 따로 고칠 것은 없다.

@@ -1,5 +1,6 @@
 package com.swpp.wakeup.data.repository
 
+import com.google.gson.Gson
 import com.swpp.wakeup.data.remote.EventCreateRequest
 import com.swpp.wakeup.data.remote.EventDto
 import com.swpp.wakeup.data.remote.EventTagDto
@@ -237,7 +238,7 @@ class EventRepositoryTest {
     )
 
     @Test
-    fun `일정 생성은 장소와 경로 선택 때의 출발지를 함께 보낸다`() = runTest {
+    fun `일정 생성은 장소와 출발지와 정렬한 반복 요일을 함께 보낸다`() = runTest {
         var sent: EventCreateRequest? = null
         val created = event(9, future(days = 1))
         val api = object : FakeEventsApi() {
@@ -252,6 +253,7 @@ class EventRepositoryTest {
             tagKey = "class",
             routeKey = "transit:2호선",
             origin = cafe,
+            repeatWeekdays = setOf(2, 0),
         )
 
         assertEquals(Result.Success(created), result)
@@ -271,9 +273,12 @@ class EventRepositoryTest {
                 originLat = 37.47,
                 originLng = 126.94,
                 originLabel = "학교 앞 카페",
+                repeatWeekdays = listOf(0, 2),
             ),
             sent,
         )
+        val json = Gson().toJsonTree(sent).asJsonObject
+        assertEquals("[0,2]", json.getAsJsonArray("repeat_weekdays").toString())
     }
 
     @Test
@@ -297,6 +302,9 @@ class EventRepositoryTest {
         assertNull("빈 경로 키는 '자동 선택' 이다", sent!!.routeKey)
         assertNull(sent!!.originLat)
         assertNull(sent!!.originLabel)
+        assertTrue(sent!!.repeatWeekdays.isEmpty())
+        val json = Gson().toJsonTree(sent).asJsonObject
+        assertEquals("[]", json.getAsJsonArray("repeat_weekdays").toString())
     }
 
     @Test

@@ -71,7 +71,7 @@ devServerHost=10.0.2.2
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-최신 로컬 검증은 Android 611건·lint 오류 0이며 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다. 이는 QA 빌드 기준이다. Firebase 개인 설정 없이 같은 빌드를 검증하려면 다음을 실행한다.
+최신 로컬 검증은 디버그 JVM 테스트 677건/lint 오류 0이며, QA 빌드의 실제 에뮬레이터 UI/전체 E2E 결과는 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다. [BE-20 직접 테스트](../docs/iter2/weekly-recurrence.md)에서 반복 일정 생성/개별 OFF/삭제를 확인할 수 있다. Firebase 개인 설정 없이 QA 변형을 검증하려면 다음을 실행한다.
 
 ```bash
 ./gradlew :app:testE2eUnitTest :app:lintE2e :app:assembleE2e :app:assembleE2eAndroidTest -PjitE2e=true

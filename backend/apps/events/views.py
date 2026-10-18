@@ -29,6 +29,7 @@ from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
 
+from . import recurrence
 from .alarms import reset_alarm_overrides
 from .geo import validate_route_distance
 from .models import Event, EventTag
@@ -53,7 +54,7 @@ class _UserScopedMixin:
     def get_queryset(self):
         return (
             Event.objects.filter(user=self.request.user)
-            .select_related("place", "tag", "alarm_plan", "user__profile")
+            .select_related("place", "tag", "alarm_plan", "user__profile", "recurrence")
         )
 
 
@@ -66,7 +67,7 @@ class EventListCreateView(_UserScopedMixin, ListCreateAPIView):
         return EventWriteSerializer if self.request.method == "POST" else EventSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = super().get_queryset().filter(recurrence.expand_for_user(self.request.user))
         raw_from = self.request.query_params.get("from")
         raw_to = self.request.query_params.get("to")
         if raw_from and (dt := parse_datetime(raw_from)):
@@ -81,8 +82,13 @@ class EventListCreateView(_UserScopedMixin, ListCreateAPIView):
         with transaction.atomic():
             event = write.save()
             # 새 일정만 계산한다. 기존 일정은 선택값만 자동으로 돌린다.
-            planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
-            reset_alarm_overrides(event)
+            if event.recurrence_id is None:
+                planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
+                reset_alarm_overrides(event)
+            else:
+                recurrence.expand(event.recurrence_id, reset_choices=True)
+                if not recurrence.in_window(event):
+                    reset_alarm_overrides(event)
             event.refresh_from_db()
 
         return Response(
@@ -103,12 +109,19 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
         instance = self.get_object()
         # Partly AI-generated (Claude) — 저장 전 값. 스위치가 바뀌었는지 기록할 때 쓴다.
         alarm_before = instance.alarm_enabled
+        start_before = instance.start_at
         write = self.get_serializer(instance, data=request.data, partial=True)
         write.is_valid(raise_exception=True)
         event = write.save()
 
         # 켬/끔만 바꾸면 기존 계획을 쓴다. 카카오 경로를 다시 조회하지 않는다.
-        if set(write.validated_data) != {"alarm_enabled"}:
+        if not recurrence.in_window(event):
+            # A late switch must preserve the historical plan. Only a moved date clears it.
+            if event.start_at != start_before:
+                plan = getattr(event, "alarm_plan", None)
+                if plan is not None:
+                    plan.delete()
+        elif set(write.validated_data) != {"alarm_enabled"}:
             planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.UPDATE)
         event.refresh_from_db()
 
@@ -119,6 +132,9 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
             alarm_logs.record_switch(event, alarm_before, event.alarm_enabled)
 
         return Response(EventSerializer(event, context=self.get_serializer_context()).data)
+
+    def perform_destroy(self, instance):
+        recurrence.delete_occurrence(instance)
 
 
 class EventRecomputeView(_UserScopedMixin, APIView):
@@ -140,7 +156,8 @@ class EventRecomputeView(_UserScopedMixin, APIView):
         event = self.get_queryset().filter(pk=pk).first()
         if event is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.RECOMPUTE)
+        if recurrence.in_window(event):
+            planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.RECOMPUTE)
         event.refresh_from_db()
         return Response(EventSerializer(event, context={"request": request}).data)
 

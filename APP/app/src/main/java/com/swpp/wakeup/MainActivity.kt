@@ -490,6 +490,7 @@ private fun MainHost(
                     onTitleChange = viewModel::onAddTitleChange,
                     onDateChange = viewModel::onAddDateChange,
                     onTimeChange = viewModel::onAddTimeChange,
+                    onRepeatDayToggle = viewModel::onAddRepeatDayToggle,
                     onTagChange = viewModel::onAddTagChange,
                     onQueryChange = viewModel::onAddQueryChange,
                     onSearch = viewModel::searchPlaces,

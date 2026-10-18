@@ -12,7 +12,7 @@ from apps.planning.models import AlarmPlan
 from .models import Event
 
 
-def _user_timezone(user):
+def user_timezone(user):
     try:
         return ZoneInfo(user.profile.timezone)
     except (ZoneInfoNotFoundError, ValueError):
@@ -24,7 +24,7 @@ def reset_alarm_overrides(event: Event) -> None:
 
     생성 트랜잭션 안에서 호출한다. 새 일정의 명시적 선택과 감사 로그는 보존한다.
     """
-    tz = _user_timezone(event.user)
+    tz = user_timezone(event.user)
     day = event.start_at.astimezone(tz).date()
     start = datetime.combine(day, time.min, tzinfo=tz)
     end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=tz)
@@ -45,7 +45,7 @@ def reset_alarm_overrides(event: Event) -> None:
 
 def alarm_states(user) -> dict[int, tuple[bool, bool]]:
     """id → (alarm_on, is_first_alarm). 계산 불가·명시적 OFF는 제외한다."""
-    tz = _user_timezone(user)
+    tz = user_timezone(user)
 
     events = (
         Event.objects.filter(

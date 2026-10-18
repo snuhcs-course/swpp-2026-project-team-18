@@ -6,6 +6,7 @@ Python이 데이터 준비·GPS 이동·결과 수집을 맡는다. Playwright�
 ## 실행
 
 1. [기기 설정](../../docs/device-setup.md)의 API 34+ 에뮬레이터를 켠다. 시간대는 `Asia/Seoul`.
+   UI 자동화용 기기는 CI와 같이 개발자 옵션의 창/전환/Animator 애니메이션 배율을 모두 0으로 설정한다.
 2. [백엔드 가상환경](../../backend/README.md), Android SDK·JDK, `APP/local.properties`의 `sdk.dir`을 준비한다.
    로컬 모드에는 `backend/.env`의 카카오 키가 필요하다.
 3. 저장소 루트에서 실행하고 에뮬레이터 화면을 본다. 실행 중 직접 조작하지 않는다.
@@ -15,7 +16,7 @@ backend/.venv/bin/python qa/demo/run.py
 ```
 
 여러 에뮬레이터가 연결됐으면 `--device emulator-5554`, 영상이 필요 없으면 `--no-video`를 추가한다.
-검증은 약 5~7분 걸린다. 최초 빌드는 의존성 다운로드 때문에 더 걸린다.
+최신 로컬 재생 실행은 약 597초였다. 기기 상태/실시간 경로 응답에 따라 달라지며 최초 빌드는 의존성 다운로드 때문에 더 걸린다.
 
 ### 카카오 키 없이 로컬 변경 검증
 
@@ -37,6 +38,7 @@ backend/.venv/bin/python qa/demo/run.py --replay-routing --no-video
 `route_preview_confirm`, 좌표가 없는 응답이면 목록의 `route_confirm` 으로 확정한다.
 마지막 `SignupThrottleTest`는 기존 알람·리포트 완료 후 실제 가입 한도를 채우고 UI의 한국어 429·계정 미생성을 검사한다. 준비 시간은 기존 UI 흐름에서 5분 저장·변경·재로그인 유지를 확인한다. [R-6·R-8·R-1 검증](../../docs/iter2/account-ranges-and-travel-counts.md).
 결과에는 `external_response_mode`·`route_display_seconds`·`signup_throttle_seconds`를 기록한다.
+`BackendFeaturesTest`에는 BE-20 요일 선택/저장/회차별 기기 예약/한 회차만 OFF/삭제 유지 검증을 포함한다. [동작/전후 검증](../../docs/iter2/weekly-recurrence.md).
 이 모드는 공용 서버 옵션과 함께 사용할 수 없으며 실시간 카카오 응답 검증을 대신하지 않는다.
 
 ### 공용 서버에서 완주

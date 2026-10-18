@@ -307,13 +307,13 @@ def test_regular_and_mixed_updates_still_recompute(client, event, monkeypatch, d
 
 @pytest.mark.integration
 def test_list_query_count_does_not_grow_per_event(client, event, django_assert_num_queries):
-    # request.user.profile을 미리 불러오면 목록/count/그룹 판정의 3개 조회만 필요하다.
+    # 반복 규칙 조회 1회 + 목록/count/그룹 판정. 일정 수가 늘어도 조회는 일정하다.
     event()
-    with django_assert_num_queries(3):
+    with django_assert_num_queries(4):
         states(client)
     for hour in range(10, 15):
         event(start=f"2026-10-05T{hour}:00:00+09:00")
-    with django_assert_num_queries(3):
+    with django_assert_num_queries(4):
         states(client)
 
 

@@ -161,8 +161,10 @@ class PublicSetupTest {
             }
             step("06_plan_and_map") {
                 click(By.res("next_alarm"), "home_list")
-                find(By.textContains(config.getString("event_title")), "plan_scroll")
-                if (config.optBoolean("replay_routing")) find(By.text("지각 민감도 높음"), "plan_scroll")
+                find(By.res("plan_scroll"), timeout = 90_000)
+                find(By.textContains(config.getString("event_title")), timeout = 90_000)
+                capture("06_plan_header")
+                if (config.optBoolean("replay_routing")) find(By.text("지각 민감도 높음"))
                 val blocks = config.getJSONArray("blocks")
                 for (i in 0 until blocks.length()) find(By.text(blocks.getString(i)), "plan_scroll", 90_000)
                 capture("06_prep_breakdown")
