@@ -9,6 +9,7 @@ import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.BuildConfig
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.calendar.DeviceCalendar
+import com.swpp.wakeup.data.local.CalendarLinkStore
 import com.swpp.wakeup.data.local.LocalStores
 import com.swpp.wakeup.data.local.LiveRouteStore
 import com.swpp.wakeup.data.local.MorningSessionStore
@@ -32,6 +33,9 @@ import com.swpp.wakeup.domain.model.WeeklyReportView
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.BlockDraft
 import com.swpp.wakeup.domain.model.CalendarImportState
+import com.swpp.wakeup.domain.model.CalendarLinkState
+import com.swpp.wakeup.domain.model.CalendarOnboardingState
+import com.swpp.wakeup.domain.model.CalendarPermission
 import com.swpp.wakeup.domain.model.DropCost
 import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.ImportCandidate
@@ -496,6 +500,25 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     private var homeOnboardingAsked = false
 
+    // Partly AI-generated (Claude)
+    /**
+     * ⑱ 캘린더 연동을 이 세션에서 이미 띄웠는지. 저장소의 [CalendarLinkStore.wasAsked] 는
+     * 저장을 끝냈을 때 켜지므로, 화면을 띄운 직후의 [refresh] 가 또 밀어 넣지 않게 따로 둔다.
+     *
+     * 아래 셋은 [prepOnboardingAsked] 와 같은 이유로 `init` 위에 둔다 — `init` 의
+     * `refresh()` 가 띄운 코루틴의 [maybeAskOnboarding] 이 읽는다.
+     */
+    private var calendarOnboardingAsked = false
+
+    /** 연동한 기기 캘린더. 서버가 아니라 기기에 둔다(캘린더 id 가 기기마다 다르다) */
+    private val calendarLinkStore = CalendarLinkStore(application)
+
+    private val _calendarLink = MutableStateFlow(CalendarLinkState())
+    val calendarLink: StateFlow<CalendarLinkState> = _calendarLink.asStateFlow()
+
+    private val _calendarOnboarding = MutableStateFlow(CalendarOnboardingState())
+    val calendarOnboarding: StateFlow<CalendarOnboardingState> = _calendarOnboarding.asStateFlow()
+
     init {
         // 화면보다 오래 사는 서비스가 저장한 최신 성공 결과를 먼저 복원한다.
         // 이후 두 Flow 수집기는 Activity가 백그라운드여도 ViewModel이 살아 있는
@@ -717,9 +740,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 설정 화면. 가입할 때 정한 집 주소·준비 시간을 여기서 고친다 */
+    /** 설정 화면. 가입할 때 정한 집 주소·준비 시간·캘린더 연동을 여기서 고친다 */
     fun openSettings() {
         _nav.update { it.copy(stack = it.stack + AppRoute.Settings, forward = true) }
+        loadCalendarSources()
     }
 
     fun openHomeSetup() {
@@ -898,11 +922,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         loadCalendarCandidates()
     }
 
+    /** 스위치를 빠르게 여러 번 누르면 읽기가 겹친다. 마지막 것만 화면에 반영한다 */
+    private var importLoadGeneration = 0
+
     /**
      * 캘린더를 읽어 후보를 만든다.
      *
      * 권한이 없으면 **읽지 않고** 그 사실을 상태에 담는다. 권한 없음과 "앞으로
      * 일정이 없음" 은 사용자가 할 일이 완전히 다르다.
+     *
+     * **연동한 캘린더만 읽는다**(⑱ · ⑯). 연동한 것이 없으면 일정을 읽지 않고 화면 위에
+     * 캘린더 스위치를 띄운다 — "일정이 없음" 과는 할 일이 다르다. (Partly AI-generated (Claude))
      */
     fun loadCalendarCandidates() {
         val app = getApplication<Application>()
@@ -911,24 +941,52 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
+        val generation = ++importLoadGeneration
         _calendarImport.update {
             it.copy(loading = true, permissionDenied = false, error = null)
         }
         viewModelScope.launch {
             // ContentResolver 질의는 디스크를 탄다. 메인 스레드에서 하면 목록이
             // 큰 캘린더에서 프레임이 끊긴다.
-            val events = withContext(Dispatchers.IO) { DeviceCalendar.read(app) }
+            val calendars = withContext(Dispatchers.IO) { DeviceCalendar.listCalendars(app) }
+            val stored = withContext(Dispatchers.IO) { calendarLinkStore.linkedIds() }
+            if (generation != importLoadGeneration) return@launch
+            _calendarLink.update {
+                it.copy(
+                    permission = CalendarPermission.GRANTED,
+                    loading = false,
+                    calendars = calendars,
+                    storedIds = stored,
+                )
+            }
+            val linked = _calendarLink.value.linkedIds
+            if (linked.isEmpty()) {
+                _calendarImport.update {
+                    it.copy(loading = false, candidates = emptyList(), linkedCount = 0, linkPicker = true)
+                }
+                return@launch
+            }
 
-            when (val result = repository.buildImportCandidates(events)) {
+            val events = withContext(Dispatchers.IO) {
+                DeviceCalendar.read(app, calendarIds = linked)
+            }
+            val result = repository.buildImportCandidates(events)
+            if (generation != importLoadGeneration) return@launch
+            when (result) {
                 is EventRepository.Result.Success -> {
                     _calendarImport.update {
-                        it.copy(loading = false, error = null, candidates = result.data)
+                        it.copy(
+                            loading = false,
+                            error = null,
+                            candidates = result.data,
+                            linkedCount = linked.size,
+                        )
                     }
                     resolvePlaces(result.data)
                 }
 
                 is EventRepository.Result.Failure -> _calendarImport.update {
-                    it.copy(loading = false, error = result.message)
+                    it.copy(loading = false, error = result.message, linkedCount = linked.size)
                 }
             }
         }
@@ -994,10 +1052,126 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 권한 요청 결과를 받는다. 허용됐으면 바로 읽는다. */
+    /**
+     * 권한 요청 결과를 받는다. 허용됐으면 바로 읽는다.
+     *
+     * ⑱ · ⑯ · 가져오기가 같은 요청을 쓴다. 가져오기 화면이 열려 있을 때만 일정까지
+     * 읽는다 — 설정에서 허용했는데 일정 목록과 서버 조회까지 돌 이유가 없다.
+     */
     fun onCalendarPermissionResult(granted: Boolean) {
-        if (granted) loadCalendarCandidates()
-        else _calendarImport.update { it.copy(permissionDenied = true, loading = false) }
+        _calendarLink.update {
+            it.copy(permission = if (granted) CalendarPermission.GRANTED else CalendarPermission.DENIED)
+        }
+        val importOpen = AppRoute.CalendarImport in _nav.value.stack
+        if (granted) {
+            loadCalendarSources()
+            if (importOpen) loadCalendarCandidates()
+        } else if (importOpen) {
+            _calendarImport.update { it.copy(permissionDenied = true, loading = false) }
+        }
+    }
+
+    // --- 캘린더 연동 (⑱ · ⑯) ---------------------------------------------
+    // Partly AI-generated (Claude)
+
+    /**
+     * 기기 캘린더 목록과 저장된 연동을 읽는다. ⑱ · ⑯ 이 열릴 때와 권한이 바뀐 뒤 부른다.
+     *
+     * 이미 거절된 상태(DENIED)는 그대로 둔다. 다시 읽어도 권한이 없다는 사실만 같고,
+     * MISSING 으로 돌리면 "기기 설정에서 켜야 함" 안내가 사라진다.
+     */
+    fun loadCalendarSources() {
+        val app = getApplication<Application>()
+        if (!DeviceCalendar.hasPermission(app)) {
+            _calendarLink.update {
+                it.copy(
+                    permission = if (it.permission == CalendarPermission.DENIED) {
+                        CalendarPermission.DENIED
+                    } else {
+                        CalendarPermission.MISSING
+                    },
+                    loading = false,
+                    calendars = emptyList(),
+                    storedIds = calendarLinkStore.linkedIds(),
+                )
+            }
+            return
+        }
+        _calendarLink.update { it.copy(permission = CalendarPermission.GRANTED, loading = true) }
+        viewModelScope.launch {
+            val calendars = withContext(Dispatchers.IO) { DeviceCalendar.listCalendars(app) }
+            val stored = withContext(Dispatchers.IO) { calendarLinkStore.linkedIds() }
+            _calendarLink.update { it.copy(loading = false, calendars = calendars, storedIds = stored) }
+        }
+    }
+
+    /**
+     * 화면으로 돌아왔을 때. 사용자가 기기 설정에서 권한을 바꾸고 왔을 수 있다.
+     *
+     * 권한이 실제로 바뀐 경우에만 다시 읽는다. 화면이 돌아올 때마다 목록을 읽으면
+     * 스위치를 누르는 사이에도 목록이 깜빡인다.
+     */
+    fun onCalendarScreenResumed() {
+        val current = _nav.value.current
+        if (current != AppRoute.Settings && current != AppRoute.CalendarLink &&
+            current != AppRoute.CalendarImport
+        ) return
+        val granted = DeviceCalendar.hasPermission(getApplication())
+        val known = _calendarLink.value.permission == CalendarPermission.GRANTED
+        if (granted == known) return
+        if (granted) _calendarLink.update { it.copy(permission = CalendarPermission.GRANTED) }
+        loadCalendarSources()
+        if (current == AppRoute.CalendarImport) loadCalendarCandidates()
+    }
+
+    /** 거절된 뒤라 시스템이 대화상자를 다시 띄우지 않을 수 있는가. 화면이 기기 설정으로 보낸다 */
+    val calendarPermissionDenied: Boolean
+        get() = _calendarLink.value.permission == CalendarPermission.DENIED
+
+    /**
+     * ⑯ 설정·가져오기의 스위치. **누르는 즉시 저장한다.**
+     *
+     * 기기에서 사라진 캘린더의 id 는 이참에 버린다. 남겨 두면 같은 번호를 받은 새
+     * 캘린더가 저절로 켜질 수 있다.
+     */
+    fun setCalendarLinked(id: Long, linked: Boolean) {
+        val link = _calendarLink.value
+        val present = link.calendars.mapTo(HashSet()) { it.id }
+        if (id !in present) return
+        val next = (if (linked) link.storedIds + id else link.storedIds - id) intersect present
+        calendarLinkStore.setLinked(next)
+        _calendarLink.update { it.copy(storedIds = next) }
+        if (_nav.value.current == AppRoute.CalendarImport) loadCalendarCandidates()
+    }
+
+    /** ⑱ 의 체크. 저장은 [submitCalendarOnboarding] 이 한다 */
+    fun toggleCalendarOnboarding(id: Long) = _calendarOnboarding.update {
+        it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id)
+    }
+
+    /** ⑱ "N개 연동하고 시작하기" */
+    fun submitCalendarOnboarding() {
+        val chosen = _calendarOnboarding.value.chosen(_calendarLink.value)
+        if (chosen.isEmpty()) return
+        calendarLinkStore.setLinked(chosen)
+        calendarLinkStore.markAsked()
+        _calendarLink.update { it.copy(storedIds = chosen) }
+        _calendarOnboarding.update { it.copy(done = true, savedCount = chosen.size) }
+    }
+
+    /**
+     * ⑱ "나중에" · 뒤로. 아무것도 저장하지 않고, 이 기기·계정에서는 다시 묻지 않는다.
+     *
+     * 다시 묻지 않는 이유: 없어도 알람이 계산되는 값이다. 앱을 열 때마다 캘린더를
+     * 물으면 건너뛴 사용자를 귀찮게만 한다. ⑯ 설정에서 켤 수 있다.
+     */
+    fun skipCalendarOnboarding() {
+        calendarLinkStore.markAsked()
+        _calendarOnboarding.update { it.copy(done = true, savedCount = null) }
+    }
+
+    fun resetCalendarOnboarding() {
+        _calendarOnboarding.value = CalendarOnboardingState()
     }
 
     fun submitCalendarImport() {
@@ -2751,7 +2925,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 아직 받지 못한 온보딩 화면을 밀어 넣는다. 집 주소 → 준비 시간 순이다.
+     * 아직 받지 못한 온보딩 화면을 밀어 넣는다. 집 주소 → 준비 시간 → 캘린더 연동 순이다.
      *
      * 가입 직후만이 아니라 **답하지 않은 동안** 띄운다. 가입 여부를 인텐트
      * 플래그로 넘기면 앱을 껐다 켠 사용자는 영원히 묻지 않게 되고, 그러면
@@ -2764,23 +2938,31 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      *
      * 집을 먼저 묻는 이유는 준비 시간이 "문을 나서기까지" 를 묻는 값이어서다.
      * 어디서 나서는지를 모르는 채로 물으면 답할 기준이 없다.
+     *
+     * 캘린더 연동(⑱)은 답하지 않아도 다시 묻지 않는다. 없어도 알람이 계산되는 값이라
+     * 이 기기·계정에서 한 번만 보여 준다(Partly AI-generated (Claude)).
      */
     private fun maybeAskOnboarding(data: EventRepository.HomeData) {
         // 오프라인 사본으로는 판단하지 않는다. 캐시에 값이 없을 뿐인데
         // 물어보면, 이미 답한 사용자에게 같은 질문을 다시 하게 된다.
         if (data.fromCache) return
 
-        val pending = buildList {
-            if (data.onboardingPrepMin == null && !prepOnboardingAsked) {
-                prepOnboardingAsked = true
-                add(AppRoute.PrepOnboarding)
-            }
-            if (!data.hasHome && !homeOnboardingAsked) {
-                homeOnboardingAsked = true
-                add(AppRoute.HomeSetup)
-            }
-        }
+        // 순서 규칙은 [OnboardingQueue] 에 있다(⑭ → ⑮ → ⑱ → 홈). 캘린더 연동은 다른
+        // 온보딩 화면이 뜰 때 그 끝에 한 번만 붙는다 — 가입을 마친 사용자에게는 묻지 않는다.
+        val pending = OnboardingQueue.pushOrder(
+            askHome = !data.hasHome && !homeOnboardingAsked,
+            askPrep = data.onboardingPrepMin == null && !prepOnboardingAsked,
+            askCalendar = !calendarOnboardingAsked && !calendarLinkStore.wasAsked(),
+        )
         if (pending.isEmpty()) return
+        if (AppRoute.PrepOnboarding in pending) prepOnboardingAsked = true
+        if (AppRoute.HomeSetup in pending) homeOnboardingAsked = true
+        if (AppRoute.CalendarLink in pending) {
+            calendarOnboardingAsked = true
+            // 가져오기 화면에서 이미 켠 것이 있으면 체크해 둔 채 보여 준다.
+            _calendarOnboarding.value = CalendarOnboardingState(selected = calendarLinkStore.linkedIds())
+            loadCalendarSources()
+        }
 
         // 온보딩으로 여는 것이라 화면 문구가 달라진다. 밀어 넣기 전에 정한다.
         //

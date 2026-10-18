@@ -27,6 +27,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swpp.wakeup.domain.model.CalendarLinkState
+import com.swpp.wakeup.domain.model.CalendarPermission
+import com.swpp.wakeup.ui.calendar.CalendarLinkStatus
+import com.swpp.wakeup.ui.calendar.CalendarRowControl
+import com.swpp.wakeup.ui.calendar.CalendarSourceList
 import com.swpp.wakeup.ui.common.durationLabel
 import com.swpp.wakeup.ui.events.ScreenHeader
 import com.swpp.wakeup.ui.home.HomeViewModel
@@ -59,6 +64,11 @@ fun SettingsScreen(
     /** 개발 빌드에서만 채운다. null 이면 진단 줄을 그리지 않는다 */
     devInfo: String? = null,
     onDevCheck: (() -> Unit)? = null,
+    // Partly AI-generated (Claude)
+    /** 캘린더 연동(⑱ 과 같은 목록). 스위치는 누르는 즉시 저장된다 */
+    calendarLink: CalendarLinkState = CalendarLinkState(),
+    onCalendarToggle: (id: Long, on: Boolean) -> Unit = { _, _ -> },
+    onRequestCalendarPermission: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -106,6 +116,14 @@ fun SettingsScreen(
             value = state.onboardingPrepMin?.let(::durationLabel) ?: "아직 설정하지 않음",
             action = if (state.onboardingPrepMin == null) "설정" else "변경",
             onClick = onChangePrep,
+        )
+
+        SectionLabel("캘린더 연동")
+
+        CalendarSection(
+            link = calendarLink,
+            onToggle = onCalendarToggle,
+            onRequestPermission = onRequestCalendarPermission,
         )
 
         SectionLabel("지금 상태")
@@ -238,6 +256,50 @@ private fun SettingRow(
                 .background(JitColor.Surface2)
                 .padding(horizontal = 11.dp, vertical = 6.dp),
         )
+    }
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 캘린더 연동 칸(Figma ⑯ `card-캘린더`). ⑱ 에서 고른 캘린더를 여기서 켜고 끈다.
+ *
+ * 권한이 없으면 목록 대신 한 줄을 둔다. 설정 화면에서 커다란 권한 카드를 펼치면 이
+ * 화면의 다른 항목이 아래로 밀려 보이지 않는다.
+ */
+@Composable
+private fun CalendarSection(
+    link: CalendarLinkState,
+    onToggle: (Long, Boolean) -> Unit,
+    onRequestPermission: () -> Unit,
+) {
+    when {
+        link.permission == CalendarPermission.MISSING ||
+            link.permission == CalendarPermission.DENIED -> SettingRow(
+            label = "캘린더 권한",
+            value = if (link.permission == CalendarPermission.DENIED) {
+                "권한이 거절됨 · 기기 설정에서 켤 수 있음"
+            } else {
+                "권한이 없음 · 켜면 캘린더를 고를 수 있음"
+            },
+            action = "허용",
+            onClick = onRequestPermission,
+        )
+
+        link.showList -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            CalendarSourceList(
+                calendars = link.ordered,
+                isOn = link::isLinked,
+                onToggle = onToggle,
+                control = CalendarRowControl.SWITCH,
+            )
+            Text(
+                text = "켠 캘린더의 일정만 ‘캘린더에서 가져오기’에 나옴. 고른 일정만 서버로 보냄",
+                color = JitColor.TextSecondary,
+                fontSize = 10.sp,
+            )
+        }
+
+        else -> CalendarLinkStatus(link = link, onRequestPermission = onRequestPermission)
     }
 }
 

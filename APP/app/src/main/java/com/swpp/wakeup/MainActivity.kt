@@ -1,9 +1,11 @@
 package com.swpp.wakeup
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -44,6 +46,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.swpp.wakeup.calendar.DeviceCalendar
@@ -56,6 +59,7 @@ import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
 import com.swpp.wakeup.ui.alarm.arrivalClockLabel
 import com.swpp.wakeup.ui.alarm.freshnessLabel
 import com.swpp.wakeup.ui.calendar.CalendarImportScreen
+import com.swpp.wakeup.ui.calendar.CalendarLinkScreen
 import com.swpp.wakeup.ui.common.durationLabel
 import com.swpp.wakeup.ui.alarm.RiskChoiceScreen
 import com.swpp.wakeup.ui.auth.LoginActivity
@@ -188,6 +192,8 @@ private fun MainHost(
     val mapPickState by viewModel.mapPick.collectAsStateWithLifecycle()
     val routineState by viewModel.routine.collectAsStateWithLifecycle()
     val importState by viewModel.calendarImport.collectAsStateWithLifecycle()
+    val calendarLinkState by viewModel.calendarLink.collectAsStateWithLifecycle()
+    val calendarOnboardingState by viewModel.calendarOnboarding.collectAsStateWithLifecycle()
     val reportState by viewModel.report.collectAsStateWithLifecycle()
     val morningSession by viewModel.morning.collectAsStateWithLifecycle()
 
@@ -328,6 +334,20 @@ private fun MainHost(
             snackbarHostState.showSnackbar(label ?: "캘린더에서 가져왔습니다")
         }
     }
+    // Partly AI-generated (Claude) — ⑱ 캘린더 연동. 건너뛰었으면 저장한 것이 없으므로 말하지 않는다.
+    LaunchedEffect(calendarOnboardingState.done) {
+        if (calendarOnboardingState.done) {
+            val saved = calendarOnboardingState.savedCount
+            viewModel.goBack()
+            viewModel.resetCalendarOnboarding()
+            if (saved != null) snackbarHostState.showSnackbar("캘린더 ${saved}개를 연동했습니다")
+        }
+    }
+    // 기기 설정에서 캘린더 권한을 켜고 돌아왔을 수 있다. 바뀐 경우에만 다시 읽는다.
+    LifecycleResumeEffect(Unit) {
+        viewModel.onCalendarScreenResumed()
+        onPauseOrDispose { }
+    }
 
     // 알람을 해제하고 넘어왔으면 아침 기록으로 바로 들어간다. 한 번만 한다 —
     // 사용자가 뒤로 나갔는데 다시 밀어 넣으면 화면을 벗어날 수 없다.
@@ -343,6 +363,27 @@ private fun MainHost(
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> viewModel.onCalendarPermissionResult(granted) }
+
+    // Partly AI-generated (Claude)
+    // ⑱ · ⑯ · 가져오기가 같이 쓴다. 한 번 거절한 뒤 시스템이 대화상자를 더 띄우지 않으면
+    // ("다시 묻지 않음") 요청해도 바로 거절로 끝난다. 그때는 앱 권한 화면을 연다.
+    val requestCalendarPermission: () -> Unit = {
+        val activity = activityContext as? Activity
+        val blocked = viewModel.calendarPermissionDenied && activity != null &&
+            !activity.shouldShowRequestPermissionRationale(DeviceCalendar.PERMISSION)
+        if (blocked) {
+            runCatching {
+                activityContext.startActivity(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        "package:${activityContext.packageName}".toUri(),
+                    )
+                )
+            }
+        } else {
+            calendarPermissionLauncher.launch(DeviceCalendar.PERMISSION)
+        }
+    }
 
     Scaffold(
         modifier = Modifier.semantics { testTagsAsResourceId = true },
@@ -552,6 +593,16 @@ private fun MainHost(
                     modifier = Modifier.padding(innerPadding),
                 )
 
+                AppRoute.CalendarLink -> CalendarLinkScreen(
+                    link = calendarLinkState,
+                    state = calendarOnboardingState,
+                    onToggle = viewModel::toggleCalendarOnboarding,
+                    onRequestPermission = requestCalendarPermission,
+                    onSubmit = viewModel::submitCalendarOnboarding,
+                    onSkip = viewModel::skipCalendarOnboarding,
+                    modifier = Modifier.padding(innerPadding),
+                )
+
                 AppRoute.HomeSetup -> HomeSetupScreen(
                     state = homeSetupState,
                     onQueryChange = viewModel::onHomeQueryChange,
@@ -582,6 +633,9 @@ private fun MainHost(
                     },
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
+                    calendarLink = calendarLinkState,
+                    onCalendarToggle = viewModel::setCalendarLinked,
+                    onRequestCalendarPermission = requestCalendarPermission,
                     // 빌드에 박힌 값이 아니라 실제로 쓰는 주소를 보여준다.
                     // 에뮬레이터면 10.0.2.2 로 바뀌어 있다.
                     devInfo = if (BuildConfig.DEV_TOOLS) {
@@ -620,12 +674,12 @@ private fun MainHost(
                     state = importState,
                     onBack = viewModel::goBack,
                     onToggle = viewModel::toggleImportCandidate,
-                    onRequestPermission = {
-                        calendarPermissionLauncher.launch(DeviceCalendar.PERMISSION)
-                    },
+                    onRequestPermission = requestCalendarPermission,
                     onRetry = viewModel::loadCalendarCandidates,
                     onImport = viewModel::submitCalendarImport,
                     modifier = Modifier.padding(innerPadding),
+                    link = calendarLinkState,
+                    onCalendarToggle = viewModel::setCalendarLinked,
                 )
 
                 AppRoute.WeeklyReport -> WeeklyReportScreen(

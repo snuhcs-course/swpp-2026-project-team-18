@@ -47,6 +47,11 @@ class PrefsScopeAuditTest {
         // Partly AI-generated (Claude) — 알람 기록(db-schema.md A3)
         "alarm/AlarmLogQueue.kt" to
             "앞 사용자의 알람 울림·끄기 기록을 지금 계정의 토큰으로 올리게 된다",
+        // Partly AI-generated (Claude) — ⑱ 캘린더 연동
+        "data/local/CalendarLinkStore.kt" to
+            "앞 사용자가 고른 캘린더를 지금 계정이 그대로 읽게 된다",
+        "data/local/LiveRouteStore.kt" to
+            "현재 위치에서 시작하는 앞 사용자의 이동 경로가 들어 있다",
     )
 
     /**
@@ -64,7 +69,8 @@ class PrefsScopeAuditTest {
         mustBeScoped.forEach { (relative, why) ->
             val source = readSource(relative)
             val reads = source.contains("discardIfForeign") || source.contains("isForeignOwner")
-            val writes = source.contains("stampOwner")
+            // editOwned 는 값과 소유자를 한 트랜잭션에 쓴다(PrefsOwner.kt). 새 저장소는 이쪽을 쓴다.
+            val writes = source.contains("stampOwner") || source.contains("editOwned")
 
             if (!reads) violations += "$relative — 읽을 때 소유자를 확인하지 않는다 ($why)"
             if (!writes) violations += "$relative — 쓸 때 소유자를 남기지 않는다 ($why)"
@@ -77,7 +83,7 @@ class PrefsScopeAuditTest {
                     violations.forEach { appendLine("  $it") }
                     appendLine()
                     appendLine("읽을 때 discardIfForeign(context) 로 남의 것을 걸러내고,")
-                    appendLine("쓸 때 stampOwner(context) 로 소유자를 남겨야 한다.")
+                    appendLine("쓸 때 editOwned(context) 나 stampOwner(context) 로 소유자를 남겨야 한다.")
                     appendLine("근거는 data/local/PrefsOwner.kt 상단에 있다.")
                 }
             )

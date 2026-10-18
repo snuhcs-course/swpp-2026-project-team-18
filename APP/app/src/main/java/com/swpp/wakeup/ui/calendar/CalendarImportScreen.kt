@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.CalendarImportState
+import com.swpp.wakeup.domain.model.CalendarLinkState
 import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.common.JitChip
@@ -65,6 +66,10 @@ fun CalendarImportScreen(
     onRetry: () -> Unit,
     onImport: () -> Unit,
     modifier: Modifier = Modifier,
+    // Partly AI-generated (Claude)
+    /** 연동한 캘린더(⑱ · ⑯). 하나도 없으면 화면 위에서 바로 켠다 */
+    link: CalendarLinkState = CalendarLinkState(),
+    onCalendarToggle: (id: Long, on: Boolean) -> Unit = { _, _ -> },
 ) {
     LazyColumn(
         modifier = modifier
@@ -92,7 +97,12 @@ fun CalendarImportScreen(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "고른 것만 서버로 보냄. 앞으로 2주 안의 시간 지정 일정만 보여줌",
+                    text = if (state.linkedCount > 0) {
+                        "고른 것만 서버로 보냄. 연동한 캘린더 ${state.linkedCount}개의 " +
+                            "앞으로 2주 일정만 보여줌"
+                    } else {
+                        "고른 것만 서버로 보냄. 앞으로 2주 안의 시간 지정 일정만 보여줌"
+                    },
                     color = JitColor.TextSecondary,
                     fontSize = 13.sp,
                 )
@@ -103,6 +113,14 @@ fun CalendarImportScreen(
             item(key = "permission") { PermissionCard(onRequestPermission) }
             return@LazyColumn
         }
+
+        // Partly AI-generated (Claude)
+        // 연동한 캘린더 없이 열었으면 여기서 켠다(Figma ⑱ 상태 변형 "가져오기 · 연동 없음").
+        // 다른 화면(⑯)으로 보내면 돌아오는 길에 목록이 낡는다.
+        if (state.linkPicker) {
+            item(key = "link") { LinkPicker(state, link, onCalendarToggle, onRequestPermission) }
+        }
+        if (state.needsLink) return@LazyColumn
 
         if (state.loading) {
             item(key = "loading") { LoadingBlock() }
@@ -151,6 +169,48 @@ fun CalendarImportScreen(
                     fontSize = 10.sp,
                 )
             }
+        }
+    }
+}
+
+// Partly AI-generated (Claude)
+/** 가져올 캘린더 스위치. 여기서 켠 것은 ⑯ 설정에도 그대로 켜진다(같은 저장소). */
+@Composable
+private fun LinkPicker(
+    state: CalendarImportState,
+    link: CalendarLinkState,
+    onToggle: (Long, Boolean) -> Unit,
+    onRequestPermission: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(JitSpace.Section)) {
+        JitCard(padding = 16.dp, gap = 7.dp) {
+            JitDotLabel(
+                text = if (state.linkedCount > 0) {
+                    "가져올 캘린더 · ${state.linkedCount}개 켜짐"
+                } else {
+                    "연동한 캘린더가 없음"
+                },
+                dotColor = JitColor.Accent,
+                fontSize = 13,
+                dotSize = 8.dp,
+            )
+            Text(
+                text = "가져올 캘린더를 켜면 그 캘린더의 일정이 아래에 나옴.\n" +
+                    "여기서 켠 것은 설정에도 같이 켜짐",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+            )
+        }
+        if (link.showList) {
+            CalendarSourceList(
+                calendars = link.ordered,
+                isOn = link::isLinked,
+                onToggle = onToggle,
+                control = CalendarRowControl.SWITCH,
+                enabled = !state.importing,
+            )
+        } else {
+            CalendarLinkStatus(link = link, onRequestPermission = onRequestPermission)
         }
     }
 }

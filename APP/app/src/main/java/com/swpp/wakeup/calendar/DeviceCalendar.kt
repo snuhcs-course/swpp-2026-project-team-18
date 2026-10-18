@@ -56,11 +56,22 @@ object DeviceCalendar {
      * @param days 조회 기간. 기본 14일. 알람 등록 지평이 7일이므로 그보다
      *   넉넉하게 보여 주고 등록은 서버·스케줄러가 알아서 미룬다.
      */
-    fun read(context: Context, days: Int = DEFAULT_DAYS): List<CalendarEvent> {
+    fun read(
+        context: Context,
+        days: Int = DEFAULT_DAYS,
+        // Partly AI-generated (Claude)
+        /**
+         * 읽을 캘린더(`Calendars._ID`). null 이면 전부, 빈 집합이면 아무것도 읽지 않는다.
+         * 가져오기 화면은 사용자가 연동한 캘린더만 넘긴다(⑱ 캘린더 연동).
+         */
+        calendarIds: Set<Long>? = null,
+    ): List<CalendarEvent> {
         if (!hasPermission(context)) {
             Log.i(TAG, "캘린더 권한이 없다")
             return emptyList()
         }
+        // 고른 캘린더가 없으면 질의하지 않는다. "IN ()" 은 SQL 오류이기도 하다.
+        if (calendarIds != null && calendarIds.isEmpty()) return emptyList()
 
         val zone = ZoneId.systemDefault()
         val now = System.currentTimeMillis()
@@ -73,20 +84,32 @@ object DeviceCalendar {
             it.build()
         }
 
+        // 취소된 일정과 내가 거절한 일정을 뺀다. NULL 은 통과시킨다 —
+        // 상태를 기록하지 않는 캘린더 제공자가 있다.
+        val selection = StringBuilder(
+            "(${CalendarContract.Instances.STATUS} IS NULL OR " +
+                "${CalendarContract.Instances.STATUS} != ?) AND " +
+                "(${CalendarContract.Instances.SELF_ATTENDEE_STATUS} IS NULL OR " +
+                "${CalendarContract.Instances.SELF_ATTENDEE_STATUS} != ?)"
+        )
+        val args = mutableListOf(
+            CalendarContract.Instances.STATUS_CANCELED.toString(),
+            CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED.toString(),
+        )
+        // 연동하지 않은 캘린더는 읽지도 않는다. 화면에서 거르면 읽은 사실 자체는 남는다.
+        calendarIds?.let { ids ->
+            selection.append(" AND ${CalendarContract.Instances.CALENDAR_ID} IN (")
+            selection.append(ids.joinToString(",") { "?" })
+            selection.append(")")
+            args += ids.map(Long::toString)
+        }
+
         return try {
             context.contentResolver.query(
                 uri,
                 PROJECTION,
-                // 취소된 일정과 내가 거절한 일정을 뺀다. NULL 은 통과시킨다 —
-                // 상태를 기록하지 않는 캘린더 제공자가 있다.
-                "(${CalendarContract.Instances.STATUS} IS NULL OR " +
-                    "${CalendarContract.Instances.STATUS} != ?) AND " +
-                    "(${CalendarContract.Instances.SELF_ATTENDEE_STATUS} IS NULL OR " +
-                    "${CalendarContract.Instances.SELF_ATTENDEE_STATUS} != ?)",
-                arrayOf(
-                    CalendarContract.Instances.STATUS_CANCELED.toString(),
-                    CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED.toString(),
-                ),
+                selection.toString(),
+                args.toTypedArray(),
                 "${CalendarContract.Instances.BEGIN} ASC",
             )?.use { cursor -> collect(cursor, zone, now) } ?: emptyList()
         } catch (e: SecurityException) {
@@ -95,6 +118,63 @@ object DeviceCalendar {
             emptyList()
         } catch (e: Exception) {
             Log.e(TAG, "캘린더 조회 실패", e)
+            emptyList()
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 기기에 있는 캘린더 목록. ⑱ 캘린더 연동과 ⑯ 설정이 이 중에서 고르게 한다.
+     *
+     * **캘린더 앱에서 보이게 켜 둔 것만** 준다(`VISIBLE`). 숨긴 캘린더는 사용자가 이미
+     * 안 보기로 한 것이라 여기서 다시 묻지 않는다. 일정은 읽지 않는다 — 목록에는
+     * 캘린더 이름과 계정만 필요하다.
+     *
+     * 권한이 없거나 조회가 실패하면 빈 목록을 준다. [read] 와 같은 이유다.
+     */
+    fun listCalendars(context: Context): List<DeviceCalendarSource> {
+        if (!hasPermission(context)) return emptyList()
+        return try {
+            context.contentResolver.query(
+                CalendarContract.Calendars.CONTENT_URI,
+                CALENDAR_PROJECTION,
+                "(${CalendarContract.Calendars.VISIBLE} IS NULL OR " +
+                    "${CalendarContract.Calendars.VISIBLE} = 1)",
+                null,
+                null,
+            )?.use { cursor ->
+                val idIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars._ID)
+                val nameIndex =
+                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+                val accountIndex =
+                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_NAME)
+                val colorIndex =
+                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR)
+                val primaryIndex =
+                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.IS_PRIMARY)
+                buildList {
+                    while (cursor.moveToNext()) {
+                        val account = cursor.getString(accountIndex)?.trim()?.takeIf { it.isNotEmpty() }
+                        add(
+                            DeviceCalendarSource(
+                                id = cursor.getLong(idIndex),
+                                // 이름이 빈 캘린더도 있다. 무엇인지 알 수 있게 계정 이름으로 대신한다.
+                                name = cursor.getString(nameIndex)?.trim()?.takeIf { it.isNotEmpty() }
+                                    ?: account
+                                    ?: "이름 없는 캘린더",
+                                accountName = account,
+                                color = if (cursor.isNull(colorIndex)) null else cursor.getInt(colorIndex),
+                                primary = !cursor.isNull(primaryIndex) && cursor.getInt(primaryIndex) == 1,
+                            )
+                        )
+                    }
+                }
+            } ?: emptyList()
+        } catch (e: SecurityException) {
+            Log.w(TAG, "캘린더 권한이 회수됐다", e)
+            emptyList()
+        } catch (e: Exception) {
+            Log.e(TAG, "캘린더 목록 조회 실패", e)
             emptyList()
         }
     }
@@ -182,7 +262,34 @@ object DeviceCalendar {
         CalendarContract.Instances.ALL_DAY,
         CalendarContract.Instances.CALENDAR_DISPLAY_NAME,
     )
+
+    private val CALENDAR_PROJECTION = arrayOf(
+        CalendarContract.Calendars._ID,
+        CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+        CalendarContract.Calendars.ACCOUNT_NAME,
+        CalendarContract.Calendars.CALENDAR_COLOR,
+        CalendarContract.Calendars.IS_PRIMARY,
+    )
 }
+
+// Partly AI-generated (Claude)
+/**
+ * 기기 캘린더 하나(일정이 아니라 캘린더 자체).
+ *
+ * [id] 는 이 기기 안에서만 뜻이 있다(`CalendarContract.Calendars._ID`). 계정을 지웠다
+ * 다시 넣거나 기기를 바꾸면 달라진다. 그래서 연동 목록은 서버가 아니라 기기에 둔다
+ * ([com.swpp.wakeup.data.local.CalendarLinkStore]).
+ */
+data class DeviceCalendarSource(
+    val id: Long,
+    val name: String,
+    /** 구글 계정 주소 같은 계정 이름. 기기 로컬 캘린더면 없을 수 있다 */
+    val accountName: String?,
+    /** ARGB. 캘린더 앱과 같은 색 점을 그린다 */
+    val color: Int?,
+    /** 계정의 기본 캘린더인가 */
+    val primary: Boolean,
+)
 
 /**
  * 기기 캘린더의 일정 한 건.

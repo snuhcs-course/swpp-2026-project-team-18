@@ -169,9 +169,29 @@ class CalendarImportStateTest {
         // "캘린더에 일정이 없다" 는 거짓 안내를 본다.
         val denied = CalendarImportState(permissionDenied = true)
         assertFalse(denied.isEmpty)
+        assertFalse(denied.needsLink)
 
-        val empty = CalendarImportState(candidates = emptyList())
+        val empty = CalendarImportState(candidates = emptyList(), linkedCount = 1)
         assertTrue(empty.isEmpty)
+        assertFalse(empty.needsLink)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `연동한 캘린더가 없으면 일정 없음이 아니라 연동 필요다`() {
+        // 아무 캘린더도 읽지 않았는데 "가져올 일정이 없음" 을 보이면 사용자는 캘린더가
+        // 비어 있다고 믿는다. 할 일은 캘린더를 켜는 것이다.
+        val none = CalendarImportState(candidates = emptyList(), linkedCount = 0, linkPicker = true)
+        assertFalse(none.isEmpty)
+        assertTrue(none.needsLink)
+        assertFalse(none.canImport)
+    }
+
+    @Test
+    fun `읽는 중에는 연동 필요로 보지 않는다`() {
+        // 화면을 처음 열 때는 연동 수를 아직 모른다. 그 사이에 스위치 안내가 번쩍이면 안 된다.
+        val loading = CalendarImportState(loading = true)
+        assertFalse(loading.needsLink)
     }
 
     @Test

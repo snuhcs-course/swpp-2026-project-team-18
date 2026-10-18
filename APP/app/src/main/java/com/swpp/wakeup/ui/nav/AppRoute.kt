@@ -77,6 +77,16 @@ sealed interface AppRoute {
      */
     data object PrepOnboarding : AppRoute
 
+    // Partly AI-generated (Claude)
+    /**
+     * Figma ⑱ 캘린더 연동. 가입 직후 ⑮ 준비 시간 다음에 한 번 뜬다.
+     *
+     * 어느 기기 캘린더를 앱이 읽을지 고른다. 고른 캘린더의 일정은 [CalendarImport]
+     * 에 나오고, **그중 고른 것만** 서버로 간다 — 연동했다고 자동으로 올리지 않는다.
+     * 건너뛰면 다시 묻지 않고, ⑯ 설정의 스위치로 켜고 끈다.
+     */
+    data object CalendarLink : AppRoute
+
     /**
      * 아침 루틴 블록 **정의** 편집.
      *
@@ -98,6 +108,9 @@ sealed interface AppRoute {
      *
      * **사용자가 고른 것만 서버로 보낸다.** 캘린더에는 일정 제목이 들어 있고
      * 그건 민감할 수 있다. 자동 동기화를 두지 않은 이유다.
+     *
+     * 연동한 캘린더([CalendarLink], ⑯ 설정)의 일정만 읽는다. 연동한 것이 없으면 화면
+     * 위에 캘린더 스위치를 먼저 보인다. (Partly AI-generated (Claude))
      */
     data object CalendarImport : AppRoute
 

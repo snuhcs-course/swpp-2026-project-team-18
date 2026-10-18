@@ -81,6 +81,19 @@ data class CalendarImportState(
     val resultLabel: String? = null,
     /** 가져오기가 끝나 화면을 닫아야 하는 상태 */
     val done: Boolean = false,
+    // Partly AI-generated (Claude)
+    /**
+     * 읽은 캘린더 수(⑱ 에서 연동한 것). 0 이면 일정을 읽지 않았다 — "일정이 없음" 이
+     * 아니라 "읽을 캘린더가 없음" 이다.
+     */
+    val linkedCount: Int = 0,
+    /**
+     * 화면 위에 캘린더 스위치를 보여 주는가.
+     *
+     * 연동한 캘린더 없이 이 화면을 열었을 때 켠다. 하나를 켜자마자 스위치가 사라지면
+     * 두 번째를 켤 수 없으므로, 화면을 닫을 때까지 그대로 둔다.
+     */
+    val linkPicker: Boolean = false,
 ) {
     val selectedCount: Int get() = candidates.count { it.selected }
 
@@ -96,8 +109,13 @@ data class CalendarImportState(
             null
         }
 
+    /** 연동한 캘린더를 읽었는데 일정이 없다. 연동한 캘린더가 없는 것과는 다르다 */
     val isEmpty: Boolean
-        get() = !loading && !permissionDenied && candidates.isEmpty()
+        get() = !loading && !permissionDenied && linkedCount > 0 && candidates.isEmpty()
+
+    /** 연동한 캘린더가 없어 아직 아무것도 읽지 않았다 */
+    val needsLink: Boolean
+        get() = !loading && !permissionDenied && linkedCount == 0
 
     companion object {
         /**
