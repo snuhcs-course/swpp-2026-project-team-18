@@ -268,7 +268,7 @@ class PlanRevision(models.Model):
     ([DECISION_FIELDS])과 경로 입력이 마지막 이력과 같으면 쌓지 않는다.
     실패 상태(`route_failed` 등)도 결정이다.
 
-    **학습·리포트는 아직 이 표를 읽지 않는다.** 바꾸는 것은 팀이 정한다.
+    **이동 학습은 이 표의 결정 시점 경로 원값을 사용한다.** 리포트는 아직 현재 계획을 읽는다.
     """
 
     class Trigger(models.TextChoices):
