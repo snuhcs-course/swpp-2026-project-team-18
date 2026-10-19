@@ -109,8 +109,7 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
         """체류 시간 상한.
 
         추적은 일정 시작 후 한 시간에 끝나므로 그보다 긴 체류는 나올 수 없다.
-        여유를 두고 상한을 두는 이유는 이 값이 학습 필터로 쓰이기 때문이다 —
-        쓰레기 값 하나가 "체류 2분 이상" 필터를 통과해 버린다.
+        새 앱은 즉시 도착해 0을 보낸다. 과거 앱의 체류 기록도 같은 상한으로 받는다.
         """
         if value is None:
             return value

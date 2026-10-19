@@ -41,7 +41,9 @@ from datetime import timedelta
 
 from django.db import transaction
 from django.db.models import Avg, Count, StdDev
+from rest_framework.exceptions import ValidationError
 
+from apps.events.geo import validate_route_distance
 from apps.events.models import Event
 from apps.routing import clients
 
@@ -120,6 +122,7 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         "total_quantile_minutes": None,
         "travel_mode": "",
         "travel_source": "",
+        "travel_sample_count": 0,
         "route_summary": "",
         "route_key": "",
         "route_detail": "",
@@ -135,9 +138,12 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         "alt_route_path": [],
     }
 
-    # 1) 장소가 없으면 이동 시간을 구할 수 없다.
-    if event.place_id is None:
-        defaults["status"] = AlarmPlan.Status.NO_PLACE
+    # 1) 집 목적지는 계산할 때마다 현재 프로필에서 해석한다.
+    destination = event.resolve_destination(profile)
+    if destination is None:
+        defaults["status"] = (
+            AlarmPlan.Status.NO_HOME if event.destination_is_home else AlarmPlan.Status.NO_PLACE
+        )
         return _upsert(event, defaults, trigger=trigger)
 
     # 2) 출발지를 모르면 이동 시간을 구할 수 없다.
@@ -150,6 +156,15 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         defaults["status"] = AlarmPlan.Status.NO_HOME
         return _upsert(event, defaults, trigger=trigger)
     origin_lat, origin_lng, _origin_label = origin
+    dest_lat, dest_lng, _dest_label = destination
+
+    # 집 변경으로 기존 일정의 양 끝이 가까워질 수 있다. 낡은 계획을 지우고
+    # 외부 경로 호출 전에 중단한다. API 저장 검증과 같은 거리 규칙을 쓴다.
+    try:
+        validate_route_distance(origin_lat, origin_lng, dest_lat, dest_lng)
+    except ValidationError:
+        defaults["status"] = AlarmPlan.Status.ROUTE_FAILED
+        return _upsert(event, defaults, trigger=trigger)
 
     # 3) 경로 조회.
     #
@@ -165,15 +180,15 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
             event.route_key,
             start_lat=origin_lat,
             start_lng=origin_lng,
-            end_lat=event.place.lat,
-            end_lng=event.place.lng,
+            end_lat=dest_lat,
+            end_lng=dest_lng,
         )
     else:
         route, degraded = clients.best_route(
             start_lat=origin_lat,
             start_lng=origin_lng,
-            end_lat=event.place.lat,
-            end_lng=event.place.lng,
+            end_lat=dest_lat,
+            end_lng=dest_lng,
         )
     if degraded or not route:
         defaults["status"] = AlarmPlan.Status.ROUTE_FAILED
@@ -186,6 +201,76 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
     tau = event.effective_tau
     buffer_min = DEFAULT_BUFFER_MINUTES
 
+    prep, travel = estimate_components(event, route)
+
+    math_ = estimators.compute_alarm_math(prep, travel, buffer_min, tau)
+
+    # 5) 시각으로 환산.
+    #
+    # 도착 예정은 일정 시작에서 버퍼를 뺀 시각이다. 출발 시각은 거기서
+    # 이동 시간을 뺀 값이고, 알람은 거기서 준비 시간을 뺀 값이다.
+    arrive_at = event.start_at - timedelta(minutes=math_.buffer_minutes)
+    depart_by = arrive_at - timedelta(minutes=math_.travel_minutes)
+    alarm_at = depart_by - timedelta(minutes=math_.prep_minutes)
+
+    defaults.update(
+        {
+            "status": AlarmPlan.Status.OK,
+            "alarm_at": alarm_at,
+            "depart_by": depart_by,
+            "arrive_at": arrive_at,
+            "prep_minutes": math_.prep_minutes,
+            "travel_minutes": math_.travel_minutes,
+            "buffer_minutes": math_.buffer_minutes,
+            "tau_used": tau,
+            "on_time_probability": math_.on_time_probability,
+            "confidence_basis": math_.confidence_basis,
+            "prep_source": math_.prep_source,
+            "prep_breakdown": math_.prep_breakdown,
+            "total_quantile_minutes": round(
+                math_.total_minutes - math_.buffer_minutes, 2
+            ),
+            "travel_mode": (route.get("mode") or "")[:20],
+            "travel_sample_count": travel.sample_count,
+            # 보정이 적용됐으면 그 사실을 남긴다. 나중에 실측과 비교할 때
+            # "카카오 원값" 과 "보정값" 을 구분해야 한다.
+            "travel_source": (
+                f"{route.get('source', '')}+{travel.source}"
+                if travel.source != "kakao"
+                else (route.get("source") or "")
+            )[:30],
+            # 요약 문자열은 clients 가 만든다. 같은 규칙을 두 곳에 두지 않는다.
+            "route_summary": (route.get("summary") or f"{math_.travel_minutes}분")[:200],
+            "route_key": (route.get("key") or "")[:120],
+            "route_detail": (route.get("detail") or "")[:120],
+            # 지도에 그릴 경로선과 진행률의 분모. 좌표를 못 받았으면 빈 배열이고
+            # 앱은 지도 자리에 안내만 띄운다 — 알람 계산은 그대로 성립한다.
+            "route_path": route.get("path") or [],
+            "route_distance_m": route.get("path_distance_m"),
+            # 지금 더 빠른 대안. 고른 경로는 위에서 그대로 저장했고, 이건 지도에
+            # 겹쳐 보여 주기만 한다. `resolve_route` 가 대중교통을 고른 경우에만
+            # 채워 주고, 같은 경로거나 더 느리면 아예 붙이지 않는다.
+            **_alternative_fields(route),
+        }
+    )
+    return _upsert(
+        event,
+        defaults,
+        trigger=trigger,
+        # 카카오가 준 분 그대로(G2). 계획의 `travel_minutes` 는 보정·τ 분위수가 들어간 값이다.
+        route_minutes_raw=_raw_minutes(route),
+    )
+
+
+def estimate_components(
+    event: Event, route: dict,
+) -> tuple[estimators.PrepEstimate | None, estimators.TravelEstimate]:
+    """Shared preparation/travel model for stored plans and risk previews.
+
+    ``route["minutes"]`` must be the upstream raw estimate, never the corrected
+    or quantile-allocated ``AlarmPlan.travel_minutes``.
+    """
+    profile = event.user.profile
     # **집에서 출발하지 않는 일정은 준비 시간이 해당되지 않는다.**
     #
     # 준비 시간은 집에서 씻고 옷을 입고 나서는 시간이다. 이미 밖에 있는 사람이
@@ -216,62 +301,7 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         depart_at=event.start_at,
     )
 
-    math_ = estimators.compute_alarm_math(prep, travel, buffer_min, tau)
-
-    # 5) 시각으로 환산.
-    #
-    # 도착 예정은 일정 시작에서 버퍼를 뺀 시각이다. 출발 시각은 거기서
-    # 이동 시간을 뺀 값이고, 알람은 거기서 준비 시간을 뺀 값이다.
-    arrive_at = event.start_at - timedelta(minutes=math_.buffer_minutes)
-    depart_by = arrive_at - timedelta(minutes=math_.travel_minutes)
-    alarm_at = depart_by - timedelta(minutes=math_.prep_minutes)
-
-    defaults.update(
-        {
-            "status": AlarmPlan.Status.OK,
-            "alarm_at": alarm_at,
-            "depart_by": depart_by,
-            "arrive_at": arrive_at,
-            "prep_minutes": math_.prep_minutes,
-            "travel_minutes": math_.travel_minutes,
-            "buffer_minutes": math_.buffer_minutes,
-            "tau_used": tau,
-            "on_time_probability": math_.on_time_probability,
-            "confidence_basis": math_.confidence_basis,
-            "prep_source": math_.prep_source,
-            "prep_breakdown": math_.prep_breakdown,
-            "total_quantile_minutes": round(
-                math_.total_minutes - math_.buffer_minutes, 2
-            ),
-            "travel_mode": (route.get("mode") or "")[:20],
-            # 보정이 적용됐으면 그 사실을 남긴다. 나중에 실측과 비교할 때
-            # "카카오 원값" 과 "보정값" 을 구분해야 한다.
-            "travel_source": (
-                f"{route.get('source', '')}+{travel.source}"
-                if travel.source != "kakao"
-                else (route.get("source") or "")
-            )[:30],
-            # 요약 문자열은 clients 가 만든다. 같은 규칙을 두 곳에 두지 않는다.
-            "route_summary": (route.get("summary") or f"{math_.travel_minutes}분")[:200],
-            "route_key": (route.get("key") or "")[:120],
-            "route_detail": (route.get("detail") or "")[:120],
-            # 지도에 그릴 경로선과 진행률의 분모. 좌표를 못 받았으면 빈 배열이고
-            # 앱은 지도 자리에 안내만 띄운다 — 알람 계산은 그대로 성립한다.
-            "route_path": route.get("path") or [],
-            "route_distance_m": route.get("path_distance_m"),
-            # 지금 더 빠른 대안. 고른 경로는 위에서 그대로 저장했고, 이건 지도에
-            # 겹쳐 보여 주기만 한다. `resolve_route` 가 대중교통을 고른 경우에만
-            # 채워 주고, 같은 경로거나 더 느리면 아예 붙이지 않는다.
-            **_alternative_fields(route),
-        }
-    )
-    return _upsert(
-        event,
-        defaults,
-        trigger=trigger,
-        # 카카오가 준 분 그대로(G2). 계획의 `travel_minutes` 는 보정·τ 분위수가 들어간 값이다.
-        route_minutes_raw=_raw_minutes(route),
-    )
+    return prep, travel
 
 
 # Partly AI-generated (Claude)
@@ -335,13 +365,16 @@ def recompute_for_user(user, only_future: bool = True, *, trigger: str = "") -> 
     1,000건이므로 일정이 많으면 한 번에 다 쓰지 않게 상한을 둔다.
     """
     from django.utils import timezone
+    from apps.events.recurrence import in_window
 
-    qs = Event.objects.filter(user=user).select_related("place", "tag", "user__profile")
+    qs = Event.objects.filter(user=user).select_related("place", "tag", "user__profile", "recurrence")
     if only_future:
         qs = qs.filter(start_at__gte=timezone.now())
 
     count = 0
     for event in qs[:50]:
+        if not in_window(event):
+            continue
         compute_and_store(event, trigger=trigger)
         count += 1
     return count

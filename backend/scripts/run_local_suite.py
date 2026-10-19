@@ -101,6 +101,8 @@ def local_env() -> dict[str, str]:
 
     env = os.environ.copy()
     env["DATABASE_URL"] = suite_database_url()
+    # 한 IP에서 계정을 대량 생성하는 회귀 전용. 운영의 10/hour는 별도 검증한다.
+    env["DJANGO_SETTINGS_MODULE"] = "config.settings.local_suite"
     # 윈도우 콘솔 기본 코드페이지에서 한글 출력이 깨지는 것을 막는다.
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"

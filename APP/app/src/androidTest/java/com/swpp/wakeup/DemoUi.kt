@@ -7,6 +7,7 @@ import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
+import java.util.regex.Pattern
 
 /** 화면 갱신 시 요소 조회부터 읽기·클릭까지 새 노드로 다시 수행한다. */
 internal class DemoUi(private val device: UiDevice) {
@@ -62,6 +63,35 @@ internal class DemoUi(private val device: UiDevice) {
             Thread.sleep(300)
         }
         throw AssertionError("화면 요소를 찾지 못함: $selector")
+    }
+
+    fun pickTime(time: String, onDialReady: () -> Unit = {}) {
+        val (hour, minute) = time.split(":").map(String::toInt)
+        click(By.text(Pattern.compile(if (hour >= 12) "PM|오후" else "AM|오전")))
+        val clockHour = if (hour % 12 == 0) 12 else hour % 12
+        click(By.desc(Pattern.compile("$clockHour (hours?|o'clock)|${clockHour}시")))
+        dragMinute(minute, onDialReady)
+    }
+
+    fun dragMinute(minute: Int, onDialReady: () -> Unit = {}) {
+        // 현재 시각과 같으면 상단 시 표시를 누를 수 있으므로 분 선택을 명시한다.
+        click(By.desc(Pattern.compile("Select minutes|분 선택")))
+        onDialReady()
+        val zero = By.desc(Pattern.compile("0 minutes?|0분"))
+        val thirty = By.desc(Pattern.compile("30 minutes?|30분"))
+        await(zero)
+        await(thirty)
+        // 상단 분 표시도 같은 설명을 쓴다. 아래쪽 다이얼의 숫자를 기준으로 잡는다.
+        val top = withNode(zero) { device.findObjects(zero).maxBy { it.visibleCenter.y }.visibleCenter }
+        val bottom = withNode(thirty) { device.findObjects(thirty).maxBy { it.visibleCenter.y }.visibleCenter }
+        val x = (top.x + bottom.x) / 2.0
+        val y = (top.y + bottom.y) / 2.0
+        val radius = (bottom.y - top.y) / 2.0
+        val angle = Math.PI * 2 * minute / 60
+        // 탭은 5분 단위로 반올림된다. 드래그는 1분 단위로 선택한다.
+        device.swipe(x.toInt(), y.toInt(), (x + radius * kotlin.math.sin(angle)).toInt(),
+            (y - radius * kotlin.math.cos(angle)).toInt(), 30)
+        device.waitForIdle()
     }
 
     private fun hideKeyboard() {

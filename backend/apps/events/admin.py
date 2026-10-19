@@ -7,7 +7,16 @@ from django.db.models import Count
 from apps.observations.models import AlarmLog, TripObservation
 from apps.planning.models import AlarmPlan, PlanRevision
 
-from .models import Event, EventTag, Place
+from .models import Event, EventRecurrence, EventTag, Place
+
+
+@admin.register(EventRecurrence)
+class EventRecurrenceAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "start_at", "timezone")
+    readonly_fields = ("user", "start_at", "timezone", "weekdays", "template", "place", "tag", "excluded_dates")
+
+    def has_add_permission(self, request):
+        return False
 
 
 class EventForm(forms.ModelForm):

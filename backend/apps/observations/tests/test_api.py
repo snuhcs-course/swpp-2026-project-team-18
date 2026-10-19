@@ -22,7 +22,7 @@ from apps.observations.serializers import (
 from apps.planning.models import AlarmPlan
 
 KST = timezone(timedelta(hours=9))
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 BATCH_URL = "/api/observations/batch"
 LIST_URL = "/api/observations"

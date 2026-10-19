@@ -17,6 +17,8 @@ import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+pytestmark = pytest.mark.integration
+
 SUBWAY = "6e69426b6f6b6a6837357545696c5a"
 BUS = "52946bbceb164c6d51e445be7b3259db"
 

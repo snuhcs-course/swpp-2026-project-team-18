@@ -28,6 +28,7 @@ from django.urls import reverse
 
 from apps.common.models import ApiRequestLog
 from apps.events.models import Event, Place
+from apps.events.recurrence import attach
 from apps.observations.models import AlarmLog, TripObservation
 from apps.planning.models import PlanRevision
 from apps.reports.models import LlmCall
@@ -68,6 +69,7 @@ def seeded(django_user_model):
         user=user, place=place, title="수업",
         start_at=datetime(2026, 10, 5, 9, 0, tzinfo=KST),
     )
+    attach(event, [0])
     TripObservation.objects.create(
         user=user, event=event, kind="arrive", detector="gps",
         observed_at=datetime(2026, 10, 5, 8, 55, tzinfo=KST),
@@ -111,6 +113,7 @@ def admin_url(model, view: str, **kwargs) -> str:
 
 
 class TestEveryAdminOpens:
+    @pytest.mark.integration
     def test_index_lists_the_apps(self, client_admin):
         res = client_admin.get(reverse("admin:index"))
         assert res.status_code == 200
@@ -118,6 +121,7 @@ class TestEveryAdminOpens:
         # DB 에서 고친 적이 있어서다.
         assert "JustInTime" in res.content.decode()
 
+    @pytest.mark.integration
     def test_changelists_open(self, client_admin, seeded):
         broken = []
         for model in registered_models():
@@ -126,6 +130,7 @@ class TestEveryAdminOpens:
                 broken.append(f"{model.__name__} → {res.status_code}")
         assert not broken, "목록 화면이 열리지 않는다: " + ", ".join(broken)
 
+    @pytest.mark.integration
     def test_changelists_survive_search_and_filters(self, client_admin, seeded):
         """검색어와 쓰레기 필터값에 500 이 나지 않는지.
 
@@ -141,6 +146,7 @@ class TestEveryAdminOpens:
                     broken.append(f"{model.__name__}{query} → {res.status_code}")
         assert not broken, "목록 조회가 터진다: " + ", ".join(broken)
 
+    @pytest.mark.integration
     def test_change_pages_open(self, client_admin, seeded):
         """행이 있는 모델의 수정 화면을 연다.
 
@@ -156,6 +162,7 @@ class TestEveryAdminOpens:
                 broken.append(f"{model.__name__}({obj.pk}) → {res.status_code}")
         assert not broken, "수정 화면이 열리지 않는다: " + ", ".join(broken)
 
+    @pytest.mark.integration
     def test_add_pages_open_or_are_closed_on_purpose(self, client_admin, seeded):
         """추가 화면은 열리거나, 막혀 있어야 한다(403).
 
@@ -169,6 +176,7 @@ class TestEveryAdminOpens:
         closed = {
             "alarmplan", "tripobservation", "weeklysummary",
             "planrevision", "alarmlog", "llmcall", "apirequestlog",
+            "eventrecurrence",
         }
         broken = []
         for model in registered_models():
@@ -198,6 +206,7 @@ class TestEveryAdminOpens:
         assert not missing, "admin 에 등록되지 않은 모델: " + ", ".join(missing)
 
 
+@pytest.mark.integration
 class TestHomeCoordinatePair:
     """집 좌표를 한쪽만 저장하려 할 때.
 

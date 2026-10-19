@@ -15,8 +15,6 @@ import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.sensing.TripLiveState
 import com.swpp.wakeup.ui.auth.LoginActivity
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,7 +62,6 @@ class DemoFlowTest {
 
             step("02_plan_and_map") {
                 openPlan()
-                find(By.textContains(config.getString("event_title")), "plan_scroll")
                 find(By.res("trip_status"), "plan_scroll")
                 find(By.desc("경로 지도"), "plan_scroll", timeout = 45_000)
             }
@@ -119,18 +116,14 @@ class DemoFlowTest {
                 find(By.res("trip_status").textStartsWith("이동 중"), "plan_scroll", 15_000)
             }
 
-            step("07_destination_dwell") {
-                until("목적지 반경 진입", 90_000) {
-                    TripLiveState.pointFor(eventId)?.awaitingDwell == true
+            step("07_immediate_arrival") {
+                until("100m 반경 진입 즉시 도착", 90_000) {
+                    TripLiveState.arrivalFor(eventId) != null
                 }
-                assertNull("2분 체류 전에 도착 완료됨", TripLiveState.arrivalFor(eventId))
-                assertNotEquals("도착 완료", ui.text(By.res("trip_status"), "plan_scroll"))
+                assertArrival(eventId)
             }
 
             step("08_arrival_after_service_stop") {
-                until("실제 2분 체류 도착 판정", 180_000) {
-                    TripLiveState.arrivalFor(eventId) != null
-                }
                 until("추적 서비스 종료", 20_000) {
                     TripLiveState.pointFor(eventId) == null &&
                         !Regex("ServiceRecord\\{[^\\n]*TripTrackingService").containsMatchIn(
@@ -181,13 +174,14 @@ class DemoFlowTest {
 
     private fun openPlan() {
         ui.click(By.res("next_alarm"), "home_list")
-        find(By.text("알람 결정"))
+        find(By.res("plan_scroll"), timeout = 90_000)
+        find(By.textContains(config.getString("event_title")), timeout = 90_000)
     }
 
     private fun assertArrival(eventId: Long) {
         find(By.res("trip_status").text("도착 완료"), "plan_scroll", 15_000)
         val arrival = TripLiveState.arrivalFor(eventId)!!
-        val clock = SimpleDateFormat("HH:mm", Locale.KOREA).format(Date(arrival.atMillis))
+        val clock = SimpleDateFormat("H:mm", Locale.KOREA).format(Date(arrival.atMillis))
         assertEquals("실제 도착 시각 UI", clock, ui.text(By.res("trip_arrival_time"), "plan_scroll"))
     }
 
@@ -203,22 +197,7 @@ class DemoFlowTest {
         throw AssertionError("시간 초과: $label")
     }
 
-    private fun control(path: String): JSONObject {
-        val connection = URL(config.getString("control_url") + path).openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.connectTimeout = 10_000
-        connection.readTimeout = 90_000
-        connection.setRequestProperty("X-QA-Token", config.getString("control_token"))
-        try {
-            val code = connection.responseCode
-            val body = (if (code == 200) connection.inputStream else connection.errorStream)
-                .bufferedReader().use { it.readText() }
-            assertEquals("QA 제어 API $path: $body", 200, code)
-            return JSONObject(body)
-        } finally {
-            connection.disconnect()
-        }
-    }
+    private fun control(path: String) = demoControl(config, path)
 
     private fun step(name: String, action: () -> Unit) {
         Log.i("DemoFlowQA", "START $name")

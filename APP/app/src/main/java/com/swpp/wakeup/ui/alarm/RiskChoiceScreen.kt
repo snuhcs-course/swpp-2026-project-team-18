@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -46,24 +47,7 @@ import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTheme
 
 // Partly AI-generated (Claude)
-/**
- * 리스크 선택. Figma "5. 리스크 선택" (node 1:53).
- *
- * 원래 의도는 **시각이 아니라 감수할 지각 위험을 정하는 것**이다. τ 를 올리면
- * 더 일찍 일어나고, 내리면 더 자되 지각 확률이 커진다.
- *
- * **그런데 지금은 선택지를 고를 수 없다.** τ 별 알람 시각·확률은 서버의 옵션
- * API(task.md BE-16, backend-requests R-2)가 계산해야 하는데 아직 없다. 관측이
- * 부족해서가 아니다 — `MainActivity` 가 [riskOptions] 를 넘기지 않으므로 사용자가
- * 보는 것은 항상 빈 상태다.
- *
- * 그래서 선택지는 **서버가 계산해 준 경우에만**([riskOptions]) 그린다. 그 전에는
- * "선택지 준비 중" 빈 상태를 보여준다. 가짜 97%/90%/65% 세 장이나 서버에 없는
- * 기준으로 고정한 진행 막대를 보여주는 것보다 정직하다.
- *
- * @param riskOptions 서버가 준 옵션·분포. null 이거나 옵션이 비면 빈 상태
- * @param onContinue 고른 옵션의 key 로 계속. ⏳ B-5 이후: 저장 API 를 부르고 ④로 돌아간다
- */
+/** 서버가 계산한 위험별 선택지. 저장은 사용자가 계속하기를 눌렀을 때만 한다. */
 @Composable
 fun RiskChoiceScreen(
     plan: AlarmPlanView?,
@@ -71,11 +55,15 @@ fun RiskChoiceScreen(
     modifier: Modifier = Modifier,
     riskOptions: RiskOptionsView? = null,
     onContinue: (String) -> Unit = {},
+    loading: Boolean = false,
+    saving: Boolean = false,
+    error: String? = null,
+    onRetry: () -> Unit = {},
 ) {
-    if (riskOptions != null && riskOptions.options.isNotEmpty()) {
-        RiskChooser(riskOptions, onBack, onContinue, modifier)
+    if (!loading && riskOptions != null && riskOptions.options.isNotEmpty()) {
+        RiskChooser(riskOptions, onBack, onContinue, modifier, saving, error, plan?.tauUsed)
     } else {
-        RiskEmptyState(plan, onBack, modifier)
+        RiskEmptyState(plan, onBack, modifier, loading, error, riskOptions?.unavailableReason, onRetry)
     }
 }
 
@@ -87,18 +75,21 @@ private fun RiskChooser(
     onBack: () -> Unit,
     onContinue: (String) -> Unit,
     modifier: Modifier = Modifier,
+    saving: Boolean = false,
+    error: String? = null,
+    currentTau: Double? = null,
 ) {
     // 고른 옵션은 화면 상태다. 저장은 "계속하기" 를 눌렀을 때 한다(B-5).
     var selectedKey by rememberSaveable(riskOptions) {
-        mutableStateOf(riskOptions.selectedKey ?: riskOptions.options.first().key)
+        mutableStateOf(riskOptions.selectedKey)
     }
-    val selected = riskOptions.options.firstOrNull { it.key == selectedKey }
-        ?: riskOptions.options.first()
+    val selected = riskOptions.option(selectedKey)
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(JitColor.Bg)
+            .testTag("risk_scroll")
             .verticalScroll(rememberScrollState())
             .padding(
                 start = JitSpace.ScreenHorizontal,
@@ -117,16 +108,28 @@ private fun RiskChooser(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "지각하지 않을 확률 선택",
+            text = if (riskOptions.options.all { it.probability == null })
+                "일부 소요시간의 변동 폭만 알려져 정시 도착 확률은 아직 계산할 수 없음"
+            else "지각하지 않을 확률 선택",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
 
+        if (riskOptions.selectedKey == null) {
+            Text(
+                text = currentTau?.let { "현재 적용 τ $it · 바꾸려면 옵션을 골라 주세요" }
+                    ?: "바꾸려면 옵션을 골라 주세요",
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+            )
+        }
+
         riskOptions.options.forEach { option ->
             RiskOptionCard(
                 option = option,
-                selected = option.key == selected.key,
+                selected = option.key == selected?.key,
                 onClick = { selectedKey = option.key },
+                enabled = !saving,
             )
         }
 
@@ -138,9 +141,13 @@ private fun RiskChooser(
 
         Spacer(Modifier.height(4.dp))
 
+        error?.let { Text(it, color = JitColor.Red, fontSize = 12.sp) }
         JitPrimaryButton(
-            label = "${selected.label}${josaRo(selected.label)} 계속하기",
-            onClick = { onContinue(selected.key) },
+            label = selected?.let { "${it.label}${josaRo(it.label)} 계속하기" } ?: "옵션을 선택해 주세요",
+            onClick = { selected?.let { onContinue(it.key) } },
+            enabled = selected != null,
+            loading = saving,
+            modifier = Modifier.testTag("risk_continue"),
         )
     }
 }
@@ -151,10 +158,15 @@ private fun RiskChooser(
  * 고른 카드는 주황 테두리와 "선택됨" 으로 표시한다.
  */
 @Composable
-private fun RiskOptionCard(option: RiskOptionView, selected: Boolean, onClick: () -> Unit) {
+private fun RiskOptionCard(
+    option: RiskOptionView,
+    selected: Boolean,
+    onClick: () -> Unit,
+    enabled: Boolean,
+) {
     val color = optionColor(option.key)
     JitCard(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.testTag("risk_option_${option.key}").clickable(enabled = enabled, onClick = onClick),
         accented = selected,
         gap = 8.dp,
     ) {
@@ -212,7 +224,7 @@ private fun RiskOptionCard(option: RiskOptionView, selected: Boolean, onClick: (
 }
 
 // Partly AI-generated (Claude)
-/** "● 자동 조정: 시험·발표 일정은 기본적으로 안전 모드" */
+/** 일정 종류 기본 τ가 프로필 기본값 대신 적용된 실제 이유. */
 @Composable
 private fun AutoAdjustCard(reason: String?) {
     JitCard(gap = 6.dp) {
@@ -232,18 +244,18 @@ private fun AutoAdjustCard(reason: String?) {
 
 // AI-generated (Claude)
 /**
- * 총 소요시간 분포 히스토그램. 막대 높이는 구간별 기록 수에 비례한다.
+ * 총 소요시간 모델 분포. 막대 높이는 구간별 예상 비율에 비례한다.
  * 축은 처음 · 중앙값 · 끝 세 값만 적는다(Figma "62분 / 80분 / 98분").
  */
 @Composable
 private fun DistributionCard(distribution: DurationDistributionView) {
     JitCard(gap = 8.dp) {
         Text(
-            text = "총 소요시간 분포 · 최근 ${distribution.windowDays}일",
+            text = "예상 총 소요시간 분포 · 모형 계산",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
-        val maxCount = distribution.bins.maxOfOrNull { it.count }?.takeIf { it > 0 } ?: 1
+        val maxMass = distribution.bins.maxOfOrNull { it.mass }?.takeIf { it > 0 } ?: 1.0
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -257,7 +269,7 @@ private fun DistributionCard(distribution: DurationDistributionView) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight(fraction = (bin.count.toFloat() / maxCount).coerceAtLeast(0.04f))
+                        .fillMaxHeight(fraction = (bin.mass / maxMass).toFloat().coerceIn(0f, 1f))
                         .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
                         .background(if (inside) JitColor.Accent else JitColor.Track),
                 )
@@ -276,7 +288,7 @@ private fun DistributionCard(distribution: DurationDistributionView) {
             }
         }
         Text(
-            text = "절반은 ${distribution.p50Minutes}분 이내 · 90%는 ${distribution.p90Minutes}분 이내",
+            text = "모형 기준 절반은 ${distribution.p50Minutes}분 이내 · 90%는 ${distribution.p90Minutes}분 이내",
             color = JitColor.TextPrimary,
             fontSize = 12.sp,
         )
@@ -310,11 +322,16 @@ private fun RiskEmptyState(
     plan: AlarmPlanView?,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    loading: Boolean,
+    error: String?,
+    unavailableReason: String?,
+    onRetry: () -> Unit,
 ) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(JitColor.Bg)
+            .testTag("risk_scroll")
             .verticalScroll(rememberScrollState())
             .padding(
                 start = JitSpace.ScreenHorizontal,
@@ -347,7 +364,7 @@ private fun RiskEmptyState(
             ) {
                 Text("지금 적용된 값", color = JitColor.TextSecondary, fontSize = 11.sp)
                 Text(
-                    text = plan?.tauUsed?.let { "τ ${"%.2f".format(it)}" } ?: "τ —",
+                    text = plan?.tauUsed?.let { "τ $it" } ?: "τ —",
                     color = JitColor.Accent,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
@@ -379,62 +396,30 @@ private fun RiskEmptyState(
             }
         }
 
-        // 왜 아직 고를 수 없는지. 관측 부족이 아니라 옵션 API(BE-16)가 없어서다.
-        // 서버에 없는 기준("며칠")이나 고정 진행 막대는 그리지 않는다.
-        JitCard(gap = 9.dp) {
+        JitCard(gap = 9.dp, modifier = Modifier.testTag("risk_unavailable")) {
             JitDotLabel(
-                text = "선택지 준비 중",
+                text = if (loading) "선택지 불러오는 중" else "선택지를 표시할 수 없음",
                 dotColor = JitColor.Amber,
                 fontSize = 13,
                 dotSize = 8.dp,
             )
             Text(
-                text = "안전·보통·도박 중에서 고르는 기능은 서버 계산이 붙으면 열림. " +
-                    "지금은 위에 적힌 τ 로 계산함",
+                text = when {
+                    loading -> "서버에서 알람 선택지를 계산하고 있습니다."
+                    error != null -> error
+                    else -> unavailableReason ?: "소요시간 정보가 부족해 선택지를 계산할 수 없습니다."
+                },
                 color = JitColor.TextSecondary,
                 fontSize = 11.sp,
             )
         }
-
-        // 열리면 무엇을 고를 수 있는지
-        JitCard(gap = 9.dp) {
-            Text("열리면 고를 수 있는 것", color = JitColor.TextSecondary, fontSize = 11.sp)
-            FutureRow("안전", "일찍 일어나고 지각 확률이 낮음", JitColor.Green)
-            FutureRow("보통", "권장값. 수면과 정시 도착의 균형", JitColor.Accent)
-            FutureRow("도박", "더 자되 지각 확률을 감수", JitColor.Red)
-        }
-
-        // 지금도 동작하는 것
-        JitCard(gap = 9.dp) {
-            JitDotLabel(
-                text = "지금도 자동으로 적용되는 것",
-                dotColor = JitColor.Blue,
-                fontSize = 12,
-                dotSize = 6.dp,
-            )
-            Text(
-                text = "시험·발표·기차 일정은 τ 를 높게 잡아 더 여유 있게 계산함. " +
-                    "일정 종류만 골라 두면 알아서 반영됨",
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+        if (!loading) {
+            JitPrimaryButton(
+                label = "다시 시도",
+                onClick = onRetry,
+                modifier = Modifier.testTag("risk_retry"),
             )
         }
-    }
-}
-
-// Partly AI-generated (Claude)
-@Composable
-private fun FutureRow(name: String, body: String, color: Color) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            text = name,
-            color = color,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(40.dp),
-        )
-        Spacer(Modifier.width(9.dp))
-        Text(text = body, color = JitColor.TextSecondary, fontSize = 11.sp)
     }
 }
 
@@ -485,25 +470,26 @@ private fun RiskChooserPreview() {
             onBack = {},
             riskOptions = RiskOptionsView(
                 options = listOf(
-                    RiskOptionView("safe", "안전", "7:20", "AM", 97, "수면 6시간 20분"),
-                    RiskOptionView("normal", "보통", "7:40", "AM", 90, "수면 6시간 40분"),
-                    RiskOptionView("gamble", "도박", "8:00", "AM", 65, "수면 7시간"),
+                    RiskOptionView("safe", "안전", "7:20", "AM", 97, null, .97),
+                    RiskOptionView("normal", "보통", "7:40", "AM", 90, null, .90),
+                    RiskOptionView("gamble", "도박", "8:00", "AM", 65, null, .65),
                 ),
                 selectedKey = "normal",
-                autoAdjusted = true,
-                autoReason = "시험·발표 일정은 기본적으로 안전 모드",
+                autoAdjusted = false,
+                autoReason = null,
                 distribution = DurationDistributionView(
                     bins = listOf(
-                        DurationDistributionView.Bin(62, 68, 2),
-                        DurationDistributionView.Bin(68, 74, 5),
-                        DurationDistributionView.Bin(74, 80, 9),
-                        DurationDistributionView.Bin(80, 86, 7),
-                        DurationDistributionView.Bin(86, 92, 4),
-                        DurationDistributionView.Bin(92, 98, 2),
+                        DurationDistributionView.Bin(62, 68, .07),
+                        DurationDistributionView.Bin(68, 74, .17),
+                        DurationDistributionView.Bin(74, 80, .31),
+                        DurationDistributionView.Bin(80, 86, .24),
+                        DurationDistributionView.Bin(86, 92, .14),
+                        DurationDistributionView.Bin(92, 98, .07),
                     ),
                     p50Minutes = 80,
                     p90Minutes = 92,
-                    windowDays = 30,
+                    windowDays = null,
+                    source = "model",
                 ),
             ),
         )

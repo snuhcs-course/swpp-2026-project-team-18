@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -108,10 +110,12 @@ fun AddEventScreen(
     onTitleChange: (String) -> Unit,
     onDateChange: (LocalDate) -> Unit,
     onTimeChange: (Int, Int) -> Unit,
+    onRepeatDayToggle: (Int) -> Unit,
     onTagChange: (String?) -> Unit,
     onQueryChange: (String) -> Unit,
     onSearch: () -> Unit,
     onPlaceSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit,
+    onDestinationHome: () -> Unit,
     onLoadMore: () -> Unit,
     onSortChange: (String) -> Unit,
     onOpenMap: () -> Unit,
@@ -175,7 +179,7 @@ fun AddEventScreen(
 
         DateRow(state.date, onDateChange, enabled = !state.submitting)
         // Figma 순서: 날짜 → 반복 → 시작 시각
-        RepeatRow(selected = emptySet(), onToggle = {}, available = REPEAT_AVAILABLE)
+        RepeatRow(state.repeatWeekdays, onRepeatDayToggle, enabled)
         TimeRow(state.hour, state.minute, onTimeChange, enabled = !state.submitting)
 
         // Figma 13-a 출발·도착 지정: 각 줄 [값] [집] [검색].
@@ -184,6 +188,7 @@ fun AddEventScreen(
             val originIsHome = state.origin == null && homePlace != null
             EndpointRow(
                 label = "출발지",
+                tag = "origin",
                 value = when {
                     state.originLocating -> "현재 위치를 확인하는 중"
                     state.origin != null -> state.origin.name
@@ -247,16 +252,17 @@ fun AddEventScreen(
             val destination = state.selectedPlace
             EndpointRow(
                 label = "도착지",
+                tag = "destination",
                 value = destination?.name ?: "도착지를 검색해 주세요",
                 hasValue = destination != null,
-                isHome = destination != null && homePlace != null && destination.isSameSpot(homePlace),
+                isHome = state.destinationIsHome,
                 homeAvailable = homePlace != null,
                 searching = destinationSearching,
                 enabled = enabled,
                 onHome = {
                     if (homePlace == null) onSetHome()
                     else {
-                        onPlaceSelect(homePlace)
+                        onDestinationHome()
                         destinationSearching = false
                     }
                 },
@@ -560,27 +566,14 @@ private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enable
     }
 }
 
-// AI-generated (Claude)
-/**
- * 반복 일정을 서버가 받을 수 있는지.
- *
- * 반복 저장은 서버 작업(task.md B-6)이다. 그 전에 칩을 누를 수 있게 두면
- * 사용자는 반복이 저장된 줄 알지만 실제로는 한 번짜리 일정만 생긴다. 그래서
- * B-6 전까지는 칩을 비활성으로 두고 "준비 중" 이라고 적는다.
- *
- * ⏳ B-6 이후: true 로 바꾸고, 고른 요일을 `AddState` 에 담아 생성 요청에 보낸다.
- */
-private const val REPEAT_AVAILABLE = false
-
 // Partly AI-generated (Claude)
 /**
  * 반복 카드. Figma "⑫ 반복": 오른쪽 위 선택 요약("월 · 수"), 아래 월~일 칩 7개.
  *
  * @param selected 고른 요일. 0 = 월 … 6 = 일 ([DAY_NAMES] 의 인덱스)
- * @param available false 면 칩을 비활성으로 그리고 요약 자리에 "준비 중"
  */
 @Composable
-private fun RepeatRow(selected: Set<Int>, onToggle: (Int) -> Unit, available: Boolean) {
+private fun RepeatRow(selected: Set<Int>, onToggle: (Int) -> Unit, enabled: Boolean) {
     JitCard(gap = 10.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -589,10 +582,11 @@ private fun RepeatRow(selected: Set<Int>, onToggle: (Int) -> Unit, available: Bo
         ) {
             Text("반복", color = JitColor.TextSecondary, fontSize = 11.sp)
             Text(
-                text = if (available) repeatSummary(selected) else "준비 중",
-                color = if (available) JitColor.Accent else JitColor.TextSecondary,
+                text = repeatSummary(selected),
+                color = JitColor.Accent,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
+                modifier = Modifier.testTag("repeat_summary"),
             )
         }
         Row(
@@ -600,28 +594,37 @@ private fun RepeatRow(selected: Set<Int>, onToggle: (Int) -> Unit, available: Bo
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             DAY_NAMES.forEachIndexed { index, name ->
-                val on = available && index in selected
+                val on = index in selected
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .height(34.dp)
                         .clip(RoundedCornerShape(JitRadius.Hint))
                         .background(if (on) JitColor.Accent else JitColor.Surface2)
-                        .clickable(enabled = available) { onToggle(index) },
+                        .testTag("repeat_day_$index")
+                        .toggleable(
+                            value = on,
+                            enabled = enabled,
+                            role = Role.Checkbox,
+                            onValueChange = { onToggle(index) },
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = name,
-                        color = when {
-                            on -> JitColor.Bg
-                            available -> JitColor.TextPrimary
-                            else -> JitColor.Track
-                        },
+                        color = if (on) JitColor.Bg else JitColor.TextPrimary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                     )
                 }
             }
+        }
+        if (selected.isNotEmpty()) {
+            Text(
+                text = "선택한 날짜부터 매주 반복 / 앞으로 7일치 표시",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+            )
         }
     }
 }
@@ -935,6 +938,7 @@ private fun RouteRow(
 @Composable
 private fun EndpointRow(
     label: String,
+    tag: String,
     value: String,
     hasValue: Boolean,
     isHome: Boolean,
@@ -963,6 +967,7 @@ private fun EndpointRow(
                 dimmed = !homeAvailable,
                 enabled = enabled,
                 onClick = onHome,
+                modifier = Modifier.testTag("${tag}_home"),
             )
             Spacer(Modifier.width(6.dp))
             EndpointButton(
@@ -971,6 +976,7 @@ private fun EndpointRow(
                 dimmed = false,
                 enabled = enabled,
                 onClick = onSearchToggle,
+                modifier = Modifier.testTag("${tag}_search"),
             )
         }
     }
@@ -984,6 +990,7 @@ private fun EndpointButton(
     dimmed: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Text(
         text = text,
@@ -994,7 +1001,7 @@ private fun EndpointButton(
         },
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier
+        modifier = modifier
             .clip(RoundedCornerShape(JitRadius.Hint))
             .background(if (active) JitColor.Accent else JitColor.Surface2)
             .clickable(enabled = enabled, onClick = onClick)
@@ -1032,9 +1039,3 @@ private fun NoticeLine(text: String) {
         dotSize = 6.dp,
     )
 }
-
-// AI-generated (Claude)
-/** 같은 지점인지. 검색 결과와 저장된 집은 객체가 달라서 좌표로 비교한다(약 10m). */
-internal fun com.swpp.wakeup.data.remote.PlaceSearchItem.isSameSpot(
-    other: com.swpp.wakeup.data.remote.PlaceSearchItem,
-): Boolean = kotlin.math.abs(lat - other.lat) < 1e-4 && kotlin.math.abs(lng - other.lng) < 1e-4

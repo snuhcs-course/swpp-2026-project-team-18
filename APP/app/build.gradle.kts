@@ -7,6 +7,8 @@ plugins {
     alias(libs.plugins.google.services)
     // Room 의 DAO·DB 구현을 생성한다.
     alias(libs.plugins.ksp)
+    // 단위 테스트 커버리지 리포트(jacocoDebugUnitTestReport). 아래 정의 참고.
+    jacoco
 }
 
 /**
@@ -120,6 +122,9 @@ android {
 
     buildTypes {
         debug {
+            // testDebugUnitTest 에 JaCoCo 에이전트를 붙인다. APK 에는 영향이 없다
+            // (APK 계측은 enableAndroidTestCoverage 쪽이고 아직 켜지 않는다).
+            enableUnitTestCoverage = true
             // 공용 서버(gradle.properties jitApiBaseUrl)가 기본이고,
             // local.properties 에 devServerHost 를 적으면 로컬 백엔드로 바뀐다.
             buildConfigField("String", "BASE_URL", "\"$apiBaseUrl\"")
@@ -155,7 +160,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
+    // JDK 25(Gradle 데몬)에서도 도는 버전. 기본값은 AGP 가 정하는데 새 JDK 의
+    // 클래스 파일을 못 읽는 옛 버전일 수 있다.
+    testCoverage {
+        jacocoVersion = libs.versions.jacoco.get()
+    }
+
     testOptions {
+        // 기기 테스트(connectedDebugAndroidTest) 동안 시스템 애니메이션을 끈다.
+        // 켜 두면 화면 전환 중간 상태를 읽어 같은 테스트가 PC 마다 다르게 나온다.
+        animationsDisabled = true
         unitTests {
             // JVM 단위 테스트에서 안드로이드 프레임워크 호출이 예외를 던지지
             // 않고 기본값을 돌려주게 한다.
@@ -166,6 +180,14 @@ android {
             // 원인을 찾는 유일한 창구라 빼고 싶지 않다.
             isReturnDefaultValues = true
         }
+    }
+
+    // JVM 단위 테스트와 기기 테스트가 같은 가짜 API·픽스처 도우미를 쓴다
+    // (src/sharedTest/.../testing/Fakes.kt). 한쪽에만 두면 두 벌이 되고, 두 벌은
+    // 서버 응답 모양이 바뀔 때 반드시 갈린다.
+    sourceSets {
+        getByName("test").kotlin.directories.add("src/sharedTest/java")
+        getByName("androidTest").kotlin.directories.add("src/sharedTest/java")
     }
 }
 
@@ -220,6 +242,58 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.uiautomator)
+    // 화면 통합 테스트(src/androidTest/.../integration). 실행은 README "Verification".
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+jacoco {
+    toolVersion = libs.versions.jacoco.get()
+}
+
+/**
+ * JVM 단위 테스트 커버리지 리포트.
+ *
+ *     ./gradlew jacocoDebugUnitTestReport
+ *     → app/build/reports/jacoco/jacocoDebugUnitTestReport/html/index.html
+ *     → app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml
+ *     python3 scripts/coverage_summary.py   # 계층별 표 (APP 에서)
+ *
+ * AGP 내장 createDebugUnitTestCoverageReport 를 쓰지 않는 이유: 제외 규칙을 줄 수
+ * 없다. 생성 코드가 섞이면 숫자가 "우리가 쓴 코드 중 테스트가 닿은 비율" 이 아니게
+ * 된다. 빼는 것은 아래 목록뿐이고, 화면(Composable)은 빼지 않는다 — 낮게 나오는
+ * 것이 사실이고, 그 계층의 목표를 따로 잡는다.
+ */
+val coverageExcludes = listOf(
+    // AGP 생성
+    "**/R.class", "**/R$*.class", "**/BuildConfig.*", "**/Manifest*.*",
+    // Room(KSP) 생성 DAO·DB 구현
+    "**/*_Impl.class", "**/*_Impl$*.class",
+    // Compose 컴파일러가 만든 람다 보관 클래스
+    "**/ComposableSingletons*.*",
+    // 색·글꼴 토큰, 앱 진입점(내비게이션 그래프). 로직이 없다.
+    "**/ui/theme/**", "**/MainActivity*.*", "**/JitApplication*.*",
+)
+
+tasks.register<JacocoReport>("jacocoDebugUnitTestReport") {
+    group = "verification"
+    description = "testDebugUnitTest 를 돌리고 생성 코드를 뺀 줄 커버리지 리포트를 만든다."
+    val unitTest = tasks.named<Test>("testDebugUnitTest").get()
+    dependsOn(unitTest)
+    executionData(unitTest)
+    // AGP 9 는 Kotlin 을 내장 컴파일러로 빌드해 클래스가 여기에 생긴다.
+    classDirectories.setFrom(
+        fileTree(layout.buildDirectory.dir("intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes")) {
+            exclude(coverageExcludes)
+        }
+    )
+    sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
 }
 
 // QA는 FCM을 사용하지 않는다. 개인 앱의 Firebase 등록 정보도 공유하지 않는다.

@@ -1,5 +1,7 @@
 # Phase A 설계 — 경로 미리보기 · 백엔드 후속 · 불확실 정보 정리 · 준비 시간 다이얼
 
+> 이 문서는 해당 Phase의 설계·리뷰·검증 당시 기록이다. 당시 테스트 수·미구현 설명을 현재 상태로 해석하지 않는다. 2026-10-17 후속 통합 상태는 [최신 TODO](../../task.md), [요청별 완료 상태](backend-requests.md), [최신 검증](account-ranges-and-travel-counts.md)을 따른다.
+
 - 기준: `front-iter2` (HEAD `b1eff1f`, origin/main 과 같음). 서버 `APP_VERSION 0.10.0`, 앱 `versionName 0.10.0`.
 - 범위: Figma 시안 + 앱 화면(프론트). 서버 변경은 하지 않는다. 서버가 해 줘야 하는 것은 [backend-requests.md](backend-requests.md).
 - Figma: 이 작업 환경에 Figma MCP 도구가 없어 직접 수정하지 못했다. 프레임별 변경 명세는 [figma-changes.md](figma-changes.md). **팀 규칙대로 Figma 반영 → 코드 순서**로 진행한다.

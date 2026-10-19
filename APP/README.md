@@ -71,7 +71,13 @@ devServerHost=10.0.2.2
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-현재 검증 결과는 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다.
+최신 로컬 검증은 디버그 JVM 테스트 677건/lint 오류 0이며, QA 빌드의 실제 에뮬레이터 UI/전체 E2E 결과는 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다. [BE-20 직접 테스트](../docs/iter2/weekly-recurrence.md)에서 반복 일정 생성/개별 OFF/삭제를 확인할 수 있다. Firebase 개인 설정 없이 QA 변형을 검증하려면 다음을 실행한다.
+
+```bash
+./gradlew :app:testE2eUnitTest :app:lintE2e :app:assembleE2e :app:assembleE2eAndroidTest -PjitE2e=true
+```
+
+`-PjitE2e=true`는 `debug` 대신 `e2e` 변형을 사용한다. 기본 QA 주소는 `http://10.0.2.2:8765/`이며 실제 화면 검증은 아래 E2E 러너가 서버·설치·데이터를 준비한다.
 
 에뮬레이터에서 로그인부터 실제 알람·GPS 도착·리포트까지 자동 검증하려면
 [데모 E2E QA](../qa/demo/README.md)를 따른다. 별도 QA 앱과 일회용 DB를 사용한다.

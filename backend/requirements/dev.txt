@@ -11,5 +11,7 @@ psycopg[binary]==3.2.3
 # 테스트
 pytest==8.3.4
 pytest-django==4.9.0
+# 커버리지. 설정은 .coveragerc, 컴포넌트별 표는 scripts/coverage_summary.py.
+pytest-cov==6.0.0
 
 # numpy 는 P2 의 분포 계산(BE-P2-01)에서 필요하다. 지금은 넣지 않는다.

@@ -18,7 +18,7 @@ from apps.observations.models import TripObservation
 from apps.observations.serializers import MAX_DWELL_SECONDS
 
 KST = timezone(timedelta(hours=9))
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 BATCH_URL = "/api/observations/batch"
 LIST_URL = "/api/observations"
@@ -101,9 +101,15 @@ class TestEnteredAt:
         assert res.status_code == 400
 
     def test_entry_equal_to_the_decision_is_accepted(self, client, event):
-        """추적 마감에 걸려 바로 확정한 도착은 진입과 판정이 같은 fix 일 수 있다."""
-        res = client.post(BATCH_URL, arrival(event, "a4", entered=OBSERVED), format="json")
+        """BE-24 즉시 도착은 진입=판정이며 체류 시간 0도 보존한다."""
+        body = arrival(event, "a4", entered=OBSERVED)
+        body["observations"][0]["dwell_seconds"] = 0
+        res = client.post(BATCH_URL, body, format="json")
         assert res.status_code == 201
+        observation = TripObservation.objects.get(client_uuid="a4")
+        assert observation.entered_at == observation.observed_at
+        assert observation.dwell_seconds == 0
+        assert observation.dwell_confirmed is False  # 과거 체류 참고값이며 도착 거절이 아니다.
 
     def test_gap_is_capped_like_dwell(self, client, event):
         ok = OBSERVED - timedelta(seconds=MAX_DWELL_SECONDS)

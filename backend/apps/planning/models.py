@@ -127,6 +127,7 @@ class AlarmPlan(models.Model):
     # 이동 시간의 출처를 남긴다. 나중에 실측과 비교할 때 필요하다.
     travel_mode = models.CharField("이동 수단", max_length=20, blank=True)
     travel_source = models.CharField("이동시간 출처", max_length=30, blank=True)
+    travel_sample_count = models.PositiveIntegerField("이동 보정 표본 수", default=0, db_default=0)
     route_summary = models.CharField("경로 요약", max_length=200, blank=True)
 
     # 실제로 계산에 쓴 경로 key. `Event.route_key` 와 다르면 사용자가 고른
@@ -264,10 +265,10 @@ class PlanRevision(models.Model):
     ## 언제 쌓이나
 
     `compute_and_store` 가 계획을 저장한 바로 뒤, 같은 트랜잭션이다. 결정값
-    ([DECISION_FIELDS])이 그 일정의 마지막 이력과 같으면 쌓지 않는다 — 같은 값으로
-    다시 계산한 것은 결정이 바뀐 것이 아니다. 실패 상태(`route_failed` 등)도 결정이다.
+    ([DECISION_FIELDS])과 경로 입력이 마지막 이력과 같으면 쌓지 않는다.
+    실패 상태(`route_failed` 등)도 결정이다.
 
-    **학습·리포트는 아직 이 표를 읽지 않는다.** 바꾸는 것은 팀이 정한다.
+    **이동 학습은 이 표의 결정 시점 경로 원값을 사용한다.** 리포트는 아직 현재 계획을 읽는다.
     """
 
     class Trigger(models.TextChoices):
@@ -280,7 +281,7 @@ class PlanRevision(models.Model):
         PROFILE = "profile", "프로필 변경"
         BLOCKS = "blocks", "블록 체크 변경"
 
-    # 이 값들이 마지막 이력과 다를 때만 새 줄을 만든다.
+    # 알람 결정값. 이력 중복 검사는 별도로 경로 원값·요청 key도 비교한다.
     DECISION_FIELDS = (
         "status",
         "alarm_at",
@@ -342,6 +343,7 @@ class PlanRevision(models.Model):
     travel_source = models.CharField(
         "이동시간 출처", max_length=30, blank=True, default="", db_default=""
     )
+    travel_sample_count = models.PositiveIntegerField("이동 보정 표본 수", default=0, db_default=0)
     route_key = models.CharField(
         "사용한 경로", max_length=120, blank=True, default="", db_default=""
     )

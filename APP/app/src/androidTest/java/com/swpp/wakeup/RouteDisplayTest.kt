@@ -33,7 +33,8 @@ class RouteDisplayTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             ui.await(By.res("next_alarm"), timeout = 90_000)
             ui.click(By.text("+  일정 추가"), "home_list")
-            ui.input("event_title", "경로 표시 검증", "add_event_scroll")
+            ui.await(By.res("add_event_scroll"))
+            ui.input("event_title", "경로 표시 검증")
             ui.click(By.res("place_query"), "add_event_scroll")
             ui.input("place_query", query, "add_event_scroll")
             ui.click(By.res("place_search"), "add_event_scroll")
@@ -43,6 +44,7 @@ class RouteDisplayTest {
             // 자전거: 카드를 누르면 전체 화면 지도 미리보기(⑬-e). 뒤로 = 목록으로 복귀.
             ui.click(By.text("자전거"), "route_scroll")
             ui.click(By.res("route_bicycle"), "route_scroll")
+            ui.await(By.res("route_guide"))
             ui.await(By.res("candidate_route_map"))
             ui.await(By.desc("경로 지도"), timeout = 90_000)
             device.takeScreenshot(File(directory, "candidate-bicycle.png"))
@@ -51,6 +53,7 @@ class RouteDisplayTest {
             // 대중교통 배지·대체 버스. 도보 확인이 일정 추가로 돌아가므로 그보다 먼저 본다.
             ui.click(By.text("대중교통"), "route_scroll")
             ui.click(By.res("route_transit:5511"), "route_scroll")
+            ui.await(By.res("route_guide"), "route_scroll")
             for (badge in listOf("최단 시간", "최소 비용", "최소 환승")) {
                 ui.await(By.text(badge), "route_scroll")
             }
@@ -70,6 +73,7 @@ class RouteDisplayTest {
             // 도보: 미리보기의 "이 경로로 계산" 이 일정 추가로 바로 돌아간다.
             ui.click(By.text("도보"), "route_scroll")
             ui.click(By.res("route_walk"), "route_scroll")
+            ui.await(By.res("route_guide"))
             ui.await(By.res("candidate_route_map"))
             ui.await(By.desc("경로 지도"), timeout = 90_000)
             device.takeScreenshot(File(directory, "candidate-walk.png"))

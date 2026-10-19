@@ -6,6 +6,7 @@ Python이 데이터 준비·GPS 이동·결과 수집을 맡는다. Playwright�
 ## 실행
 
 1. [기기 설정](../../docs/device-setup.md)의 API 34+ 에뮬레이터를 켠다. 시간대는 `Asia/Seoul`.
+   UI 자동화용 기기는 CI와 같이 개발자 옵션의 창/전환/Animator 애니메이션 배율을 모두 0으로 설정한다.
 2. [백엔드 가상환경](../../backend/README.md), Android SDK·JDK, `APP/local.properties`의 `sdk.dir`을 준비한다.
    로컬 모드에는 `backend/.env`의 카카오 키가 필요하다.
 3. 저장소 루트에서 실행하고 에뮬레이터 화면을 본다. 실행 중 직접 조작하지 않는다.
@@ -15,7 +16,7 @@ backend/.venv/bin/python qa/demo/run.py
 ```
 
 여러 에뮬레이터가 연결됐으면 `--device emulator-5554`, 영상이 필요 없으면 `--no-video`를 추가한다.
-검증은 약 5~7분 걸린다. 최초 빌드는 의존성 다운로드 때문에 더 걸린다.
+최신 로컬 재생 실행은 약 597초였다. 기기 상태/실시간 경로 응답에 따라 달라지며 최초 빌드는 의존성 다운로드 때문에 더 걸린다.
 
 ### 카카오 키 없이 로컬 변경 검증
 
@@ -25,13 +26,19 @@ backend/.venv/bin/python qa/demo/run.py --replay-routing --no-video
 
 일회용 로컬 DB와 현재 백엔드 코드를 사용한다. 외부 응답만
 [`replay/route.json`](replay/route.json)의 실제 도보 경로 기록·고정 대중교통 사례와
-저장된 지도 이미지로 재생한다. 가입·저장·실제 알람·GPS·관측·리포트 검증은
+저장된 지도 이미지로 재생한다. 집 목적지 변경에는 고정 좌표 경로 사례를 추가로 쓴다. 가입·저장·실제 알람·GPS·관측·리포트 검증은
 그대로 실행하며, 도보 걸음 수·kcal 추정 표시와 시험 일정의 지각 민감도 배지도 확인한다.
 `RouteDisplayTest`는 자전거 카드 → 전체 화면 지도 미리보기 → 뒤로(목록 복귀), 배지 3개와 대체 버스 2개의 실제 카드 표시,
 마지막으로 도보 미리보기의 "이 경로로 계산" → 일정 추가 복귀를 확인한다.
+선택 카드·미리보기의 경로 안내도 확인한다. `BackendFeaturesTest`는 집 목적지 UI 생성·현재 집 변경,
+리스크 빈 상태·모형 옵션·선택 저장·기기 알람 동기화를 확인한다. 리스크 검증 입력만 일회용 DB에 준비하며,
+실제 API가 결과를 계산한다. 이동 보정 표본 20회가 계획 화면에 표시되고 보정 제거 뒤 0으로 초기화되는지도 확인한다. 이후 입력을 복원하고 같은 일정으로 이동 E2E를 이어 간다.
+[직접 테스트와 변경 전후 증거](../../docs/iter2/route-risk-home.md).
 `PublicSetupTest`의 준비 시간 단계는 시계 다이얼(`prep_value` → 24시간제 시:분)로 고르고, 도보 경로는 미리보기가 열리면
 `route_preview_confirm`, 좌표가 없는 응답이면 목록의 `route_confirm` 으로 확정한다.
-결과에는 `external_response_mode`와 `route_display_seconds`를 기록한다.
+마지막 `SignupThrottleTest`는 기존 알람·리포트 완료 후 실제 가입 한도를 채우고 UI의 한국어 429·계정 미생성을 검사한다. 준비 시간은 기존 UI 흐름에서 5분 저장·변경·재로그인 유지를 확인한다. [R-6·R-8·R-1 검증](../../docs/iter2/account-ranges-and-travel-counts.md).
+결과에는 `external_response_mode`·`route_display_seconds`·`signup_throttle_seconds`를 기록한다.
+`BackendFeaturesTest`에는 BE-20 요일 선택/저장/회차별 기기 예약/한 회차만 OFF/삭제 유지 검증을 포함한다. [동작/전후 검증](../../docs/iter2/weekly-recurrence.md).
 이 모드는 공용 서버 옵션과 함께 사용할 수 없으며 실시간 카카오 응답 검증을 대신하지 않는다.
 
 ### 공용 서버에서 완주
@@ -72,11 +79,15 @@ backend/.venv/bin/python qa/demo/run.py --public-ui
 [DemoFlowTest.kt](../../APP/app/src/androidTest/java/com/swpp/wakeup/DemoFlowTest.kt)는 다음 흐름을 검증한다.
 
 준비 UI 검증 후 자동 로그인 → 경로·알람 근거 → 화면 잠금 → 실제 알람 → 해제·루틴 완료 → GPS 출발·이동
-→ 목적지 체류 → 도착 완료 → 화면 재진입 → 관측 업로드·이번 주 리포트.
+→ 목적지 반경 진입 즉시 도착 → 화면 재진입 → 관측 업로드·이번 주 리포트.
 
 준비 블록은 각각 1~2분으로 신고해 준비 시간 변동 폭의 근거를 만든다(확률은 이동 변동 폭도 있어야 나온다).
 알람은 화면 준비 후 약 **30초 뒤**로 계산한다. 루틴은 각 5초, 이동은 65초로 시뮬레이션한다.
-도착의 **50m 반경·120초 체류**는 앱의 원래 조건을 그대로 사용한다.
+GPS는 **목적지 80m 앞에서 멈춘다**. 100m 반경의 첫 유효 위치에서 도착하고,
+서버에 체류 0초·진입=판정 시각·거리 50~100m가 저장돼야 통과한다.
+재생 모드는 UI에서 알람을 끈 뒤 같은 생성 API로 새 일정을 추가해 선택 초기화와
+실제 스위치·기기 예약 복원도 확인한다. 검증용 추가 일정은 바로 삭제한다.
+[BE-25·24 직접 테스트와 전후 결과](../../docs/iter2/alarm-arrival-policy.md).
 GPS 공급자를 QA에서 활성화하고 ADB로 카카오 경로 좌표를 이동시킨다. 앱의 추적 서비스가 출발·도착 관측을 생성한다.
 주간 리포트는 미래 일정을 제외하므로, 도착 기록 저장 후 **같은 일정의 약속 시각만 API로 마감**한다.
 

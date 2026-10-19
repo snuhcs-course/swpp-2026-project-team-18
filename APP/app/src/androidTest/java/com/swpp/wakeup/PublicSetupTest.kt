@@ -10,6 +10,10 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
+import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.data.remote.EventCreateRequest
+import com.swpp.wakeup.data.remote.PlaceInput
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.time.LocalDate
 import java.time.YearMonth
@@ -21,6 +25,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -156,8 +161,10 @@ class PublicSetupTest {
             }
             step("06_plan_and_map") {
                 click(By.res("next_alarm"), "home_list")
-                find(By.textContains(config.getString("event_title")), "plan_scroll")
-                if (config.optBoolean("replay_routing")) find(By.text("지각 민감도 높음"), "plan_scroll")
+                find(By.res("plan_scroll"), timeout = 90_000)
+                find(By.textContains(config.getString("event_title")), timeout = 90_000)
+                capture("06_plan_header")
+                if (config.optBoolean("replay_routing")) find(By.text("지각 민감도 높음"))
                 val blocks = config.getJSONArray("blocks")
                 for (i in 0 until blocks.length()) find(By.text(blocks.getString(i)), "plan_scroll", 90_000)
                 capture("06_prep_breakdown")
@@ -195,6 +202,39 @@ class PublicSetupTest {
                 until("ON 기기 예약 복원") { store.find(eventId) != null }
                 assertTrue(ui.withNode(toggle, "home_list") { it.isChecked })
             }
+            if (config.optBoolean("replay_routing")) step("09_new_event_resets_alarm_choice") {
+                val store = ScheduledAlarmStore(context)
+                val eventId = store.all().single().eventId
+                val api = ApiClient.events
+                val original = runBlocking { requireNotNull(api.get(eventId).body()) }
+                val place = requireNotNull(original.place)
+                val toggle = By.res("event_alarm_$eventId")
+                click(toggle, "home_list")
+                until("초기화 검증 전 OFF 예약 해제") { store.find(eventId) == null }
+
+                // UI와 같은 생성 API를 호출한 뒤 실제 화면·기기 예약을 함께 확인한다.
+                val response = runBlocking { api.create(EventCreateRequest(
+                    title = "QA 초기화 검증", startAt = original.startAt,
+                    place = PlaceInput(place.name, place.lat, place.lng, place.address, place.kakaoPlaceId),
+                    tagKey = original.tag?.key, routeKey = original.routeKey,
+                    originLat = original.originLat, originLng = original.originLng,
+                    originLabel = original.originLabel,
+                )) }
+                assertEquals(201, response.code())
+                val added = requireNotNull(response.body())
+                try {
+                    val reset = runBlocking { requireNotNull(api.get(eventId).body()) }
+                    assertNull(reset.alarmEnabled)
+                    launch()
+                    assertTrue(ui.withNode(toggle, "home_list") { it.isChecked })
+                    assertFalse(ui.withNode(By.res("event_alarm_${added.id}"), "home_list") { it.isChecked })
+                    until("자동 ON 기기 예약 복원") { store.find(eventId) != null }
+                    assertNull(store.find(added.id))
+                } finally {
+                    assertEquals(204, runBlocking { api.delete(added.id).code() })
+                    launch()
+                }
+            }
             writeResult("passed")
         } catch (error: Throwable) {
             capture("failure")
@@ -203,13 +243,7 @@ class PublicSetupTest {
         }
     }
 
-    private fun pickTime(time: String) {
-        val (hour, minute) = time.split(":").map(String::toInt)
-        click(By.text(Pattern.compile(if (hour >= 12) "PM|오후" else "AM|오전")))
-        val clockHour = if (hour % 12 == 0) 12 else hour % 12
-        click(By.desc(Pattern.compile("$clockHour (hours?|o'clock)|${clockHour}시")))
-        dragMinute(minute, "05_time_picker")
-    }
+    private fun pickTime(time: String) = ui.pickTime(time) { capture("05_time_picker") }
 
     // AI-generated (Claude)
     /**
@@ -241,26 +275,7 @@ class PublicSetupTest {
     }
 
     /** 분 다이얼에서 [minute] 를 1분 단위로 고른다. 시는 이미 고른 상태다. */
-    private fun dragMinute(minute: Int, shot: String) {
-        // 현재 시각과 같으면 상단 시 표시를 누를 수 있으므로 분 선택을 명시한다.
-        click(By.desc(Pattern.compile("Select minutes|분 선택")))
-        capture(shot)
-        val zero = By.desc(Pattern.compile("0 minutes?|0분"))
-        val thirty = By.desc(Pattern.compile("30 minutes?|30분"))
-        find(zero)
-        find(thirty)
-        // 상단 분 표시도 같은 설명을 쓴다. 아래쪽 다이얼의 숫자를 기준으로 잡는다.
-        val top = ui.withNode(zero) { device.findObjects(zero).maxBy { it.visibleCenter.y }.visibleCenter }
-        val bottom = ui.withNode(thirty) { device.findObjects(thirty).maxBy { it.visibleCenter.y }.visibleCenter }
-        val x = (top.x + bottom.x) / 2.0
-        val y = (top.y + bottom.y) / 2.0
-        val radius = (bottom.y - top.y) / 2.0
-        val angle = Math.PI * 2 * minute / 60
-        // 탭은 5분 단위로 반올림된다. 드래그는 1분 단위로 선택한다.
-        device.swipe(x.toInt(), y.toInt(), (x + radius * kotlin.math.sin(angle)).toInt(),
-            (y - radius * kotlin.math.cos(angle)).toInt(), 30)
-        device.waitForIdle()
-    }
+    private fun dragMinute(minute: Int, shot: String) = ui.dragMinute(minute) { capture(shot) }
 
     private fun until(label: String, timeout: Long = 30_000, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeout

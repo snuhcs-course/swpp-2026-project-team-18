@@ -205,6 +205,7 @@ def assert_no_coordinates(row: ApiRequestLog) -> None:
 @pytest.mark.django_db
 @pytest.mark.usefixtures("logging_on")
 class TestMiddleware:
+    @pytest.mark.integration
     def test_event_create_keeps_clean_bodies(self, client, user, stub_route):
         res = client.post("/api/events", EVENT_BODY, format="json", HTTP_X_APP_VERSION="0.12.0")
         assert res.status_code == 201
@@ -221,6 +222,7 @@ class TestMiddleware:
         assert row.error_code == ""
         assert_no_coordinates(row)
 
+    @pytest.mark.integration
     def test_route_is_the_pattern_and_keeps_the_id(self, client, user, stub_route):
         event = Event.objects.create(user=user, title="수업", start_at=datetime(2027, 3, 2, 9, tzinfo=KST))
         assert client.post(f"/api/events/{event.pk}/recompute").status_code == 200
@@ -229,6 +231,7 @@ class TestMiddleware:
         assert row.object_id == event.pk
         assert row.response_body["id"] == event.pk
 
+    @pytest.mark.integration
     def test_auth_routes_keep_meta_only(self, user):
         res = APIClient().post(
             "/api/auth/token", {"email": user.email, "password": PASSWORD}, format="json"
@@ -242,6 +245,7 @@ class TestMiddleware:
         assert PASSWORD not in dumped
         assert res.data["access"] not in dumped
 
+    @pytest.mark.integration
     def test_anonymous_request(self):
         assert APIClient().get("/api/events").status_code == 401
         row = only_row()
@@ -249,17 +253,20 @@ class TestMiddleware:
         assert row.status_code == 401
         assert row.error_code == "not_authenticated"
 
+    @pytest.mark.integration
     @pytest.mark.parametrize("path", ["/api/health", "/admin/login/"])
     def test_excluded_paths(self, client, path):
         client.get(path)
         assert not ApiRequestLog.objects.exists()
 
+    @pytest.mark.integration
     def test_unmatched_paths_are_not_logged(self, client):
         """URL 패턴에 없는 경로는 남기지 않는다. 아무 경로나 보내 표를 채우지 못한다(리뷰 #2)."""
         assert client.get("/api/no-such-route").status_code == 404
         assert APIClient().post("/api/x" * 50, {"a": 1}, format="json").status_code == 404
         assert not ApiRequestLog.objects.exists()
 
+    @pytest.mark.integration
     def test_anonymous_rows_have_a_daily_cap(self, client, user, settings):
         """로그인 없이 보낸 요청은 하루 상한까지만 남긴다. 로그인한 요청은 계속 남긴다."""
         settings.API_REQUEST_LOG_ANON_DAILY_CAP = 2
@@ -277,11 +284,13 @@ class TestMiddleware:
         assert middleware.anonymous_allowed(today=today) is False
         assert middleware.anonymous_allowed(today=today + timedelta(days=1)) is True
 
+    @pytest.mark.integration
     def test_zero_cap_keeps_no_anonymous_rows(self, settings):
         settings.API_REQUEST_LOG_ANON_DAILY_CAP = 0
         assert APIClient().get("/api/events").status_code == 401
         assert not ApiRequestLog.objects.exists()
 
+    @pytest.mark.integration
     def test_live_location_is_not_kept(self, client, user, stub_route):
         place = Place.objects.create(name="302동", lat=37.4486, lng=126.9526)
         event = Event.objects.create(
@@ -301,18 +310,21 @@ class TestMiddleware:
         assert row.response_body == {}  # 경로 갱신 응답은 남기지 않는다
         assert_no_coordinates(row)
 
+    @pytest.mark.integration
     def test_queries_are_cleaned(self, client, stub_route):
         client.get("/api/routes/candidates?origin_lat=37.4701&origin_lng=126.9402&dest_lat=37.4486")
         row = only_row()
         assert row.query["origin_lat"] == row.query["dest_lat"] == request_log.COORDS
         assert_no_coordinates(row)
 
+    @pytest.mark.integration
     def test_unlisted_routes_keep_meta_only(self, client):
         assert client.get("/api/reports/weekly").status_code == 200
         row = only_row()
         assert row.route == "api/reports/weekly"
         assert row.response_body == {}
 
+    @pytest.mark.integration
     def test_large_bodies_are_cut(self, client, user):
         event = Event.objects.create(user=user, title="수업", start_at=datetime(2027, 3, 2, 9, tzinfo=KST))
         observations = [
@@ -328,6 +340,7 @@ class TestMiddleware:
         assert len(row.request_body["preview"].encode("utf-8")) <= request_log.REQUEST_LIMIT_BYTES
         assert_no_coordinates(row)
 
+    @pytest.mark.integration
     def test_log_failure_keeps_the_response(self, client, stub_route, monkeypatch):
         def broken(self, *args, **kwargs):
             raise DatabaseError("no such table")
@@ -339,11 +352,13 @@ class TestMiddleware:
         assert Event.objects.filter(pk=res.data["id"]).exists()
         assert not ApiRequestLog.objects.exists()
 
+    @pytest.mark.integration
     def test_switch_off(self, client, settings):
         settings.API_REQUEST_LOG_ENABLED = False
         client.get("/api/events")
         assert not ApiRequestLog.objects.exists()
 
+    @pytest.mark.integration
     def test_deleting_the_user_deletes_their_rows(self, client, user):
         client.get("/api/events")
         assert ApiRequestLog.objects.filter(user=user).exists()
@@ -404,6 +419,7 @@ class TestRetention:
         assert retention.maybe_purge(today=today) is None
         assert retention.maybe_purge(today=today + timedelta(days=1)) is not None
 
+    @pytest.mark.integration
     def test_first_logged_request_of_the_day_purges(self, client, settings, monkeypatch):
         settings.API_REQUEST_LOG_ENABLED = True
         monkeypatch.setattr(retention, "_last_purged_on", None)

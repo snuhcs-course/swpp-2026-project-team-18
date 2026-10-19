@@ -17,7 +17,7 @@ from apps.planning.models import AlarmPlan
 
 KST = timezone(timedelta(hours=9))
 UTC = timezone.utc
-pytestmark = pytest.mark.django_db
+pytestmark = [pytest.mark.django_db, pytest.mark.integration]
 
 ROUTE = {
     "minutes": 20, "mode": "transit", "source": "kakao",

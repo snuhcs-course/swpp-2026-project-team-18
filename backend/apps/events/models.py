@@ -6,8 +6,8 @@
    조회는 언제나 `Event.objects.filter(user=request.user)` 로 시작한다.
 2. `Place` 는 사용자 간 공유한다. "서울대 302동" 을 두 사람이 각자 저장하면
    행이 두 개가 되므로 `kakao_place_id` 로 합친다.
-3. `Event.place` 는 null 을 허용한다. 장소를 모르면 알람을 계산할 수 없지만
-   일정 자체는 적어둘 수 있어야 한다. 계산 가능 여부는 `planning` 이 판단한다.
+3. `Event.place` 는 null 을 허용한다. 집 목적지는 현재 프로필에서 해석하며,
+   장소 미정 일정도 적어둘 수 있다. 계산 가능 여부는 `planning` 이 판단한다.
 4. `EventTag` 는 마이그레이션으로 시드한다. 사용자가 만들지 않는다.
 """
 
@@ -94,6 +94,22 @@ class EventTag(models.Model):
         return self.label
 
 
+class EventRecurrence(models.Model):
+    """Weekly rule and immutable event inputs; concrete occurrences stay normal Events."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="event_recurrences")
+    start_at = models.DateTimeField()
+    timezone = models.CharField(max_length=64)
+    weekdays = models.JSONField(default=list)
+    template = models.JSONField(default=dict)
+    place = models.ForeignKey(Place, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    tag = models.ForeignKey(EventTag, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    excluded_dates = models.JSONField(default=list)
+
+    class Meta:
+        db_table = "events_recurrence"
+
+
 class Event(models.Model):
     """일정. 사용자별로 격리된다."""
 
@@ -111,6 +127,12 @@ class Event(models.Model):
     source = models.CharField(
         "출처", max_length=10, choices=Source.choices, default=Source.MANUAL
     )
+    recurrence = models.ForeignKey(
+        EventRecurrence, on_delete=models.CASCADE, null=True, blank=True,
+        default=None, db_default=None, related_name="occurrences",
+    )
+    # Original local slot survives a one-occurrence time edit.
+    recurrence_date = models.DateField(null=True, blank=True, default=None, db_default=None)
     # 캘린더 동기화용 외부 식별자. 직접 입력이면 null.
     external_id = models.CharField(
         "외부 ID", max_length=120, null=True, blank=True
@@ -132,6 +154,11 @@ class Event(models.Model):
         blank=True,
         related_name="events",
         verbose_name="장소",
+    )
+    # 집은 장소 사본을 저장하지 않고 계산할 때 현재 프로필에서 해석한다.
+    # 구버전 INSERT 도 허용하도록 DB 기본값을 함께 남긴다.
+    destination_is_home = models.BooleanField(
+        "도착지가 집", default=False, db_default=False
     )
     tag = models.ForeignKey(
         EventTag,
@@ -208,6 +235,16 @@ class Event(models.Model):
             models.Index(fields=["user", "start_at"], name="events_user_start_idx"),
         ]
         constraints = [
+            models.UniqueConstraint(fields=["recurrence", "recurrence_date"], name="events_recurrence_date_unique"),
+            models.CheckConstraint(
+                condition=(Q(recurrence__isnull=True) & Q(recurrence_date__isnull=True))
+                | (Q(recurrence__isnull=False) & Q(recurrence_date__isnull=False)),
+                name="events_recurrence_slot_pair",
+            ),
+            models.CheckConstraint(
+                condition=Q(destination_is_home=False) | Q(place__isnull=True),
+                name="events_event_home_without_place",
+            ),
             # 같은 사용자가 같은 외부 일정을 두 번 담지 않게 한다.
             # external_id 가 null 인 직접 입력 일정에는 적용되지 않는다.
             models.UniqueConstraint(
@@ -248,6 +285,16 @@ class Event(models.Model):
             return self.origin_lat, self.origin_lng, self.origin_label or "출발지"
         if profile.home_lat is not None and profile.home_lng is not None:
             return profile.home_lat, profile.home_lng, profile.home_label or "집"
+        return None
+
+    def resolve_destination(self, profile) -> tuple[float, float, str] | None:
+        """현재 목적지. 집은 프로필을 따르며 Place 행을 만들지 않는다."""
+        if self.destination_is_home:
+            if profile.home_lat is not None and profile.home_lng is not None:
+                return profile.home_lat, profile.home_lng, profile.home_label or "집"
+            return None
+        if self.place is not None:
+            return self.place.lat, self.place.lng, self.place.name
         return None
 
     @property

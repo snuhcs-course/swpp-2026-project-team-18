@@ -1,5 +1,7 @@
 # Phase B 구현 검증 기록 — 리포트(⑧·⑨)와 주간 줄글 요약
 
+> 이 문서는 해당 Phase의 설계·리뷰·검증 당시 기록이다. 당시 테스트 수·미구현 설명을 현재 상태로 해석하지 않는다. 2026-10-17 후속 통합 상태는 [최신 TODO](../../task.md), [요청별 완료 상태](backend-requests.md), [최신 검증](account-ranges-and-travel-counts.md)을 따른다.
+
 - 일시: 2026-10-13. worktree `SWPP-PJ-front-iter2`, 브랜치 `front-iter2`, 기준 `5a41095`. **커밋하지 않음**(승인 뒤 다음 단계에서 커밋).
 - 기준 설계: [report-design.md](report-design.md) + 설계 리뷰 [phaseB-design-review.md](phaseB-design-review.md) 의 고침 + 구현 리뷰 [phaseB-review.md](phaseB-review.md) 6건의 고침(아래 "구현 리뷰 반영"·"설계와 다르게 한 것"). 버전 0.10.0 → **0.11.0**(서버 `APP_VERSION`, 앱 `versionName`·`versionCode 11`).
 

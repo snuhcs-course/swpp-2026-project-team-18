@@ -1,0 +1,97 @@
+name: Daily model training
+
+on:
+  schedule:
+    - cron: '17 14 * * *' # 매일 한국 시간 23:17 (UTC 14:17)
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'verify는 독립 DB 테스트 / dry-run은 운영 데이터 조회 / train은 학습 저장'
+        type: choice
+        options: [verify, dry-run, train]
+        default: verify
+  push:
+    branches: [back-iter2]
+    paths:
+      - '.github/workflows/train-models.yml'
+      - 'backend/apps/prediction/**'
+      - 'backend/apps/planning/history.py'
+      - 'backend/apps/planning/estimators.py'
+      - 'backend/apps/planning/tests/test_estimators.py'
+      - 'backend/config/settings/training.py'
+      - 'backend/requirements/**'
+  pull_request:
+    paths:
+      - '.github/workflows/train-models.yml'
+      - 'backend/apps/prediction/**'
+      - 'backend/apps/planning/history.py'
+      - 'backend/apps/planning/estimators.py'
+      - 'backend/apps/planning/tests/test_estimators.py'
+      - 'backend/config/settings/training.py'
+      - 'backend/requirements/**'
+
+permissions:
+  contents: read
+
+# 같은 브랜치의 예약/수동 실행은 겹치지 않는다. 진행 중인 학습은 취소하지 않는다.
+concurrency:
+  group: daily-model-training-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify learning on an isolated database
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements/*.txt
+      - run: pip install -r requirements/dev.txt
+      - run: python -m pytest apps/prediction apps/planning/tests/test_plan_revision.py apps/planning/tests/test_estimators.py -q
+
+  train:
+    name: Train from production observations
+    needs: verify
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' &&
+        (inputs.mode == 'dry-run' || inputs.mode == 'train')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.training
+      DATABASE_URL: ${{ secrets.TRAINING_DATABASE_URL }}
+      TRAINING_MODE: ${{ github.event_name == 'schedule' && 'train' || inputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements/*.txt
+      - run: pip install -r requirements/prod.txt
+      - name: Run the training command
+        shell: bash
+        run: |
+          if [[ -z "$DATABASE_URL" ]]; then
+            echo "::error::TRAINING_DATABASE_URL Secret is required."
+            exit 1
+          fi
+          # 스키마 배포는 웹서비스의 migrate가 담당한다. 배치는 누락 시 멈춘다.
+          python manage.py migrate --check
+          args=(--users --verbosity 0)
+          if [[ "$TRAINING_MODE" == "dry-run" ]]; then
+            args+=(--dry-run)
+          fi
+          python manage.py train_models "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

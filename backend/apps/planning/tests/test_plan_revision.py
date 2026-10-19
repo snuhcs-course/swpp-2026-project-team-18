@@ -153,6 +153,7 @@ class TestRecording:
         assert not PlanRevision.objects.exists()
 
 
+@pytest.mark.integration
 class TestTriggers:
     @pytest.fixture
     def client(self, user):

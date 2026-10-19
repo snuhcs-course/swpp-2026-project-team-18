@@ -1,5 +1,7 @@
 # Phase C 구현 검증 기록 — 데이터 기록(P12)과 DB 추가 변경
 
+> 이 문서는 해당 Phase의 설계·리뷰·검증 당시 기록이다. 당시 테스트 수·미구현 설명을 현재 상태로 해석하지 않는다. 2026-10-17 후속 통합 상태는 [최신 TODO](../../task.md), [요청별 완료 상태](backend-requests.md), [최신 검증](account-ranges-and-travel-counts.md)을 따른다.
+
 - 일시: 2026-10-13. worktree `SWPP-PJ-front-iter2`, 브랜치 `front-iter2`, 기준 `71c9f0d`. 리뷰 승인 뒤 아래 "커밋 전 검증 게이트" 를 다시 통과시키고 front-iter2 에 로컬 커밋했다(push 는 하지 않음).
 - 기준 설계: [db-schema.md](db-schema.md) §7 A1~A7 + §9 보존. §8(P1~P9)은 제안이라 손대지 않았다. §5 제약대로 도착 `observed_at` 계산과 `prediction/learning.py`·`reports/services.py` 의 사용은 그대로다.
 - 이전 실행이 남긴 미완성 작업(WIP, 백업 `%TEMP%\jit-wf\phaseC-wip-backup`)을 §7 과 항목별로 맞춰 본 뒤 이어서 끝냈다.

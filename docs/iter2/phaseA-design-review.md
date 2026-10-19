@@ -1,5 +1,7 @@
 # Phase A 설계 리뷰
 
+> 이 문서는 해당 Phase의 설계·리뷰·검증 당시 기록이다. 당시 테스트 수·미구현 설명을 현재 상태로 해석하지 않는다. 2026-10-17 후속 통합 상태는 [최신 TODO](../../task.md), [요청별 완료 상태](backend-requests.md), [최신 검증](account-ranges-and-travel-counts.md)을 따른다.
+
 - 대상: `docs/iter2/phaseA-design.md` (참고 `figma-changes.md`, `backend-requests.md`). 기준 `front-iter2` HEAD `b1eff1f`.
 - 방법: 설계의 주장을 앱(`APP/app/src/**`)·서버(`backend/**`)·QA(`qa/demo/**`) 소스와 하나씩 대조했다. 지시대로 빌드·테스트는 돌리지 않았다. 색 대비는 WCAG 2.x 상대 휘도 식으로 계산했다.
 - 판정: **CHANGES_REQUESTED** — HIGH 2 · MEDIUM 9 · NIT 11.

@@ -39,6 +39,9 @@ interface EventsApi {
     @GET("api/events/{id}")
     suspend fun get(@Path("id") id: Long): Response<EventDto>
 
+    @GET("api/events/{id}/risk-options")
+    suspend fun riskOptions(@Path("id") id: Long): Response<RiskOptionsDto>
+
     @POST("api/events")
     suspend fun create(@Body body: EventCreateRequest): Response<EventDto>
 
@@ -151,6 +154,7 @@ interface EventsApi {
         @Query("origin_lat") originLat: Double? = null,
         @Query("origin_lng") originLng: Double? = null,
         @Query("origin_label") originLabel: String? = null,
+        @Query("dest_label") destLabel: String? = null,
     ): Response<RouteCandidateResponse>
 
     /**
@@ -283,19 +287,27 @@ data class EventDto(
      * 서버가 아직 보내지 않으면 null 이다.
      */
     @SerializedName("lateness_sensitivity") val latenessSensitivity: String? = null,
+    /** 집 목적지의 place 는 서버가 현재 프로필 좌표로 펼쳐 준다. */
+    @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
+    @SerializedName("repeat_weekdays") val repeatWeekdays: List<Int>? = null,
+    @SerializedName("recurrence_id") val recurrenceId: Long? = null,
 )
 
 /**
  * 경로 후보 목록.
  *
- * 카카오는 대중교통 대안을 항상 15개 주지만 대부분 같은 버스의 다른 환승
- * 조합이다. 서버가 축별(빠름·환승없음·지하철·저렴) 대표만 추려 6개 이하로
- * 내려 준다. 앱은 받은 순서대로 보여주면 된다 — 이미 빠른 순이다.
+ * 수단별 목록이 정본이며 `results`는 구버전 서버와의 호환용이다.
+ * 누락된 새 필드는 null로 받아 기존 results로 전환한다.
  */
 data class RouteCandidateResponse(
     val origin: RouteOriginDto?,
-    val results: List<RouteCandidateDto> = emptyList(),
+    val results: List<RouteCandidateDto>? = null,
     val degraded: Boolean = false,
+    val car: List<RouteCandidateDto>? = null,
+    val transit: List<RouteCandidateDto>? = null,
+    val walk: List<RouteCandidateDto>? = null,
+    val bicycle: List<RouteCandidateDto>? = null,
+    @SerializedName("fastest_key") val fastestKey: String? = null,
 )
 
 data class RouteOriginDto(
@@ -357,6 +369,8 @@ data class RouteCandidateDto(
     val segments: List<RouteSegmentDto>? = null,
     /** 도보·자전거 미리보기. 구버전 응답의 누락/null 도 같은 파서로 받는다. */
     val path: JsonElement? = null,
+    /** 서버가 출발지·도착지와 실제 경로 정보로 만든 안내. 구버전은 null. */
+    val guide: String? = null,
 ) {
     val routePoints: List<List<Double>> get() = path.toLatLngPairs()
 }
@@ -569,6 +583,8 @@ data class AlarmPlanDto(
     @SerializedName("prep_source") val prepSource: String?,
     @SerializedName("buffer_source") val bufferSource: String?,
     @SerializedName("travel_time_source") val travelTimeSource: String?,
+    /** 실제 이동 보정에 쓴 표본 수. 구버전 응답에서는 null. */
+    @SerializedName("travel_sample_count") val travelSampleCount: Int? = null,
 
     /**
      * 준비 시간을 블록별로 쪼갠 내역. 루틴 블록이 없으면 **빈 배열**이다.
@@ -850,6 +866,9 @@ data class EventCreateRequest(
     @SerializedName("origin_lat") val originLat: Double? = null,
     @SerializedName("origin_lng") val originLng: Double? = null,
     @SerializedName("origin_label") val originLabel: String? = null,
+    @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
+    /** 0 = 월요일 / 6 = 일요일. 비어 있으면 한 번짜리 일정이다. */
+    @SerializedName("repeat_weekdays") val repeatWeekdays: List<Int> = emptyList(),
 )
 
 data class EventUpdateRequest(
@@ -859,6 +878,8 @@ data class EventUpdateRequest(
     @SerializedName("tag_key") val tagKey: String? = null,
     @SerializedName("route_key") val routeKey: String? = null,
     @SerializedName("alarm_enabled") val alarmEnabled: Boolean? = null,
+    @SerializedName("tau_override") val tauOverride: Double? = null,
+    @SerializedName("destination_is_home") val destinationIsHome: Boolean? = null,
 )
 
 data class PlaceInput(

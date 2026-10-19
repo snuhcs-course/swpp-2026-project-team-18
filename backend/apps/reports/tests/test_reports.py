@@ -510,6 +510,7 @@ class TestWeekly:
         assert report["primary_counts"] == {"travel_over": 1}
 
 
+@pytest.mark.integration
 class TestApi:
 
     def test_weekly_requires_authentication(self):
@@ -1000,6 +1001,7 @@ class TestWeeklyAggregates:
         assert next_week["event_count"] == 1
 
 
+@pytest.mark.integration
 class TestWeeklyApiPhaseB:
 
     def test_summary_is_a_template_without_a_key(self, client, user, place):

@@ -11,10 +11,10 @@
 #    코드가 섞여 들어가도 아무도 모른다. 이 워크플로는 그 파일들이 **없는**
 #    상태로 돌기 때문에 그 의존을 즉시 드러낸다.
 #
-# ## 잡을 셋으로 나눈 이유
+# ## 잡을 넷으로 나눈 이유
 #
 # 실패 원인을 한 줄로 읽을 수 있어야 한다. 하나로 합치면 "CI 실패" 만 보이고
-# 로그를 열어야 백엔드인지 앱인지 알 수 있다. 셋은 서로 독립이라 병렬로 돈다.
+# 로그를 열어야 백엔드인지 앱인지 알 수 있다. 넷은 서로 독립이라 병렬로 돈다.
 #
 # ## 비밀값을 쓰지 않는다
 #
@@ -43,7 +43,7 @@ permissions:
 
 jobs:
   # =========================================================================
-  # 백엔드 단위 테스트
+  # 백엔드 단위·통합 테스트
   # =========================================================================
   backend:
     name: 백엔드 pytest
@@ -66,8 +66,39 @@ jobs:
       # config/settings/test.py 가 DB 를 메모리 SQLite 로 고정하고 외부 API 키를
       # 빈 문자열로 덮는다. 그래서 환경변수를 하나도 주지 않는다 — 실수로 공용
       # DB 나 실제 키를 쓰게 되는 경로를 아예 만들지 않는 것이다.
-      - name: pytest
-        run: python -m pytest
+      #
+      # 커버리지를 함께 잰다(.coveragerc). 테스트 문서(Wiki)의 "계층별 목표 vs
+      # 실제" 표는 이 잡의 요약을 옮긴 것이다. 로컬에서 같은 숫자를 보려면 같은
+      # 두 명령을 돌린다.
+      - name: pytest · 커버리지
+        run: python -m pytest --cov --cov-report=term --cov-report=html --cov-report=json
+
+      - name: 커버리지 요약
+        run: |
+          echo "## 백엔드 줄 커버리지" >> "$GITHUB_STEP_SUMMARY"
+          python scripts/coverage_summary.py >> "$GITHUB_STEP_SUMMARY"
+
+      # 통합 = 테스트 클라이언트로 HTTP 요청을 보내는 테스트(backend/conftest.py).
+      # 표시가 실제와 다르면 위 pytest 가 이미 실패하므로 이 개수는 믿어도 된다.
+      - name: 단위·통합 개수
+        run: |
+          count() { python -m pytest -q --collect-only -m "$1" | tail -1 | sed -E 's#^([0-9]+)/.*#\1#'; }
+          {
+            echo "## 백엔드 테스트 수"
+            echo "| 구분 | 테스트 |"
+            echo "| --- | ---: |"
+            echo "| 단위 (\`-m \"not integration\"\`) | $(count 'not integration') |"
+            echo "| 통합 (\`-m integration\`) | $(count integration) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 커버리지 리포트 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/htmlcov/
+          retention-days: 14
+          if-no-files-found: ignore
 
   # =========================================================================
   # 앱-서버 계약 검사 (살아 있는 서버 상대)
@@ -145,10 +176,28 @@ jobs:
       # 57건이고, 처음부터 노란불이 섞이면 아무도 보지 않는다. 오류 쪽은
       # MissingPermission·WrongThread 처럼 실제 크래시가 되는 것들이라 막을
       # 가치가 있다(실제로 3건을 이 검사로 찾아 고쳤다).
-      - name: 단위 테스트 · lint · 디버그 빌드
+      #
+      # jacocoDebugUnitTestReport 가 testDebugUnitTest 를 돌리고 커버리지 리포트를
+      # 만든다(app/build.gradle.kts). 테스트를 두 번 돌리지 않는다.
+      - name: 단위 테스트 · 커버리지 · lint · 디버그 빌드
         run: >-
-          ./gradlew testDebugUnitTest lintDebug assembleDebug --console=plain
+          ./gradlew testDebugUnitTest jacocoDebugUnitTestReport lintDebug assembleDebug --console=plain
           -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
+
+      # 리포트가 비어 있으면(클래스 경로가 틀림) 이 단계가 실패한다.
+      - name: 커버리지 요약
+        run: |
+          echo "## 앱 줄 커버리지 (JVM 단위 테스트)" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/coverage_summary.py >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 커버리지 리포트 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-coverage
+          path: APP/app/build/reports/jacoco/
+          retention-days: 14
+          if-no-files-found: ignore
 
       # 실패했을 때 어느 테스트가 깨졌는지 보려면 리포트가 필요하다. 로그만
       # 보고는 Compose·Gradle 출력에 묻힌다.
@@ -161,5 +210,79 @@ jobs:
             APP/app/build/reports/tests/
             APP/app/build/test-results/
             APP/app/build/reports/lint-results-debug.html
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # =========================================================================
+  # 안드로이드 앱 — 기기 통합 테스트 (에뮬레이터)
+  # =========================================================================
+  #
+  # 화면·Room 캐시처럼 JVM 에서는 돌지 않는 것을 실제 안드로이드에서 돌린다.
+  # 모든 PR 에서 돈다(2026-10-16 팀 결정). 시간이 가장 오래 걸리는 잡이라 단위
+  # 테스트 잡과 나눠 두었다 — 단위 테스트 실패는 이 잡을 기다리지 않고 보인다.
+  #
+  # `com.swpp.wakeup.integration` 패키지만 돌린다. 같은 폴더의 E2E 테스트
+  # (DemoFlowTest 등)는 QA 빌드와 재생 서버가 있어야 해서 `qa/demo/run.py` 가
+  # 따로 돌린다. 통합 테스트는 서버를 부르지 않는다(가짜 API 와 기기 DB 만 쓴다).
+  #
+  # API 34 는 minSdk 다. 지원하는 가장 낮은 버전에서 돌아야 그 아래 기능을 실수로
+  # 쓴 것이 잡힌다.
+  android-integration:
+    name: 앱 통합 테스트 (에뮬레이터)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: APP
+    steps:
+      - uses: actions/checkout@v4
+
+      # 단위 테스트 잡과 같은 JDK 구성이다(이유는 위 android 잡 주석).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-37.0 build-tools;36.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 에뮬레이터 하드웨어 가속. 없으면 소프트웨어 에뮬레이션이라 부팅만 수십 분이다.
+      - name: KVM 켜기
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # 에뮬레이터를 켜기 전에 APK 를 만든다. 켠 뒤에 빌드하면 그 시간 동안
+      # 에뮬레이터가 놀면서 러너 메모리를 차지한다.
+      - name: 앱·테스트 APK 빌드
+        run: >-
+          ./gradlew assembleDebug assembleDebugAndroidTest --console=plain
+          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64
+
+      - name: 기기 통합 테스트
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          working-directory: APP
+          script: ./gradlew connectedDebugAndroidTest --console=plain -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64 -Pandroid.testInstrumentationRunnerArguments.package=com.swpp.wakeup.integration
+
+      - name: 통합 테스트 리포트 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-integration-test-report
+          path: |
+            APP/app/build/reports/androidTests/connected/
+            APP/app/build/outputs/androidTest-results/connected/
           retention-days: 7
           if-no-files-found: ignore

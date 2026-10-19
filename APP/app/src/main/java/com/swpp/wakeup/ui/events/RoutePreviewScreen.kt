@@ -106,6 +106,7 @@ internal fun RoutePreviewScreen(
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
+        RouteGuide(option.guide)
 
         key(option.key, option.routePath) {
             CandidateRouteMapCard(

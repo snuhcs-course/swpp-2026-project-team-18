@@ -1,21 +1,16 @@
-"""학습 파이프라인을 돌린다. back-spec.md 6.2 의 Celery 태스크를 겸한다.
+"""관측 기반 학습 배치. GitHub Actions가 매일 한국 시간 23:17에 실행한다.
 
-## Celery 대신 커맨드인 이유
-
-명세 6.2 는 `train_global_model`(매일 03:00), `update_route_corrections`
-(매시 정각)을 Celery Beat 로 돌리도록 정했다. 지금은 Celery 를 넣지 않았다.
-
-  - Redis 가 필요하고, Render 무료 플랜에 Redis 가 없다
-  - 워커 프로세스가 하나 더 떠야 하는데 무료 인스턴스 시간을 두 배로 먹는다
-  - 학습은 실시간이 아니다. 하루 한 번이면 충분하다
-
-커맨드로 두면 cron·Render Cron Job·손으로 실행이 모두 가능하다. Celery 가
-들어오면 태스크가 이 커맨드를 부르면 된다.
+기본 브랜치의 .github/workflows/train-models.yml이 예약/수동 실행을 관리한다.
+학습은 결정 시점 계획 이력의 경로 원값을 사용하며, 원값 없는 과거 이동은 건너뛴다.
+전체 학습은 새로 만들 수 없는 과거 학습 보정을 정리하고 n=0 수동 보정은 보존한다.
 
     python manage.py train_models                    전역만
     python manage.py train_models --users            개인 아티팩트까지
     python manage.py train_models --routes-only      경로 보정만
     python manage.py train_models --dry-run          저장하지 않고 결과만 출력
+    python manage.py train_models --users -v 0       공개 배치 로그용 집계만 출력
+
+보정 갱신 후 기존 일정은 다음 정상 알람 재계산 때 새 보정을 반영한다.
 """
 
 from __future__ import annotations
@@ -69,6 +64,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"  표본 {result['samples']}건 → 보정 {result['written']}행"
             )
+            self.stdout.write(f"  더 이상 유효하지 않은 학습 보정 {result.get('removed', 0)}행 제거")
             for reason, n in sorted((result.get("dropped") or {}).items()):
                 self.stdout.write(f"  버림: {reason} {n}건")
 
@@ -87,10 +83,11 @@ class Command(BaseCommand):
             f"(sd {payload['global']['prep_sd']}, {payload['global']['prep_days']}일)"
         )
         self.stdout.write(f"  slack_coef = {payload['slack_coef']}")
-        for name, stat in sorted(payload["blocks"].items()):
-            self.stdout.write(
-                f"    {name:14} 평균 {stat['mean']:>6}분  sd {stat['sd']}  n={stat['n']}"
-            )
+        if options["verbosity"] > 0:
+            for name, stat in sorted(payload["blocks"].items()):
+                self.stdout.write(
+                    f"    {name:14} 평균 {stat['mean']:>6}분  sd {stat['sd']}  n={stat['n']}"
+                )
         if options["show_payload"]:
             self.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2))
 
@@ -121,10 +118,11 @@ class Command(BaseCommand):
             if not dry:
                 learning.save_artifact(personal, user=user)
             made += 1
-            self.stdout.write(
-                f"  {user.email:34} 관측 {n}건 "
-                f"블록 {len(personal['blocks'])}종 slack={personal['slack_coef']}"
-            )
+            if options["verbosity"] > 0:
+                self.stdout.write(
+                    f"  {user.email:34} 관측 {n}건 "
+                    f"블록 {len(personal['blocks'])}종 slack={personal['slack_coef']}"
+                )
         if made == 0:
             self.stdout.write(
                 f"  관측 {learning.MIN_PERSONAL_OBSERVATIONS}건 이상인 사용자가 없다."
