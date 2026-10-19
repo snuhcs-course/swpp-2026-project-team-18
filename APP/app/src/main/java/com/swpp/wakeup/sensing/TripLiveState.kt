@@ -59,6 +59,14 @@ object TripLiveState {
         val atMillis: Long,
         val phase: TripGeofence.Phase,
         /**
+         * 단계 판정에 쓴 마지막 위치의 시각(벽시계 ms). 판정에 쓸 위치를 아직 못 받았으면 null.
+         *
+         * [point] 는 판정에 못 쓰는 흐린 위치일 수 있다. 흐린 위치만 오는 동안 [phase] 는
+         * 마지막으로 확인한 "집" 에 머물기 때문에, "준비 중" 을 믿을 수 있는지는 이 값으로
+         * 본다([com.swpp.wakeup.domain.model.TripStage.tracked]). (Partly AI-generated (Claude))
+         */
+        val phaseCheckedAtMillis: Long? = null,
+        /**
          * 이동이 시작된 것으로 판정한 시각(벽시계 ms). 아직 준비 중이면 null.
          *
          * **실시간 도착 예정의 유일한 재료다.** 화면은 지금 위치를 경로에 투영해

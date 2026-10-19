@@ -469,18 +469,18 @@ private fun MainHost(
                         ?.takeIf { it.hasRoutePath }
                         ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
                     val arrival = tripArrival?.takeIf { it.eventId == route.eventId }
-                    val stage = plan?.let { viewModel.stageOf(it, arrival) } ?: TripStage.BEFORE_ALARM
+                    val stage = plan?.let { viewModel.stageOf(it, arrival, nowMillis) }
+                        ?: TripStage.BEFORE_ALARM
 
                     // 지각 전망. 진행 바의 색이 이것으로 정해진다.
                     //
                     // 알람 전에는 내지 않는다 — 아직 시작하지 않은 여정을 두고
-                    // 늦는다/안 늦는다 할 것이 없다. 경로를 벗어났을 때도 내지
-                    // 않는다: 다른 길을 가는 중이면 계획 속도로 환산한 값이
-                    // 아무 뜻이 없다.
+                    // 늦는다/안 늦는다 할 것이 없다. 기록이 없거나(지난 일정·알람
+                    // 꺼짐) 어디 있는지 모를 때(출발 확인 안 됨)도 마찬가지다.
+                    // 경로를 벗어났을 때도 내지 않는다: 다른 길을 가는 중이면 계획
+                    // 속도로 환산한 값이 아무 뜻이 없다.
                     val outlook = plan?.takeIf {
-                        stage != TripStage.BEFORE_ALARM &&
-                            stage != TripStage.PAST &&
-                            progress?.onRoute != false
+                        stage.canJudgeLateness && progress?.onRoute != false
                     }?.let { p ->
                         if (stage == TripStage.ARRIVED) {
                             (arrival?.atMillis ?: live?.atMillis)?.let {

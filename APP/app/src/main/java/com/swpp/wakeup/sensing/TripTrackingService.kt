@@ -50,7 +50,8 @@ import kotlin.math.roundToInt
  * **정확도를 단계별로 바꾼다.** 집을 나서는지 보는 동안은 150m 를 구분하면
  * 되므로 저전력 모드로 30초에 한 번만 본다. 나간 뒤에는 100m 반경을 봐야 하니
  * 고정확도로 10초에 한 번 본다. 처음부터 고정확도로 켜 두면 준비하는 30분
- * 동안 GPS 를 헛돌린다.
+ * 동안 GPS 를 헛돌린다. 다만 저전력 위치가 2분 동안 판정에 못 쓸 만큼 흐리거나
+ * 오지 않으면 출발 전이라도 고정확도로 올린다([blindRunnable]).
  *
  * 스스로 멈추는 조건 — 도착 판정이 났거나, 일정 시작 후 한 시간이 지났거나,
  * 사용자가 알림에서 중지를 눌렀을 때.
@@ -90,6 +91,39 @@ class TripTrackingService : Service() {
     private val deadlineRunnable = Runnable {
         Log.i(TAG, "마감 시각이 지나 추적을 멈춘다")
         stopSelf()
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 출발 전인데 판정에 쓸 위치가 [TripGeofence.EVIDENCE_MAX_AGE_MS] 동안 없을 때.
+     *
+     * 저전력 위치는 Wi-Fi·기지국으로 잡는다. Wi-Fi 가 꺼져 있거나 이미 밖·지하로
+     * 나갔으면 오차가 커서 판정에 못 쓰고, 그대로 두면 출발이 영영 판정되지 않아
+     * 집을 나선 뒤에도 "준비 중" 에 머문다. 그래서 고정확도(GPS)로 올린다.
+     *
+     * **다시 내리지 않는다.** 내리면 같은 이유로 2분 뒤 또 올리고, 그때마다 GPS 가
+     * 처음부터 위치를 잡으며 알림이 "준비 중" 과 "위치 확인 중" 을 오간다. 이 비용은
+     * 저전력 위치를 못 쓰는 아침에만 든다.
+     */
+    private val blindRunnable = Runnable {
+        val current = schedule ?: return@Runnable
+        val fence = geofence ?: return@Runnable
+        if (fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE) return@Runnable
+        if (!highAccuracy) {
+            Log.i(
+                TAG,
+                "${TripGeofence.EVIDENCE_MAX_AGE_MS / 1000}초 동안 판정에 쓸 위치가 없어 고정확도로 올린다",
+            )
+            requestUpdates(highAccuracy = true)
+        }
+        // 근거가 낡았다. 다음 위치를 기다리지 않고 알림의 "준비 중" 을 거둔다.
+        refreshProgressNotification(current, fence, System.currentTimeMillis())
+    }
+
+    /** 판정에 쓸 위치를 받을 때마다 다시 잰다. 출발 전에만 쓴다 */
+    private fun armBlindTimer() {
+        handler.removeCallbacks(blindRunnable)
+        handler.postDelayed(blindRunnable, TripGeofence.EVIDENCE_MAX_AGE_MS)
     }
 
     private val callback = object : LocationCallback() {
@@ -176,6 +210,10 @@ class TripTrackingService : Service() {
 
         requestUpdates(highAccuracy = geofence?.phase != TripGeofence.Phase.BEFORE_DEPARTURE)
 
+        // 첫 위치도 같은 시간 안에 판정에 쓸 만큼 와야 한다. 지난 세션의 시계는 버린다.
+        handler.removeCallbacks(blindRunnable)
+        if (geofence?.phase == TripGeofence.Phase.BEFORE_DEPARTURE) armBlindTimer()
+
         // 밀린 관측이 있으면 이 기회에 올린다.
         scope.launch { queue.flush() }
 
@@ -192,6 +230,7 @@ class TripTrackingService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(deadlineRunnable)
+        handler.removeCallbacks(blindRunnable)
         liveRouteSessionGeneration++
         runCatching { fused.removeLocationUpdates(callback) }
         // 남은 관측을 마지막으로 한 번 올려 본다. scope 를 바로 닫으면
@@ -260,6 +299,8 @@ class TripTrackingService : Service() {
                 accuracyM = fix.accuracyM,
                 atMillis = fix.atMillis,
                 phase = fence.phase,
+                // 이 fix 가 흐리면 단계는 이전 fix 가 정한 것이다. 화면이 그 나이를 본다.
+                phaseCheckedAtMillis = fence.lastAcceptedFix?.atMillis,
                 movingSinceMillis = movingSinceMillis,
             )
         )
@@ -303,6 +344,7 @@ class TripTrackingService : Service() {
                         accuracyM = decision.fix.accuracyM,
                         atMillis = decision.fix.atMillis,
                         phase = TripGeofence.Phase.ARRIVED,
+                        phaseCheckedAtMillis = decision.fix.atMillis,
                         movingSinceMillis = movingSinceMillis,
                     )
                 )
@@ -320,13 +362,26 @@ class TripTrackingService : Service() {
         if (phaseBefore == TripGeofence.Phase.BEFORE_DEPARTURE &&
             fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE
         ) {
-            if (fence.departureMissed) {
-                Log.i(TAG, "첫 위치부터 집 밖이다. 출발 시각은 기록하지 않는다")
+            when {
+                // Partly AI-generated (Claude) — 흐린 fix 로 나간 것을 안 경우(TripGeofence 규칙 4).
+                !TripGeofence.isUsable(fix) -> Log.i(
+                    TAG,
+                    "흐린 위치로 집에서 멀어진 것을 확인했다(오차 ${fix.accuracyM.roundToInt()}m). " +
+                        "출발 시각은 기록하지 않는다",
+                )
+
+                fence.departureMissed -> Log.i(TAG, "첫 위치부터 집 밖이다. 출발 시각은 기록하지 않는다")
             }
             requestUpdates(highAccuracy = true)
         }
 
-        refreshProgressNotification(current, fence)
+        // 판정에 쓸 위치를 받았으면 "위치를 못 받는 중" 시계를 다시 잰다. 나간 뒤에는 필요 없다.
+        when {
+            fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE -> handler.removeCallbacks(blindRunnable)
+            TripGeofence.isUsable(fix) -> armBlindTimer()
+        }
+
+        refreshProgressNotification(current, fence, fix.atMillis)
     }
 
     /** 판정 결과를 큐에 적고 올린다. 저장이 먼저다. */
@@ -485,7 +540,7 @@ class TripTrackingService : Service() {
             AlarmNotifications.NOTIFICATION_TRIP,
             AlarmNotifications.tripNotification(
                 context = this,
-                title = "이동 기록 중",
+                title = TITLE_TRACKING,
                 text = text,
                 stopIntent = stopPendingIntent(),
             ),
@@ -522,12 +577,29 @@ class TripTrackingService : Service() {
         }
     }
 
+    /**
+     * 진행 알림을 지금 판정에 맞춘다.
+     *
+     * @param nowMillis 판정 근거의 나이를 잴 시각. fix 를 받았으면 그 fix 의 시각이다
+     */
     private fun refreshProgressNotification(
         current: AlarmSchedule,
         fence: TripGeofence,
+        nowMillis: Long,
     ) {
-        val phase = phaseLabel(fence.phase)
-        val remaining = fence.distanceToDestinationM
+        // Partly AI-generated (Claude)
+        // 출발 전이라는 판정이 낡았으면 단계를 말하지 않는다. 흐린 위치만 오는 동안
+        // 판정기는 마지막으로 확인한 "집" 에 머무는데, 그대로 "준비 중" 이라고 하면 이미
+        // 나간 사람에게 틀린 말을 계속한다. 근거는 [TripGeofence.atHomeConfirmed].
+        val unknown = fence.phase == TripGeofence.Phase.BEFORE_DEPARTURE &&
+            !fence.atHomeConfirmed(nowMillis)
+        val phase = if (unknown) null else phaseLabel(fence.phase)
+        // 남은 거리도 판정에 쓴 위치 기준이다. 그 위치가 낡았으면(흐린 위치로 나간 직후)
+        // 집에서 잰 거리를 지금 거리처럼 보이게 된다.
+        val remaining = fence.distanceToDestinationM?.takeIf {
+            val last = fence.lastAcceptedFix
+            last != null && nowMillis - last.atMillis <= TripGeofence.EVIDENCE_MAX_AGE_MS
+        }
 
         // 단계마다 사용자가 알고 싶은 것이 다르다. 준비 중에는 "아직 안 나갔다"
         // 는 사실이, 이동 중에는 남은 거리가 중요하다. 준비 중에 목적지까지의
@@ -535,10 +607,12 @@ class TripTrackingService : Service() {
         val text = buildString {
             append(current.eventLine)
             append(" · ")
-            when (fence.phase) {
-                TripGeofence.Phase.BEFORE_DEPARTURE -> append("아직 출발 전")
+            when {
+                unknown -> append("위치 확인 중")
 
-                TripGeofence.Phase.IN_TRANSIT -> {
+                fence.phase == TripGeofence.Phase.BEFORE_DEPARTURE -> append("아직 출발 전")
+
+                fence.phase == TripGeofence.Phase.IN_TRANSIT -> {
                     if (remaining != null) {
                         append("목적지까지 ")
                         append(formatDistance(remaining))
@@ -547,10 +621,10 @@ class TripTrackingService : Service() {
                     }
                 }
 
-                TripGeofence.Phase.ARRIVED -> append("도착을 기록했다")
+                else -> append("도착을 기록했다")
             }
         }
-        updateNotification(phase.label, text, phase)
+        updateNotification(phase?.label ?: TITLE_TRACKING, text, phase)
     }
 
     /**
@@ -641,6 +715,9 @@ class TripTrackingService : Service() {
 
     companion object {
         private const val TAG = "TripTrackingService"
+
+        /** 단계를 아직 모르거나 단정할 수 없을 때의 알림 제목 */
+        private const val TITLE_TRACKING = "이동 기록 중"
 
         const val ACTION_START = "com.swpp.wakeup.action.TRIP_START"
         const val ACTION_STOP = "com.swpp.wakeup.action.TRIP_STOP"

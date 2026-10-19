@@ -175,6 +175,23 @@ class TripProgressCardTest {
     }
 
     @Test
+    fun `알람 꺼짐과 출발 확인 안 됨은 흐리고 채우지 않으며 이름을 그대로 쓴다`() {
+        // Partly AI-generated (Claude) — 근거 없는 상태라 전망이 있어도 칠하지 않는다.
+        for (stage in listOf(TripStage.ALARM_OFF, TripStage.DEPARTURE_UNKNOWN)) {
+            assertEquals(JitColor.Track, rowColor(stage, null, late))
+            assertEquals(0f, fillRatio(stage, null), 0.001f)
+            assertEquals("도착 예정", trailingLine(stage, null, null))
+        }
+        assertEquals("알람 꺼짐", statusLine(TripStage.ALARM_OFF, null))
+        assertEquals("출발 확인 안 됨", statusLine(TripStage.DEPARTURE_UNKNOWN, null))
+        assertEquals("알람이 꺼진 일정이라 이동을 기록하지 않음", stageHint(TripStage.ALARM_OFF))
+        assertFalse(
+            "출발을 확인하지 못했는데 준비 중이라고 말한다",
+            stageHint(TripStage.DEPARTURE_UNKNOWN).contains("준비"),
+        )
+    }
+
+    @Test
     fun `이탈 중에는 전망을 말하지 않는다`() {
         assertEquals("경로 이탈", trailingLine(TripStage.IN_TRANSIT, offRoute(), onTime))
     }

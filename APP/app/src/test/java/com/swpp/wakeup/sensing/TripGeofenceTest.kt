@@ -401,4 +401,155 @@ class TripGeofenceTest {
         assertTrue(TripGeofence.MOVING_WINDOW_MILLIS >= 60_000L)
     }
 
+    // --- 나간 뒤 흐린 위치만 올 때 (규칙 4, Partly AI-generated (Claude)) -----
+    //
+    // 팀원 제보: 집을 나선 지 한참 됐는데 계속 "준비 중" 이었다. 출발 전에는
+    // 저전력 위치를 받는데, Wi-Fi 를 잃으면 오차가 수백 m 라 판정에서 전부 버려져
+    // 출발이 영영 판정되지 않았다.
+
+    /** 집에서 북쪽으로 [meters], 오차 [accuracy] 인 기지국 위치. 출발 전 주기(30초) */
+    private fun coarseFix(meters: Double, accuracy: Float = 600f) =
+        fix(north(home, meters), accuracy = accuracy, afterMillis = 30_000)
+
+    @Test
+    fun `나간 뒤 흐린 위치만 와도 집에서 확실히 멀어지면 이동 중이 된다`() {
+        val f = fence()
+        // 집에서는 Wi-Fi 위치가 정확하다.
+        repeat(3) { assertNull(f.offer(idleFix(home))) }
+        assertTrue(f.atHomeConfirmed(clock))
+
+        // 나간 뒤에는 기지국 위치뿐이다. 오차 600m 로 집에서 2km, 2.5km.
+        assertNull(f.offer(coarseFix(2_000.0)))
+        assertEquals("한 번으로는 판정하지 않는다", TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+        assertNull("출발 시각을 모르므로 출발 사건을 만들지 않는다", f.offer(coarseFix(2_500.0)))
+
+        assertEquals(TripGeofence.Phase.IN_TRANSIT, f.phase)
+        assertTrue(f.departureMissed)
+        // 마지막 정확한 위치는 집이다. 집에서 잰 거리를 지금 남은 거리처럼 말하지 않는다.
+        assertNull(f.distanceToDestinationM)
+    }
+
+    @Test
+    fun `오차를 빼면 집 근처일 수 있는 흐린 위치는 출발 근거가 아니다`() {
+        // 기지국 위치는 한쪽으로 치우친 채 되풀이된다. 오차 900m 에 1.5km 는 집에서
+        // 600m 일 수도 있다. 몇 번이 와도 집에 있는 사람을 내보내지 않는다.
+        val f = fence()
+        f.offer(idleFix(home))
+        repeat(10) { assertNull(f.offer(coarseFix(1_500.0, accuracy = 900f))) }
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+        assertFalse(f.departureMissed)
+    }
+
+    @Test
+    fun `집 반경 안의 정확한 위치가 흐린 근거를 지운다`() {
+        val f = fence()
+        f.offer(idleFix(home))
+        f.offer(coarseFix(3_000.0))          // 1회
+        f.offer(idleFix(north(home, 20.0)))  // 집이다 → 초기화
+        f.offer(coarseFix(3_000.0))          // 다시 1회
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+
+        f.offer(coarseFix(3_200.0))          // 2회
+        assertEquals(TripGeofence.Phase.IN_TRANSIT, f.phase)
+    }
+
+    @Test
+    fun `근거가 못 되는 흐린 위치는 쌓인 근거를 지우지 않는다`() {
+        // 기지국이 바뀌며 오차가 들쭉날쭉해도 쌓인 근거를 잃지 않는다(규칙 1 과 같다).
+        val f = fence()
+        f.offer(idleFix(home))
+        f.offer(coarseFix(3_000.0))                    // 1회
+        f.offer(coarseFix(3_100.0, accuracy = 2_800f)) // 근거 아님(300m) — 그대로 둔다
+        f.offer(coarseFix(3_300.0))                    // 2회
+        assertEquals(TripGeofence.Phase.IN_TRANSIT, f.phase)
+    }
+
+    @Test
+    fun `오차를 모르는 위치는 출발 근거가 아니다`() {
+        val f = fence()
+        f.offer(idleFix(home))
+        for (accuracy in listOf(Float.MAX_VALUE, Float.POSITIVE_INFINITY, Float.NaN, -1f)) {
+            assertNull(f.offer(fix(north(home, 5_000.0), accuracy = accuracy, afterMillis = 30_000)))
+        }
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+    }
+
+    @Test
+    fun `흐린 근거는 추적 첫 위치에서도 연속 두 번을 요구한다`() {
+        // 추적을 시작하자마자 흐린 위치가 한 번 멀리 찍혀도 판정하지 않는다.
+        val f = fence()
+        assertNull(f.offer(coarseFix(4_000.0)))
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+
+        assertNull(f.offer(coarseFix(4_200.0)))
+        assertEquals(TripGeofence.Phase.IN_TRANSIT, f.phase)
+        assertTrue(f.departureMissed)
+    }
+
+    @Test
+    fun `흐린 위치로 이동 중이 된 뒤 정확한 위치로 도착한다`() {
+        val f = fence()
+        f.offer(idleFix(home))
+        f.offer(coarseFix(2_000.0))
+        f.offer(coarseFix(2_500.0))
+        assertEquals(TripGeofence.Phase.IN_TRANSIT, f.phase)
+
+        // 지하에서 나와 목적지 근처의 GPS 위치를 받는다.
+        val arrived = f.offer(fix(north(dest, 40.0)))
+        assertTrue("도착을 잡아야 한다: $arrived", arrived is TripEvent.Arrived)
+    }
+
+    @Test
+    fun `집 좌표가 없으면 흐린 위치로 판정할 것이 없다`() {
+        val f = fence(home = null)
+        assertNull(f.offer(fix(north(dest, 2_000.0), accuracy = 600f)))
+        assertEquals(TripGeofence.Phase.IN_TRANSIT, f.phase)
+        assertFalse(f.departureMissed)
+    }
+
+    // --- 출발 전 판정의 나이 ---------------------------------------------------
+
+    @Test
+    fun `출발 전 판정은 판정에 쓴 위치가 2분 안일 때만 믿는다`() {
+        val f = fence()
+        assertFalse("판정에 쓴 위치가 아직 없다", f.atHomeConfirmed(clock))
+
+        f.offer(idleFix(home))
+        val checked = clock
+        assertTrue(f.atHomeConfirmed(checked + TripGeofence.EVIDENCE_MAX_AGE_MS))
+        assertFalse(f.atHomeConfirmed(checked + TripGeofence.EVIDENCE_MAX_AGE_MS + 1))
+
+        // 흐린 위치는 판정 근거를 새로 고치지 않는다.
+        repeat(5) { f.offer(coarseFix(300.0)) }
+        assertEquals(TripGeofence.Phase.BEFORE_DEPARTURE, f.phase)
+        assertFalse(f.atHomeConfirmed(clock))
+    }
+
+    @Test
+    fun `나간 뒤에는 출발 전 판정이 아니다`() {
+        val f = fence()
+        f.offer(fix(home))
+        f.offer(fix(north(home, 400.0)))
+        f.offer(fix(north(home, 500.0)))
+        assertEquals(TripGeofence.Phase.IN_TRANSIT, f.phase)
+        assertFalse(f.atHomeConfirmed(clock))
+    }
+
+    @Test
+    fun `흐린 위치 기준이 출발 반경보다 넓고 나이 한도가 주기 네 번이다`() {
+        assertTrue(TripGeofence.COARSE_DEPARTURE_MARGIN_M > TripGeofence.DEFAULT_DEPARTURE_RADIUS_M)
+        // 출발 전 주기(30초)로 네 번은 받을 시간이다. 짧으면 정상 주기의 지연에도 흔들린다.
+        assertTrue(TripGeofence.EVIDENCE_MAX_AGE_MS >= 4 * 30_000L)
+    }
+
+    @Test
+    fun `판정에 쓸 수 있는 위치는 오차가 0 이상 50m 이하다`() {
+        fun at(accuracy: Float) = LocationFix(home.lat, home.lng, accuracy, clock)
+        assertTrue(TripGeofence.isUsable(at(0f)))
+        assertTrue(TripGeofence.isUsable(at(50f)))
+        assertFalse(TripGeofence.isUsable(at(50.1f)))
+        assertFalse(TripGeofence.isUsable(at(-1f)))
+        assertFalse(TripGeofence.isUsable(at(Float.NaN)))
+    }
+
 }

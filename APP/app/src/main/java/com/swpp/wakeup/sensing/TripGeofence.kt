@@ -73,6 +73,13 @@ sealed interface TripEvent {
  * 지어내지 않는다([departureMissed] 로 알린다). 없는 관측을 만들면 그게
  * 그대로 학습 데이터가 된다.
  *
+ * **4. 나간 뒤 흐린 fix 만 온다.** 출발 전에는 저전력(Wi-Fi·기지국) 위치를 받는데,
+ * 집을 나서 Wi-Fi 가 없는 곳·지하철로 가면 오차가 수백 m 로 벌어져 1 에서 전부
+ * 버려진다. 그러면 판정이 영영 나지 않아 집을 나선 지 한참 뒤에도 "준비 중" 이었다.
+ * 흐린 fix 라도 **오차를 다 빼고도** 집에서 [coarseDepartureMarginM] 넘게 떨어져
+ * 있으면 나간 근거로 센다([requiredStreak] 회 연속). 근거가 채워진 시각은 나간
+ * 시각이 아니므로 출발 관측을 만들지 않는다([departureMissed]).
+ *
  * 상태를 들고 있으므로 이동 한 건당 인스턴스 하나를 쓴다.
  */
 class TripGeofence(
@@ -85,6 +92,7 @@ class TripGeofence(
     private val movingDistanceM: Double = MOVING_DISTANCE_M,
     private val movingWindowMillis: Long = MOVING_WINDOW_MILLIS,
     private val movingResetM: Double = MOVING_RESET_M,
+    private val coarseDepartureMarginM: Double = COARSE_DEPARTURE_MARGIN_M,
 ) {
 
     enum class Phase {
@@ -104,13 +112,18 @@ class TripGeofence(
     /**
      * 출발 시각을 놓쳤는지.
      *
-     * 첫 fix 부터 집 반경 밖이었다는 뜻이다. 이 이동에서는 출발 관측을
-     * 만들지 않는다.
+     * 첫 fix 부터 집 반경 밖이었거나(규칙 3), 흐린 fix 로만 나간 것을 알았다는
+     * 뜻이다(규칙 4). 이 이동에서는 출발 관측을 만들지 않는다.
      */
     var departureMissed: Boolean = false
         private set
 
-    /** 판정에 쓴 마지막 fix. 알림에 남은 거리를 표시할 때 쓴다. */
+    /**
+     * 판정에 쓴 마지막 fix. 알림에 남은 거리를 표시할 때 쓴다.
+     *
+     * 흐린 fix 로 나간 것을 알았으면(규칙 4) 비운다. 그 전의 정확한 fix 는 집이라
+     * 지금 위치를 말하지 않는다.
+     */
     var lastAcceptedFix: LocationFix? = null
         private set
 
@@ -122,8 +135,28 @@ class TripGeofence(
             return distanceMeters(fix.point, dest)
         }
 
+    /**
+     * 출발 전이라는 판정을 지금도 믿을 수 있는가.
+     *
+     * 판정에 쓴 마지막 fix 가 [EVIDENCE_MAX_AGE_MS] 안이어야 한다. 흐린 fix 만 오거나
+     * 아무것도 오지 않으면 [phase] 는 마지막으로 확인한 "집" 에 머문다. 그 상태로
+     * "준비 중" 을 말하면 이미 나간 사람에게 틀린 말을 계속하게 된다 — 판정과 표시를
+     * 나누는 이유다. 단계가 [Phase.BEFORE_DEPARTURE] 가 아니면 false 다.
+     *
+     * @param nowMillis 지금 시각(epoch ms). fix 시각과 같은 시계여야 한다
+     * (Partly AI-generated (Claude))
+     */
+    fun atHomeConfirmed(nowMillis: Long): Boolean {
+        if (phase != Phase.BEFORE_DEPARTURE) return false
+        val last = lastAcceptedFix ?: return false
+        return nowMillis - last.atMillis <= EVIDENCE_MAX_AGE_MS
+    }
+
     private var sawFirstFix = false
     private var departureStreak = 0
+
+    /** 흐린 fix 가 "집에서 확실히 멀다" 를 연속으로 말한 횟수. 규칙 4 */
+    private var coarseDepartureStreak = 0
 
     /**
      * 이동을 재는 기준 fix. 여기서부터 얼마나 나아갔는지를 본다.
@@ -144,7 +177,11 @@ class TripGeofence(
      */
     fun offer(fix: LocationFix): TripEvent? {
         // 1. 흐린 fix 는 판정에 쓰지 않는다. 연속 기록은 건드리지 않는다.
-        if (fix.accuracyM !in 0f..maxAccuracyM) return null
+        //    단, 출발 전에는 "확실히 멀다" 는 근거로만 쓸 수 있다(규칙 4).
+        if (!isUsable(fix, maxAccuracyM)) {
+            if (phase == Phase.BEFORE_DEPARTURE) checkCoarseDeparture(fix)
+            return null
+        }
 
         lastAcceptedFix = fix
 
@@ -180,6 +217,8 @@ class TripGeofence(
             if (departureStreak >= requiredStreak) return depart(fix, distance)
         } else {
             departureStreak = 0
+            // 집 반경 안의 정확한 위치는 흐린 fix 가 쌓은 "멀다" 도 뒤집는다.
+            coarseDepartureStreak = 0
         }
 
         // 5. 반경 안이라도 지속적으로 이동하고 있으면 나간 것이다.
@@ -194,8 +233,44 @@ class TripGeofence(
     private fun depart(fix: LocationFix, distance: Double): TripEvent {
         phase = Phase.IN_TRANSIT
         departureStreak = 0
+        coarseDepartureStreak = 0
         movementAnchor = null
         return TripEvent.Departed(fix, distance)
+    }
+
+    /**
+     * 규칙 4. 판정에 못 쓰는 흐린 fix 로 "이미 나갔다" 만 판단한다.
+     *
+     * 오차 원 전체가 집에서 [coarseDepartureMarginM] 넘게 떨어져 있어야 근거다.
+     * 150m 반경을 기준으로 삼지 않는 이유 — 기지국 위치는 한쪽으로 치우친 채 같은
+     * 값을 되풀이하는 일이 있어서, 연속 기록만으로는 집에 있는 사람을 내보내는 것을
+     * 막지 못한다. 1km 를 넘겨 치우치는 일은 드물고, 그만큼 갔으면 이미 이동 중이다.
+     *
+     * 근거가 못 되는 흐린 fix 는 연속 기록을 지우지 않는다(규칙 1 과 같다). 지우는
+     * 것은 집 반경 안의 정확한 fix 뿐이다. 오차를 모르는 fix(음수·무한·NaN)는 거리를
+     * 말할 수 없으므로 세지 않는다.
+     *
+     * 출발 관측은 만들지 않는다. 언제 나갔는지는 이 fix 가 말해 주지 않는다.
+     * (Partly AI-generated (Claude))
+     */
+    private fun checkCoarseDeparture(fix: LocationFix) {
+        val origin = home ?: return
+        if (!fix.accuracyM.isFinite() || fix.accuracyM < 0f) return
+
+        val worstCase = distanceMeters(fix.point, origin) - fix.accuracyM
+        if (worstCase <= coarseDepartureMarginM) return
+
+        coarseDepartureStreak++
+        if (coarseDepartureStreak < requiredStreak) return
+
+        departureMissed = true
+        phase = Phase.IN_TRANSIT
+        departureStreak = 0
+        coarseDepartureStreak = 0
+        movementAnchor = null
+        // 마지막 정확한 위치는 집이다. 남겨 두면 알림이 집에서 잰 거리를 지금 남은
+        // 거리처럼 보인다. 이동 중의 정확한 위치를 받을 때까지 비워 둔다.
+        lastAcceptedFix = null
     }
 
     /**
@@ -266,6 +341,29 @@ class TripGeofence(
 
         /** 출발을 몇 번 연속으로 만족해야 판정할지. */
         const val DEFAULT_REQUIRED_STREAK = 2
+
+        /**
+         * 흐린 fix 로 출발을 말하려면 오차를 빼고도 집에서 이만큼 떨어져야 한다(규칙 4).
+         *
+         * 기지국 위치의 오차는 수백 m~1km 대이고 한쪽으로 치우친 채 반복되기도 한다.
+         * 그 치우침이 오차 반경을 다시 1km 넘게 벗어나는 일은 드물다. 반대로 통학·
+         * 통근은 대개 1km 를 넘으므로 지하에 들어가 정확한 위치를 못 받아도 가는 동안
+         * 이 선을 넘는다.
+         */
+        const val COARSE_DEPARTURE_MARGIN_M = 1_000.0
+
+        /**
+         * 판정에 쓸 위치가 이만큼 끊기면 "출발 전" 을 더는 믿지 않는다.
+         *
+         * 출발 전 위치 주기가 30초라 2분이면 네 번을 못 받은 것이다. 서비스는 이때
+         * 고정확도로 올리고, 화면과 알림은 "준비 중" 을 단정하지 않는다
+         * ([atHomeConfirmed]). (Partly AI-generated (Claude))
+         */
+        const val EVIDENCE_MAX_AGE_MS = 120_000L
+
+        /** 판정에 쓸 수 있는 fix 인가. 오차가 없거나(NaN·음수) [MAX_ACCURACY_M] 보다 흐리면 아니다 */
+        fun isUsable(fix: LocationFix, maxAccuracyM: Float = MAX_ACCURACY_M): Boolean =
+            fix.accuracyM in 0f..maxAccuracyM
 
         /**
          * 이동으로 인정할 최소 누적 거리.

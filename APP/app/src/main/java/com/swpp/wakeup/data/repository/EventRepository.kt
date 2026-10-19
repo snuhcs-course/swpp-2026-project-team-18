@@ -1268,6 +1268,10 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         // 일정 시각이 지났는가. 알람과 따로 본다 — 알람은 지났지만 일정은
         // 아직 안 온 구간(준비·이동 중)이 이 화면의 본래 자리다.
         eventPassed = start.isBefore(OffsetDateTime.now()),
+        // Partly AI-generated (Claude) — 추적 근거가 없을 때 "준비 중" 을 말할 수 있는 끝.
+        departPassed = departBy?.isAfter(OffsetDateTime.now()) == false,
+        // 알람 등록(toSchedule)과 같은 기준이다. 값이 없으면 알람이 울리지 않는다.
+        alarmOn = alarmOn == true,
         routeDetail = plan.routeDetail?.takeIf { it.isNotBlank() },
         routePath = plan.routePoints.toGeoPoints(),
         routeDistanceM = plan.routeDistanceM,

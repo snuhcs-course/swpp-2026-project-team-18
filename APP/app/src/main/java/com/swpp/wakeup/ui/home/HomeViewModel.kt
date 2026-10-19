@@ -2653,6 +2653,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 판정기는 "알람 전" 과 "준비 중" 을 구분하지 않는다 — 판정에는 같지만
      * (둘 다 집에 있다) 사용자에게는 전혀 다른 상태다.
      *
+     * 판정기의 "출발 전" 은 판정에 쓴 위치가 2분 안일 때만 쓴다. 흐린 위치만 오는
+     * 동안에도 판정기는 집에 머물러, 집을 나선 사람에게 "준비 중" 을 계속 보였다.
+     *
      * 시각 판정은 [AlarmPlanView.alarmPassed]·[AlarmPlanView.eventPassed] 가 이미
      * 담고 있다. 여기서 시계를 다시 읽으면 화면에 보이는 문구("지난 알람")와
      * 단계가 서로 다른 시점을 근거로 삼게 된다.
@@ -2660,19 +2663,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun stageOf(
         plan: AlarmPlanView,
         arrival: TripLiveState.Arrival? = TripLiveState.arrivalFor(plan.eventId),
+        /** 추적 판정의 나이를 잴 시각. "출발 전" 은 싱싱할 때만 믿는다([TripStage.tracked]) */
+        nowMillis: Long = System.currentTimeMillis(),
     ): TripStage = if (arrival?.eventId == plan.eventId) TripStage.ARRIVED else TripStage.of(
         tracked = TripLiveState.pointFor(plan.eventId)?.let { live ->
-            when (live.phase) {
-                TripGeofence.Phase.BEFORE_DEPARTURE -> TripStage.PREPARING
-                TripGeofence.Phase.IN_TRANSIT -> TripStage.IN_TRANSIT
-                TripGeofence.Phase.ARRIVED -> TripStage.ARRIVED
-            }
+            TripStage.tracked(live.phase, live.phaseCheckedAtMillis, nowMillis)
         } ?: TripLiveState.liveRouteFor(plan.eventId)
             ?.takeIf { it.usableLiveRoute() != null }
             ?.let { TripStage.IN_TRANSIT },
         alarmPassed = plan.alarmPassed,
         eventPassed = plan.eventPassed,
         prepApplies = plan.prepApplies,
+        alarmOn = plan.alarmOn,
+        departPassed = plan.departPassed,
     )
 
     // --- 일정 추가 --------------------------------------------------------
