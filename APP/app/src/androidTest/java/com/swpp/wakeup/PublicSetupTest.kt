@@ -75,6 +75,8 @@ class PublicSetupTest {
                 assertPrepValue("—") // 값을 미리 채우지 않는다.
                 pickDuration(prep)
                 click(By.res("prep_submit"))
+                // 가입 직후 온보딩 끝에 캘린더 연동 화면이 한 번 뜬다. 이 흐름은 캘린더를 쓰지 않는다.
+                click(By.res("calendar_link_skip"), timeout = 90_000)
                 find(By.res("home_list"), timeout = 90_000)
                 click(By.res("open_settings"), "home_list")
                 find(By.text(durationText(prep)), "settings_scroll")
