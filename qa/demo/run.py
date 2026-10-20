@@ -69,6 +69,8 @@ class Demo:
                         DJANGO_SECRET_KEY=secrets.token_urlsafe(40), PYTHONUNBUFFERED="1",
                         PYTHONIOENCODING="utf-8", FCM_CREDENTIALS_PATH="")
         java = Path("/Applications/Android Studio.app/Contents/jbr/Contents/Home")
+        if os.name == "nt":
+            java = Path("C:/Program Files/Android/Android Studio/jbr")
         if "JAVA_HOME" not in self.env and java.exists():
             self.env["JAVA_HOME"] = str(java)
         sdk_path = self.env.get("ANDROID_HOME") or self.env.get("ANDROID_SDK_ROOT")
@@ -78,7 +80,7 @@ class Demo:
                 if line.strip().startswith("sdk.dir="):
                     sdk_path = line.split("=", 1)[1].strip().replace("\\:", ":").replace("\\\\", "\\")
         sdk = Path(sdk_path or Path.home() / "Library/Android/sdk")
-        adb = shutil.which("adb") or str(sdk / "platform-tools/adb")
+        adb = shutil.which("adb") or str(sdk / ("platform-tools/adb.exe" if os.name == "nt" else "platform-tools/adb"))
         require(Path(adb).exists(), "adb를 찾을 수 없습니다. ANDROID_HOME을 설정하세요.")
         devices = run([adb, "devices"], capture_output=True).stdout.splitlines()[1:]
         devices = [line.split()[0] for line in devices if line.strip().endswith("device")
@@ -420,7 +422,7 @@ class Demo:
         print("[2/5] 독립 QA 앱 · UI 테스트 빌드/설치", flush=True)
         log = open(self.output / "build.log", "w")
         self.files.append(log)
-        run([str(ROOT / "APP/gradlew"), ":app:assembleE2e", ":app:assembleE2eAndroidTest",
+        run([str(ROOT / ("APP/gradlew.bat" if os.name == "nt" else "APP/gradlew")), ":app:assembleE2e", ":app:assembleE2eAndroidTest",
              "-PjitE2e=true", f"-PjitPublicUi={str(self.public_server).lower()}", "--console=plain"], cwd=ROOT / "APP", env=self.env,
              stdout=log, stderr=subprocess.STDOUT, timeout=600)
         for apk in ("e2e/app-e2e.apk", "androidTest/e2e/app-e2e-androidTest.apk"):
@@ -430,6 +432,9 @@ class Demo:
         self.shell("pm", "clear", PACKAGE)  # 이 테스트 전용 패키지만 초기화한다.
         for permission in ("POST_NOTIFICATIONS", "ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"):
             self.shell("pm", "grant", PACKAGE, f"android.permission.{permission}")
+        if int(self.shell("getprop", "ro.build.version.sdk")) >= 37:
+            # API 37: 앱 uid가 10.0.2.2(로컬 QA 서버)에 닿으려면 필요하다.
+            self.shell("pm", "grant", PACKAGE, "android.permission.ACCESS_LOCAL_NETWORK")
         self.shell("appops", "set", PACKAGE, "USE_FULL_SCREEN_INTENT", "allow")
         self.shell("cmd", "location", "set-location-enabled", "true")
         self.shell("input", "keyevent", "KEYCODE_WAKEUP")
