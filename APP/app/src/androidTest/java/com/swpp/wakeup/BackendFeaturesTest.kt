@@ -1,6 +1,7 @@
 package com.swpp.wakeup
 
 import android.content.Intent
+import android.graphics.Rect
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -214,6 +215,13 @@ class BackendFeaturesTest {
                 device.waitForIdle()
             }
             capture("feature-repeat-delete-ready")
+            // 빠른 스와이프 뒤 관성 스크롤이 남아 있으면 탭이 스크롤을 멈추는 데만 쓰인다.
+            // 버튼 위치가 두 번 연속 같을 때 누른다.
+            var settled: Rect? = null
+            until {
+                val bounds = ui.withNode(By.res("event_delete")) { it.visibleBounds }
+                (bounds == settled).also { settled = bounds }
+            }
             ui.click(By.res("event_delete"), timeout = 90_000)
             ui.await(By.res("home_list"))
             until { store.find(first.id) == null }
