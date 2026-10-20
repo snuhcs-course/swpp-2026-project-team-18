@@ -476,6 +476,44 @@ class EventRepositoryTest {
     }
 
     @Test
+    fun `근거 화면은 알람이 울리는지와 출발 시각이 지났는지를 싣는다`() = runTest {
+        // Partly AI-generated (Claude) — 진행 단계가 근거 없이 "준비 중" 을 말하지 않게 하는 재료다.
+        // future(1) 은 지금부터 9~33시간 뒤다. 36·40시간 앞이면 언제 돌려도 이미 지났다.
+        val start = future(days = 1)
+        val departed = """{"status":"ok","alarm_at":"${shiftHours(start, -40)}",
+            "depart_by":"${shiftHours(start, -36)}","prep_minutes":30,"travel_minutes":40}"""
+
+        suspend fun planOf(dto: EventDto): AlarmPlanViewCheck {
+            val api = object : FakeEventsApi() {
+                override suspend fun get(id: Long) = ok(dto)
+            }
+            val view = (EventRepository(api, FakeProfileApi()).loadPlan(1) as Result.Success).data
+            return AlarmPlanViewCheck(view.alarmOn, view.alarmPassed, view.departPassed, view.eventPassed)
+        }
+
+        // 알람은 지났고 출발 시각도 지났지만 일정은 아직이다. 알람은 꺼져 있다.
+        assertEquals(
+            AlarmPlanViewCheck(alarmOn = false, alarmPassed = true, departPassed = true, eventPassed = false),
+            planOf(event(1, start, alarmOn = false, plan = departed)),
+        )
+        // 출발 시각이 없으면 지났다고 하지 않는다. 기본 일정은 알람이 켜져 있다.
+        assertEquals(
+            AlarmPlanViewCheck(alarmOn = true, alarmPassed = false, departPassed = false, eventPassed = false),
+            planOf(event(1, start)),
+        )
+        // 서버가 alarm_on 을 주지 않으면 알람 등록과 같이 울리지 않는 것으로 본다.
+        assertFalse(planOf(event(1, start, alarmOn = null)).alarmOn)
+    }
+
+    /** 근거 화면의 시각·알람 판정 네 값. 실패 메시지에서 한눈에 비교하려고 묶는다 */
+    private data class AlarmPlanViewCheck(
+        val alarmOn: Boolean,
+        val alarmPassed: Boolean,
+        val departPassed: Boolean,
+        val eventPassed: Boolean,
+    )
+
+    @Test
     fun `다시 계산 실패는 서버 문구를 돌려준다`() = runTest {
         val api = object : FakeEventsApi() {
             override suspend fun recompute(id: Long) =

@@ -461,23 +461,24 @@ class TestStaticMapRequest:
 
 
 class TestScale:
-    """줌 레벨당 거리. 실측값이라 바뀌면 재검색 범위가 화면과 어긋난다."""
+    """줌 레벨당 거리. 실측값이라 바뀌면 지도 위 선·핀과 재검색 범위가 어긋난다."""
 
     def test_base_level_is_one_meter_per_unit(self):
+        assert clients.STATIC_MAP_BASE_LEVEL == 3
         assert clients.meters_per_unit(clients.STATIC_MAP_BASE_LEVEL) == 1.0
 
     def test_each_level_doubles(self):
-        for lv in range(clients.STATIC_MAP_BASE_LEVEL, 12):
+        for lv in range(clients.STATIC_MAP_MIN_LEVEL, clients.STATIC_MAP_MAX_LEVEL):
             assert clients.meters_per_unit(lv + 1) == pytest.approx(
                 clients.meters_per_unit(lv) * 2
             )
 
-    def test_below_base_level_does_not_zoom_further(self):
-        """lv 1~4 는 모두 1 m/단위였다(실측). 더 확대되지 않는다."""
-        for lv in (1, 2, 3, 4):
-            assert clients.meters_per_unit(lv) == 1.0
-
     def test_measured_points_match(self):
-        # calibrate_staticmap.py 가 실제로 잰 값: lv7 = 8.03, lv10 = 64.15
-        assert clients.meters_per_unit(7) == pytest.approx(8.0, abs=0.1)
-        assert clients.meters_per_unit(10) == pytest.approx(64.0, abs=0.5)
+        """2026-10-18 재측정(마커 없이 중심만 옮긴 두 장의 위상 상관).
+
+        예전 표(lv4 = 1m, lv7 = 8.03)는 마커로 쟀다. 마커를 주면 카카오가 줌을 바꾸므로
+        두 배 틀렸고, 앱의 경로선이 지도 중심에서 두 배 멀리 그려졌다.
+        """
+        measured = {1: 0.25, 2: 0.5, 3: 1.0, 4: 2.0, 6: 8.0, 8: 32.0, 10: 128.0, 15: 4096.0}
+        for lv, mpu in measured.items():
+            assert clients.meters_per_unit(lv) == pytest.approx(mpu)

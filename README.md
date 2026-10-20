@@ -23,11 +23,13 @@ observations.
 | Shared server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
 | Stack | Android · Kotlin · Jetpack Compose — Django · DRF · Neon Postgres — Render |
 
-![Figma board](docs/figma-board.png)
+![Figma board](docs/figma-board-2026-10-18.png)
 
-> The Figma board as of 2026-09-30: 17 screens plus state variants (route map,
-> progress colors, route modes, input states). Columns are stages; screens below a
-> frame are its children. The board is ahead of the app in places — the lists below
+> The Figma board as of 2026-10-18: 18 screens plus state variants, in four flow bands —
+> A sign-in · onboarding · settings, B home · alarm · replanning, C add event · route ·
+> place, D reports. Each band reads left to right; a screen's states sit directly below
+> it. The multi-user screens (⑩ room, ⑪ member detail) are parked on the right and are
+> out of scope for now. The board is ahead of the app in places — the lists below
 > describe the app.
 
 ---

@@ -35,6 +35,33 @@ class MapCameraMathTest {
         assertTrue(camera.center.lng < 127.0)
     }
 
+    // Partly AI-generated (Claude)
+    @Test
+    fun `끈 거리만큼 지도 좌표에서 정확히 옮긴다`() {
+        // 손가락 아래 장소가 손을 뗀 뒤에도 그 자리에 있어야 한다. 예전에는 축척을 두 배
+        // 작게 알고 있어서 지도가 끈 거리의 절반만 따라와 손을 떼면 되돌아갔다.
+        val start = GeoPoint(37.46, 126.952)
+        val camera = MapCameraMath.finishGesture(
+            start, 6, Offset(120f, -80f), 1f, 8.0, 3, 10,
+        )
+        val before = KakaoMapProjection.forward(start)
+        val after = KakaoMapProjection.forward(camera.center)
+        assertEquals(-120 * 8.0, after.x - before.x, 0.01)
+        assertEquals(-80 * 8.0, after.y - before.y, 0.01)
+    }
+
+    @Test
+    fun `투영과 손짓이 같은 좌표계다`() {
+        // 중심을 어떤 점으로 끌어오면 그 점의 오프셋이 0 이 된다.
+        val center = GeoPoint(35.1796, 129.0756)
+        val target = GeoPoint(35.1900, 129.1100)
+        val offset = MapCameraMath.offsetPx(target, center, 4.0)
+        val camera = MapCameraMath.finishGesture(center, 5, -offset, 1f, 4.0, 3, 10)
+        val after = MapCameraMath.offsetPx(target, camera.center, 4.0)
+        assertEquals(0f, after.x, 0.01f)
+        assertEquals(0f, after.y, 0.01f)
+    }
+
     @Test
     fun `북쪽 좌표는 화면 위쪽으로 투영된다`() {
         val offset = MapCameraMath.offsetPx(

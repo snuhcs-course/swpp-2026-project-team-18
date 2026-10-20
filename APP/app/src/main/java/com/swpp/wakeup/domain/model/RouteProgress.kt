@@ -1,6 +1,7 @@
 package com.swpp.wakeup.domain.model
 
 import com.swpp.wakeup.sensing.GeoPoint
+import com.swpp.wakeup.sensing.TripGeofence
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -182,8 +183,9 @@ data class RouteProgress(
  * 관측이 올라간 뒤에야 안다.
  *
  * [TripGeofence.Phase] 는 출발·도착 **판정**을 위한 세 단계이고, 이것은 화면에
- * 보여 줄 네 단계다. 알람이 울리기 전과 준비 중은 판정 관점에서 같지만
- * (둘 다 집에 있다) 사용자에게는 전혀 다른 상태다.
+ * 보여 줄 단계다. 진행 막대의 칸은 네 개([ordered])이고, 나머지(지난 일정·알람
+ * 꺼짐·출발 확인 안 됨)는 "막대로 말할 것이 없다" 는 상태다. 알람이 울리기 전과
+ * 준비 중은 판정 관점에서 같지만(둘 다 집에 있다) 사용자에게는 전혀 다른 상태다.
  */
 enum class TripStage(val label: String) {
     /** 알람이 아직 울리지 않았다 */
@@ -205,38 +207,109 @@ enum class TripStage(val label: String) {
      * 것이 없다" 는 상태다. 이것이 없으면 알람이 지난 일정은 영원히 "준비 중"
      * 으로 남는다 — 이틀 전 일정을 열어도 지금 준비하고 있다고 말하게 된다.
      */
-    PAST("지난 일정");
+    PAST("지난 일정"),
+
+    /**
+     * 이 일정은 알람이 울리지 않는다. 그래서 이동도 기록하지 않는다.
+     *
+     * 추적은 알람을 끌 때만 시작한다. 알람이 꺼진 일정(하루 둘째 일정 등)에 "알람
+     * 전"·"준비 중" 을 말하면 울리지 않을 알람을 기다리게 하거나, 이미 밖에 있는
+     * 사람에게 준비 중이라고 한다. [ordered] 에 넣지 않는다. (Partly AI-generated (Claude))
+     */
+    ALARM_OFF("알람 꺼짐"),
+
+    /**
+     * 출발 예정 시각이 지났는데 출발을 확인할 위치가 없다.
+     *
+     * 추적이 돌지 않거나(위치 권한·기기 절전·서비스 종료) 판정에 쓸 위치가 오지
+     * 않은 경우다. 계획대로라면 이미 나갔어야 하지만 근거가 없으니 "준비 중" 도
+     * "이동 중" 도 말하지 않는다. "준비 중" 을 계속 말하면 집을 나선 사람에게 틀린
+     * 말을 하고, "이동 중" 이라고 하면 추적이 멈춘 것을 감춘다. [ordered] 에 넣지
+     * 않는다. (Partly AI-generated (Claude))
+     */
+    DEPARTURE_UNKNOWN("출발 확인 안 됨");
+
+    /**
+     * 지각 전망(색·"+5분")을 낼 수 있는 단계인가.
+     *
+     * 시작하지 않은 여정(알람 전), 기록이 없는 여정(지난 일정·알람 꺼짐), 어디에
+     * 있는지 모르는 여정(출발 확인 안 됨)에는 전망을 내지 않는다. 근거 없이 칠한 색은
+     * 숫자보다 쉽게 믿는다.
+     */
+    val canJudgeLateness: Boolean
+        get() = this == PREPARING || this == IN_TRANSIT || this == ARRIVED
 
     companion object {
         /** 화면에 그릴 순서. 진행 막대의 단계 표시가 이 순서를 쓴다 */
         val ordered: List<TripStage> = listOf(BEFORE_ALARM, PREPARING, IN_TRANSIT, ARRIVED)
 
         /**
+         * 추적기의 판정을 화면 단계로 옮긴다. 믿을 수 없으면 null — 그때는 [of] 가
+         * 시각으로 가른다.
+         *
+         * **"출발 전" 은 근거가 싱싱할 때만 "준비 중" 이다.** 판정기는 판정에 쓸 위치가
+         * 끊기면 마지막으로 확인한 집에 머문다. 흐린 위치만 오는 지하철 안에서도
+         * "출발 전" 이라고 하는 셈이다. 마지막 판정 위치가
+         * [TripGeofence.EVIDENCE_MAX_AGE_MS] 보다 오래됐거나 아직 없으면 판정을 쓰지
+         * 않는다. 나간 뒤(이동 중·도착)는 되돌아갈 일이 없으므로 나이를 보지 않는다.
+         *
+         * @param checkedAtMillis 판정에 쓴 마지막 위치의 시각. 없으면 null
+         * @param nowMillis 지금 시각(벽시계 ms)
+         * (Partly AI-generated (Claude))
+         */
+        fun tracked(
+            phase: TripGeofence.Phase,
+            checkedAtMillis: Long?,
+            nowMillis: Long,
+        ): TripStage? = when (phase) {
+            TripGeofence.Phase.BEFORE_DEPARTURE -> PREPARING.takeIf {
+                checkedAtMillis != null &&
+                    nowMillis - checkedAtMillis <= TripGeofence.EVIDENCE_MAX_AGE_MS
+            }
+
+            TripGeofence.Phase.IN_TRANSIT -> IN_TRANSIT
+            TripGeofence.Phase.ARRIVED -> ARRIVED
+        }
+
+        /**
          * 단계를 정한다. 추적 중이면 [tracked] 가 이기고, 아니면 시각으로 가른다.
          *
-         * **시각을 여기서 읽지 않는다.** 두 불린은 화면 문구("지난 알람")를 만든
+         * **시각을 여기서 읽지 않는다.** 불린들은 화면 문구("지난 알람")를 만든
          * 것과 같은 시점에서 나온 값이다. 여기서 시계를 다시 보면 문구와 단계가
          * 서로 다른 시점을 근거로 삼는다.
+         *
+         * **시각으로 가르는 것은 계획이 말하는 범위까지다.** 알람이 울렸으면 집에서
+         * 준비하는 중이라고 볼 수 있지만, 출발 예정 시각이 지나면 계획만으로는 어디
+         * 있는지 말할 수 없다([DEPARTURE_UNKNOWN]). 알람이 꺼진 일정은 처음부터 추적할
+         * 일이 없다([ALARM_OFF]).
          *
          * @param tracked 추적기가 판정한 단계. 없으면 null
          * @param alarmPassed 알람 시각이 지났는가
          * @param eventPassed 일정 시각까지 지났는가
          * @param prepApplies 준비 단계가 있는 일정인가. 집에서 출발하지 않으면 없다
+         * @param alarmOn 이 일정의 알람이 울리는가(서버 `alarm_on`)
+         * @param departPassed 계획한 출발 시각이 지났는가
          */
         fun of(
             tracked: TripStage?,
             alarmPassed: Boolean,
             eventPassed: Boolean,
             prepApplies: Boolean = true,
+            alarmOn: Boolean = true,
+            departPassed: Boolean = false,
         ): TripStage = when {
             // 준비 단계가 없는 일정에서 추적기가 "준비 중" 을 주면 이동 중으로
             // 읽는다. 집에 있지도 않은 사람에게 준비 중이라고 할 근거가 없다.
             tracked == PREPARING && !prepApplies -> IN_TRANSIT
             tracked != null -> tracked
+            // 알람이 울리지 않는 일정은 추적할 일이 없다. 끝났으면 지난 일정이다.
+            !alarmOn -> if (eventPassed) PAST else ALARM_OFF
             !alarmPassed -> BEFORE_ALARM
             // 일정이 끝났는데 이동 기록이 없다. 알람만 보면 계속 "준비 중" 인데,
             // 이틀 전 일정을 열어 놓고 지금 준비하고 있다고 말하는 셈이 된다.
             eventPassed -> PAST
+            // 계획상 이미 나갔어야 한다. 근거 없이 "준비 중" 을 이어 말하지 않는다.
+            departPassed -> DEPARTURE_UNKNOWN
             !prepApplies -> IN_TRANSIT
             else -> PREPARING
         }

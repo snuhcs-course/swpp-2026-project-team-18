@@ -1,6 +1,7 @@
 package com.swpp.wakeup.domain.model
 
 import com.swpp.wakeup.sensing.GeoPoint
+import com.swpp.wakeup.sensing.TripGeofence
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -278,6 +279,111 @@ class RouteProgressTest {
         assertEquals(
             TripStage.IN_TRANSIT,
             TripStage.of(tracked = TripStage.IN_TRANSIT, alarmPassed = false, eventPassed = false),
+        )
+    }
+
+    // --- 근거 없이 "준비 중" 을 말하지 않는다 (Partly AI-generated (Claude)) ---
+    //
+    // 팀원 제보: 집을 나선 지 한참 됐는데 계속 "준비 중" 이었다. 추적 근거가 없을
+    // 때도 알람이 지났다는 이유만으로 "준비 중" 을 말했기 때문이다.
+
+    @Test
+    fun `알람이 꺼진 일정은 알람 전도 준비 중도 아니다`() {
+        // 울리지 않을 알람을 기다리게 하거나, 이미 밖에 있는 사람에게 준비 중이라고 한다.
+        assertEquals(
+            TripStage.ALARM_OFF,
+            TripStage.of(null, alarmPassed = false, eventPassed = false, alarmOn = false),
+        )
+        assertEquals(
+            TripStage.ALARM_OFF,
+            TripStage.of(null, alarmPassed = true, eventPassed = false, alarmOn = false),
+        )
+        assertEquals(
+            TripStage.PAST,
+            TripStage.of(null, alarmPassed = true, eventPassed = true, alarmOn = false),
+        )
+    }
+
+    @Test
+    fun `알람이 꺼졌어도 추적 기록이 있으면 그것을 쓴다`() {
+        // 알람이 울려 추적을 시작한 뒤에 스위치를 끈 경우다.
+        assertEquals(
+            TripStage.IN_TRANSIT,
+            TripStage.of(TripStage.IN_TRANSIT, alarmPassed = true, eventPassed = false, alarmOn = false),
+        )
+    }
+
+    @Test
+    fun `출발 시각이 지났는데 추적 근거가 없으면 준비 중이라고 하지 않는다`() {
+        assertEquals(
+            TripStage.DEPARTURE_UNKNOWN,
+            TripStage.of(null, alarmPassed = true, eventPassed = false, departPassed = true),
+        )
+        // 출발 시각 전까지는 계획대로 준비 중이다.
+        assertEquals(
+            TripStage.PREPARING,
+            TripStage.of(null, alarmPassed = true, eventPassed = false, departPassed = false),
+        )
+        // 일정이 끝났으면 지난 일정이다.
+        assertEquals(
+            TripStage.PAST,
+            TripStage.of(null, alarmPassed = true, eventPassed = true, departPassed = true),
+        )
+        // 집에서 출발하지 않는 일정도 출발 시각이 지나면 같다.
+        assertEquals(
+            TripStage.DEPARTURE_UNKNOWN,
+            TripStage.of(null, alarmPassed = true, eventPassed = false, prepApplies = false, departPassed = true),
+        )
+    }
+
+    @Test
+    fun `출발 시각이 지나도 집에 있다는 근거가 있으면 준비 중이다`() {
+        // 늦게 나서는 사람이다. 추적기가 집이라고 하면 그대로 말하고 전망이 늦음을 알린다.
+        assertEquals(
+            TripStage.PREPARING,
+            TripStage.of(TripStage.PREPARING, alarmPassed = true, eventPassed = false, departPassed = true),
+        )
+    }
+
+    @Test
+    fun `출발 전 판정은 근거가 싱싱할 때만 준비 중이다`() {
+        val checked = 1_000_000L
+        val maxAge = TripGeofence.EVIDENCE_MAX_AGE_MS
+        val atHome = TripGeofence.Phase.BEFORE_DEPARTURE
+
+        assertEquals(TripStage.PREPARING, TripStage.tracked(atHome, checked, checked + maxAge))
+        assertNull(TripStage.tracked(atHome, checked, checked + maxAge + 1))
+        assertNull("판정에 쓴 위치가 아직 없다", TripStage.tracked(atHome, null, checked))
+        // 나간 뒤에는 나이를 보지 않는다. 되돌아갈 일이 없다.
+        assertEquals(
+            TripStage.IN_TRANSIT,
+            TripStage.tracked(TripGeofence.Phase.IN_TRANSIT, null, checked + 10 * maxAge),
+        )
+        assertEquals(
+            TripStage.ARRIVED,
+            TripStage.tracked(TripGeofence.Phase.ARRIVED, checked, checked + 10 * maxAge),
+        )
+    }
+
+    @Test
+    fun `흐린 위치만 오는 동안 출발 시각이 지나면 준비 중이 아니다`() {
+        // 제보 재현. 판정기는 5분 전에 확인한 집에 머물러 있고 출발 시각도 지났다.
+        val now = 10_000_000L
+        val tracked = TripStage.tracked(TripGeofence.Phase.BEFORE_DEPARTURE, now - 5 * 60_000L, now)
+
+        assertEquals(
+            TripStage.DEPARTURE_UNKNOWN,
+            TripStage.of(tracked, alarmPassed = true, eventPassed = false, departPassed = true),
+        )
+    }
+
+    @Test
+    fun `알람 꺼짐과 출발 확인 안 됨은 막대의 칸이 아니고 전망도 내지 않는다`() {
+        assertFalse(TripStage.ALARM_OFF in TripStage.ordered)
+        assertFalse(TripStage.DEPARTURE_UNKNOWN in TripStage.ordered)
+        assertEquals(
+            listOf(TripStage.PREPARING, TripStage.IN_TRANSIT, TripStage.ARRIVED),
+            TripStage.entries.filter { it.canJudgeLateness },
         )
     }
 

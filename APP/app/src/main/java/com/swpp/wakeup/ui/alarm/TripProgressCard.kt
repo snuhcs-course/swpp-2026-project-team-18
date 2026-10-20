@@ -236,7 +236,8 @@ private fun Avatar(initials: String, color: Color) {
  *
  * 1. **경로 이탈** — 경고색. 전망을 계산할 수 없으므로(다른 길을 가는 중이다)
  *    초록으로 "정시" 라고 말해서는 안 된다
- * 2. **전망을 못 냄** — 흐린 회색. 알람 전이거나 기록이 없는 경우다
+ * 2. **전망을 못 냄** — 흐린 회색. 알람 전이거나 기록이 없거나(알람 꺼짐 포함)
+ *    출발을 확인하지 못한 경우다([TripStage.canJudgeLateness])
  * 3. 전망대로 초록 · 노랑 · 빨강
  */
 internal fun rowColor(
@@ -245,7 +246,8 @@ internal fun rowColor(
     outlook: ArrivalOutlook?,
 ): Color = when {
     progress != null && !progress.onRoute -> JitColor.Amber
-    stage == TripStage.BEFORE_ALARM || stage == TripStage.PAST -> JitColor.Track
+    // 알람 전·지난 일정·알람 꺼짐·출발 확인 안 됨. 전망이 있어도 칠하지 않는다.
+    !stage.canJudgeLateness -> JitColor.Track
     outlook == null -> JitColor.Track
     else -> outlookColor(outlook.verdict)
 }
@@ -307,11 +309,15 @@ internal fun trailingLine(
 }
 
 /** 진행률을 못 그리는 이유. 상태마다 다르다. */
-private fun stageHint(stage: TripStage): String = when (stage) {
+internal fun stageHint(stage: TripStage): String = when (stage) {
     TripStage.BEFORE_ALARM -> "알람이 울리면 추적이 시작됨"
     TripStage.PREPARING -> "집을 나서면 이동 거리가 표시됨"
     TripStage.IN_TRANSIT -> "위치를 아직 받지 못했음"
     TripStage.ARRIVED -> "도착함"
     // 지난 일정이다. "추적이 시작됨" 같은 앞날 이야기를 하면 안 된다.
     TripStage.PAST -> "일정 시각이 지났고 이동 기록이 없음"
+    // Partly AI-generated (Claude) — 추적은 알람을 끌 때 시작한다. 울리지 않으면 기록도 없다.
+    TripStage.ALARM_OFF -> "알람이 꺼진 일정이라 이동을 기록하지 않음"
+    // 추적이 멈췄거나 위치가 오지 않는다. 어디 있는지 지어내지 않는다.
+    TripStage.DEPARTURE_UNKNOWN -> "위치 기록이 없어 출발했는지 알 수 없음"
 }

@@ -139,6 +139,22 @@ data class AlarmPlanView(
      */
     val eventPassed: Boolean = false,
     /**
+     * 계획한 출발 시각(`depart_by`)이 지났는가. 출발 시각이 없으면 false.
+     *
+     * 추적 근거가 없을 때 "준비 중" 을 언제까지 말할 수 있는지 가른다. 그 뒤로는
+     * 계획만으로 어디 있는지 말할 수 없다([TripStage.DEPARTURE_UNKNOWN]). [alarmPassed]
+     * 와 같은 시점에 계산한다. (Partly AI-generated (Claude))
+     */
+    val departPassed: Boolean = false,
+    /**
+     * 이 일정의 알람이 울리는가(서버 `alarm_on`, 자동·수동 ON/OFF 를 반영한 최종값).
+     *
+     * 추적은 알람을 끌 때 시작하므로, 꺼진 일정에는 진행 단계를 말할 근거가 없다
+     * ([TripStage.ALARM_OFF]). 알람 등록([com.swpp.wakeup.domain.model.AlarmSchedule])도
+     * 같은 값으로 거른다.
+     */
+    val alarmOn: Boolean = true,
+    /**
      * 사람이 읽는 경로 설명. "2호선 → 5513".
      *
      * 알람 카드가 "무엇을 기준으로 이 시각인가" 를 밝히는 데 쓴다. 서버는

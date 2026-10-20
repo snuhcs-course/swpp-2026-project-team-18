@@ -23,6 +23,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
@@ -85,7 +87,10 @@ fun RouteChoiceScreen(
      */
     arriveBy: java.time.LocalDateTime? = null,
     loadMap: (suspend (GeoPoint, Int, Int, Int) -> EventRepository.Result<Bitmap>)? = null,
-    /** 좌표가 있는 도보·자전거 카드를 누르면 부른다. 같은 경로 안에서 지도 미리보기를 연다 */
+    /**
+     * 좌표가 있는 카드의 지도 미리보기를 연다(같은 경로 안에서). 자동차·도보·자전거는
+     * 카드를 누를 때, 대중교통은 카드의 "지도로 보기" 를 누를 때 부른다
+     */
     onPreview: (String) -> Unit = {},
     /** 미리보기의 뒤로. 목록으로 돌아간다(선택은 그대로) */
     onClosePreview: () -> Unit = {},
@@ -180,28 +185,30 @@ fun RouteChoiceScreen(
                 }
                 inTab.forEach { option ->
                     // 지도는 목록 안에 붙이지 않는다. 세로 스크롤 안의 핀치·드래그가
-                    // 스크롤과 겹친다. 좌표가 있는 도보·자전거 카드는 누르면 전체 화면
-                    // 미리보기로 간다(PM 지시 "눌렀을 때 지도 화면으로").
+                    // 스크롤과 겹친다. 좌표가 있으면 전체 화면 미리보기로 간다(PM 지시
+                    // "눌렀을 때 지도 화면으로"). 경로가 하나뿐인 자동차(B-4 전)·도보·자전거는
+                    // 카드를 누르면, 후보가 여럿인 대중교통은 "지도로 보기" 를 누르면 간다.
                     val previewable = option.canPreviewMap && loadMap != null
                     RouteCard(
                         option = option,
                         selected = option.key == choice.selectedKey,
                         onClick = {
-                            if (previewable) onPreview(option.key) else onSelect(option.key)
+                            if (previewable && option.opensPreviewOnTap) {
+                                onPreview(option.key)
+                            } else {
+                                onSelect(option.key)
+                            }
                         },
                         depart = departAt(arriveBy, option.minutes),
                         origin = choice.originLabel,
                         destination = choice.destination,
-                        previewable = previewable,
+                        onPreview = if (previewable) ({ onPreview(option.key) }) else null,
                     )
                     if (option.key == choice.selectedKey) {
                         RouteGuide(option.guide)
                     }
                     // 구버전 서버처럼 좌표가 없으면 고르기만 된다. 지도가 안 뜨는 이유를 밝힌다.
-                    if (option.key == choice.selectedKey &&
-                        (mode == RouteMode.WALK || mode == RouteMode.BICYCLE) &&
-                        !option.canPreviewMap
-                    ) {
+                    if (option.key == choice.selectedKey && !option.canPreviewMap) {
                         Text(
                             text = "지도 미리보기를 받지 못했음",
                             color = JitColor.TextSecondary,
@@ -341,9 +348,11 @@ private fun RouteCard(
     depart: java.time.LocalDateTime? = null,
     origin: String = "출발",
     destination: String = "도착",
-    /** 누르면 지도 미리보기로 가는 카드인가. 카드 아래에 "지도로 보기" 를 단다 */
-    previewable: Boolean = false,
+    /** 지도 미리보기를 연다. null 이면 좌표가 없어 "지도로 보기" 를 달지 않는다 */
+    onPreview: (() -> Unit)? = null,
 ) {
+    // 카드 전체가 지도로 가는 카드인가(자동차·도보·자전거). 대중교통은 카드가 고르기다.
+    val cardOpensMap = onPreview != null && option.opensPreviewOnTap
     Column(
         modifier = Modifier
             .testTag("route_${option.key}")
@@ -362,7 +371,7 @@ private fun RouteCard(
                     Modifier
                 }
             )
-            .clickable(onClickLabel = if (previewable) "지도로 보기" else null, onClick = onClick)
+            .clickable(onClickLabel = if (cardOpensMap) "지도로 보기" else null, onClick = onClick)
             .padding(13.dp),
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
@@ -417,7 +426,9 @@ private fun RouteCard(
                 RouteTimeline(rows)
             }
         }
-        if (previewable) {
+        onPreview?.let { open ->
+            // 대중교통은 카드가 고르기라서 이 글자가 따로 눌려야 한다. 손가락이 닿을
+            // 크기(48dp)를 준다. 다른 수단은 카드 전체가 같은 일을 하므로 표시만 된다.
             Text(
                 text = "지도로 보기 ›",
                 color = JitColor.Accent,
@@ -425,7 +436,18 @@ private fun RouteCard(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .align(Alignment.End)
-                    .testTag("route_preview_${option.key}"),
+                    .testTag("route_preview_${option.key}")
+                    .then(
+                        if (cardOpensMap) {
+                            Modifier
+                        } else {
+                            Modifier
+                                .minimumInteractiveComponentSize()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(role = Role.Button, onClick = open)
+                                .padding(horizontal = 4.dp)
+                        }
+                    ),
             )
         }
     }
