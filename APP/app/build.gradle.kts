@@ -7,7 +7,7 @@ plugins {
     alias(libs.plugins.google.services)
     // Room 의 DAO·DB 구현을 생성한다.
     alias(libs.plugins.ksp)
-    // 단위 테스트 커버리지 리포트(jacocoDebugUnitTestReport). 아래 정의 참고.
+    // 커버리지 리포트(jacocoDebugUnitTestReport, jacocoDebugAndroidTestReport). 아래 정의 참고.
     jacoco
 }
 
@@ -122,9 +122,12 @@ android {
 
     buildTypes {
         debug {
-            // testDebugUnitTest 에 JaCoCo 에이전트를 붙인다. APK 에는 영향이 없다
-            // (APK 계측은 enableAndroidTestCoverage 쪽이고 아직 켜지 않는다).
+            // testDebugUnitTest 에 JaCoCo 에이전트를 붙인다.
             enableUnitTestCoverage = true
+            // 디버그 APK 를 JaCoCo 로 계측해 기기 테스트(connectedDebugAndroidTest)의
+            // 커버리지를 남긴다. 화면(View) 계층 목표는 이 숫자로 잰다. 디버그 APK 가
+            // 조금 느려진다. e2e 빌드에는 켜지 않는다.
+            enableAndroidTestCoverage = true
             // 공용 서버(gradle.properties jitApiBaseUrl)가 기본이고,
             // local.properties 에 devServerHost 를 적으면 로컬 백엔드로 바뀐다.
             buildConfigField("String", "BASE_URL", "\"$apiBaseUrl\"")
@@ -276,18 +279,47 @@ val coverageExcludes = listOf(
     "**/ui/theme/**", "**/MainActivity*.*", "**/JitApplication*.*",
 )
 
+// AGP 9 는 Kotlin 을 내장 컴파일러로 빌드해 클래스가 여기에 생긴다.
+// 기기 테스트 리포트도 계측 전 원본인 이 클래스로 읽는다.
+val debugClassDir = layout.buildDirectory.dir("intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes")
+
 tasks.register<JacocoReport>("jacocoDebugUnitTestReport") {
     group = "verification"
     description = "testDebugUnitTest 를 돌리고 생성 코드를 뺀 줄 커버리지 리포트를 만든다."
     val unitTest = tasks.named<Test>("testDebugUnitTest").get()
     dependsOn(unitTest)
     executionData(unitTest)
-    // AGP 9 는 Kotlin 을 내장 컴파일러로 빌드해 클래스가 여기에 생긴다.
-    classDirectories.setFrom(
-        fileTree(layout.buildDirectory.dir("intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes")) {
-            exclude(coverageExcludes)
+    classDirectories.setFrom(fileTree(debugClassDir) { exclude(coverageExcludes) })
+    sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
+    reports {
+        xml.required = true
+        html.required = true
+        csv.required = false
+    }
+}
+
+/**
+ * 기기 통합 테스트 커버리지 리포트. 에뮬레이터를 켠 상태에서:
+ *
+ *     ./gradlew jacocoDebugAndroidTestReport -Pandroid.testInstrumentationRunnerArguments.package=com.swpp.wakeup.integration
+ *     → app/build/reports/jacoco/jacocoDebugAndroidTestReport/html/index.html
+ *     python3 scripts/coverage_summary.py app/build/reports/jacoco/jacocoDebugAndroidTestReport/jacocoDebugAndroidTestReport.xml
+ *
+ * 단위 테스트 리포트와 같은 클래스·제외 규칙을 써서 두 숫자의 분모가 같다. AGP 내장
+ * createDebugAndroidTestCoverageReport 를 쓰지 않는 이유도 위와 같다. 패키지 필터를
+ * 빼면 QA 빌드가 필요한 E2E 테스트까지 돌아 실패한다.
+ */
+tasks.register<JacocoReport>("jacocoDebugAndroidTestReport") {
+    group = "verification"
+    description = "connectedDebugAndroidTest 를 돌리고 생성 코드를 뺀 줄 커버리지 리포트를 만든다."
+    dependsOn("connectedDebugAndroidTest")
+    // 기기마다 하위 폴더에 .ec 파일이 생긴다. 여러 기기면 합쳐서 센다.
+    executionData.setFrom(
+        fileTree(layout.buildDirectory.dir("outputs/code_coverage/debugAndroidTest/connected")) {
+            include("**/*.ec")
         }
     )
+    classDirectories.setFrom(fileTree(debugClassDir) { exclude(coverageExcludes) })
     sourceDirectories.setFrom(files("src/main/java", "src/main/kotlin"))
     reports {
         xml.required = true

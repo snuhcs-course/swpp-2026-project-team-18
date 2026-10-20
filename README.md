@@ -294,12 +294,15 @@ leaves out the end-to-end tests in the same folder, which need the QA build and 
 replay server and run through `qa/demo/run.py`.
 
 CI also measures line coverage and prints a per-layer table in the job summary; the
-HTML reports are uploaded as the `backend-coverage` and `app-coverage` artifacts.
+HTML reports are uploaded as the `backend-coverage`, `app-coverage` (JVM unit tests) and
+`app-device-coverage` (integration tests on the emulator) artifacts.
 To get the same numbers locally:
 
 ```bash
 cd backend && python -m pytest --cov --cov-report=html --cov-report=json && python scripts/coverage_summary.py
 cd APP     && ./gradlew jacocoDebugUnitTestReport && python3 scripts/coverage_summary.py
+cd APP     && ./gradlew jacocoDebugAndroidTestReport -Pandroid.testInstrumentationRunnerArguments.package=com.swpp.wakeup.integration \
+           && python3 scripts/coverage_summary.py app/build/reports/jacoco/jacocoDebugAndroidTestReport/jacocoDebugAndroidTestReport.xml
 ```
 
 Excluded from coverage: tests, migrations and seed commands on the server
