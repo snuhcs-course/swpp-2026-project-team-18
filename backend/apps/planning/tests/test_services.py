@@ -302,6 +302,47 @@ class TestFailureStates:
         assert plan.status == AlarmPlan.Status.ROUTE_FAILED
         assert plan.alarm_at is None
 
+    def test_failed_recompute_keeps_the_previous_alarm(self, user, place, stub_route, monkeypatch):
+        """다시 계산의 경로 조회가 실패해도 맞던 알람은 그대로 남는다."""
+        from apps.planning.models import PlanRevision
+
+        event = make_event(user, place)
+        ok = services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
+        revisions = event.plan_revisions.count()
+
+        monkeypatch.setattr(services.clients, "best_route", lambda **kw: (None, True))
+        kept = services.compute_and_store(event, trigger=PlanRevision.Trigger.RECOMPUTE)
+        kept.refresh_from_db()
+
+        assert kept.status == AlarmPlan.Status.OK
+        assert kept.alarm_at == ok.alarm_at
+        assert kept.route_key == ok.route_key
+        # 계산하지 않았으므로 계산 시각과 이력이 그대로다.
+        assert kept.computed_at == ok.computed_at
+        assert event.plan_revisions.count() == revisions
+
+    def test_failed_recompute_without_a_good_plan_still_fails(self, user, place, monkeypatch):
+        """지킬 직전 알람이 없으면 실패를 그대로 알린다."""
+        from apps.planning.models import PlanRevision
+
+        monkeypatch.setattr(services.clients, "best_route", lambda **kw: (None, True))
+        plan = services.compute_and_store(
+            make_event(user, place), trigger=PlanRevision.Trigger.RECOMPUTE
+        )
+        assert plan.status == AlarmPlan.Status.ROUTE_FAILED
+        assert plan.alarm_at is None
+
+    def test_failed_update_still_clears_the_alarm(self, user, place, stub_route, monkeypatch):
+        """수정은 입력이 바뀌었으므로 직전 알람이 더는 맞지 않는다."""
+        from apps.planning.models import PlanRevision
+
+        event = make_event(user, place)
+        services.compute_and_store(event)
+        monkeypatch.setattr(services.clients, "best_route", lambda **kw: (None, True))
+        plan = services.compute_and_store(event, trigger=PlanRevision.Trigger.UPDATE)
+        assert plan.status == AlarmPlan.Status.ROUTE_FAILED
+        assert plan.alarm_at is None
+
     def test_recompute_clears_stale_values(self, user, place, stub_route):
         """성공했다가 실패하면 낡은 시각이 남지 않아야 한다."""
         event = make_event(user, place)

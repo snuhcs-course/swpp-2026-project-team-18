@@ -256,6 +256,21 @@ class TestUpdateAndRecompute:
         assert plan.status == AlarmPlan.Status.NO_PLACE
         assert plan.alarm_at is None
 
+    def test_failed_route_lookup_keeps_the_alarm(self, client, stub_route, event_id, monkeypatch):
+        """다시 계산하다 경로 조회가 실패해도 직전 알람이 응답과 DB 에 남는다."""
+        from apps.planning import services
+
+        before = AlarmPlan.objects.get(event_id=event_id)
+        monkeypatch.setattr(services.clients, "best_route", lambda **kw: (None, True))
+        monkeypatch.setattr(services.clients, "resolve_route", lambda key, **kw: (None, True))
+
+        res = client.post(f"/api/events/{event_id}/recompute")
+        assert res.status_code == 200
+        assert res.json()["alarm_plan"]["status"] == "ok"
+        after = AlarmPlan.objects.get(event_id=event_id)
+        assert after.alarm_at == before.alarm_at
+        assert after.computed_at == before.computed_at
+
     def test_delete_removes_the_plan_too(self, client, stub_route, event_id):
         assert client.delete(f"/api/events/{event_id}").status_code == 204
         assert not AlarmPlan.objects.filter(event_id=event_id).exists()
