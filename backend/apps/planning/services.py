@@ -48,7 +48,7 @@ from apps.events.models import Event
 from apps.routing import clients
 
 from . import estimators, history
-from .models import AlarmPlan
+from .models import AlarmPlan, PlanRevision
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +191,9 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
             end_lng=dest_lng,
         )
     if degraded or not route:
+        kept = _keep_previous_plan(event, trigger)
+        if kept is not None:
+            return kept
         defaults["status"] = AlarmPlan.Status.ROUTE_FAILED
         return _upsert(event, defaults, trigger=trigger)
 
@@ -260,6 +263,30 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         # 카카오가 준 분 그대로(G2). 계획의 `travel_minutes` 는 보정·τ 분위수가 들어간 값이다.
         route_minutes_raw=_raw_minutes(route),
     )
+
+
+def _keep_previous_plan(event: Event, trigger: str) -> AlarmPlan | None:
+    """다시 계산의 경로 조회가 실패하면 직전 계획을 돌려준다. 없으면 None.
+
+    다시 계산은 일정을 바꾸지 않는다. 출발지·목적지·경로가 그대로이니 직전
+    계획은 여전히 맞는 계획이다. 실패한 조회는 카카오 장애나 쿼터 소진 같은
+    일시적 사정일 뿐인데, 이걸 `ROUTE_FAILED` 로 덮으면 `alarm_at` 이 비고
+    앱이 등록해 둔 알람을 취소한다. 기기의 경로 갱신 워커가 15분마다 이걸
+    부르므로 아침에 한 번만 실패해도 알람이 사라진다.
+
+    생성·수정·가져오기·블록·프로필 변경은 입력 자체가 바뀌었으므로 직전
+    계획이 더는 맞지 않는다. 그때는 지금처럼 비운다.
+
+    계획을 건드리지 않으므로 `computed_at` 도 그대로다 — 화면의 "N분 전 계산"
+    이 실제로 계산한 시각을 계속 가리킨다. 이력도 남기지 않는다.
+    """
+    if trigger != PlanRevision.Trigger.RECOMPUTE:
+        return None
+    plan = AlarmPlan.objects.filter(event=event).first()
+    if plan is None or plan.status != AlarmPlan.Status.OK or plan.alarm_at is None:
+        return None
+    logger.warning("일정 %s 다시 계산의 경로 조회 실패. 직전 계획을 유지한다", event.pk)
+    return plan
 
 
 def estimate_components(
