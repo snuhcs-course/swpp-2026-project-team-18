@@ -204,49 +204,15 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
     #
     # 준비: 루틴 블록이 있으면 블록 조합에서, 없으면 온보딩 값 하나에서.
     # 이동: 카카오 점추정치에 관측된 경로 보정을 적용.
-    tau = event.effective_tau
-    buffer_min = DEFAULT_BUFFER_MINUTES
-
     prep, travel = estimate_components(event, route)
 
-    math_ = estimators.compute_alarm_math(prep, travel, buffer_min, tau)
-
-    # 5) 시각으로 환산.
-    #
-    # 도착 예정은 일정 시작에서 버퍼를 뺀 시각이다. 출발 시각은 거기서
-    # 이동 시간을 뺀 값이고, 알람은 거기서 준비 시간을 뺀 값이다.
-    arrive_at = event.start_at - timedelta(minutes=math_.buffer_minutes)
-    depart_by = arrive_at - timedelta(minutes=math_.travel_minutes)
-    alarm_at = depart_by - timedelta(minutes=math_.prep_minutes)
-
+    # 5) 시각으로 환산. 경로를 다시 조회하지 않는 재계산(`refresh`)과 같은 규칙이다.
+    defaults.update(alarm_fields(event, prep, travel, route_source=route.get("source") or ""))
     defaults.update(
         {
-            "status": AlarmPlan.Status.OK,
-            "alarm_at": alarm_at,
-            "depart_by": depart_by,
-            "arrive_at": arrive_at,
-            "prep_minutes": math_.prep_minutes,
-            "travel_minutes": math_.travel_minutes,
-            "buffer_minutes": math_.buffer_minutes,
-            "tau_used": tau,
-            "on_time_probability": math_.on_time_probability,
-            "confidence_basis": math_.confidence_basis,
-            "prep_source": math_.prep_source,
-            "prep_breakdown": math_.prep_breakdown,
-            "total_quantile_minutes": round(
-                math_.total_minutes - math_.buffer_minutes, 2
-            ),
             "travel_mode": (route.get("mode") or "")[:20],
-            "travel_sample_count": travel.sample_count,
-            # 보정이 적용됐으면 그 사실을 남긴다. 나중에 실측과 비교할 때
-            # "카카오 원값" 과 "보정값" 을 구분해야 한다.
-            "travel_source": (
-                f"{route.get('source', '')}+{travel.source}"
-                if travel.source != "kakao"
-                else (route.get("source") or "")
-            )[:30],
             # 요약 문자열은 clients 가 만든다. 같은 규칙을 두 곳에 두지 않는다.
-            "route_summary": (route.get("summary") or f"{math_.travel_minutes}분")[:200],
+            "route_summary": (route.get("summary") or f"{defaults['travel_minutes']}분")[:200],
             "route_key": (route.get("key") or "")[:120],
             "route_detail": (route.get("detail") or "")[:120],
             # 지도에 그릴 경로선과 진행률의 분모. 좌표를 못 받았으면 빈 배열이고
@@ -292,13 +258,64 @@ def _keep_previous_plan(event: Event, trigger: str) -> AlarmPlan | None:
     return plan
 
 
+# Partly AI-generated (Claude)
+def alarm_fields(
+    event: Event,
+    prep: estimators.PrepEstimate | None,
+    travel: estimators.TravelEstimate,
+    *,
+    route_source: str,
+) -> dict:
+    """분포에서 알람 시각과 그 근거 필드를 만든다. 경로 필드(경로선·요약·대안)는 넣지 않는다.
+
+    도착 예정은 일정 시작에서 버퍼를 뺀 시각이다. 출발 시각은 거기서 이동 시간을 뺀
+    값이고, 알람은 거기서 준비 시간을 뺀 값이다.
+    """
+    tau = event.effective_tau
+    math_ = estimators.compute_alarm_math(prep, travel, DEFAULT_BUFFER_MINUTES, tau)
+
+    arrive_at = event.start_at - timedelta(minutes=math_.buffer_minutes)
+    depart_by = arrive_at - timedelta(minutes=math_.travel_minutes)
+    alarm_at = depart_by - timedelta(minutes=math_.prep_minutes)
+    return {
+        "status": AlarmPlan.Status.OK,
+        "alarm_at": alarm_at,
+        "depart_by": depart_by,
+        "arrive_at": arrive_at,
+        "prep_minutes": math_.prep_minutes,
+        "travel_minutes": math_.travel_minutes,
+        "buffer_minutes": math_.buffer_minutes,
+        "tau_used": tau,
+        "on_time_probability": math_.on_time_probability,
+        "confidence_basis": math_.confidence_basis,
+        "prep_source": math_.prep_source,
+        "prep_breakdown": math_.prep_breakdown,
+        "total_quantile_minutes": round(math_.total_minutes - math_.buffer_minutes, 2),
+        "travel_sample_count": travel.sample_count,
+        # 보정이 적용됐으면 그 사실을 남긴다. 나중에 실측과 비교할 때
+        # "카카오 원값" 과 "보정값" 을 구분해야 한다.
+        "travel_source": (
+            f"{route_source}+{travel.source}" if travel.source != "kakao" else route_source
+        )[:30],
+    }
+
+
+def prep_inputs(user_id: int) -> tuple[dict, list[float]]:
+    """준비 시간 추정의 사용자별 재료(블록 관측 통계, GPS 준비 표본).
+
+    일정마다 같은 값이다. 여러 일정을 한 번에 다시 계산할 때 한 번만 읽는다.
+    """
+    return _block_observation_stats(user_id), prep_observations.gps_prep_samples(user_id)
+
+
 def estimate_components(
-    event: Event, route: dict,
+    event: Event, route: dict, *, inputs: tuple[dict, list[float]] | None = None,
 ) -> tuple[estimators.PrepEstimate | None, estimators.TravelEstimate]:
     """Shared preparation/travel model for stored plans and risk previews.
 
     ``route["minutes"]`` must be the upstream raw estimate, never the corrected
-    or quantile-allocated ``AlarmPlan.travel_minutes``.
+    or quantile-allocated ``AlarmPlan.travel_minutes``. ``inputs`` is
+    ``prep_inputs(event.user_id)``; pass it when computing many events of one user.
     """
     profile = event.user.profile
     # **집에서 출발하지 않는 일정은 준비 시간이 해당되지 않는다.**
@@ -311,17 +328,17 @@ def estimate_components(
     #
     # `None` 을 넘긴다. 0분으로 만들어 넘기면 정시 도착 확률이 영영 안 나오고
     # 화면이 "준비 시간 0분" 을 그린다 — `compute_alarm_math` 의 설명 참고.
-    prep = (
-        None
-        if event.origin_lat is not None
-        else estimators.estimate_prep(
+    if event.origin_lat is not None:
+        prep = None
+    else:
+        observations, gps_samples = inputs or prep_inputs(event.user_id)
+        prep = estimators.estimate_prep(
             event,
             profile,
             fallback_minutes=FALLBACK_PREP_MINUTES,
-            observations=_block_observation_stats(event.user_id),
-            gps_samples=prep_observations.gps_prep_samples(event.user_id),
+            observations=observations,
+            gps_samples=gps_samples,
         )
-    )
     travel = estimators.estimate_travel(
         minutes=route["minutes"],
         route_key=route.get("key", "") or "",

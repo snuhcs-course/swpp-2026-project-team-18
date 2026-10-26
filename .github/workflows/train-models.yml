@@ -18,8 +18,10 @@ on:
       - 'backend/apps/planning/history.py'
       - 'backend/apps/planning/estimators.py'
       - 'backend/apps/planning/prep_observations.py'
+      - 'backend/apps/planning/refresh.py'
       - 'backend/apps/planning/tests/test_estimators.py'
       - 'backend/apps/planning/tests/test_gps_prep.py'
+      - 'backend/apps/planning/tests/test_refresh.py'
       - 'backend/config/settings/training.py'
       - 'backend/requirements/**'
   pull_request:
@@ -29,8 +31,10 @@ on:
       - 'backend/apps/planning/history.py'
       - 'backend/apps/planning/estimators.py'
       - 'backend/apps/planning/prep_observations.py'
+      - 'backend/apps/planning/refresh.py'
       - 'backend/apps/planning/tests/test_estimators.py'
       - 'backend/apps/planning/tests/test_gps_prep.py'
+      - 'backend/apps/planning/tests/test_refresh.py'
       - 'backend/config/settings/training.py'
       - 'backend/requirements/**'
 
@@ -58,7 +62,7 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements/*.txt
       - run: pip install -r requirements/dev.txt
-      - run: python -m pytest apps/prediction apps/planning/tests/test_plan_revision.py apps/planning/tests/test_estimators.py apps/planning/tests/test_gps_prep.py -q
+      - run: python -m pytest apps/prediction apps/planning/tests/test_plan_revision.py apps/planning/tests/test_estimators.py apps/planning/tests/test_gps_prep.py apps/planning/tests/test_refresh.py -q
 
   train:
     name: Train from production observations

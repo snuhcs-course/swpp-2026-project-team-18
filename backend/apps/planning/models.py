@@ -280,6 +280,9 @@ class PlanRevision(models.Model):
         IMPORT = "import", "캘린더 가져오기"
         PROFILE = "profile", "프로필 변경"
         BLOCKS = "blocks", "블록 체크 변경"
+        # 아래 둘은 경로를 다시 조회하지 않는다(`planning.refresh`).
+        ROUTINE = "routine", "루틴 블록 수정"
+        LEARNING = "learning", "학습 반영"
 
     # 알람 결정값. 이력 중복 검사는 별도로 경로 원값·요청 key도 비교한다.
     DECISION_FIELDS = (

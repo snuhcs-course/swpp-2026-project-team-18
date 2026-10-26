@@ -22,7 +22,8 @@
 
 **여기서 하지 않는 것** — 관측이 들어와도 알람을 다시 계산하지 않는다.
 매 관측마다 `compute_and_store` 를 부르면 카카오 무료 쿼터(일 1,000건)를
-관측 수만큼 먹는다. 재계산은 기존 `/api/events/{id}/recompute` 에 맡긴다.
+관측 수만큼 먹는다. 그날 들어온 관측은 밤 학습 뒤 경로 조회 없는 재계산
+(`planning.refresh`)이 다음 알람에 반영한다.
 """
 
 from django.conf import settings

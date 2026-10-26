@@ -3,8 +3,8 @@
 from datetime import timedelta
 import math
 
-from . import estimators, services
-from .models import AlarmPlan, PlanRevision
+from . import estimators, history, services
+from .models import AlarmPlan
 
 OPTIONS = (("safe", "안전", .97), ("normal", "보통", .90), ("gamble", "도박", .65))
 
@@ -32,19 +32,9 @@ def build_risk_options(event) -> dict:
         result["unavailable_reason"] = "알람 계획을 계산한 뒤 선택지를 볼 수 있습니다."
         return result
 
-    # Identical recomputations may not create a revision. Compare decision values,
-    # rather than requiring identical computed_at. Never fall back to older raw
-    # values when the latest revision is missing or no longer matches the plan.
-    revision = event.plan_revisions.order_by("-computed_at", "-id").first()
-    if (
-        revision is None or revision.route_minutes_raw is None
-        or revision.event_start_at != event.start_at
-        or revision.requested_route_key != (event.route_key or "")
-        or any(
-            getattr(revision, field) != getattr(plan, field)
-            for field in PlanRevision.DECISION_FIELDS if field != "event_start_at"
-        )
-    ):
+    # Never fall back to older raw values when the latest revision no longer matches the plan.
+    revision = history.reusable_revision(event, plan)
+    if revision is None:
         result["unavailable_reason"] = "저장된 경로 원값이 없습니다. 알람을 다시 계산해 주세요."
         return result
 

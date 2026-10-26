@@ -5,15 +5,15 @@
 
 ## 재계산을 언제 하는가
 
-블록을 고치면 준비 시간이 바뀌므로 알람도 바뀐다. 그런데 매번 전부 다시
-계산하면 카카오 경로 API 무료 쿼터(일 1,000건)를 블록 수정 횟수만큼 먹는다.
+블록을 고치면 준비 시간이 바뀌므로 알람도 바뀐다. 그런데 매번 경로까지 다시
+조회하면 카카오 경로 API 무료 쿼터(일 1,000건)를 블록 수정 횟수만큼 먹는다.
 
-    블록 생성·수정·삭제        재계산하지 않는다. 다음 조회·명시적 재계산 때 반영
-    일정의 블록 체크 변경      **그 일정만** 재계산한다
+    블록 생성·수정·삭제        앞으로의 일정을 **경로 조회 없이** 재계산한다
+    일정의 블록 체크 변경      **그 일정만** 재계산한다(경로도 다시 조회)
 
-체크 변경은 "이 아침에 뭘 할지" 를 정하는 행위라 사용자가 즉시 결과를 기대한다.
-블록 정의 수정은 설정 변경이라 다음 계산에 반영되면 된다. 블록 정의를 고친 뒤
-바로 반영하고 싶으면 `POST /api/events/{id}/recompute` 를 쓴다.
+블록 정의는 경로를 바꾸지 않는다. 지금 계획을 만든 카카오 원값을 그대로 두고
+준비 시간만 다시 섞는다(`planning.refresh`). 알람이 이미 울렸거나 출발한 일정은
+건드리지 않는다. (Partly AI-generated (Claude))
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from rest_framework.views import APIView
 
 from apps.events.models import Event
 from apps.events.serializers import EventSerializer
+from apps.planning import refresh as planning_refresh
 from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 
@@ -43,6 +44,12 @@ class _BlockScopedMixin:
     """요청자 소유 블록만 다룬다."""
 
     serializer_class = RoutineBlockSerializer
+
+    def _refresh_plans(self):
+        """블록 정의가 바뀌었다. 앞으로의 알람을 경로 조회 없이 다시 계산한다."""
+        planning_refresh.refresh_upcoming(
+            self.request.user, trigger=PlanRevision.Trigger.ROUTINE
+        )
 
     def get_queryset(self):
         # 관측 통계를 함께 붙인다. 시리얼라이저가 블록마다 쿼리를 날리면
@@ -71,10 +78,15 @@ class RoutineBlockListCreateView(_BlockScopedMixin, ListCreateAPIView):
         # **user 를 본문에서 받지 않는다.** 받으면 다른 사용자 앞으로 블록을
         # 만들 수 있다.
         serializer.save(user=self.request.user)
+        self._refresh_plans()
 
 
 class RoutineBlockDetailView(_BlockScopedMixin, RetrieveUpdateDestroyAPIView):
     """GET/PATCH/DELETE /api/routines/blocks/{id}"""
+
+    def perform_update(self, serializer):
+        serializer.save()
+        self._refresh_plans()
 
     def perform_destroy(self, instance):
         """삭제 전에 이 블록을 선행으로 삼는 블록들을 풀어 준다.
@@ -88,6 +100,7 @@ class RoutineBlockDetailView(_BlockScopedMixin, RetrieveUpdateDestroyAPIView):
                 user=instance.user, precondition=instance
             ).update(precondition=None)
             instance.delete()
+        self._refresh_plans()
 
 
 class EventBlockSelectionView(APIView):

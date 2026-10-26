@@ -97,6 +97,29 @@ def record_revision(
         return None
 
 
+def reusable_revision(event, plan: AlarmPlan) -> PlanRevision | None:
+    """지금 계획을 만든 이력. 그 경로 원값을 다시 써도 될 때만 돌려준다.
+
+    마지막 이력이 지금 계획과 결정값이 같고, 일정 시작 시각·고른 경로가 그때와 같아야
+    한다. 똑같은 재계산은 이력을 남기지 않으므로 `computed_at` 은 비교하지 않는다.
+    마지막 이력이 맞지 않으면 더 오래된 원값으로 물러나지 않는다.
+    """
+    revision = event.plan_revisions.order_by("-computed_at", "-id").first()
+    if (
+        revision is None
+        or revision.route_minutes_raw is None
+        or revision.event_start_at != event.start_at
+        or revision.requested_route_key != (event.route_key or "")
+        or any(
+            getattr(revision, field) != getattr(plan, field)
+            for field in PlanRevision.DECISION_FIELDS
+            if field != "event_start_at"
+        )
+    ):
+        return None
+    return revision
+
+
 def decision_revision(event_id: int) -> PlanRevision | None:
     """사용자가 따른 계획으로 볼 이력. 없으면 None.
 
