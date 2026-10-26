@@ -29,7 +29,7 @@ from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
 
-from . import recurrence
+from . import recurrence, route_preference
 from .alarms import reset_alarm_overrides
 from .geo import validate_route_distance
 from .models import Event, EventTag
@@ -788,6 +788,12 @@ class RouteCandidateView(APIView):
     고른 출발지는 화면에서 끝나지 않고 `Event.origin_*` 에 저장된다. 저장하지
     않으면 알람 재계산이 집 좌표로 `route_key` 를 다시 풀어 **다른 경로의
     소요시간으로 알람을 잡는다**(planning/services.py 3번 주석).
+
+    **기본 선택** — `fastest_key` 는 전체 최단이다. `preferred_key`·`preferred_mode`
+    는 사용자가 전에 고른 경로에서 정한 기본 선택이고, 근거는 `preferred_basis`
+    (`same_destination` 같은 목적지 · `recent_mode` 최근에 자주 고른 수단)다. 고른
+    기록이 없거나 그 수단의 후보가 없으면 셋 다 null 이다(`route_preference`).
+    (Partly AI-generated (Claude))
     """
 
     throttle_classes = [ScopedRateThrottle]
@@ -856,6 +862,7 @@ class RouteCandidateView(APIView):
                 "degraded": degraded,
                 **groups,
                 "fastest_key": fastest["key"] if fastest else None,
+                **route_preference.preferred_route(request.user, dest_lat, dest_lng, results),
             }
         )
 
