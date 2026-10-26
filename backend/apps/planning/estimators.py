@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import logging
 import random
+import statistics
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -52,6 +53,7 @@ from django.utils import timezone as dj_tz
 from apps.routines.models import RoutineBlock
 
 from . import distributions as dist
+from .prep_observations import within_expected
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,11 @@ RANGE_TO_SD_DIVISOR = 4.0
 # 블록 관측이 이만큼 쌓이면 개인 실측이 신고 범위를 대체하기 시작한다.
 # back-spec 6.1 S2 의 k.
 BLOCK_SHRINKAGE_K = 5
+
+# GPS 출발 기준 준비 시간이 이만큼 모이면 블록·온보딩 값과 50:50 이 된다.
+# 블록의 k(5)보다 작다 — 사람이 누른 기록보다 GPS 출발을 더 믿는다
+# (`prep_observations` 의 신뢰 순서).
+GPS_PREP_SHRINKAGE_K = 3
 
 # 몬테카를로 시드. 같은 입력이 같은 알람을 내도록 고정한다. 알람 시각이
 # 재계산마다 1~2분씩 흔들리면 사용자가 신뢰를 잃는다.
@@ -201,12 +208,76 @@ def estimate_prep(
     profile,
     fallback_minutes: int,
     observations: dict[int, tuple[float, float, int]] | None = None,
+    gps_samples: list[float] | None = None,
 ) -> PrepEstimate:
     """준비 시간 분포를 만든다.
 
     `observations` 는 `{block_id: (평균, 표준편차, 표본수)}` 다. 호출부가
     한 번에 조회해 넘긴다 — 블록마다 쿼리를 날리면 N+1 이 된다.
+
+    `gps_samples` 는 GPS 출발 기준 실제 준비 시간(분) 목록이다
+    (`prep_observations.gps_prep_samples`). 있으면 블록·온보딩 추정을 사전값으로
+    두고 그쪽으로 끌어당긴다.
     """
+    return _with_gps_samples(
+        _estimate_prep_prior(event, profile, fallback_minutes, observations),
+        gps_samples or [],
+    )
+
+
+def _spread(d: dist.Distribution) -> float:
+    """분포의 대략적인 표준편차. 16~84% 분위 폭의 절반이다.
+
+    블렌드·컨볼루션 결과는 정규분포가 아니라서 `sd_min` 이 없다.
+    """
+    return max(0.0, (d.quantile(0.8413) - d.quantile(0.1587)) / 2.0)
+
+
+def _with_gps_samples(prior: PrepEstimate, samples: list[float]) -> PrepEstimate:
+    """GPS 출발 기준 실제 준비 시간으로 사전 추정을 갱신한다.
+
+    섞는 방식은 블록 관측과 같은 shrinkage 다(`dist.blend`). k 만 작다.
+
+    표본이 1건이면 표준편차를 만들 수 없다. 그때는 사전 추정의 폭을 쓴다 — 한
+    번 재봤다고 "변동성이 없다" 고 하면 안 된다. 2건 이상이면 실제 흩어짐을 쓴다.
+    온보딩 값 하나뿐이라 변동성이 없던 사용자도 이렇게 변동성이 생긴다.
+
+    블록 내역은 총시간 비율로 늘이거나 줄인다. 블록 기록은 "어디에 시간을
+    썼나" 의 비율로만 남고, 총량은 GPS 쪽을 따른다.
+    """
+    # 사용자의 예상 준비 시간 대비 터무니없는 아침은 뺀다. 기준은 GPS 를 섞기
+    # 전의 추정이다 — 섞은 값을 기준으로 쓰면 걸러진 표본이 다시 기준을 움직인다.
+    samples = within_expected(samples, prior.distribution.mean)
+    n = len(samples)
+    if n == 0:
+        return prior
+
+    mean = statistics.fmean(samples)
+    sd = statistics.stdev(samples) if n >= 2 else _spread(prior.distribution)
+    observed = dist.Normal(mean_min=mean, sd_min=sd)
+    blended = dist.blend(observed, prior.distribution, n, k=GPS_PREP_SHRINKAGE_K)
+
+    prior_mean = prior.distribution.mean
+    scale = blended.mean / prior_mean if prior_mean > 0 else 1.0
+    breakdown = [
+        {**row, "minutes": round(row["minutes"] * scale, 1)} for row in prior.breakdown
+    ]
+    return PrepEstimate(
+        distribution=blended,
+        block_count=prior.block_count,
+        # 앱·리포트가 아는 값을 쓴다. 새 값을 만들면 구버전 앱이 "기본값" 으로 읽는다.
+        source="observed",
+        breakdown=breakdown,
+    )
+
+
+def _estimate_prep_prior(
+    event,
+    profile,
+    fallback_minutes: int,
+    observations: dict[int, tuple[float, float, int]] | None,
+) -> PrepEstimate:
+    """블록 기록·신고 범위·온보딩 값만으로 만든 준비 시간 분포."""
     obs = observations or {}
     blocks = _selected_blocks(event)
 

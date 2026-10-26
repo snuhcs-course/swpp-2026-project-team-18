@@ -30,6 +30,7 @@ SQLite 에는 `STDDEV` 집계가 없다. `django.db.models.StdDev` 는 Postgres 
 | 실제/예측 비율이 0.25~4.0 밖 | 중간에 딴 데 들렀거나 판정 오류 |
 | 결정 시점 경로 원값이 없다 | 현재 보정값을 다시 학습하면 중복 보정이 됨 |
 | 실제 소요가 0분 | 출발·도착이 같은 fix 로 판정됐다 |
+| 블록 기록이 같은 일정의 GPS 출발보다 늦다 | 나간 뒤에 눌러 이동 시간이 섞였다 |
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from django.utils import timezone as dj_tz
 
 from apps.planning import history
 from apps.planning.models import AlarmPlan
+from apps.planning.prep_observations import exclude_after_departure
 from apps.routing.models import (
     GLOBAL_SIGNATURE,
     MAX_FACTOR,
@@ -246,7 +248,7 @@ def block_stats(user=None) -> dict[str, dict]:
     """
     from apps.routines.models import BlockObservation
 
-    qs = BlockObservation.objects.select_related("block")
+    qs = exclude_after_departure(BlockObservation.objects.select_related("block"))
     if user is not None:
         qs = qs.filter(user=user)
 
@@ -284,7 +286,7 @@ def estimate_slack_coef(user=None) -> float | None:
     """
     from apps.routines.models import BlockObservation
 
-    qs = BlockObservation.objects.filter(slack_minutes__isnull=False)
+    qs = exclude_after_departure(BlockObservation.objects.filter(slack_minutes__isnull=False))
     if user is not None:
         qs = qs.filter(user=user)
 
@@ -319,7 +321,7 @@ def prep_total_stats(user=None) -> dict:
     """
     from apps.routines.models import BlockObservation
 
-    qs = BlockObservation.objects.filter(was_parallel=False)
+    qs = exclude_after_departure(BlockObservation.objects.filter(was_parallel=False))
     if user is not None:
         qs = qs.filter(user=user)
 

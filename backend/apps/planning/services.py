@@ -47,7 +47,7 @@ from apps.events.geo import validate_route_distance
 from apps.events.models import Event
 from apps.routing import clients
 
-from . import estimators, history
+from . import estimators, history, prep_observations
 from .models import AlarmPlan, PlanRevision
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,10 @@ def _block_observation_stats(user_id: int) -> dict[int, tuple[float, float, int]
     """
     from apps.routines.models import BlockObservation
 
-    qs = BlockObservation.objects.filter(user_id=user_id).values("block_id")
+    # 출발 뒤에 찍힌 기록은 이동 시간이 섞여 있다(`prep_observations`).
+    qs = prep_observations.exclude_after_departure(
+        BlockObservation.objects.filter(user_id=user_id)
+    ).values("block_id")
     try:
         rows = list(
             qs.annotate(
@@ -316,6 +319,7 @@ def estimate_components(
             profile,
             fallback_minutes=FALLBACK_PREP_MINUTES,
             observations=_block_observation_stats(event.user_id),
+            gps_samples=prep_observations.gps_prep_samples(event.user_id),
         )
     )
     travel = estimators.estimate_travel(
