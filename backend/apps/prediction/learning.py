@@ -31,6 +31,7 @@ SQLite 에는 `STDDEV` 집계가 없다. `django.db.models.StdDev` 는 Postgres 
 | 결정 시점 경로 원값이 없다 | 현재 보정값을 다시 학습하면 중복 보정이 됨 |
 | 실제 소요가 0분 | 출발·도착이 같은 fix 로 판정됐다 |
 | 블록 기록이 같은 일정의 GPS 출발보다 늦다 | 나간 뒤에 눌러 이동 시간이 섞였다 |
+| 출발·도착을 직접 눌렀다(`manual`) | 누른 시각이 실제보다 늦기 쉽다. 리포트에만 쓴다 |
 """
 
 from __future__ import annotations
@@ -116,6 +117,11 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
     dropped: dict[str, int] = defaultdict(int)
 
     for obs in qs:
+        # 직접 누른 판정은 학습에 쓰지 않는다. 누른 시각이 실제보다 늦기 쉬워
+        # 이동 시간이 길게 학습된다. 리포트 채점에만 보조로 쓴다(`observations.selection`).
+        if obs.detector != TripObservation.Detector.GPS:
+            dropped["수동 판정"] += 1
+            continue
         if obs.accuracy_m is not None and obs.accuracy_m > MAX_ACCURACY_M:
             dropped["정확도 초과"] += 1
             continue

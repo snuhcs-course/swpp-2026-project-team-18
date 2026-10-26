@@ -56,6 +56,7 @@ from django.utils import timezone
 
 from apps.events.alarms import alarm_states
 from apps.events.models import Event
+from apps.observations import selection
 from apps.observations.models import TripObservation
 from apps.planning.estimators import PREP_SOURCE_NOT_FROM_HOME
 from apps.planning.models import AlarmPlan
@@ -291,10 +292,15 @@ def _observations_by_kind(event: Event) -> dict[str, TripObservation]:
     같은 종류가 여러 건이면 **가장 이른 것**을 쓴다. 출발은 처음 집을 나선
     순간이고 도착은 처음 목적지에 닿은 순간이다. 마지막 것을 쓰면 잠깐 돌아온
     경우에 이동 시간이 부풀려진다.
+
+    GPS 판정이 먼저다. 직접 누른 판정은 GPS 가 없을 때만 쓴다(`selection`).
     """
+    observations = list(event.trip_observations.all())
     found: dict[str, TripObservation] = {}
-    for obs in sorted(event.trip_observations.all(), key=lambda o: o.observed_at):
-        found.setdefault(obs.kind, obs)
+    for kind in TripObservation.Kind.values:
+        obs = selection.representative(observations, kind, event)
+        if obs is not None:
+            found[kind] = obs
     return found
 
 

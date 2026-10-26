@@ -90,18 +90,14 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("client_uuid 가 필요하다.")
         return key[:40]
 
-    def validate_accuracy_m(self, value: float) -> float:
-        if value < 0:
+    def validate_accuracy_m(self, value: float | None) -> float | None:
+        # 50m 상한은 GPS 판정에만 있다. 판별기를 알아야 해서 `validate` 가 본다.
+        if value is not None and value < 0:
             raise serializers.ValidationError("정확도는 음수일 수 없다.")
-        if value > MAX_ACCURACY_M:
-            raise serializers.ValidationError(
-                f"오차 {value:.0f}m 인 위치로는 반경 판정을 신뢰할 수 없다. "
-                f"{MAX_ACCURACY_M:.0f}m 이하만 받는다."
-            )
         return value
 
-    def validate_distance_m(self, value: float) -> float:
-        if value < 0:
+    def validate_distance_m(self, value: float | None) -> float | None:
+        if value is not None and value < 0:
             raise serializers.ValidationError("거리는 음수일 수 없다.")
         return value
 
@@ -131,8 +127,44 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"dwell_seconds": "출발 관측에는 체류 시간이 없다."}
             )
+        self._validate_location(attrs)
         self._validate_entered_at(attrs)
         return attrs
+
+    # Partly AI-generated (Claude)
+    @staticmethod
+    def _validate_location(attrs) -> None:
+        """GPS 관측은 위치 네 값이 필수이고 오차가 50m 이하여야 한다.
+
+        직접 누른 관측(`manual`)은 위치가 없어도, 오차가 커도 받는다. 실내에서
+        누르면 fix 가 흐리거나 없다. 그때 거절하면 앱 큐가 **배치를 통째로 버려**
+        같은 배치의 GPS 관측까지 사라진다. 믿을지는 읽는 쪽(`selection`)이 정한다.
+        """
+        lat, lng = attrs.get("lat"), attrs.get("lng")
+        if (lat is None) != (lng is None):
+            raise serializers.ValidationError({"lat": "lat 과 lng 는 함께 보내야 한다."})
+
+        detector = attrs.get("detector") or TripObservation.Detector.GPS
+        if detector != TripObservation.Detector.GPS:
+            return
+
+        missing = {
+            name: "GPS 관측에는 위치가 필요하다."
+            for name in ("lat", "lng", "accuracy_m", "distance_m")
+            if attrs.get(name) is None
+        }
+        if missing:
+            raise serializers.ValidationError(missing)
+        accuracy = attrs["accuracy_m"]
+        if accuracy > MAX_ACCURACY_M:
+            raise serializers.ValidationError(
+                {
+                    "accuracy_m": (
+                        f"오차 {accuracy:.0f}m 인 위치로는 반경 판정을 신뢰할 수 없다. "
+                        f"{MAX_ACCURACY_M:.0f}m 이하만 받는다."
+                    )
+                }
+            )
 
     # Partly AI-generated (Claude)
     @staticmethod
@@ -169,13 +201,13 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
                 }
             )
 
-    def validate_lat(self, value: float) -> float:
-        if not -90 <= value <= 90:
+    def validate_lat(self, value: float | None) -> float | None:
+        if value is not None and not -90 <= value <= 90:
             raise serializers.ValidationError("위도 범위를 벗어났다.")
         return value
 
-    def validate_lng(self, value: float) -> float:
-        if not -180 <= value <= 180:
+    def validate_lng(self, value: float | None) -> float | None:
+        if value is not None and not -180 <= value <= 180:
             raise serializers.ValidationError("경도 범위를 벗어났다.")
         return value
 
