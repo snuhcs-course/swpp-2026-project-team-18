@@ -28,6 +28,8 @@
 
 경로 필드(경로선·요약·대안)는 직전 값을 그대로 둔다. 결과가 같으면 저장하지 않는다.
 `computed_at` 이 화면의 "N분 전 계산" 으로 나가고 결정 시점 판단에도 쓰이기 때문이다.
+
+일정 시각·τ 만 고친 수정도 같은 방식으로 다시 계산한다(`refresh_edited`, `events.edits`).
 """
 
 from __future__ import annotations
@@ -163,7 +165,58 @@ def _refresh(
     revision = history.reusable_revision(event, plan)
     if revision is None:
         return SKIP_NO_RAW
+    return _remix(
+        event, plan, revision, trigger=trigger, inputs=inputs, buffer=buffer, dry_run=dry_run
+    )
 
+
+# Partly AI-generated (Claude)
+def refresh_edited(event: Event, *, start_before) -> AlarmPlan | None:
+    """고친 일정의 알람을 경로 조회 없이 다시 계산한다. 할 수 없으면 None.
+
+    시작 시각·τ·태그만 바뀐 수정(`events.edits`)에 쓴다. 출발지·목적지·고른 경로가
+    그대로면 카카오 원값도 그대로다 — 카카오 경로 조회는 출발 시각을 받지 않으므로 다시
+    불러도 같은 원값이 온다. 지금 계획을 만든 이력은 **수정 전 시작 시각**(`start_before`)
+    으로 찾는다. 일정은 이미 새 시각으로 저장돼 있다.
+
+    밤 재계산과 달리 울림·출발·곧 울림을 건너뛰지 않는다. 사용자가 직접 고쳤고, 앱은
+    응답의 새 알람을 바로 기기에 다시 건다. 결과가 같으면 저장하지 않는다.
+
+    None 이면 호출자가 `compute_and_store` 로 경로부터 다시 구한다. 계산 불가 상태,
+    출발지·목적지 없음, 원값이 지금 계획과 맞지 않을 때다.
+    """
+    plan = AlarmPlan.objects.filter(event=event).first()
+    if plan is None or plan.status != AlarmPlan.Status.OK or plan.alarm_at is None:
+        return None
+    profile = event.user.profile
+    if event.resolve_origin(profile) is None or event.resolve_destination(profile) is None:
+        return None
+    revision = history.reusable_revision(event, plan, start_at=start_before)
+    if revision is None:
+        return None
+    _remix(
+        event,
+        plan,
+        revision,
+        trigger=PlanRevision.Trigger.UPDATE,
+        inputs=services.prep_inputs(event.user_id),
+        buffer=buffers.current(event.user_id),
+        dry_run=False,
+    )
+    return plan
+
+
+def _remix(
+    event: Event,
+    plan: AlarmPlan,
+    revision: PlanRevision,
+    *,
+    trigger: str,
+    inputs: tuple[dict, list[float]],
+    buffer: buffers.Buffer,
+    dry_run: bool,
+) -> str:
+    """이력의 카카오 원값으로 분포를 다시 섞어 계획에 쓴다. 경로 필드는 그대로 둔다."""
     route = {
         "minutes": revision.route_minutes_raw,
         "key": plan.route_key,

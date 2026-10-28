@@ -96,7 +96,9 @@ make the screen look finished while being untrue.
 
 - Replanning before departure ⑥ and a "switch to this route" action
 - Group rooms ⑩⑪
-- Editing a saved event — schedule changes via `PATCH /api/events/{id}` recompute, but the
+- Editing a saved event — the server side is ready (`PATCH /api/events/{id}`: a time or τ
+  change recomputes without a new route lookup, a place or route change looks the route up
+  again; contract in [docs/iter3/event-edit-api.md](docs/iter3/event-edit-api.md)), but the
   app has no edit screen
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
 - User-defined tags (BE-21) and sleep-time calculation (BE-22)

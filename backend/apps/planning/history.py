@@ -97,18 +97,22 @@ def record_revision(
         return None
 
 
-def reusable_revision(event, plan: AlarmPlan) -> PlanRevision | None:
+def reusable_revision(event, plan: AlarmPlan, *, start_at=None) -> PlanRevision | None:
     """지금 계획을 만든 이력. 그 경로 원값을 다시 써도 될 때만 돌려준다.
 
     마지막 이력이 지금 계획과 결정값이 같고, 일정 시작 시각·고른 경로가 그때와 같아야
     한다. 똑같은 재계산은 이력을 남기지 않으므로 `computed_at` 은 비교하지 않는다.
     마지막 이력이 맞지 않으면 더 오래된 원값으로 물러나지 않는다.
+
+    `start_at` 은 계획을 만들 때의 일정 시작 시각이다. 시각을 고친 직후처럼 일정이 이미
+    새 시각으로 저장됐을 때 수정 전 시각을 넘긴다. 비우면 일정의 지금 시작 시각이다.
     """
+    planned_start = event.start_at if start_at is None else start_at
     revision = event.plan_revisions.order_by("-computed_at", "-id").first()
     if (
         revision is None
         or revision.route_minutes_raw is None
-        or revision.event_start_at != event.start_at
+        or revision.event_start_at != planned_start
         or revision.requested_route_key != (event.route_key or "")
         or any(
             getattr(revision, field) != getattr(plan, field)

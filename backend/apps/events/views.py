@@ -29,8 +29,8 @@ from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
 
-from . import recurrence, route_preference
-from .alarms import reset_alarm_overrides
+from . import edits, recurrence, route_preference
+from .alarms import reset_alarm_overrides, user_timezone
 from .geo import validate_route_distance
 from .models import Event, EventTag
 from .serializers import (
@@ -106,23 +106,34 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
         return EventSerializer
 
     def update(self, request, *args, **kwargs):
+        """일정을 고치고 알람 계획을 다시 만든다. 규칙은 `edits` 와 docs/iter3/event-edit-api.md."""
         instance = self.get_object()
         # Partly AI-generated (Claude) — 저장 전 값. 스위치가 바뀌었는지 기록할 때 쓴다.
         alarm_before = instance.alarm_enabled
         start_before = instance.start_at
+        # 계획 입력. 무엇이 실제로 바뀌었는지 보고 카카오를 부를지 정한다.
+        inputs_before = edits.plan_inputs(instance)
         write = self.get_serializer(instance, data=request.data, partial=True)
         write.is_valid(raise_exception=True)
         event = write.save()
 
-        # 켬/끔만 바꾸면 기존 계획을 쓴다. 카카오 경로를 다시 조회하지 않는다.
         if not recurrence.in_window(event):
             # A late switch must preserve the historical plan. Only a moved date clears it.
             if event.start_at != start_before:
                 plan = getattr(event, "alarm_plan", None)
                 if plan is not None:
                     plan.delete()
-        elif set(write.validated_data) != {"alarm_enabled"}:
-            planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.UPDATE)
+        else:
+            # 제목·켬/끔만 바꾸면 기존 계획을 쓰고, 시각·τ 만 바꾸면 경로를 다시 조회하지 않는다.
+            edits.replan(event, inputs_before, start_before=start_before)
+
+        # Partly AI-generated (Claude)
+        # 다른 날로 옮기면 옮겨 간 날의 수동 켬/끔을 자동으로 돌린다. 그날에 일정이 새로
+        # 들어온 것이라 생성과 같은 규칙이다(BE-25). 이 일정의 선택은 그대로 둔다.
+        tz = user_timezone(event.user)
+        if event.start_at.astimezone(tz).date() != start_before.astimezone(tz).date():
+            with transaction.atomic():
+                reset_alarm_overrides(event)
         event.refresh_from_db()
 
         # Partly AI-generated (Claude)

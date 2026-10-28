@@ -294,7 +294,8 @@ def test_invalid_override_is_rejected_without_changing_event(client, event):
 @pytest.mark.parametrize("data", [
     {"start_at": "2026-10-05T12:00:00+09:00"},
     {"alarm_enabled": False, "start_at": "2026-10-05T12:00:00+09:00"},
-    {"alarm_enabled": False, "place": None},
+    # 장소가 실제로 바뀌어야 한다. 같은 값을 다시 보내는 것은 수정이 아니다(`edits`).
+    {"alarm_enabled": False, "place": {"name": "학교", "lat": 37.45, "lng": 126.95}},
 ])
 def test_regular_and_mixed_updates_still_recompute(client, event, monkeypatch, data):
     instance = event()
