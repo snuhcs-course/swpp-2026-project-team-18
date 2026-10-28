@@ -220,6 +220,11 @@ def main() -> int:
         if cands:
             picked_key = cands[0].get("key")
             home_minutes = cands[0].get("minutes")
+        # Partly AI-generated (Claude)
+        # 0.12.0 — 전에 고른 경로로 정한 기본 선택. 고른 적이 없으면 값이 None 이고
+        # 키는 늘 있다. 배포 전 서버에서는 키가 없다(정상).
+        for field in ("preferred_key", "preferred_mode", "preferred_basis"):
+            check(f"후보 응답에 {field} (0.12.0)", field in (body or {}), f"{sorted(body or {})}")
 
     # 출발지 지정 (이번에 추가)
     st, body = api(
