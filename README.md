@@ -21,7 +21,7 @@ needed it (4–15 min).
 
 | | |
 | --- | --- |
-| Version | **0.12.0** — source `APP_VERSION` and app `versionName`; deployment status is tracked separately |
+| Version | **0.13.0** — source `APP_VERSION` and app `versionName`; deployment status is tracked separately |
 | Shared server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
 | Stack | Android · Kotlin · Jetpack Compose — Django · DRF · Neon Postgres — Render |
 
@@ -383,7 +383,7 @@ health, password check, sign-up, token and refresh.
 | Service | Render `justintime-api` — Docker, free plan, Singapore, deploys `main` |
 | Start | `backend/Dockerfile` runs `migrate`, then gunicorn with 2 workers |
 | Database | Neon Postgres, **direct** URL (the `-pooler` endpoint can break migrations) |
-| Expected source health | `GET /api/health` → `{"ok": true, "version": "0.12.0", "realtime": {"subway": true, "bus": true}}`, independent of the database |
+| Expected source health | `GET /api/health` → `{"ok": true, "version": "0.13.0", "realtime": {"subway": true, "bus": true}, "social": {"kakao": true, "google": true}}`, independent of the database |
 | Idle | sleeps after 15 minutes; waking takes 30–60 seconds |
 
 Bump the server `APP_VERSION` and the app `versionName` / `versionCode` together in the

@@ -153,6 +153,15 @@ def main() -> int:
     if st == 200 and body.get("access"):
         api.token = body["access"]
 
+    # Partly AI-generated (Claude)
+    # 0.13.0 — 로그아웃은 refresh 를 취소한다. access 는 그대로라 아래 확인에 영향이 없다.
+    login_refresh = (body or {}).get("refresh")
+    if login_refresh:
+        st_out, _ = api("/api/auth/logout", "POST", {"refresh": login_refresh}, auth=False)
+        check("로그아웃 204", st_out == 204, f"status={st_out}")
+        st_ref, _ = api("/api/auth/token/refresh", "POST", {"refresh": login_refresh}, auth=False)
+        check("로그아웃한 refresh 로 재발급 401", st_ref == 401, f"status={st_ref}")
+
     st, body = api("/api/auth/me")
     check("me 200", st == 200, f"status={st}")
     check("me 이메일 일치", (body or {}).get("email") == email, str(body)[:160])
@@ -298,6 +307,13 @@ def main() -> int:
     st, created = api("/api/events", "POST", payload)
     check("일정 생성 201", st == 201, f"status={st} body={str(created)[:250]}")
     event_id = (created or {}).get("id")
+    # 0.13.0 — 준비 시간 포함 여부. 고르지 않으면 null 이고 집 출발이라 준비가 들어간다.
+    check(
+        "일정 응답에 include_prep·prep_applies",
+        "include_prep" in (created or {}) and (created or {}).get("prep_applies") is True,
+        f"include_prep={(created or {}).get('include_prep')!r} "
+        f"prep_applies={(created or {}).get('prep_applies')!r}",
+    )
     plan = (created or {}).get("alarm_plan") or {}
     check(
         "알람 계획 status=ok",
