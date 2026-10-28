@@ -334,6 +334,23 @@ def main() -> int:
             f"p={plan.get('on_time_probability')} — 임의값을 넣으면 안 된다",
         )
 
+    # 0.14.0 — "안 감" 표시와 되돌리기. 표시하면 알람이 꺼지고, 되돌리면 그대로다.
+    if event_id:
+        st, marked = api(f"/api/events/{event_id}/skip", "POST")
+        check(
+            "안 감 표시 200, 알람 끔",
+            st == 200 and (marked or {}).get("skipped") is True
+            and (marked or {}).get("alarm_on") is False,
+            f"status={st} skipped={(marked or {}).get('skipped')!r} "
+            f"alarm_on={(marked or {}).get('alarm_on')!r}",
+        )
+        st, undone = api(f"/api/events/{event_id}/skip", "DELETE")
+        check(
+            "안 감 되돌리기 200",
+            st == 200 and (undone or {}).get("skipped") is False,
+            f"status={st} skipped={(undone or {}).get('skipped')!r}",
+        )
+
     # 출발지를 일정에 저장 (이번에 추가)
     st, with_origin = api(
         "/api/events",
@@ -570,6 +587,9 @@ def main() -> int:
         # 0.11.0 — 줄글 요약과 출처. 배포 전 서버에서는 없음으로 나온다(정상).
         for field in ("summary", "summary_source", "outcomes"):
             check(f"주간 리포트에 {field} (0.11.0)", field in (weekly or {}), f"{sorted(weekly or {})}")
+        # 0.14.0 — "안 감" 으로 표시한 일정 수. 그 일정은 위 모든 수에서 빠져 있다.
+        check("주간 리포트에 skipped_count (0.14.0)", "skipped_count" in (weekly or {}),
+              f"{sorted(weekly or {})}")
         check(
             "summary_source 가 llm/template 중 하나",
             (weekly or {}).get("summary_source") in ("llm", "template"),

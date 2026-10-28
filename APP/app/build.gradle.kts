@@ -88,7 +88,7 @@ android {
         applicationId = "com.swpp.wakeup"
         minSdk = 34
         targetSdk = 37
-        versionCode = 13
+        versionCode = 14
         // 서버 APP_VERSION 과 같은 자리수를 쓴다. 실기기에서 "어느 빌드인가" 를
         // 서버 버전과 나란히 읽을 수 있어야 원인을 좁힐 수 있다.
         //   0.1.0  P1 — 고정 규칙 알람
@@ -109,7 +109,9 @@ android {
         //          알람 재계산·경로 기본 선택은 서버 쪽)
         //   0.13.0 서버 0.13.0 과 맞춘다. 앱 코드 변경은 없다(버퍼 학습·일정 수정 재계산·
         //          소셜 로그인·준비 시간 포함·로그아웃 취소는 서버 쪽, 앱 연동은 할 일)
-        versionName = "0.13.0"
+        //   0.14.0 서버 0.14.0 과 맞춘다. 앱 코드 변경은 없다("안 감" 표시·블록 기록 거르기는
+        //          서버 쪽, 앱 버튼은 할 일)
+        versionName = "0.14.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
