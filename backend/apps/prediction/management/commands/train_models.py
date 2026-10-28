@@ -10,10 +10,11 @@
     python manage.py train_models --dry-run          저장하지 않고 결과만 출력
     python manage.py train_models --users -v 0       공개 배치 로그용 집계만 출력
 
-학습이 끝나면 앞으로 7일 일정의 알람을 **경로 조회 없이** 다시 계산한다
-(`planning.refresh`). 새 이동 보정과 그날 올라온 블록 기록·GPS 출발이 다음 아침
-알람에 들어간다. 알람이 3시간 안에 울릴 일정은 앱 경로 갱신 워커에 맡긴다.
---dry-run 이면 바뀔 건수만 출력한다(이때는 새 보정도 저장하지 않았으므로 지금 DB 기준).
+학습 뒤에는 지각 이력으로 사용자별 안전 버퍼를 조정하고(`planning.buffers`), 앞으로
+7일 일정의 알람을 **경로 조회 없이** 다시 계산한다(`planning.refresh`). 새 이동 보정·버퍼와
+그날 올라온 블록 기록·GPS 출발이 다음 아침 알람에 들어간다. 알람이 3시간 안에 울릴 일정은
+앱 경로 갱신 워커에 맡긴다. --dry-run 이면 바뀔 건수만 출력한다(이때는 새 보정·버퍼도
+저장하지 않았으므로 지금 DB 기준). --routes-only 는 버퍼를 건드리지 않는다.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
-from apps.planning import refresh
+from apps.planning import buffers, refresh
 from apps.prediction import learning
 
 
@@ -54,12 +55,29 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         self._train(options)
+        if not options["routes_only"]:
+            self._adjust_buffers(options["dry_run"])
         self._refresh_plans(options["dry_run"])
+
+    # Partly AI-generated (Claude)
+    def _adjust_buffers(self, dry: bool):
+        """지각 이력으로 안전 버퍼를 조정한다. 사용자 수만 출력한다(공개 로그)."""
+        self.stdout.write("\n[4] 안전 버퍼 조정(지각 이력)")
+        outcomes = buffers.adjust_all(dry_run=dry)
+        self.stdout.write(
+            f"  {buffers.INCREASED} {outcomes[buffers.INCREASED]}명 / "
+            f"{buffers.DECREASED} {outcomes[buffers.DECREASED]}명"
+        )
+        for reason in (buffers.KEEP_FEW, buffers.KEEP_ON_TRACK, buffers.KEEP_AT_LIMIT):
+            if outcomes[reason]:
+                self.stdout.write(f"  {reason} {outcomes[reason]}명")
+        if dry:
+            self.stdout.write("  (dry-run 이라 저장하지 않았다)")
 
     # Partly AI-generated (Claude)
     def _refresh_plans(self, dry: bool):
         """학습 결과를 앞으로의 알람에 반영한다. 카카오를 부르지 않는다."""
-        self.stdout.write("\n[4] 앞으로 7일 알람 재계산(경로 조회 없음)")
+        self.stdout.write("\n[5] 앞으로 7일 알람 재계산(경로 조회 없음)")
         outcomes = refresh.refresh_after_learning(dry_run=dry)
         self.stdout.write(
             f"  바뀜 {outcomes[refresh.CHANGED]}건 / 그대로 {outcomes[refresh.UNCHANGED]}건"

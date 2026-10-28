@@ -118,6 +118,27 @@ def test_model_options_order_and_patch_parity(context, monkeypatch):
     assert get_options(client, event)["selected_key"] == "safe"
 
 
+# Partly AI-generated (Claude)
+def test_options_use_the_users_learned_buffer(context):
+    """지각 이력으로 조정한 버퍼(`planning.buffers`)를 실제 알람과 똑같이 쓴다."""
+    from apps.planning.models import BufferAdjustment
+
+    client, event = context
+    add_variance(event)
+    services.compute_and_store(event)
+    before = {o["key"]: datetime.fromisoformat(o["alarm_at"]) for o in get_options(client, event)["options"]}
+    BufferAdjustment.objects.create(
+        user=event.user, previous_minutes=10, minutes=14, reason="late_more", sample_count=6,
+        late_count=3, expected_late=.3, mean_slack_minutes=4.3, tightest_slack_minutes=-6,
+    )
+    plan = services.compute_and_store(event)
+
+    after = {o["key"]: datetime.fromisoformat(o["alarm_at"]) for o in get_options(client, event)["options"]}
+
+    assert {key: before[key] - after[key] for key in before} == dict.fromkeys(before, timedelta(minutes=4))
+    assert after["normal"] == plan.alarm_at
+
+
 def test_custom_tau_is_unselected_and_metadata_tracks_actual_default(context):
     client, event = context
     add_variance(event)

@@ -58,6 +58,14 @@ class AlarmPlan(models.Model):
     prep_minutes = models.PositiveIntegerField("준비 시간(분)", null=True, blank=True)
     travel_minutes = models.PositiveIntegerField("이동 시간(분)", null=True, blank=True)
     buffer_minutes = models.PositiveIntegerField("안전 버퍼(분)", null=True, blank=True)
+    # Partly AI-generated (Claude)
+    # `fixed`(기본값) 또는 `learned`(지각 이력으로 조정, `planning.buffers`). 계산하지
+    # 못한 계획은 빈 값이다. DB 기본값이 `fixed` 인 이유: 이 필드가 생기기 전 계획과
+    # 배포 중 구버전 서버가 만든 계획은 모두 고정 10분이었다. 빈 값으로 두면 밤 재계산이
+    # 출처만 다른 계획을 전부 "바뀜" 으로 저장한다.
+    buffer_source = models.CharField(
+        "버퍼 출처", max_length=16, blank=True, default="fixed", db_default="fixed"
+    )
 
     tau_used = models.FloatField(
         "적용 τ",
@@ -386,3 +394,52 @@ class PlanRevision(models.Model):
     def __str__(self):
         label = self.event.title if self.event_id else "(일정 없음)"
         return f"{label} — {self.get_status_display()} {self.computed_at:%m-%d %H:%M}"
+
+
+# Partly AI-generated (Claude)
+class BufferAdjustment(models.Model):
+    """안전 버퍼 조정 이력(`planning.buffers`). 사용자의 마지막 행 `minutes` 가 지금 버퍼다.
+
+    바뀐 때만 행을 남긴다. 행이 없으면 기본값(10분)이다. 주간 리포트가 "버퍼 n분 → m분
+    으로 조정한 이유" 를 이 행으로 쓴다. 근거 수치도 함께 남긴다 — 나중에 규칙을 바꿔도
+    그때 무엇을 보고 바꿨는지 남아 있어야 한다.
+    """
+
+    class Reason(models.TextChoices):
+        LATE_MORE_THAN_PROMISED = "late_more", "약속보다 잦은 지각"
+        BUFFER_UNUSED = "unused", "쓰지 않은 버퍼"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="buffer_adjustments",
+        verbose_name="사용자",
+    )
+    previous_minutes = models.PositiveSmallIntegerField("이전 버퍼(분)")
+    minutes = models.PositiveSmallIntegerField("새 버퍼(분)")
+    reason = models.CharField("이유", max_length=16, choices=Reason.choices)
+
+    # 판단에 쓴 아침들. 모두 직전 조정 뒤에 결정된 계획이다.
+    sample_count = models.PositiveSmallIntegerField("본 아침 수")
+    late_count = models.PositiveSmallIntegerField("지각 수")
+    # 계획들이 약속한 정시 확률로 셈한 지각 기대 수. Σ(1 − 정시 확률).
+    expected_late = models.FloatField("약속한 지각 수")
+    mean_slack_minutes = models.FloatField("평균 여유(분)")
+    # 가장 빠듯했던 아침의 여유. 음수면 그만큼 늦었다.
+    tightest_slack_minutes = models.FloatField("가장 적은 여유(분)")
+    median_late_minutes = models.FloatField("지각 분 중앙값", null=True, blank=True)
+
+    # 조정 시각. 다음 조정은 이 뒤에 결정된 아침만 센다.
+    created_at = models.DateTimeField("조정 시각", auto_now_add=True)
+
+    class Meta:
+        db_table = "planning_buffer_adjustment"
+        verbose_name = "버퍼 조정"
+        verbose_name_plural = "버퍼 조정"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["user", "created_at"], name="buffer_adj_user_time_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.previous_minutes}분 → {self.minutes}분 ({self.get_reason_display()})"

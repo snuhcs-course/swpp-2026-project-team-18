@@ -3,7 +3,7 @@
 from datetime import timedelta
 import math
 
-from . import estimators, history, services
+from . import buffers, estimators, history, services
 from .models import AlarmPlan
 
 OPTIONS = (("safe", "안전", .97), ("normal", "보통", .90), ("gamble", "도박", .65))
@@ -44,13 +44,15 @@ def build_risk_options(event) -> dict:
         "mode": plan.travel_mode,
     })
     total = estimators.total_distribution(prep, travel)
+    # 실제 알람과 같은 버퍼여야 선택지의 알람 시각이 "이걸 고르면 이렇게 울린다" 가 된다.
+    buffer = buffers.current(event.user_id)
     if total.quantile(.99) <= total.quantile(.5) + 1e-9:
         result["unavailable_reason"] = "소요시간의 변동 폭을 아직 몰라 위험별 선택지를 계산할 수 없습니다."
         return result
 
     for key, label, option_tau in OPTIONS:
         calculation = estimators.compute_alarm_math(
-            prep, travel, services.DEFAULT_BUFFER_MINUTES, option_tau,
+            prep, travel, buffer.minutes, option_tau,
         )
         result["options"].append({
             "key": key, "label": label, "tau": option_tau,

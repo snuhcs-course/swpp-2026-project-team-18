@@ -9,13 +9,15 @@ time — it is *how sure you want to be that you won't be late*. JustInTime work
 backwards from when your event starts:
 
 ```
-alarm = event start − safety buffer (10 min) − τ-quantile of (prep + travel)
+alarm = event start − safety buffer (10 min to start) − τ-quantile of (prep + travel)
 ```
 
 τ is the confidence you ask for — 0.90 for a class, 0.99 for an exam or a train. The
 app **shows the reasoning behind the number**: what Kakao estimated (a route of
-20 min, 4.6 km, one transfer), what is fixed (the buffer), and what comes from
-observations.
+20 min, 4.6 km, one transfer), what is fixed or learned (the buffer), and what comes from
+observations. The buffer only covers risk the model misses: nightly training raises it when
+you are late more often than the promised on-time probability, and lowers it when you never
+needed it (4–15 min).
 
 | | |
 | --- | --- |
@@ -59,7 +61,8 @@ What the MVP supports:
 7. **Choose risk** — server-modeled safe/normal/gamble choices update the alarm and device schedule. Missing uncertainty has an explicit empty state
 8. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
    offline. Prep observations feed the next calculation directly; GitHub Actions schedules
-   travel correction training daily at 23:17 KST ([status and guide](docs/iter2/daily-training.md))
+   travel correction and safety buffer training daily at 23:17 KST, then recalculates the next
+   7 days of alarms without a new route lookup ([status and guide](docs/iter2/daily-training.md))
 9. **Review** — a weekly report with a short written summary, a per-day detail (plan
    vs actual, cause of lateness) and calibration: did you arrive as often as τ promised?
 

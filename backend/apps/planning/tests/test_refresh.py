@@ -300,7 +300,7 @@ class TestTrainModels:
 
         out = self.run()
 
-        assert "[4] 앞으로 7일 알람 재계산" in out
+        assert "[5] 앞으로 7일 알람 재계산" in out
         assert "바뀜 1건 / 그대로 0건" in out
         assert plan_of(event).alarm_at == before.alarm_at - timedelta(minutes=15)
         assert latest_revision(event).trigger == PlanRevision.Trigger.LEARNING

@@ -13,7 +13,7 @@
 
 from django.contrib import admin
 
-from .models import AlarmPlan, PlanRevision
+from .models import AlarmPlan, BufferAdjustment, PlanRevision
 
 
 @admin.register(AlarmPlan)
@@ -145,3 +145,34 @@ class PlanRevisionAdmin(admin.ModelAdmin):
         if all(p is None for p in parts):
             return "—"
         return " + ".join("?" if p is None else str(p) for p in parts)
+
+
+# Partly AI-generated (Claude)
+@admin.register(BufferAdjustment)
+class BufferAdjustmentAdmin(admin.ModelAdmin):
+    """버퍼 조정 이력. **읽기 전용이다.** 밤 학습이 남긴다(`planning.buffers`).
+
+    사람이 행을 더하면 그 시각 이후 아침만 다음 조정에 세게 되어 학습이 멈춘다.
+    """
+
+    list_display = (
+        "created_at",
+        "user",
+        "previous_minutes",
+        "minutes",
+        "reason",
+        "sample_count",
+        "late_count",
+        "expected_late",
+        "mean_slack_minutes",
+    )
+    list_filter = ("reason",)
+    search_fields = ("user__email", "user__nickname")
+    date_hierarchy = "created_at"
+    ordering = ("-created_at", "-id")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

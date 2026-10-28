@@ -154,7 +154,11 @@ def decision_revisions(event_ids) -> dict[int, PlanRevision]:
     selected = {}
     revisions = (
         PlanRevision.objects.filter(event_id__in=event_ids)
-        .only("event_id", "computed_at", "status", "route_minutes_raw", "route_key", "travel_mode")
+        .only(
+            "event_id", "computed_at", "status", "route_minutes_raw", "route_key", "travel_mode",
+            # 버퍼 조정(`buffers`)이 읽는다.
+            "buffer_minutes", "on_time_probability", "tau_used",
+        )
         .order_by("event_id", "-computed_at", "-id")
     )
     for revision in revisions.iterator():

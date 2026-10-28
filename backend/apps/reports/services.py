@@ -58,8 +58,9 @@ from apps.events.alarms import alarm_states
 from apps.events.models import Event
 from apps.observations import selection
 from apps.observations.models import TripObservation
+from apps.planning import buffers
 from apps.planning.estimators import PREP_SOURCE_NOT_FROM_HOME
-from apps.planning.models import AlarmPlan
+from apps.planning.models import AlarmPlan, BufferAdjustment
 from apps.routines.models import BlockObservation
 
 # 캘리브레이션 버킷 폭. back-spec 5.8 이 0.05 로 정했다.
@@ -693,6 +694,7 @@ def weekly(user, *, anchor: date | None = None) -> dict:
         "previous_week": _previous_week(user, start, on_time_rate, len(arrived)),
         "deviation": _deviation_stats(list(measured.values())),
         "learning": _learning(outcomes),
+        "buffer": _buffer(user, start, end),
         "outcomes": [
             _outcome_row(o, measured[o.event.pk], causes.get(o.event.pk), alarms, blocks)
             for o in outcomes
@@ -791,6 +793,37 @@ def _learning(outcomes: list[Outcome]) -> dict:
         "travel_from_records": sum(
             1 for p in plans if TRAVEL_SOURCE_OBSERVED_MARK in (p.travel_source or "")
         ),
+    }
+
+
+# Partly AI-generated (Claude)
+def _buffer(user, start: datetime, end: datetime) -> dict:
+    """지금 버퍼와 이 주에 한 버퍼 조정(`planning.buffers`). 조정마다 이유 문장을 붙인다.
+
+    `current_*` 는 이 주가 아니라 **지금** 값이다. 지난 주를 열어도 지금 버퍼가 나온다.
+    """
+    now = buffers.current(user.pk)
+    adjustments = BufferAdjustment.objects.filter(
+        user=user, created_at__gte=start, created_at__lt=end
+    ).order_by("created_at", "id")
+    return {
+        "current_minutes": now.minutes,
+        "current_source": now.source,
+        "adjustments": [
+            {
+                "adjusted_at": _iso(row.created_at),
+                "previous_minutes": row.previous_minutes,
+                "minutes": row.minutes,
+                "reason": row.reason,
+                "reason_text": buffers.reason_text(row),
+                "sample_count": row.sample_count,
+                "late_count": row.late_count,
+                "expected_late": row.expected_late,
+                "mean_slack_minutes": row.mean_slack_minutes,
+                "tightest_slack_minutes": row.tightest_slack_minutes,
+            }
+            for row in adjustments
+        ],
     }
 
 

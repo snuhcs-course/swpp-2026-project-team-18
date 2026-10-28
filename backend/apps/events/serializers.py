@@ -163,7 +163,13 @@ class AlarmPlanSerializer(serializers.Serializer):
         return obj.prep_source or "fixed"
 
     def get_buffer_source(self, obj) -> str:
-        return "" if obj.buffer_minutes is None else "fixed"
+        """`fixed`(기본값) 또는 `learned`(지각 이력으로 조정, `planning.buffers`).
+
+        출처 필드가 생기기 전 계획은 빈 값이다. 그때는 모두 기본값이었다.
+        """
+        if obj.buffer_minutes is None:
+            return ""
+        return obj.buffer_source or "fixed"
 
     def get_travel_time_source(self, obj) -> str:
         return obj.travel_source or ""

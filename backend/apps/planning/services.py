@@ -47,13 +47,14 @@ from apps.events.geo import validate_route_distance
 from apps.events.models import Event
 from apps.routing import clients
 
-from . import estimators, history, prep_observations
+from . import buffers, estimators, history, prep_observations
 from .models import AlarmPlan, PlanRevision
 
 logger = logging.getLogger(__name__)
 
 # 문 앞에서 실제 출발까지의 여유. back-spec 4.5 door_buffer_minutes.
-DEFAULT_BUFFER_MINUTES = 10
+# 조정 기록이 없는 사용자의 값이다. 지각 이력으로 사용자마다 바뀐다(`buffers`).
+DEFAULT_BUFFER_MINUTES = buffers.DEFAULT_MINUTES
 
 # 프로필에 준비시간이 없을 때 쓰는 값. 온보딩(S1)에서 사용자가 답하면 대체된다.
 FALLBACK_PREP_MINUTES = 30
@@ -117,6 +118,7 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         "prep_minutes": None,
         "travel_minutes": None,
         "buffer_minutes": None,
+        "buffer_source": "",
         "tau_used": None,
         "on_time_probability": None,
         "confidence_basis": "",
@@ -265,14 +267,18 @@ def alarm_fields(
     travel: estimators.TravelEstimate,
     *,
     route_source: str,
+    buffer: buffers.Buffer | None = None,
 ) -> dict:
     """분포에서 알람 시각과 그 근거 필드를 만든다. 경로 필드(경로선·요약·대안)는 넣지 않는다.
 
     도착 예정은 일정 시작에서 버퍼를 뺀 시각이다. 출발 시각은 거기서 이동 시간을 뺀
-    값이고, 알람은 거기서 준비 시간을 뺀 값이다.
+    값이고, 알람은 거기서 준비 시간을 뺀 값이다. 버퍼는 사용자의 지금 버퍼다
+    (`buffers.current`). 여러 일정을 한 번에 계산하면 미리 구해 넘긴다.
     """
     tau = event.effective_tau
-    math_ = estimators.compute_alarm_math(prep, travel, DEFAULT_BUFFER_MINUTES, tau)
+    if buffer is None:
+        buffer = buffers.current(event.user_id)
+    math_ = estimators.compute_alarm_math(prep, travel, buffer.minutes, tau)
 
     arrive_at = event.start_at - timedelta(minutes=math_.buffer_minutes)
     depart_by = arrive_at - timedelta(minutes=math_.travel_minutes)
@@ -285,6 +291,7 @@ def alarm_fields(
         "prep_minutes": math_.prep_minutes,
         "travel_minutes": math_.travel_minutes,
         "buffer_minutes": math_.buffer_minutes,
+        "buffer_source": buffer.source,
         "tau_used": tau,
         "on_time_probability": math_.on_time_probability,
         "confidence_basis": math_.confidence_basis,

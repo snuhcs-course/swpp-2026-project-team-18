@@ -3,12 +3,13 @@
 
 ## 왜 필요한가
 
-알람은 `준비 + 이동` 분포에서 나온다. 이동은 카카오 원값에 학습된 보정을 곱한 값이고,
-준비는 블록 정의·블록 기록·GPS 출발에서 나온다. 그런데 계획은 카카오를 부르는
+알람은 `준비 + 이동` 분포와 버퍼에서 나온다. 이동은 카카오 원값에 학습된 보정을 곱한
+값이고, 준비는 블록 정의·블록 기록·GPS 출발에서 나온다. 버퍼는 밤 학습이 지각 이력으로
+조정한다(`buffers`). 그런데 계획은 카카오를 부르는
 `compute_and_store` 로만 다시 계산했다. 카카오 쿼터(일 1,000건) 때문에
 
 - 루틴 블록 정의를 고쳐도 다시 계산하지 않았다(앱이 "다시 계산" 을 누르라고 안내했다)
-- 밤 학습(`train_models`)이 이동 보정을 바꿔도 계획은 그대로였다
+- 밤 학습(`train_models`)이 이동 보정·버퍼를 바꿔도 계획은 그대로였다
 - 새 블록 기록·GPS 출발이 올라와도 다음 계산 전까지 알람에 들어가지 않았다
 
 **바뀐 것은 경로가 아니라 모델이다.** 지금 계획을 만든 카카오 원값
@@ -41,7 +42,7 @@ from django.utils import timezone
 from apps.events.models import Event
 from apps.events.recurrence import in_window
 
-from . import history, services
+from . import buffers, history, services
 from .models import AlarmPlan, PlanRevision
 
 # 사용자 한 명당 한 번에 다시 계산할 일정 수. 집 변경 재계산(`recompute_for_user`)과
@@ -100,11 +101,13 @@ def refresh_upcoming(
         .values_list("event_id", flat=True)
     )
     inputs = services.prep_inputs(user.pk)
+    buffer = buffers.current(user.pk)
     for event in events:
         outcome = _refresh(
             event,
             trigger=trigger,
             inputs=inputs,
+            buffer=buffer,
             started=event.pk in started,
             cutoff=now + protect,
             dry_run=dry_run,
@@ -142,6 +145,7 @@ def _refresh(
     *,
     trigger: str,
     inputs: tuple[dict, list[float]],
+    buffer: buffers.Buffer,
     started: bool,
     cutoff,
     dry_run: bool,
@@ -168,7 +172,9 @@ def _refresh(
     prep, travel = services.estimate_components(event, route, inputs=inputs)
     # 경로 출처(`kakao_transit` 등)는 직전 계획의 출처 앞부분이다(`alarm_fields`).
     route_source = (plan.travel_source or "").split("+", 1)[0]
-    fields = services.alarm_fields(event, prep, travel, route_source=route_source)
+    fields = services.alarm_fields(
+        event, prep, travel, route_source=route_source, buffer=buffer
+    )
     if all(getattr(plan, name) == value for name, value in fields.items()):
         return UNCHANGED
     if dry_run:

@@ -29,14 +29,17 @@ Actions → Daily model training → Run workflow에서 다음 중 하나를 선
 - 원값 이력이 없는 과거 이동은 건너뛴다. 과거 원값을 추측해 채우지 않는다.
 - 전체 재학습은 자격을 잃은 학습 보정(`sample_count>0`)을 정리한다. 수동 보정(`sample_count=0`)은 보존한다. 일부 사용자만 학습할 때는 다른 사용자의 공유 보정을 정리하지 않는다.
 - 학습과 보정 조회는 같은 현지 시간대를 사용한다. 같은 순간의 UTC/KST 입력은 같은 시간/요일 보정을 선택한다.
-- 준비 관측 통계는 기존처럼 알람 재계산 때 바로 반영된다. 이동 보정 갱신 후 기존 일정은 다음 정상 알람 재계산 때 새 보정을 반영한다. 이 배치가 카카오 경로를 다시 조회하거나 기기 알람을 직접 바꾸지는 않는다.
+- 준비 관측 통계는 기존처럼 알람 재계산 때 바로 반영된다.
+- [4] 안전 버퍼 조정(`planning/buffers.py`): 도착 기록이 있는 사용자마다 직전 조정 뒤에 결정된 아침 최근 10번을 본다. 지각이 2번 이상이고 계획이 약속한 지각 수 Σ(1 − 정시 확률)보다 1번 이상 많으면 지각 분 중앙값(1~5분)만큼 늘리고, 지각 없이 모든 아침이 계획한 도착보다 먼저 왔으면 2분 줄인다(4~15분, 3번 미만이면 그대로). 약속한 만큼의 지각은 τ 몫이라 버퍼를 움직이지 않는다. 바뀐 때만 `BufferAdjustment` 행을 남기고 주간 리포트 `buffer`에 이유 문장이 나간다. 로그에는 사용자 수만 남는다.
+- [5] 앞으로 7일 알람 재계산(`planning/refresh.py`): 새 이동 보정·버퍼를 계획의 카카오 원값으로 다시 섞는다. 카카오 경로를 다시 조회하지 않는다. 3시간 안에 울릴 알람, 이미 울렸거나 출발한 일정은 건드리지 않는다(앱 경로 갱신 워커 몫). 기기 알람은 앱 정기 동기화가 다시 건다.
+- `--routes-only`는 버퍼를 조정하지 않는다. `--dry-run`은 버퍼·재계산도 건수만 출력한다.
 - 개인/전역 `ModelArtifact`는 통계 스냅샷이며 알람 계산은 여전히 관측 통계와 `RouteCorrection`을 사용한다.
 
 ## 검증
 
 ```bash
 cd backend
-python -m pytest apps/prediction apps/planning/tests/test_plan_revision.py apps/planning/tests/test_estimators.py -q
+python -m pytest apps/prediction apps/planning/tests/test_plan_revision.py apps/planning/tests/test_estimators.py apps/planning/tests/test_gps_prep.py apps/planning/tests/test_refresh.py apps/planning/tests/test_buffers.py -q
 ```
 
 변경 전 실제 실패한 G1/G2/원값 누락/공개 로그 노출 6건을 수정 후 통과시켰다. 리뷰에서 발견한 오래된 학습 보정 잔존 2건과 UTC/KST 조회 불일치 1건도 실패 재현 후 수정했다. 전용 검증 106건 / 전체 백엔드 1,237건 통과, HTTP 8종 실패 0(2항목 스킵)을 확인했다.
