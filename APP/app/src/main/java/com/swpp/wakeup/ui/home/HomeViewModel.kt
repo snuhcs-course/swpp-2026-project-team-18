@@ -51,9 +51,11 @@ import com.swpp.wakeup.domain.model.RouteMapProjection
 import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.sensing.GeoPoint
+import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.sensing.TripLiveState
 import com.swpp.wakeup.sensing.TripObservationQueue
+import com.swpp.wakeup.sensing.TripTrackingService
 import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.RiskOptionsView
 import com.swpp.wakeup.domain.model.UpcomingEvent
@@ -190,6 +192,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * 누르지 않은 상태다 — 그때도 입구를 보여줘야 큐에 남은 것이 정리된다.
          */
         val morningBlocksLeft: Int? = null,
+
+        /**
+         * 울리지 않고 지나갔고 아직 출발 전인 알람. 없으면 null.
+         *
+         * 강제 중지가 알람을 지운 아침에 사용자가 앱을 열면 여기가 채워진다.
+         * 알람 해제가 추적의 시작점이라, 이 안내가 없으면 그 아침의 이동 기록이
+         * 아무 말 없이 사라진다.
+         */
+        val missedAlarm: MissedAlarmNotice? = null,
     ) {
         val isEmpty: Boolean get() = !loading && error == null && totalCount == 0
         val todayLine: String
@@ -201,6 +212,29 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val date = today.format(DateTimeFormatter.ofPattern("M월 d일"))
                 val day = listOf("월", "화", "수", "목", "금", "토", "일")[today.dayOfWeek.value - 1]
                 return "$date $day · 오늘 ${count}개"
+            }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 놓친 알람 안내 한 건.
+     *
+     * @property canTrack 지금 추적을 시작할 수 있는가. 출발·도착 기준점과 정밀 위치
+     *   권한이 둘 다 있어야 한다([AlarmSchedule.canTrack], [LocationPermissions]).
+     */
+    data class MissedAlarmNotice(
+        val schedule: AlarmSchedule,
+        val canTrack: Boolean,
+    ) {
+        /** "8:25 AM" */
+        val alarmLine: String get() = "${schedule.alarmLabel} ${schedule.meridiem}"
+
+        /** 계획된 출발 시각 "9:25". 계산 못 했으면 null */
+        val departLabel: String?
+            get() = schedule.departByMillis?.let {
+                java.time.Instant.ofEpochMilli(it)
+                    .atZone(ZoneId.systemDefault())
+                    .format(DateTimeFormatter.ofPattern("H:mm"))
             }
     }
 
@@ -542,6 +576,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 알람 액티비티가 세션을 만들어 두었을 수 있다. 홈 카드가 보이려면
         // 여기서 한 번 읽어야 한다.
         reloadMorning()
+        // 서버 응답을 기다리지 않는다. 놓친 알람은 디스크 사본만으로 판별되고,
+        // 오프라인이어도 출발 전에 알려야 한다.
+        reloadMissedAlarm()
         // 로그아웃이 정기 작업을 취소했으므로 다시 로그인했으면 되살려야 한다.
         // Application.onCreate 는 프로세스당 한 번이라 로그아웃→로그인을 같은
         // 프로세스에서 하면 그 경로만으로는 복구되지 않는다. KEEP 이라 중복
@@ -639,6 +676,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val registered = runCatching { scheduler.registered() }.getOrDefault(emptyList())
+
+        // 동기화가 지난 알람을 사본에서 옮겼을 수 있다. 다시 읽는다.
+        reloadMissedAlarm()
 
         _state.update {
             it.copy(
@@ -821,6 +861,60 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     //
     // 저장소와 상태 선언은 이 위 `init` 블록보다 앞에 있다. `init` 이
     // reloadMorning() 을 부르므로 여기 두면 앱을 켤 때마다 죽는다.
+
+    // --- 놓친 알람 ---------------------------------------------------------
+    // Partly AI-generated (Claude)
+
+    /**
+     * 울리지 않은 알람을 디스크에서 다시 읽는다.
+     *
+     * 이미 그 일정을 추적하고 있으면 띄우지 않는다 — 사용자가 다른 길로 기록을
+     * 시작했다는 뜻이다.
+     */
+    fun reloadMissedAlarm() {
+        val app = getApplication<Application>()
+        val trackingId = TripLiveState.snapshot.value?.eventId
+        val missed = runCatching { AlarmScheduler(app).missed() }
+            .onFailure { Log.w(TAG, "놓친 알람을 읽지 못했다", it) }
+            .getOrDefault(emptyList())
+            .firstOrNull { it.eventId != trackingId }
+        _state.update {
+            it.copy(
+                missedAlarm = missed?.let { schedule ->
+                    MissedAlarmNotice(
+                        schedule = schedule,
+                        canTrack = schedule.canTrack && LocationPermissions.granted(app),
+                    )
+                }
+            )
+        }
+    }
+
+    /**
+     * 놓친 알람의 이동 기록을 지금 시작한다.
+     *
+     * 알람 해제([com.swpp.wakeup.alarm.AlarmActivity])와 같은 서비스를 같은 계획으로
+     * 띄운다. **아침 기록은 시작하지 않는다.** 알람 없이 이미 준비를 시작한
+     * 뒤라 블록마다 걸린 시간이 맞지 않고, 틀린 기록은 준비 시간 학습을 흐린다.
+     */
+    fun startMissedAlarmTracking() {
+        val notice = _state.value.missedAlarm ?: return
+        val app = getApplication<Application>()
+        if (notice.schedule.canTrack && LocationPermissions.granted(app)) {
+            runCatching { TripTrackingService.start(app, notice.schedule) }
+                .onFailure { Log.e(TAG, "놓친 알람 추적 시작 실패", it) }
+        }
+        dismissMissedAlarm()
+    }
+
+    /** 안내를 닫는다. 같은 알람으로 다시 띄우지 않는다. */
+    fun dismissMissedAlarm() {
+        val notice = _state.value.missedAlarm ?: return
+        runCatching { AlarmScheduler(getApplication()).acknowledgeMissed(notice.schedule) }
+            .onFailure { Log.w(TAG, "놓친 알람 처리 표시 실패", it) }
+        // 같은 아침에 두 일정을 놓쳤으면 다음 것을 띄운다.
+        reloadMissedAlarm()
+    }
 
     /** 화면에 들어올 때마다 디스크에서 다시 읽는다. 알람 액티비티가 만들었을 수 있다. */
     fun reloadMorning() {

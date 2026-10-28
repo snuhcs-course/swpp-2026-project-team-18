@@ -84,10 +84,58 @@ class ScheduledAlarmStore(context: Context) {
         replaceAll(all().filterNot { it.eventId == eventId })
     }
 
+    // Partly AI-generated (Claude) — 놓친 알람 판별([MissedAlarms])에 쓰는 두 값.
+
+    /**
+     * 처리한 알람의 키([MissedAlarms.key]). 울렸거나 사용자가 "놓쳤다" 안내를 닫은 것.
+     *
+     * 사본만으로는 울린 알람과 사라진 알람을 구별할 수 없다. 둘 다 "시각이 지난
+     * 항목" 으로 남는다.
+     */
+    fun handledKeys(): Set<String> {
+        if (prefs.discardIfForeign(appContext)) return emptySet()
+        // getStringSet 이 돌려준 집합은 고치면 안 된다. 복사해서 넘긴다.
+        return prefs.getStringSet(KEY_HANDLED, null)?.toSet().orEmpty()
+    }
+
+    fun markHandled(schedule: AlarmSchedule, nowMillis: Long = System.currentTimeMillis()) {
+        val next = MissedAlarms.pruneHandled(handledKeys(), nowMillis) + MissedAlarms.key(schedule)
+        prefs.edit { putStringSet(KEY_HANDLED, next) }
+        prefs.stampOwner(appContext)
+    }
+
+    /**
+     * 사본에서 빠졌지만 아직 알려야 하는 놓친 알람.
+     *
+     * 서버 동기화와 재부팅 복원은 지난 알람을 사본에서 지운다. 놓친 알람을 그
+     * 자리에 두면 안내를 띄우기 전에 사라지므로 여기로 옮겨 둔다.
+     */
+    fun missedCopies(): List<AlarmSchedule> {
+        if (prefs.discardIfForeign(appContext)) return emptyList()
+        val raw = prefs.getString(KEY_MISSED, null) ?: return emptyList()
+        return try {
+            gson.fromJson<List<AlarmSchedule>>(raw, TYPE).orEmpty().map { it.withDiskDefaults() }
+        } catch (e: JsonSyntaxException) {
+            Log.w(TAG, "놓친 알람 사본을 읽을 수 없어 버린다", e)
+            prefs.edit { remove(KEY_MISSED) }
+            emptyList()
+        }
+    }
+
+    fun replaceMissed(schedules: List<AlarmSchedule>) {
+        prefs.edit {
+            if (schedules.isEmpty()) remove(KEY_MISSED)
+            else putString(KEY_MISSED, gson.toJson(schedules.sortedBy { it.alarmAtMillis }))
+        }
+        prefs.stampOwner(appContext)
+    }
+
     private companion object {
         const val TAG = "ScheduledAlarmStore"
         const val FILE = "jit_scheduled_alarms"
         const val KEY_SCHEDULES = "schedules"
+        const val KEY_HANDLED = "handled"
+        const val KEY_MISSED = "missed"
         val TYPE = object : TypeToken<List<AlarmSchedule>>() {}.type
     }
 }

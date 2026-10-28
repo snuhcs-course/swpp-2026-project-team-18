@@ -36,7 +36,8 @@ class AlarmReceiver : BroadcastReceiver() {
             return
         }
 
-        val schedule = ScheduledAlarmStore(context).find(eventId)
+        val store = ScheduledAlarmStore(context)
+        val schedule = store.find(eventId)
         if (schedule == null) {
             // 서버 동기화가 이 알람을 지운 뒤에 발화한 경우다. 취소가 한발
             // 늦었을 뿐이므로 조용히 넘긴다.
@@ -45,6 +46,11 @@ class AlarmReceiver : BroadcastReceiver() {
         }
 
         Log.i(TAG, "알람 발화: 일정 $eventId ${schedule.alarmLabel}")
+
+        // Partly AI-generated (Claude) — 울렸다는 표시. 없으면 나중에 이 알람을 강제
+        // 중지로 사라진 알람과 구별하지 못하고 "안 울렸다" 고 띄운다([MissedAlarms]).
+        runCatching { store.markHandled(schedule) }
+            .onFailure { Log.w(TAG, "울림 표시 실패", it) }
 
         // Partly AI-generated (Claude) — 울린 시각을 남긴다(db-schema.md A3). 디스크에 적고
         // 업로드는 워커가 한다. 실패해도 알람은 그대로 뜬다(`record` 가 삼킨다).

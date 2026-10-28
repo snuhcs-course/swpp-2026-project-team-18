@@ -58,16 +58,36 @@ class AuthInterceptor(private val tokenStore: TokenStore) : Interceptor {
  *  2. refresh 자체가 실패하면 토큰을 지우고 null 을 돌려준다
  *
  * refresh 는 동기 호출이다. OkHttp 가 워커 스레드에서 부르므로 막아도 된다.
- * `@Synchronized` 로 동시에 여러 요청이 401 을 받아도 refresh 를 한 번만 한다.
+ * 락으로 동시에 여러 요청이 401 을 받아도 refresh 를 한 번만 한다.
+ *
+ * **refresh 요청 자신의 401 은 락을 잡기 전에 돌려보낸다.** refresh 는 같은
+ * 클라이언트를 타고 다른 디스패처 스레드에서 돈다. 그 401 이 다시 여기로
+ * 들어와 락을 기다리면, 락을 쥔 스레드는 그 응답을 기다리고 있으므로 둘 다
+ * 영영 멈춘다. 그 뒤로 인증이 필요한 모든 요청이 같은 락에 줄을 서고,
+ * callTimeout 도 막힌 스레드를 풀지 못해 화면이 로딩 상태로 굳는다.
+ * 다른 서버에서 받은 토큰(로컬 → 배포 서버 전환)으로 실제로 재현됐다.
  */
 class TokenRefreshAuthenticator(
     private val tokenStore: TokenStore,
     private val refreshApi: () -> AuthApi,
 ) : Authenticator {
 
-    @Synchronized
+    private val lock = Any()
+
     override fun authenticate(route: Route?, response: Response): Request? {
+        // 토큰 발급·갱신 경로의 401 은 갱신으로 풀 수 없다. 그대로 올려
+        // 호출부가 판단한다. `/api/auth/me` 같은 인증 경로는 여기 들지 않는다.
+        if (isTokenPath(response.request)) return null
         if (responseCount(response) >= 2) return null
+        return synchronized(lock) { authenticateLocked(response) }
+    }
+
+    private fun isTokenPath(request: Request): Boolean {
+        val path = request.url.encodedPath
+        return TOKEN_PATHS.any { path.endsWith(it) }
+    }
+
+    private fun authenticateLocked(response: Response): Request? {
 
         val refresh = tokenStore.refreshToken
         if (refresh.isNullOrBlank()) return null
@@ -145,5 +165,7 @@ class TokenRefreshAuthenticator(
 
     private companion object {
         const val TAG = "TokenRefresh"
+
+        val TOKEN_PATHS = listOf("/api/auth/token", "/api/auth/token/refresh")
     }
 }

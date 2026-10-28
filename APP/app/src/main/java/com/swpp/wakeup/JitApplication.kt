@@ -1,6 +1,8 @@
 package com.swpp.wakeup
 
 import android.app.Application
+import android.util.Log
+import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ApiClient
@@ -32,5 +34,14 @@ class JitApplication : Application() {
         // 로그아웃 상태에서도 예약한다. 워커가 로그인 여부를 확인해 바로
         // 끝내고, 다시 로그인하면 별도 등록 없이 동기화가 이어진다.
         JitWork.ensurePeriodicSync(this)
+
+        // Partly AI-generated (Claude)
+        // 저장해 둔 알람을 네트워크 없이 먼저 다시 건다. 강제 중지(설정·제조사 정리·
+        // Android Studio Stop)는 시스템 알람을 지우고 BootReceiver 도 부르지 않는다.
+        // 홈의 서버 동기화가 다시 걸어 주지만 오프라인이면 그마저 없다. 사본을
+        // 고치지 않는 rearm 을 쓰는 이유는 AlarmScheduler.rearm 에 적었다.
+        // 실패해도 앱은 떠야 한다.
+        runCatching { AlarmScheduler(this).rearm() }
+            .onFailure { Log.e("JitApplication", "알람 재등록 실패", it) }
     }
 }

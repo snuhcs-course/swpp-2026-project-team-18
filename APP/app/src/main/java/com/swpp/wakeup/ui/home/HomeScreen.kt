@@ -78,6 +78,8 @@ fun HomeScreen(
     onMorningClick: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    onMissedTrackClick: () -> Unit = {},
+    onMissedDismiss: () -> Unit = {},
 ) {
     LazyColumn(
         modifier = modifier
@@ -98,6 +100,15 @@ fun HomeScreen(
                 avatarInitials = avatarInitials,
                 onAvatarClick = onAvatarClick,
             )
+        }
+
+        // Partly AI-generated (Claude)
+        // 울리지 않은 알람. 출발 전에만 뜨고, 지금 추적을 시작할 수 있는 유일한
+        // 입구라서 다른 무엇보다 위에 둔다.
+        state.missedAlarm?.let { missed ->
+            item(key = "missed-alarm") {
+                MissedAlarmCard(missed, onTrack = onMissedTrackClick, onDismiss = onMissedDismiss)
+            }
         }
 
         // 캐시로 그린 화면이면 가장 먼저 밝힌다. 알람 시각은 교통 상황에 따라
@@ -429,6 +440,80 @@ private fun MorningShortcut(blocksLeft: Int, onClick: () -> Unit) {
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
         )
+    }
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 울리지 않은 알람 안내.
+ *
+ * **알람이 왜 안 울렸는지 단정하지 않는다.** 앱은 강제 중지가 있었는지 알 수 없고,
+ * 아는 것은 "등록했는데 울렸다는 기록이 없다" 뿐이다.
+ *
+ * 추적을 시작할 수 없으면(기준점·정밀 위치 권한 없음) 버튼 대신 이유를 적는다.
+ * 누를 수 없는 버튼을 보여 주면 눌러도 아무 일이 없는 것처럼 보인다.
+ */
+@Composable
+private fun MissedAlarmCard(
+    notice: HomeViewModel.MissedAlarmNotice,
+    onTrack: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .testTag("missed_alarm")
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Hint))
+            .background(JitColor.Surface2)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        JitDotLabel(
+            text = "${notice.alarmLine} 알람이 울리지 않았음",
+            dotColor = JitColor.Red,
+            textColor = JitColor.TextPrimary,
+            fontSize = 12,
+            dotSize = 6.dp,
+        )
+        Text(
+            text = notice.schedule.eventLine,
+            color = JitColor.TextPrimary,
+            fontSize = 11.sp,
+        )
+        Text(
+            text = when {
+                notice.canTrack -> (notice.departLabel?.let { "$it 출발 예정이라 " } ?: "") +
+                    "지금 이동 기록을 시작할 수 있음"
+                !notice.schedule.canTrack -> "출발지·목적지 좌표가 없어 이동 기록은 시작할 수 없음"
+                else -> "정밀 위치 권한이 없어 이동 기록은 시작할 수 없음"
+            },
+            color = JitColor.TextSecondary,
+            fontSize = 11.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (notice.canTrack) {
+                Text(
+                    text = "이동 기록 시작",
+                    color = JitColor.Accent,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag("missed_alarm_track")
+                        .clickable(onClick = onTrack)
+                        .padding(vertical = 4.dp),
+                )
+            }
+            Text(
+                text = "닫기",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .testTag("missed_alarm_dismiss")
+                    .clickable(onClick = onDismiss)
+                    .padding(vertical = 4.dp),
+            )
+        }
     }
 }
 

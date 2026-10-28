@@ -51,6 +51,8 @@ class AlarmScheduler(private val context: Context) {
             .sortedBy { it.alarmAtMillis }
             .take(MAX_REGISTERED)
 
+        // 갈아 끼우면 지난 알람이 사본에서 사라진다. 울리지 않은 것은 먼저 옮겨 둔다.
+        rememberMissed(dropped = before, upcoming = upcoming, nowMillis = now)
         store.replaceAll(upcoming)
         upcoming.forEach { register(it) }
 
@@ -101,11 +103,90 @@ class AlarmScheduler(private val context: Context) {
         val (alive, expired) = store.all().partition { it.alarmAtMillis > now }
 
         // 지난 알람은 버린다. 남겨 두면 다음 복원에서 또 검사 대상이 된다.
-        if (expired.isNotEmpty()) store.replaceAll(alive)
+        // 꺼진 동안 지나가 울리지 않은 알람은 먼저 놓친 알람으로 옮겨 둔다.
+        if (expired.isNotEmpty()) {
+            rememberMissed(dropped = expired, upcoming = alive, nowMillis = now)
+            store.replaceAll(alive)
+        }
 
         alive.forEach { register(it) }
         Log.i(TAG, "알람 복원: ${alive.size}건 (만료 ${expired.size}건 버림)")
         return alive.size
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 사본에 있는 앞으로의 알람을 다시 건다. **사본은 고치지 않는다.**
+     *
+     * 앱 프로세스가 뜰 때마다 부른다([com.swpp.wakeup.JitApplication]). 강제 중지는
+     * 시스템에 걸린 알람을 지우지만 디스크 사본은 남기고, 강제 중지 뒤에는
+     * [BootReceiver] 도 오지 않는다. 사용자가 앱을 여는 순간이 다시 걸 첫 기회인데,
+     * 서버 동기화를 기다리면 오프라인일 때 끝내 안 걸린다.
+     *
+     * [restoreAll] 을 쓰지 않는 이유 — 그쪽은 지난 알람을 사본에서 지운다. 프로세스가
+     * **알람 발화로** 뜬 경우 [AlarmReceiver] 보다 이것이 먼저 돌고, 그 순간 막
+     * 울리려는 알람은 이미 "지난 알람" 이다. 지우면 수신기가 사본을 못 찾아 알람을
+     * 버린다.
+     *
+     * 같은 일정은 같은 PendingIntent 라서 이미 걸린 알람을 다시 걸어도 덮어쓸 뿐이다.
+     */
+    fun rearm(): Int {
+        val now = System.currentTimeMillis()
+        val alive = store.all().filter { it.alarmAtMillis > now }
+        alive.forEach { register(it) }
+        Log.i(TAG, "앱 시작 재등록: ${alive.size}건")
+        return alive.size
+    }
+
+    /**
+     * 울리지 않고 지나갔고 아직 출발 전인 알람. 홈이 "알람이 안 울렸어요" 를 띄운다.
+     *
+     * 판단은 [MissedAlarms] 에 있다. 아직 사본에 남은 것과 동기화가 옮겨 둔 것을
+     * 함께 본다. 마감이 지난 것은 이참에 정리한다.
+     */
+    fun missed(): List<AlarmSchedule> {
+        val now = System.currentTimeMillis()
+        val current = store.all()
+        val kept = store.missedCopies()
+        val result = MissedAlarms.select(
+            candidates = current + kept,
+            handled = store.handledKeys(),
+            upcomingEventIds = current.filter { it.alarmAtMillis > now }.map { it.eventId }.toSet(),
+            nowMillis = now,
+        )
+        val stillKept = kept.filter { k -> result.any { MissedAlarms.key(it) == MissedAlarms.key(k) } }
+        if (stillKept.size != kept.size) store.replaceMissed(stillKept)
+        return result
+    }
+
+    /** 놓친 알람 안내를 처리했다. 추적을 시작했든 닫았든 다시 띄우지 않는다. */
+    fun acknowledgeMissed(schedule: AlarmSchedule) {
+        store.markHandled(schedule)
+        store.replaceMissed(store.missedCopies().filterNot { it.eventId == schedule.eventId })
+    }
+
+    /**
+     * 사본에서 빠질 알람 중 울리지 않은 것을 놓친 알람으로 옮긴다.
+     *
+     * 이전에 옮겨 둔 것도 다시 걸러 함께 쓴다 — 마감이 지났거나 새로 등록된
+     * 일정의 것은 여기서 빠진다.
+     */
+    private fun rememberMissed(
+        dropped: List<AlarmSchedule>,
+        upcoming: List<AlarmSchedule>,
+        nowMillis: Long,
+    ) {
+        val kept = store.missedCopies()
+        val next = MissedAlarms.select(
+            candidates = kept + dropped,
+            handled = store.handledKeys(),
+            upcomingEventIds = upcoming.map { it.eventId }.toSet(),
+            nowMillis = nowMillis,
+        )
+        if (next != kept) store.replaceMissed(next)
+        (next - kept.toSet()).forEach {
+            Log.w(TAG, "울리지 않은 알람: 일정 ${it.eventId} ${it.alarmLabel}")
+        }
     }
 
     fun cancel(eventId: Long) {
