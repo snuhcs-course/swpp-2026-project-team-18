@@ -19,10 +19,18 @@ from .models import Profile, User
 
 
 class UserSerializer(serializers.ModelSerializer):
+    # Partly AI-generated (Claude) — 설정 화면의 "카카오 연결됨" 과 연결 끊기 가능 여부에 쓴다.
+    login_methods = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ("id", "email", "nickname", "date_joined")
+        fields = ("id", "email", "nickname", "date_joined", "login_methods")
         read_only_fields = fields
+
+    def get_login_methods(self, obj) -> list[str]:
+        from .social import login_methods
+
+        return login_methods(obj)
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -83,6 +91,26 @@ class RegisterSerializer(serializers.Serializer):
         # createsuperuser·admin·shell 등 이 경로를 타지 않는 생성에서도 프로필이
         # 보장돼야 하기 때문이다. signals.py 주석에 근거를 적어 두었다.
         return user
+
+
+class SocialTokenSerializer(serializers.Serializer):
+    """소셜 연결. SDK 가 준 ID 토큰만 받는다. (Partly AI-generated (Claude))"""
+
+    # JWT 는 수 KB 다. 끝없이 긴 문자열을 서명 검증까지 보내지 않는다.
+    id_token = serializers.CharField(max_length=8192, trim_whitespace=True)
+
+
+class SocialLoginSerializer(SocialTokenSerializer):
+    """소셜 로그인. 새 계정을 만들 때만 약관 동의·닉네임을 본다."""
+
+    terms_agreed = serializers.BooleanField(required=False, default=False)
+    nickname = serializers.CharField(
+        max_length=20, required=False, allow_blank=True, default=""
+    )
+
+    def validate_terms_agreed(self, value: bool) -> bool:
+        # 가입과 같다. 문자열 "true" 가 아니라 JSON true 일 때만 동의로 본다.
+        return self.initial_data.get("terms_agreed") is True
 
 
 class PasswordCheckSerializer(serializers.Serializer):

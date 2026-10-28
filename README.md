@@ -90,7 +90,9 @@ make the screen look finished while being untrue.
 - Route choice — grouped candidates, fastest default and guidance work. Four car variants (BE-8), arrival-time/operating-hour routing (BE-11) and optional bicycle-road ratio (BE-14) remain
 - Weekly and detailed reports ⑧⑨ — built; the Figma panels for sleep, alarm snoozes and
   per-weekday auto-adjustment are left out because nothing records that data yet
-- Sign-in — email and password only; the social buttons show a notice
+- Sign-in — the server accepts Kakao and Google ID tokens (`POST /api/auth/social/{provider}`,
+  [docs/iter3/social-login-api.md](docs/iter3/social-login-api.md)), but the app's social
+  buttons still show a notice
 
 **Not started**
 
@@ -341,7 +343,7 @@ health, password check, sign-up, token and refresh.
 | Area | Endpoints |
 | --- | --- |
 | Health | `GET health` — version and real-time availability |
-| Auth | `POST auth/password/check` · `POST auth/register` · `POST auth/token` · `POST auth/token/refresh` · `GET auth/me` |
+| Auth | `POST auth/password/check` · `POST auth/register` · `POST auth/token` · `POST auth/token/refresh` · `GET auth/me` · `POST auth/social/{kakao,google}` · `POST DELETE auth/me/social/{provider}` |
 | Profile | `GET PATCH PUT profile` — home, prep time, default τ. A new home or prep time recomputes up to 50 future events |
 | Events | `GET POST events` · `GET PATCH DELETE events/{id}` · `GET events/{id}/risk-options` · `POST events/{id}/recompute` · `POST events/import` · `GET events/tags` · `GET PUT events/{id}/blocks` |
 | Places | `GET places/search` · `GET places/staticmap` · `GET places/reverse` |
@@ -398,6 +400,7 @@ committed.** The deployed values live in the Render dashboard, and CI needs none
 | `DATABASE_URL` | Neon Postgres, direct URL. Required |
 | `DJANGO_SECRET_KEY` | Django secret key |
 | `KAKAO_REST_API_KEY` | [Kakao](https://developers.kakao.com) routes (transit, walk, bicycle, car), place search, reverse geocoding, static maps |
+| `KAKAO_NATIVE_APP_KEY` / `GOOGLE_WEB_CLIENT_ID` | Social sign-in: the accepted ID-token audience (Kakao native app key with OpenID Connect on, Google OAuth web client ID). Empty means that sign-in answers 503. `/api/health` shows whether each is set |
 | `SEOUL_SUBWAY_API_KEY` | Subway real-time arrivals ([data.seoul.go.kr](https://data.seoul.go.kr)) |
 | `SEOUL_BUS_API_KEY_ENCODING` / `_DECODING` | Bus real-time arrivals ([data.go.kr](https://www.data.go.kr)). Set both forms of the key |
 | `STATIC_MAP_DAILY_UPSTREAM_LIMIT` | Daily budget for Kakao static-map requests, default 900 |

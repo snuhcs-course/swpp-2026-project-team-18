@@ -61,6 +61,16 @@ services:
       - key: KAKAO_REST_API_KEY
         sync: false
 
+      # 소셜 로그인 ID 토큰의 aud(backend/apps/accounts/social.py). 비어 있으면 그
+      # 로그인만 503 이고 나머지는 그대로 돈다. 대시보드에서 직접 넣는다.
+      #   KAKAO_NATIVE_APP_KEY: 카카오 개발자 콘솔의 네이티브 앱 키(OpenID Connect 활성화 필요)
+      #   GOOGLE_WEB_CLIENT_ID: Google Cloud 의 OAuth 웹 클라이언트 ID
+      - key: KAKAO_NATIVE_APP_KEY
+        sync: false
+
+      - key: GOOGLE_WEB_CLIENT_ID
+        sync: false
+
       # 실시간 대중교통 도착정보. 값은 저장소에 넣지 않고 Render 대시보드에서
       # 직접 넣는다. 로컬 backend/.env 는 Render 컨테이너에 올라가지 않는다.
       # 버스는 data.go.kr 이 보여 주는 Encoding/Decoding 두 표현을 모두 둔다.

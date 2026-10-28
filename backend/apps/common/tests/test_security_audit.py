@@ -39,7 +39,7 @@ pytestmark = pytest.mark.django_db
 PUBLIC_PATHS = {
     "/api/health": (
         "연결 진단용. DB 도 사용자 정보도 건드리지 않는다. 서버 버전과 "
-        "실시간 제공자 키의 설정 여부(참/거짓)만 반환한다 — 키 값도 길이도 "
+        "실시간 제공자·소셜 로그인 키의 설정 여부(참/거짓)만 반환한다 — 키 값도 길이도 "
         "담지 않으며 test_health.py 가 이를 고정한다. 앱이 콜드 스타트를 "
         "감지하고, 배포 서버에서 도착정보가 안 뜰 때 키 미설정과 외부 호출 "
         "실패를 구분하는 데 쓴다"
@@ -59,6 +59,12 @@ PUBLIC_PATHS = {
     "/api/auth/token/refresh": (
         "액세스 토큰 재발급. refresh 토큰 자체가 자격증명이므로 "
         "Authorization 헤더가 필요 없다"
+    ),
+    # Partly AI-generated (Claude)
+    "/api/auth/social/": (
+        "카카오·구글 로그인. 토큰을 받기 전이라 인증할 수단이 없다. 제공자 ID 토큰의 "
+        "서명·iss·aud·만료를 검증한 뒤에만 토큰을 준다(test_social_login.py). "
+        "연결·끊기(/api/auth/me/social/)는 인증이 필요하다"
     ),
 }
 
@@ -82,6 +88,8 @@ THROTTLED_PATHS = {
     # 사람이 누를 때만 불리던 동안에는 throttle 이 없어도 드러나지 않았지만,
     # 앱이 임박한 일정의 경로를 주기적으로 갱신하면 자동 호출이 된다.
     "/api/events/1/recompute": "카카오 경로 (주기 갱신이 자동 호출한다)",
+    "/api/auth/social/kakao": "제공자 공개키 조회·서명 검증 (Partly AI-generated (Claude))",
+    "/api/auth/me/social/kakao": "제공자 공개키 조회·서명 검증",
     "/api/observations/batch": "쓰기 폭주 방지",
     "/api/routines/observations/batch": "쓰기 폭주 방지",
 }

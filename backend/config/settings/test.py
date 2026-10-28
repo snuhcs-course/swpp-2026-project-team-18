@@ -48,6 +48,9 @@ DATABASES = {
 KAKAO_REST_API_KEY = ""
 KAKAO_MOBILITY_KEY = ""
 KMA_API_KEY = ""
+# 소셜 로그인. 테스트는 `settings` 픽스처로 넣고 공개키는 가짜로 바꾼다.
+KAKAO_NATIVE_APP_KEY = ""
+GOOGLE_WEB_CLIENT_ID = ""
 OPENAI_API_KEY = ""
 OPENAI_MODEL = ""
 # 주소도 고정한다. `.env` 를 따르지 않는다 — 개발자가 학교 주소를 채우면 요청
@@ -85,6 +88,7 @@ REST_FRAMEWORK = {  # noqa: F405
         "observation": None,
         "password_check": None,
         "register": None,
+        "social": None,
     },
 }
 

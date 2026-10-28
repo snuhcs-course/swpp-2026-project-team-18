@@ -162,3 +162,49 @@ class Profile(models.Model):
 
     def __str__(self):
         return f"{self.user.email} 프로필"
+
+
+# Partly AI-generated (Claude)
+class SocialAccount(models.Model):
+    """카카오·구글 계정과 우리 사용자의 연결(`apps.accounts.social`).
+
+    제공자의 사용자 번호(`sub`)로 찾는다. 이메일은 바뀌거나 남의 주소일 수 있어서
+    식별자로 쓰지 않는다(구글 문서도 `sub` 를 쓰라고 한다). 그래서 소셜 로그인은 같은
+    이메일의 기존 계정에 자동으로 붙지 않는다. 로그인한 사용자가 직접 연결한다.
+    """
+
+    class Provider(models.TextChoices):
+        KAKAO = "kakao", "카카오"
+        GOOGLE = "google", "구글"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="social_accounts", verbose_name="사용자"
+    )
+    provider = models.CharField("제공자", max_length=16, choices=Provider.choices)
+    subject = models.CharField("제공자 사용자 번호(sub)", max_length=255)
+    # 연결할 때 제공자가 준 이메일. 참고용이다. 로그인에는 쓰지 않는다.
+    email = models.CharField(
+        "제공자 이메일", max_length=254, blank=True, default="", db_default=""
+    )
+    created_at = models.DateTimeField("연결 시각", auto_now_add=True)
+    last_login_at = models.DateTimeField(
+        "마지막 로그인", null=True, blank=True, default=None, db_default=None
+    )
+
+    class Meta:
+        db_table = "accounts_social_account"
+        verbose_name = "소셜 계정 연결"
+        verbose_name_plural = "소셜 계정 연결"
+        constraints = [
+            # 한 카카오 계정은 한 사용자에게만 붙는다.
+            models.UniqueConstraint(
+                fields=["provider", "subject"], name="accounts_social_provider_subject"
+            ),
+            # 한 사용자는 제공자마다 계정 하나다. 둘이면 어느 쪽으로 로그인했는지 헷갈린다.
+            models.UniqueConstraint(
+                fields=["user", "provider"], name="accounts_social_user_provider"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_provider_display()} {self.subject} → {self.user_id}"

@@ -197,6 +197,9 @@ REST_FRAMEWORK = {
         # 글자마다 호출하는 비로그인 검사. 빠른 입력을 허용하되 IP별로 제한한다.
         "password_check": "600/min",
         "register": "10/hour",
+        # 소셜 로그인·연결. 토큰마다 서명 검증을 하고 처음 보는 키면 제공자에 공개키를 묻는다.
+        # 정상 사용은 하루 몇 번이다. 가입(10/hour)보다 넉넉한 것은 로그인도 같은 통이라서다.
+        "social": "60/hour",
     },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
@@ -217,6 +220,15 @@ SIMPLE_JWT = {
 KAKAO_REST_API_KEY = os.getenv("KAKAO_REST_API_KEY", "")
 KAKAO_MOBILITY_KEY = os.getenv("KAKAO_MOBILITY_KEY", "")
 KMA_API_KEY = os.getenv("KMA_API_KEY", "")
+
+# 소셜 로그인 ID 토큰의 `aud` 로 받을 값(`apps.accounts.social`). 쉼표로 여러 개를 줄 수
+# 있다(개발용·배포용 앱을 따로 등록했을 때). 비어 있으면 그 제공자 로그인은 503 이다.
+# 둘 다 앱에 들어가는 공개 값이라 비밀은 아니지만, 다른 키와 같이 환경변수로 둔다.
+#   카카오: 내 애플리케이션 → 앱 키 → 네이티브 앱 키 (앱 SDK 초기화에 쓰는 키와 같아야 한다)
+#   구글: Google Cloud → 사용자 인증 정보 → OAuth 2.0 웹 클라이언트 ID
+#         (앱 Credential Manager 의 serverClientId 와 같아야 한다)
+KAKAO_NATIVE_APP_KEY = os.getenv("KAKAO_NATIVE_APP_KEY", "")
+GOOGLE_WEB_CLIENT_ID = os.getenv("GOOGLE_WEB_CLIENT_ID", "")
 
 # 카카오 정적 지도 무료 쿼터는 하루 1,000건이다. 앱 전체가 공유하는 안전
 # 여유분을 남겨 두고, 캐시에서 찾지 못해 실제로 카카오를 부를 때만 차감한다.

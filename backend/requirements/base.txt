@@ -8,3 +8,8 @@ requests==2.32.5
 # 환경변수 로딩. DATABASE_URL 파싱은 dj-database-url 이 담당한다.
 python-dotenv==1.0.1
 dj-database-url==2.3.0
+
+# 소셜 로그인 ID 토큰(RS256) 서명 검증(apps/accounts/social.py). PyJWT 는 simplejwt 가
+# 이미 끌어오지만 직접 쓰므로 고정한다. RSA 서명에는 cryptography 가 필요하다.
+PyJWT==2.15.1
+cryptography==50.0.2

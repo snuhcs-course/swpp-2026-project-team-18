@@ -14,7 +14,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.db.models import Count
 
-from .models import Profile, User
+from .models import Profile, SocialAccount, User
 
 
 class ProfileForm(forms.ModelForm):
@@ -168,3 +168,26 @@ class ProfileAdmin(admin.ModelAdmin):
     def prep_display(self, obj):
         value = obj.onboarding_prep_min
         return "미응답" if value is None else f"{value}분"
+
+
+# Partly AI-generated (Claude)
+@admin.register(SocialAccount)
+class SocialAccountAdmin(admin.ModelAdmin):
+    """소셜 계정 연결. **추가·수정은 막는다.** 연결은 ID 토큰을 검증한 API 로만 생긴다.
+
+    잘못 붙은 연결을 지우는 것만 허용한다. 손으로 `sub` 를 적어 넣으면 그 카카오
+    계정의 주인이 아닌 사람에게 계정을 넘겨줄 수 있다.
+    """
+
+    list_display = ("created_at", "user", "provider", "email", "last_login_at")
+    list_filter = ("provider",)
+    search_fields = ("user__email", "user__nickname", "email")
+    readonly_fields = ("user", "provider", "subject", "email", "created_at", "last_login_at")
+    list_select_related = ("user",)
+    ordering = ("-created_at", "-id")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

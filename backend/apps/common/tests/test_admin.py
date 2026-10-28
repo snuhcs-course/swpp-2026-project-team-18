@@ -173,11 +173,12 @@ class TestEveryAdminOpens:
         # 주간 요약은 LLM 이 쓴 문장만 저장한다(apps/reports/admin.py).
         # 기록 표(계획 이력·알람 기록·LLM 호출·API 요청 기록)는 읽기 전용이다(db-schema.md §6).
         # 버퍼 조정은 밤 학습만 남긴다(apps/planning/admin.py).
+        # 소셜 계정 연결은 ID 토큰을 검증한 API 로만 생긴다(apps/accounts/admin.py).
         # (Partly AI-generated (Claude))
         closed = {
             "alarmplan", "tripobservation", "weeklysummary",
             "planrevision", "alarmlog", "llmcall", "apirequestlog",
-            "eventrecurrence", "bufferadjustment",
+            "eventrecurrence", "bufferadjustment", "socialaccount",
         }
         broken = []
         for model in registered_models():

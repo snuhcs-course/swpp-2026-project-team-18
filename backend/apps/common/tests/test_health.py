@@ -98,3 +98,14 @@ def test_realtime_은_불리언만_담는다(client, settings):
 def test_인증_없이_접근된다(client):
     """앱의 서버 확인 화면이 로그인 전에도 부른다."""
     assert client.get(reverse("health")).status_code == 200
+
+
+# Partly AI-generated (Claude)
+def test_소셜_로그인_설정_여부만_알린다(client, settings):
+    settings.KAKAO_NATIVE_APP_KEY = "kakao-native-key-value"
+    settings.GOOGLE_WEB_CLIENT_ID = " "
+
+    body = _get(client)
+
+    assert body["social"] == {"kakao": True, "google": False}
+    assert "kakao-native-key-value" not in json.dumps(body)

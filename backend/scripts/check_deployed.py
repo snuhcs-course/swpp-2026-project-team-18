@@ -100,6 +100,8 @@ def main() -> int:
         print("\n서버에 닿지 못했다. 이후 확인을 중단한다.")
         return 1
     check("version 응답", bool(body.get("version")), str(body))
+    # Partly AI-generated (Claude) — 참/거짓만 온다. 거짓이면 Render 에 키를 넣지 않은 것이다.
+    check("소셜 로그인 키 설정 여부 응답", isinstance(body.get("social"), dict), str(body.get("social")))
 
     # 새 이동 중 경로 API 가 실제 배포본에 붙었는지, 계정이나 외부 경로 API 를
     # 건드리지 않고 확인한다. 인증 검사가 본문 검증보다 먼저이므로 배포됐으면
@@ -133,6 +135,18 @@ def main() -> int:
         return 1
     api.token = body.get("access")
     check("가입 응답에 access 토큰", bool(api.token))
+
+    # Partly AI-generated (Claude) — 소셜 로그인. 가짜 토큰이라 아무것도 만들지 않는다.
+    # 키가 설정됐으면 401(토큰 거절), 아니면 503(미설정). 404 면 구버전, 5xx 다른 값이면 고장.
+    for provider in ("kakao", "google"):
+        st_social, body_social = api(
+            f"/api/auth/social/{provider}", "POST", {"id_token": "not-a-jwt"}, auth=False
+        )
+        check(
+            f"소셜 로그인 {provider} 가짜 토큰 거절 (401, 키 미설정이면 503)",
+            st_social in (401, 503),
+            f"status={st_social} body={str(body_social)[:160]}",
+        )
 
     st, body = api("/api/auth/token", "POST", {"email": email, "password": password}, auth=False)
     check("로그인 200", st == 200, f"status={st}")
