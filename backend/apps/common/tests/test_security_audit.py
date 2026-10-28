@@ -61,6 +61,12 @@ PUBLIC_PATHS = {
         "Authorization 헤더가 필요 없다"
     ),
     # Partly AI-generated (Claude)
+    "/api/auth/logout": (
+        "로그아웃(refresh 취소). refresh 토큰 자체가 자격증명이라 access 가 만료된 앱도 "
+        "부를 수 있어야 한다. 서명·만료를 검증한 토큰만 취소하고 아무것도 반환하지 않는다"
+        "(test_logout.py). 모든 기기 로그아웃(/api/auth/me/logout-all)은 인증이 필요하다"
+    ),
+    # Partly AI-generated (Claude)
     "/api/auth/social/": (
         "카카오·구글 로그인. 토큰을 받기 전이라 인증할 수단이 없다. 제공자 ID 토큰의 "
         "서명·iss·aud·만료를 검증한 뒤에만 토큰을 준다(test_social_login.py). "
@@ -90,6 +96,7 @@ THROTTLED_PATHS = {
     "/api/events/1/recompute": "카카오 경로 (주기 갱신이 자동 호출한다)",
     "/api/auth/social/kakao": "제공자 공개키 조회·서명 검증 (Partly AI-generated (Claude))",
     "/api/auth/me/social/kakao": "제공자 공개키 조회·서명 검증",
+    "/api/auth/logout": "인증 없는 쓰기(취소 기록)",
     "/api/observations/batch": "쓰기 폭주 방지",
     "/api/routines/observations/batch": "쓰기 폭주 방지",
 }

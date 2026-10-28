@@ -108,7 +108,9 @@ make the screen look finished while being untrue.
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
 - User-defined tags (BE-21) and sleep-time calculation (BE-22)
 - Encrypted token storage — tokens sit in plain SharedPreferences; required before a
-  real release
+  real release. The server can now revoke refresh tokens (`POST /api/auth/logout`,
+  `POST /api/auth/me/logout-all`, [docs/iter3/token-security-api.md](docs/iter3/token-security-api.md)),
+  but the app's logout does not call it yet and refresh-token rotation stays off
 - Battery-optimization guidance
 
 **Runtime limitations** (route scope and previously identified recovery/map issues)
@@ -404,6 +406,7 @@ committed.** The deployed values live in the Render dashboard, and CI needs none
 | `DJANGO_SECRET_KEY` | Django secret key |
 | `KAKAO_REST_API_KEY` | [Kakao](https://developers.kakao.com) routes (transit, walk, bicycle, car), place search, reverse geocoding, static maps |
 | `KAKAO_NATIVE_APP_KEY` / `GOOGLE_WEB_CLIENT_ID` | Social sign-in: the accepted ID-token audience (Kakao native app key with OpenID Connect on, Google OAuth web client ID). Empty means that sign-in answers 503. `/api/health` shows whether each is set |
+| `JWT_ROTATE_REFRESH_TOKENS` | `1` makes token refresh return a new refresh token and revoke the old one. Leave unset until the app saves the rotated token; today's app would be signed out after its first refresh ([docs/iter3/token-security-api.md](docs/iter3/token-security-api.md)) |
 | `SEOUL_SUBWAY_API_KEY` | Subway real-time arrivals ([data.seoul.go.kr](https://data.seoul.go.kr)) |
 | `SEOUL_BUS_API_KEY_ENCODING` / `_DECODING` | Bus real-time arrivals ([data.go.kr](https://www.data.go.kr)). Set both forms of the key |
 | `STATIC_MAP_DAILY_UPSTREAM_LIMIT` | Daily budget for Kakao static-map requests, default 900 |

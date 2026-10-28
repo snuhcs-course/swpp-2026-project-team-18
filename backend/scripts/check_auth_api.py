@@ -198,6 +198,21 @@ if new_access:
     check("재발급 access 로 me 200", st == 200 and body.get("email") == EMAIL,
           f"status={st} email={body.get('email')}")
 
+# 13-1) 같은 refresh 를 다시 써도 된다(회전 꺼짐). 지금 앱은 새 refresh 를 저장하지 않는다.
+st, body = call("POST", "/api/auth/token/refresh", {"refresh": refresh})
+check("같은 refresh 재사용 200", st == 200 and "refresh" not in body,
+      f"status={st} keys={sorted(body)}")
+
+# 13-2) 로그아웃하면 그 refresh 로 더는 재발급되지 않는다. 두 번 해도 204.
+st, _ = call("POST", "/api/auth/logout", {"refresh": refresh})
+check("로그아웃 204", st == 204, f"status={st}")
+st, body = call("POST", "/api/auth/token/refresh", {"refresh": refresh})
+code, msg = err(body)
+check("로그아웃한 refresh 401", st == 401 and code == "token_not_valid",
+      f"status={st} code={code}")
+st, _ = call("POST", "/api/auth/logout", {"refresh": refresh})
+check("로그아웃 두 번째도 204", st == 204, f"status={st}")
+
 # 14) 데모 계정 (마이그레이션 시드)
 st, body = call("POST", "/api/auth/token", {"email": "demo@demo.com", "password": "demo1234"})
 check("데모 계정 로그인 200", st == 200 and body.get("access"),

@@ -30,6 +30,8 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # 3rd party
     "rest_framework",
+    # refresh 토큰 취소 목록(로그아웃·회전). 발급 기록과 취소 기록 표 두 개다(`accounts.tokens`).
+    "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     # local
     # back-spec.md 2절은 앱 12개를 정의하지만 필요한 것부터 추가한다.
@@ -200,6 +202,8 @@ REST_FRAMEWORK = {
         # 소셜 로그인·연결. 토큰마다 서명 검증을 하고 처음 보는 키면 제공자에 공개키를 묻는다.
         # 정상 사용은 하루 몇 번이다. 가입(10/hour)보다 넉넉한 것은 로그인도 같은 통이라서다.
         "social": "60/hour",
+        # 로그아웃. 인증 없이 받으므로 IP별로 센다. 정상 사용은 하루 몇 번이다.
+        "logout": "60/hour",
     },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
@@ -212,6 +216,11 @@ from datetime import timedelta  # noqa: E402
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=30),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=14),
+    # 갱신 때 refresh 도 새로 주고 옛것은 취소한다. **기본은 꺼짐이다.** 지금 앱
+    # (`AuthInterceptor.kt`)은 갱신 응답의 새 refresh 를 저장하지 않아서, 켜면 설치된 앱이 첫
+    # 갱신 뒤 모두 로그아웃된다. 앱을 고쳐 배포한 뒤 `JWT_ROTATE_REFRESH_TOKENS=1` 로 켠다.
+    "ROTATE_REFRESH_TOKENS": (os.getenv("JWT_ROTATE_REFRESH_TOKENS") or "0").strip() == "1",
+    "BLACKLIST_AFTER_ROTATION": True,
 }
 
 # ---------------------------------------------------------------------------

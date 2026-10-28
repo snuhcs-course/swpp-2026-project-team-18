@@ -12,8 +12,10 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from . import tokens
 from .serializers import (
     LoginSerializer,
+    LogoutSerializer,
     PasswordCheckSerializer,
     RegisterSerializer,
     UserSerializer,
@@ -98,3 +100,42 @@ class MeView(RetrieveAPIView):
 
     def get_object(self):
         return self.request.user
+
+
+# Partly AI-generated (Claude)
+class LogoutView(GenericAPIView):
+    """POST /api/auth/logout — `{refresh}` 를 취소한다. 204.
+
+    인증 헤더를 보지 않는다. access 가 이미 만료된 앱도 로그아웃할 수 있어야 하고, refresh 자체가
+    자격증명이다(가진 사람만 취소할 수 있다). 토큰 갱신(`token/refresh`)과 같은 이유다.
+
+    이미 취소된 토큰이면 그대로 204 다(앱의 재시도, 두 번 누름). 서명·만료가 맞지 않으면
+    401 `token_not_valid`. 앱은 응답과 관계없이 저장한 토큰을 지운다. 규칙은 `tokens`.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    serializer_class = LogoutSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "logout"
+
+    def get_authenticate_header(self, request):
+        # 인증 클래스가 없으면 DRF 가 401 을 403 으로 바꾼다. 토큰 갱신(`TokenViewBase`)처럼 401 로 둔다.
+        return 'Bearer realm="api"'
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        tokens.revoke(serializer.validated_data["refresh"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class LogoutAllView(GenericAPIView):
+    """POST /api/auth/me/logout-all — 모든 기기에서 로그아웃. `{revoked}` (취소한 refresh 개수)
+
+    로그인한 사용자만 부른다. 이 기기의 refresh 도 취소되므로 앱은 부른 뒤 토큰을 지우고 로그인
+    화면으로 간다. 공개 경로(`logout`)와 접두가 겹치지 않게 `me` 아래에 둔다.
+    """
+
+    def post(self, request, *args, **kwargs):
+        return Response({"revoked": tokens.revoke_all(request.user)})

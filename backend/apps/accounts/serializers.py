@@ -210,3 +210,9 @@ class ProfileSerializer(serializers.ModelSerializer):
                     {"home_lat": "국내 좌표만 집으로 설정할 수 있다."}
                 )
         return attrs
+
+
+class LogoutSerializer(serializers.Serializer):
+    """`POST /api/auth/logout` 본문. 로그인 응답의 `refresh` 를 그대로 보낸다."""
+
+    refresh = serializers.CharField(max_length=4096)
