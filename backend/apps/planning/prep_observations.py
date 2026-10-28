@@ -88,7 +88,9 @@ def gps_prep_samples(user_id: int) -> list[float]:
     미루기 뒤 다시 울려 끈 경우 마지막 끄기부터 준비를 시작한 것으로 본다.
 
     버리는 것:
-      - 출발지를 따로 고른 일정. 집에서 준비하고 나간 아침이 아니다
+      - 출발지를 따로 고른 일정. 집에서 준비하고 나간 아침이 아니다(친구 집에서
+        자고 준비를 넣은 아침도. 남의 집 준비는 평소 준비와 다르다)
+      - 사용자가 준비를 뺀 일정(`include_prep` false). 준비하지 않고 나간 아침이다
       - 오차 반경이 150m 를 넘는 출발 fix
       - 출발 전에 끈 기록이 없는 일정(알람 없이 나갔거나 기록이 안 올라옴)
       - 1분 미만·6시간 초과(짝이 잘못된 것)
@@ -103,6 +105,7 @@ def gps_prep_samples(user_id: int) -> list[float]:
             accuracy_m__lte=GPS_PREP_MAX_ACCURACY_M,
             event__origin_lat__isnull=True,
         )
+        .exclude(event__include_prep=False)
         .order_by("event_id", "observed_at")
         .values_list("event_id", "observed_at")
     )

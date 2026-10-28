@@ -132,6 +132,24 @@ class TestGpsPrepSamples:
 
         assert prep_observations.gps_prep_samples(user.pk) == []
 
+    def test_skips_mornings_without_home_prep(self, user, place):
+        """준비를 뺀 집 출발, 준비를 넣은 친구 집 출발은 둘 다 평소 준비가 아니다."""
+        gps_morning(user, place, 1, 40)
+        skipped = make_event(user, place, 2, include_prep=False)
+        dismiss(user, skipped, morning(2), "d2")
+        depart(user, skipped, morning(2) + timedelta(minutes=5), "p2")
+        away = make_event(
+            user, place, 3, origin_lat=37.4979, origin_lng=127.0276, include_prep=True
+        )
+        dismiss(user, away, morning(3), "d3")
+        depart(user, away, morning(3) + timedelta(minutes=20), "p3")
+        # 집에서 준비를 넣었다고 고른 아침은 그대로 쓴다.
+        chosen = make_event(user, place, 4, include_prep=True)
+        dismiss(user, chosen, morning(4), "d4")
+        depart(user, chosen, morning(4) + timedelta(minutes=35), "p4")
+
+        assert prep_observations.gps_prep_samples(user.pk) == [35.0, 40.0]
+
     def test_newest_first(self, user, place):
         gps_morning(user, place, 1, 30)
         gps_morning(user, place, 2, 40)
@@ -225,6 +243,16 @@ class TestAlarmUsesGps:
             make_event(user, place, 20, origin_lat=37.4979, origin_lng=127.0276)
         )
         assert plan.prep_minutes == 0
+
+    def test_away_morning_with_prep_uses_what_home_mornings_taught(self, user, place):
+        for day in (1, 2, 3, 4, 5, 6):
+            gps_morning(user, place, day, 50)
+        home = services.compute_and_store(make_event(user, place, 20))
+        away = services.compute_and_store(make_event(
+            user, place, 21, origin_lat=37.4979, origin_lng=127.0276, include_prep=True,
+        ))
+        assert away.prep_source == "observed"
+        assert away.prep_minutes == home.prep_minutes
 
 
 class TestBlockRecordsAfterDeparture:

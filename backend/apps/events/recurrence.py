@@ -34,9 +34,14 @@ def first_start(start_at, weekdays, user):
 
 def attach(event, weekdays):
     tz = user_timezone(event.user)
+    template = {field: getattr(event, field) for field in TEMPLATE_FIELDS}
+    # 고른 값만 넣는다. 비워 두면(null) 이 필드를 모르는 이전 버전으로 되돌려도
+    # 회차를 만들 수 있다(`Event.objects.create(**template)`).
+    if event.include_prep is not None:
+        template["include_prep"] = event.include_prep
     rule = EventRecurrence.objects.create(
         user=event.user, start_at=event.start_at, timezone=tz.key, weekdays=weekdays,
-        template={field: getattr(event, field) for field in TEMPLATE_FIELDS},
+        template=template,
         place=event.place, tag=event.tag,
     )
     event.recurrence = rule

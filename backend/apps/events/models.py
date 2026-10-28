@@ -222,6 +222,15 @@ class Event(models.Model):
     origin_label = models.CharField(
         "출발지 표시명", max_length=80, blank=True, default="", db_default=""
     )
+    # 알람에 준비 시간을 넣을지. null 이면 출발지로 정한다(`prep_applies`).
+    #
+    # 출발지를 따로 고른 일정은 "이미 밖에 있다" 로 보고 준비 시간을 뺀다. 그런데
+    # 친구 집·숙소에서 자고 바로 나서는 아침도 출발지가 집이 아니다. 그날은 준비를
+    # 해야 하는데 알람이 준비 시간만큼 늦게 울린다. 그 경우 사용자가 `true` 로 고른다.
+    # 반대로 집에서 출발해도 이미 준비를 마친 일정이면 `false` 로 뺄 수 있다.
+    include_prep = models.BooleanField(
+        "준비 시간 포함", null=True, blank=True, default=None, db_default=None
+    )
 
     created_at = models.DateTimeField("생성 시각", auto_now_add=True)
     updated_at = models.DateTimeField("수정 시각", auto_now=True)
@@ -286,6 +295,23 @@ class Event(models.Model):
         if profile.home_lat is not None and profile.home_lng is not None:
             return profile.home_lat, profile.home_lng, profile.home_label or "집"
         return None
+
+    # Partly AI-generated (Claude)
+    @property
+    def prep_applies(self) -> bool:
+        """알람에 준비 시간을 넣는가.
+
+        사용자가 고른 값(`include_prep`)이 우선이다. 고르지 않았으면 집에서 출발할 때만
+        넣는다. 출발지를 따로 골랐다는 것은 보통 이미 밖에 있다는 뜻이다. 좌표를 집과
+        비교하지 않는 이유는, 집 근처 카페를 골랐어도 그건 집이 아니고 준비 단계도
+        아니기 때문이다.
+
+        알람 계산(`services.estimate_components`)과 수정 분류(`edits.plan_inputs`)가
+        같은 규칙을 보도록 여기 둔다.
+        """
+        if self.include_prep is not None:
+            return self.include_prep
+        return self.origin_lat is None
 
     def resolve_destination(self, profile) -> tuple[float, float, str] | None:
         """현재 목적지. 집은 프로필을 따르며 Place 행을 만들지 않는다."""

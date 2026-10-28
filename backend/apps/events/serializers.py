@@ -153,7 +153,7 @@ class AlarmPlanSerializer(serializers.Serializer):
           declared_point  블록을 신고했지만 범위가 한 점이다
           onboarding      블록이 없어 온보딩 응답을 썼다
           fixed           온보딩도 없어 기본값을 썼다
-          not_from_home   집에서 출발하는 일정이 아니라 준비 단계가 없다
+          not_from_home   준비 단계가 없다(출발지를 따로 골랐거나 `include_prep` false)
 
         `not_from_home` 은 0분과 다르다. 0분은 "준비를 순식간에 한다" 로 읽히고
         이 값은 "해당되지 않는다" 다. 화면이 준비 항목을 그리지 않는 근거다.
@@ -213,13 +213,16 @@ class EventSerializer(serializers.ModelSerializer):
             "origin_lat",
             "origin_lng",
             "origin_label",
+            # 사용자가 고른 값(null 은 출발지로 정함)과 그 결과.
+            "include_prep",
+            "prep_applies",
             "alarm_enabled",
             "alarm_on",
             "is_first_alarm",
             "alarm_plan",
             "created_at",
         )
-        read_only_fields = ("id", "source", "external_id", "created_at")
+        read_only_fields = ("id", "source", "external_id", "prep_applies", "created_at")
 
     def get_place(self, obj):
         if not obj.destination_is_home:
@@ -351,6 +354,7 @@ class EventWriteSerializer(serializers.ModelSerializer):
             "origin_lat",
             "origin_lng",
             "origin_label",
+            "include_prep",
         )
         read_only_fields = ("id",)
 

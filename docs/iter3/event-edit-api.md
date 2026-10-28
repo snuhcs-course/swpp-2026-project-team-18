@@ -24,6 +24,7 @@
 | `tag_key` | 태그 key | `null` 또는 `""` → 태그 없음 | 없는 key 는 400 |
 | `tau_override` | 0.5 ~ 0.999 | `null` → 태그 기본값, 없으면 프로필 기본값 | |
 | `alarm_enabled` | `true` / `false` | `null` → 자동(하루 첫 알람) | |
+| `include_prep` | `true` / `false` | `null` → 출발지로 정함(집이면 넣고 따로 골랐으면 뺌) | 준비 시간을 알람에 넣을지. [include-prep-api.md](include-prep-api.md) |
 | `repeat_weekdays` | | | **보내면 400.** 반복 규칙은 생성할 때만 정한다 |
 
 출발지·목적지가 50m 안이면 400이다(생성과 같은 규칙, 도착 판정 반경). 장소·출발지 필드를 보낼 때만
@@ -45,7 +46,7 @@
 | 실제로 바뀐 것 | 알람 계획 | 카카오 경로 호출 |
 | --- | --- | --- |
 | 출발지·목적지 좌표, `route_key` | 경로부터 다시 계산 | 1~2회 |
-| `start_at`, τ(`tau_override`·태그 기본값), 출발지를 따로 골랐는지 | 지금 경로 소요시간으로 다시 계산 | 0회 |
+| `start_at`, τ(`tau_override`·태그 기본값), 준비 시간을 넣는지(`include_prep`·출발지, [include-prep-api.md](include-prep-api.md)) | 지금 경로 소요시간으로 다시 계산 | 0회 |
 | `title`, `origin_label`, `alarm_enabled` | 그대로 | 0회 |
 
 - **시각만 바꾸면 경로를 다시 조회하지 않는다.** 카카오 경로 조회는 출발 시각을 받지 않아

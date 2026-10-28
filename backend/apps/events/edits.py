@@ -4,7 +4,7 @@
 | 실제로 바뀐 것 | 계획 | 카카오 호출 |
 | --- | --- | --- |
 | 출발지·목적지 좌표, 고른 경로(`route_key`) | 경로부터 다시 계산(`compute_and_store`) | 1~2회 |
-| 시작 시각, τ(`tau_override`·태그 기본값), 출발지를 따로 골랐는지 | 지금 경로 원값으로 다시 섞기(`refresh.refresh_edited`) | 0회 |
+| 시작 시각, τ(`tau_override`·태그 기본값), 준비 시간을 넣는지(`Event.prep_applies`) | 지금 경로 원값으로 다시 섞기(`refresh.refresh_edited`) | 0회 |
 | 제목, 출발지 이름, 알람 켬/끔 | 그대로 | 0회 |
 
 **보낸 필드가 아니라 값으로 비교한다.** 수정 화면이 모든 필드를 함께 보내도 실제로 바뀐
@@ -58,8 +58,8 @@ def plan_inputs(event: Event) -> PlanInputs:
         model=(
             event.start_at,
             event.effective_tau,
-            # 출발지를 따로 골랐으면 준비 시간을 넣지 않는다(`services.estimate_components`).
-            event.origin_lat is None,
+            # `include_prep` 와 출발지로 정한다. 둘이 바뀌어도 결과가 같으면 다시 섞지 않는다.
+            event.prep_applies,
         ),
     )
 

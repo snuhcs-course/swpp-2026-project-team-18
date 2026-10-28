@@ -325,17 +325,16 @@ def estimate_components(
     ``prep_inputs(event.user_id)``; pass it when computing many events of one user.
     """
     profile = event.user.profile
-    # **집에서 출발하지 않는 일정은 준비 시간이 해당되지 않는다.**
+    # **준비 단계가 없는 일정은 준비 시간을 넣지 않는다.**
     #
-    # 준비 시간은 집에서 씻고 옷을 입고 나서는 시간이다. 이미 밖에 있는 사람이
-    # 다음 일정으로 갈 때는 그 항목이 없다. `origin_lat` 이 있다는 것 자체가
-    # "이 일정만의 출발지를 따로 골랐다" 는 뜻이므로(`Event.resolve_origin`)
-    # 그것을 신호로 쓴다. 좌표를 집과 비교하지 않는 이유는, 사용자가 집 근처
-    # 카페를 골랐어도 그건 집이 아니고 준비 단계도 아니기 때문이다.
+    # 준비 시간은 씻고 옷을 입고 나서는 시간이다. 이미 밖에 있는 사람이 다음
+    # 일정으로 갈 때는 그 항목이 없다. 기본은 출발지를 따로 골랐으면 빼고, 사용자가
+    # 일정마다 넣거나 뺄 수 있다(친구 집에서 자고 출발하는 아침). 규칙은
+    # `Event.prep_applies` 다.
     #
     # `None` 을 넘긴다. 0분으로 만들어 넘기면 정시 도착 확률이 영영 안 나오고
     # 화면이 "준비 시간 0분" 을 그린다 — `compute_alarm_math` 의 설명 참고.
-    if event.origin_lat is not None:
+    if not event.prep_applies:
         prep = None
     else:
         observations, gps_samples = inputs or prep_inputs(event.user_id)

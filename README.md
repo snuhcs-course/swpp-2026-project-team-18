@@ -102,6 +102,9 @@ make the screen look finished while being untrue.
   change recomputes without a new route lookup, a place or route change looks the route up
   again; contract in [docs/iter3/event-edit-api.md](docs/iter3/event-edit-api.md)), but the
   app has no edit screen
+- Preparation time when leaving from somewhere other than home — the server takes
+  `include_prep` per event ([docs/iter3/include-prep-api.md](docs/iter3/include-prep-api.md)),
+  but the app has no switch for it yet
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
 - User-defined tags (BE-21) and sleep-time calculation (BE-22)
 - Encrypted token storage — tokens sit in plain SharedPreferences; required before a

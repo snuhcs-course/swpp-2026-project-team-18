@@ -4,9 +4,10 @@
 일정으로 갈 때는 그 항목이 없다. 그런데 계산기는 출발지와 무관하게 늘 준비
 시간을 넣고 있었다.
 
-신호는 `Event.origin_lat` 이다. 그 필드가 있다는 것 자체가 "이 일정만의 출발지를
+기본 신호는 `Event.origin_lat` 이다. 그 필드가 있다는 것 자체가 "이 일정만의 출발지를
 따로 골랐다" 는 뜻이다(`Event.resolve_origin`). 좌표를 집과 비교하지 않는다 —
-집 근처 카페를 골랐어도 그건 집이 아니고 준비 단계도 아니다.
+집 근처 카페를 골랐어도 그건 집이 아니고 준비 단계도 아니다. 사용자가 일정마다
+`include_prep` 로 덮을 수 있다(`TestIncludePrep`, `Event.prep_applies`).
 
 ## 0 으로 만들어 넘기면 안 되는 이유
 
@@ -199,3 +200,57 @@ class TestMathWithoutPrep:
         assert math_.prep_minutes > 0
         assert math_.confidence_basis == "observed"
         assert math_.prep_source == "declared_range"
+
+
+# Partly AI-generated (Claude)
+class TestIncludePrep:
+    """사용자가 일정마다 준비 시간을 넣거나 뺀다(`Event.include_prep`).
+
+    출발지를 따로 골랐어도 그곳에서 자고 나서는 아침(친구 집·숙소)은 준비를 한다.
+    빼면 알람이 준비 시간만큼 늦게 울린다.
+    """
+
+    AWAY = {"origin_lat": 37.4979, "origin_lng": 127.0276, "origin_label": "친구 집"}
+
+    @pytest.mark.parametrize("include_prep,own_origin,expected", [
+        (None, False, True),
+        (None, True, False),
+        (True, True, True),
+        (True, False, True),
+        (False, False, False),
+        (False, True, False),
+    ])
+    def test_prep_applies(self, include_prep, own_origin, expected):
+        event = Event(include_prep=include_prep)
+        if own_origin:
+            event.origin_lat, event.origin_lng = 37.4979, 127.0276
+        assert event.prep_applies is expected
+
+    def test_away_origin_can_include_prep(self, user, place):
+        plan = services.compute_and_store(make_event(user, place, include_prep=True, **self.AWAY))
+        assert plan.prep_minutes == 30
+        assert plan.prep_source == "onboarding"
+        assert plan.depart_by - plan.alarm_at == timedelta(minutes=30)
+
+    def test_away_with_prep_matches_home_except_the_route(self, user, place):
+        """준비는 집 출발과 같은 값이다. 경로(여기서는 고정)만 출발지를 따른다."""
+        home = services.compute_and_store(make_event(user, place))
+        away = services.compute_and_store(make_event(user, place, include_prep=True, **self.AWAY))
+        assert away.alarm_at == home.alarm_at
+        assert away.prep_minutes == home.prep_minutes
+
+    def test_away_with_prep_uses_blocks(self, user, place):
+        from apps.routines.models import RoutineBlock
+
+        RoutineBlock.objects.create(
+            user=user, name="샤워", default_min_minutes=12, default_max_minutes=18, order=0
+        )
+        plan = services.compute_and_store(make_event(user, place, include_prep=True, **self.AWAY))
+        assert [row["name"] for row in plan.prep_breakdown] == ["샤워"]
+
+    def test_home_can_drop_prep(self, user, place):
+        plan = services.compute_and_store(make_event(user, place, include_prep=False))
+        assert plan.prep_minutes == 0
+        assert plan.prep_source == estimators.PREP_SOURCE_NOT_FROM_HOME
+        assert plan.prep_breakdown == []
+        assert plan.alarm_at == plan.depart_by
