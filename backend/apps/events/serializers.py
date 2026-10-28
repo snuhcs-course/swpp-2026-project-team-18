@@ -216,13 +216,18 @@ class EventSerializer(serializers.ModelSerializer):
             # 사용자가 고른 값(null 은 출발지로 정함)과 그 결과.
             "include_prep",
             "prep_applies",
+            # "안 감" 표시. 바꾸는 곳은 `POST/DELETE /api/events/{id}/skip` 뿐이다.
+            "skipped",
+            "skipped_at",
             "alarm_enabled",
             "alarm_on",
             "is_first_alarm",
             "alarm_plan",
             "created_at",
         )
-        read_only_fields = ("id", "source", "external_id", "prep_applies", "created_at")
+        read_only_fields = (
+            "id", "source", "external_id", "prep_applies", "skipped", "skipped_at", "created_at",
+        )
 
     def get_place(self, obj):
         if not obj.destination_is_home:

@@ -40,6 +40,9 @@
 
 집에서 출발하지 않는 일정(`prep_source == not_from_home`)은 준비 단계가 **해당되지
 않는다.** 그 일정의 `prep_over` 는 None 이지만 "측정 못 함" 으로 세지 않는다.
+
+사용자가 "안 감" 으로 표시한 일정(`Event.skipped_at`)은 아예 세지 않는다. 일정 수·
+측정 못 함·정시율·캘리브레이션 어디에도 들어가지 않고 `skipped_count` 로만 나간다.
 """
 
 from __future__ import annotations
@@ -318,13 +321,19 @@ def collect_outcomes(
 
     도착 관측이 없는 일정도 목록에 담는다. 캘리브레이션은 제외하지만, "관측이
     없어서 셀 수 없는 아침이 몇 번" 을 보여주는 것이 정직하다.
+
+    **"안 감" 으로 표시한 일정은 뺀다**(`Event.skipped_at`). 안 간 아침은 측정
+    실패가 아니고, 그날 관측은 실제 등굣길이 아니다. 버퍼 조정(`planning.buffers`)도
+    이 함수를 쓰므로 같이 빠진다. 주간 리포트는 따로 센다(`skipped_count`).
     """
     now = timezone.now()
     start = since or (now - timedelta(days=DEFAULT_LOOKBACK_DAYS))
     end = min(until or now, now)
 
     events = (
-        Event.objects.filter(user=user, start_at__gte=start, start_at__lte=end)
+        Event.objects.filter(
+            user=user, start_at__gte=start, start_at__lte=end, skipped_at__isnull=True,
+        )
         .select_related("alarm_plan", "tag", "user__profile")
         .prefetch_related(
             Prefetch(
@@ -674,6 +683,8 @@ def weekly(user, *, anchor: date | None = None) -> dict:
         "arrived_count": len(arrived),
         # 결과를 알 수 없는 아침 수. 숨기면 정시율이 실제보다 좋아 보인다.
         "unobserved_count": len(outcomes) - len(arrived),
+        # "안 감" 으로 표시한 지난 일정 수. 위 모든 수에서 빠져 있다.
+        "skipped_count": _skipped_count(user, start, end),
         "on_time_count": len(on_time),
         "late_count": len(late),
         "on_time_rate": on_time_rate,
@@ -700,6 +711,18 @@ def weekly(user, *, anchor: date | None = None) -> dict:
             for o in outcomes
         ],
     }
+
+
+# Partly AI-generated (Claude)
+def _skipped_count(user, start: datetime, end: datetime) -> int:
+    """`[start, end)` 의 지난 일정 중 "안 감" 으로 표시한 수. 기준은 `collect_outcomes` 와 같다."""
+    return Event.objects.filter(
+        user=user,
+        start_at__gte=start,
+        start_at__lt=end,
+        start_at__lte=timezone.now(),
+        skipped_at__isnull=False,
+    ).count()
 
 
 # Partly AI-generated (Claude)

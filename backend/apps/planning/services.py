@@ -71,8 +71,9 @@ def _block_observation_stats(user_id: int) -> dict[int, tuple[float, float, int]
     """
     from apps.routines.models import BlockObservation
 
-    # 출발 뒤에 찍힌 기록은 이동 시간이 섞여 있다(`prep_observations`).
-    qs = prep_observations.exclude_after_departure(
+    # 안 간 일정의 기록, 출발 뒤에 찍힌 기록, 신고 범위에서 크게 벗어난 기록은 뺀다
+    # (`prep_observations.usable_block_observations`).
+    qs = prep_observations.usable_block_observations(
         BlockObservation.objects.filter(user_id=user_id)
     ).values("block_id")
     try:

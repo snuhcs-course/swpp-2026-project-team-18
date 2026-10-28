@@ -6,6 +6,7 @@
   3. **다른 사용자의 일정이 보이지 않는다** (사용자 스코프)
   4. 집 위치가 없으면 알람 계획이 NO_HOME 이다
   5. 집 위치를 설정하면 알람이 계산되고 확률은 null 로 남는다
+  6. "안 감" 표시·되돌리기(두 번 눌러도 같다, 남의 일정은 404)
 
 서버가 떠 있어야 한다.
     .\\.venv\\Scripts\\python.exe scripts\\check_events_api.py
@@ -358,6 +359,21 @@ st, body = call("POST", "/api/events", {
 }, token=token_a)
 msg = ((body or {}).get("error") or {}).get("message")
 check("없는 태그 400", st == 400, f"status={st} message={msg!r}")
+
+# 19) "안 감" 표시와 되돌리기. B 는 A 의 일정을 표시할 수 없다. (Partly AI-generated (Claude))
+st, marked = call("POST", f"/api/events/{event_id}/skip", token=token_a)
+st_again, again = call("POST", f"/api/events/{event_id}/skip", token=token_a)
+check("안 감 표시 200, 알람 끔, 두 번 눌러도 같은 시각",
+      st == st_again == 200 and (marked or {}).get("skipped") is True
+      and (marked or {}).get("alarm_on") is False
+      and (again or {}).get("skipped_at") == (marked or {}).get("skipped_at"),
+      f"status={st}/{st_again} skipped={(marked or {}).get('skipped')} "
+      f"alarm_on={(marked or {}).get('alarm_on')}")
+st, _ = call("POST", f"/api/events/{event_id}/skip", token=token_b)
+check("B 가 A 일정 안 감 표시 시 404", st == 404, f"status={st}")
+st, undone = call("DELETE", f"/api/events/{event_id}/skip", token=token_a)
+check("안 감 되돌리기 200", st == 200 and (undone or {}).get("skipped") is False
+      and (undone or {}).get("skipped_at") is None, f"status={st} body={undone!r:.120}")
 
 print("=" * 74)
 print("요약")

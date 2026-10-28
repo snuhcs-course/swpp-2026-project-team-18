@@ -105,6 +105,9 @@ make the screen look finished while being untrue.
 - Preparation time when leaving from somewhere other than home — the server takes
   `include_prep` per event ([docs/iter3/include-prep-api.md](docs/iter3/include-prep-api.md)),
   but the app has no switch for it yet
+- Marking an event as not attended — the server takes `POST/DELETE /api/events/{id}/skip`
+  and leaves those mornings out of reports, learning and alarms
+  ([docs/iter3/skip-event-api.md](docs/iter3/skip-event-api.md)), but the app has no button for it yet
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
 - User-defined tags (BE-21) and sleep-time calculation (BE-22)
 - Encrypted token storage — tokens sit in plain SharedPreferences; required before a
@@ -343,14 +346,15 @@ the 0.3.0 features and whether `routes/live` is deployed; it is being extended),
 ## API
 
 Everything is under `/api/`. Requests carry `Authorization: Bearer <access>` except
-health, password check, sign-up, token and refresh.
+health, password check, sign-up, token, refresh, social sign-in and logout (the refresh
+token in the body is the credential).
 
 | Area | Endpoints |
 | --- | --- |
 | Health | `GET health` — version and real-time availability |
-| Auth | `POST auth/password/check` · `POST auth/register` · `POST auth/token` · `POST auth/token/refresh` · `GET auth/me` · `POST auth/social/{kakao,google}` · `POST DELETE auth/me/social/{provider}` |
+| Auth | `POST auth/password/check` · `POST auth/register` · `POST auth/token` · `POST auth/token/refresh` · `POST auth/logout` · `POST auth/me/logout-all` · `GET auth/me` · `POST auth/social/{kakao,google}` · `POST DELETE auth/me/social/{provider}` |
 | Profile | `GET PATCH PUT profile` — home, prep time, default τ. A new home or prep time recomputes up to 50 future events |
-| Events | `GET POST events` · `GET PATCH DELETE events/{id}` · `GET events/{id}/risk-options` · `POST events/{id}/recompute` · `POST events/import` · `GET events/tags` · `GET PUT events/{id}/blocks` |
+| Events | `GET POST events` · `GET PATCH DELETE events/{id}` · `GET events/{id}/risk-options` · `POST events/{id}/recompute` · `POST DELETE events/{id}/skip` · `POST events/import` · `GET events/tags` · `GET PUT events/{id}/blocks` |
 | Places | `GET places/search` · `GET places/staticmap` · `GET places/reverse` |
 | Routes | `GET routes/candidates` · `POST routes/live` (from the current position, while moving) |
 | Observations | `POST observations/batch` · `GET observations` · `POST alarm-logs/batch` |

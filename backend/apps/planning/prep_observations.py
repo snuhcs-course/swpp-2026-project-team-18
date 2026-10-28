@@ -20,11 +20,28 @@ GPS 출발(`TripObservation`, kind=depart, detector=gps)은 사용자가 아무�
 (`estimators.estimate_prep`). 대신 **같은 일정의 GPS 출발보다 늦게 찍힌 블록
 기록은 학습에서 뺀다.** 출발 관측이 블록 기록보다 늦게 올라올 수 있어서 업로드
 때 거절하지 않고, 학습할 때 거른다.
+
+## 학습에서 빼는 블록 기록 (`usable_block_observations`)
+
+| 조건 | 이유 |
+| --- | --- |
+| 일정을 "안 감" 으로 표시했다 | 그날 아침은 등교 준비가 아니다 |
+| 같은 일정의 GPS 출발보다 늦게 찍혔다 | 나간 뒤에 눌러 이동 시간이 섞였다 |
+| 블록 신고 범위의 0.25배 미만·4배 초과 | 누르는 걸 잊었다가 한참 뒤에 눌렀거나 안 한 블록을 바로 눌렀다 |
+
+세 번째는 GPS 출발이 아예 잡히지 않은 아침을 위한 것이다. 출발 관측이 없으면
+두 번째 조건이 아무것도 거르지 못한다. 기준은 이동 시간 학습의 실제/예측 비율
+(0.25~4)과 같은 폭이고, 신고 범위의 양 끝에 건다. 신고가 틀렸어도(5~10분이라
+했는데 실제로는 25분) 실제 값이 버려지지 않을 만큼 넓다.
+
+리포트(`reports.services`)는 이 조건으로 거르지 않는다. 사용자가 누른 기록은 그대로
+보여 주고, 알람과 학습만 거른다. "안 감" 일정은 리포트에서도 빠진다.
 """
 
 from __future__ import annotations
 
-from django.db.models import Exists, OuterRef
+from django.db.models import Exists, ExpressionWrapper, F, FloatField, OuterRef, Value
+from django.db.models.functions import Greatest
 
 # 사용자의 예상 준비 시간 대비 이 비율 밖이면 판정 오류로 본다. 이동 시간 학습의
 # 실제/예측 비율 기준(`routing.models.MIN_FACTOR/MAX_FACTOR`)과 같다.
@@ -51,6 +68,13 @@ GPS_PREP_MAX_ACCURACY_M = 150.0
 # 최근 몇 번의 아침만 볼지. 습관이 바뀌면 오래된 아침이 알람을 끌고 가지 않게 한다.
 GPS_PREP_MAX_SAMPLES = 30
 
+# 블록 기록이 블록 신고 범위(최소~최대)의 이 비율 밖이면 학습에서 뺀다. 위 GPS 기준과
+# 같은 폭이다. 하한은 신고 최소의 0.25배, 상한은 신고 최대의 4배다.
+BLOCK_MIN_RATIO = 0.25
+BLOCK_MAX_RATIO = 4.0
+# 신고 최대가 0분인 블록도 상한이 0 이 되지 않게 이 값 아래로 내리지 않는다.
+BLOCK_RATIO_FLOOR_MINUTES = 1
+
 
 def exclude_after_departure(qs):
     """블록 기록 쿼리셋에서 같은 일정의 GPS 출발 **뒤에** 찍힌 기록을 뺀다.
@@ -67,6 +91,29 @@ def exclude_after_departure(qs):
         observed_at__lt=OuterRef("client_recorded_at"),
     )
     return qs.filter(~Exists(departed_before))
+
+
+def exclude_skipped(qs):
+    """관측 쿼리셋에서 "안 감" 으로 표시한 일정의 것을 뺀다. 일정이 없는 기록은 둔다."""
+    return qs.exclude(event__skipped_at__isnull=False)
+
+
+def within_block_range(qs):
+    """블록 기록 쿼리셋에서 블록 신고 범위의 0.25~4배 밖인 기록을 뺀다."""
+    low = ExpressionWrapper(
+        F("block__default_min_minutes") * BLOCK_MIN_RATIO, output_field=FloatField()
+    )
+    high = ExpressionWrapper(
+        Greatest(F("block__default_max_minutes"), Value(BLOCK_RATIO_FLOOR_MINUTES))
+        * BLOCK_MAX_RATIO,
+        output_field=FloatField(),
+    )
+    return qs.filter(duration_minutes__gte=low, duration_minutes__lte=high)
+
+
+def usable_block_observations(qs):
+    """알람·학습에 쓸 블록 기록. 머리말 표의 세 조건을 모두 건다."""
+    return within_block_range(exclude_after_departure(exclude_skipped(qs)))
 
 
 def within_expected(samples: list[float], expected_minutes: float) -> list[float]:
@@ -91,6 +138,7 @@ def gps_prep_samples(user_id: int) -> list[float]:
       - 출발지를 따로 고른 일정. 집에서 준비하고 나간 아침이 아니다(친구 집에서
         자고 준비를 넣은 아침도. 남의 집 준비는 평소 준비와 다르다)
       - 사용자가 준비를 뺀 일정(`include_prep` false). 준비하지 않고 나간 아침이다
+      - "안 감" 으로 표시한 일정. 나갔다 돌아왔거나 다른 데 간 아침이다
       - 오차 반경이 150m 를 넘는 출발 fix
       - 출발 전에 끈 기록이 없는 일정(알람 없이 나갔거나 기록이 안 올라옴)
       - 1분 미만·6시간 초과(짝이 잘못된 것)
@@ -106,6 +154,7 @@ def gps_prep_samples(user_id: int) -> list[float]:
             event__origin_lat__isnull=True,
         )
         .exclude(event__include_prep=False)
+        .exclude(event__skipped_at__isnull=False)
         .order_by("event_id", "observed_at")
         .values_list("event_id", "observed_at")
     )

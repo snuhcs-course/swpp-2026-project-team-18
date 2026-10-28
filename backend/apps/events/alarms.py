@@ -44,13 +44,16 @@ def reset_alarm_overrides(event: Event) -> None:
 
 
 def alarm_states(user) -> dict[int, tuple[bool, bool]]:
-    """id → (alarm_on, is_first_alarm). 계산 불가·명시적 OFF는 제외한다."""
+    """id → (alarm_on, is_first_alarm). 계산 불가·명시적 OFF·"안 감" 은 제외한다.
+
+    안 가는 일정은 울리지 않고, 그날 다음 일정이 첫 알람이 된다.
+    """
     tz = user_timezone(user)
 
     events = (
         Event.objects.filter(
             user=user, alarm_plan__status=AlarmPlan.Status.OK,
-            alarm_plan__alarm_at__isnull=False,
+            alarm_plan__alarm_at__isnull=False, skipped_at__isnull=True,
         )
         .exclude(alarm_enabled=False)
         .order_by("alarm_plan__alarm_at", "id")

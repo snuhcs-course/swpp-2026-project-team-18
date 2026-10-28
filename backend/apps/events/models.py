@@ -231,6 +231,15 @@ class Event(models.Model):
     include_prep = models.BooleanField(
         "준비 시간 포함", null=True, blank=True, default=None, db_default=None
     )
+    # 사용자가 "안 감" 으로 표시한 시각. null 이면 가는 일정이다.
+    #
+    # 안 간 아침은 도착 기록이 없어서 리포트에 "측정 못 함" 으로 섞이고, 그날 눌린
+    # 블록 기록·출발 관측은 실제 등굣길이 아니다. 표시한 일정은 리포트와 학습에서
+    # 빼고 알람도 울리지 않는다(`skipped`). 계획은 지우지 않는다 — 표시를 되돌리면
+    # 그대로 다시 쓴다. API 는 `POST/DELETE /api/events/{id}/skip`.
+    skipped_at = models.DateTimeField(
+        "안 감 표시 시각", null=True, blank=True, default=None, db_default=None
+    )
 
     created_at = models.DateTimeField("생성 시각", auto_now_add=True)
     updated_at = models.DateTimeField("수정 시각", auto_now=True)
@@ -312,6 +321,12 @@ class Event(models.Model):
         if self.include_prep is not None:
             return self.include_prep
         return self.origin_lat is None
+
+    # Partly AI-generated (Claude)
+    @property
+    def skipped(self) -> bool:
+        """사용자가 "안 감" 으로 표시했는가(`skipped_at`)."""
+        return self.skipped_at is not None
 
     def resolve_destination(self, profile) -> tuple[float, float, str] | None:
         """현재 목적지. 집은 프로필을 따르며 Place 행을 만들지 않는다."""

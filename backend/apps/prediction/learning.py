@@ -31,6 +31,8 @@ SQLite 에는 `STDDEV` 집계가 없다. `django.db.models.StdDev` 는 Postgres 
 | 결정 시점 경로 원값이 없다 | 현재 보정값을 다시 학습하면 중복 보정이 됨 |
 | 실제 소요가 0분 | 출발·도착이 같은 fix 로 판정됐다 |
 | 블록 기록이 같은 일정의 GPS 출발보다 늦다 | 나간 뒤에 눌러 이동 시간이 섞였다 |
+| 블록 기록이 블록 신고 범위의 0.25배 미만·4배 초과 | 누르는 걸 잊었거나 안 한 블록을 눌렀다 |
+| 일정을 "안 감" 으로 표시했다(`Event.skipped_at`) | 그날은 등굣길·등교 준비가 아니다 |
 | 출발·도착을 직접 눌렀다(`manual`) | 누른 시각이 실제보다 늦기 쉽다. 리포트에만 쓴다 |
 """
 
@@ -43,11 +45,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone as dj_tz
 
 from apps.planning import history
 from apps.planning.models import AlarmPlan
-from apps.planning.prep_observations import exclude_after_departure
+from apps.planning.prep_observations import usable_block_observations
 from apps.routing.models import (
     GLOBAL_SIGNATURE,
     MAX_FACTOR,
@@ -109,7 +112,9 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
     """
     from apps.observations.models import TripObservation
 
-    qs = TripObservation.objects.order_by("event_id", "observed_at", "id")
+    qs = TripObservation.objects.annotate(event_skipped_at=F("event__skipped_at")).order_by(
+        "event_id", "observed_at", "id"
+    )
     if user is not None:
         qs = qs.filter(user=user)
 
@@ -117,6 +122,10 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
     dropped: dict[str, int] = defaultdict(int)
 
     for obs in qs:
+        # 안 간 일정의 출발·도착은 등굣길이 아니다(나갔다 돌아왔거나 다른 데 갔다).
+        if obs.event_skipped_at is not None:
+            dropped["안 감"] += 1
+            continue
         # 직접 누른 판정은 학습에 쓰지 않는다. 누른 시각이 실제보다 늦기 쉬워
         # 이동 시간이 길게 학습된다. 리포트 채점에만 보조로 쓴다(`observations.selection`).
         if obs.detector != TripObservation.Detector.GPS:
@@ -254,7 +263,7 @@ def block_stats(user=None) -> dict[str, dict]:
     """
     from apps.routines.models import BlockObservation
 
-    qs = exclude_after_departure(BlockObservation.objects.select_related("block"))
+    qs = usable_block_observations(BlockObservation.objects.select_related("block"))
     if user is not None:
         qs = qs.filter(user=user)
 
@@ -292,7 +301,7 @@ def estimate_slack_coef(user=None) -> float | None:
     """
     from apps.routines.models import BlockObservation
 
-    qs = exclude_after_departure(BlockObservation.objects.filter(slack_minutes__isnull=False))
+    qs = usable_block_observations(BlockObservation.objects.filter(slack_minutes__isnull=False))
     if user is not None:
         qs = qs.filter(user=user)
 
@@ -327,7 +336,7 @@ def prep_total_stats(user=None) -> dict:
     """
     from apps.routines.models import BlockObservation
 
-    qs = exclude_after_departure(BlockObservation.objects.filter(was_parallel=False))
+    qs = usable_block_observations(BlockObservation.objects.filter(was_parallel=False))
     if user is not None:
         qs = qs.filter(user=user)
 

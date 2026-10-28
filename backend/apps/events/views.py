@@ -173,6 +173,35 @@ class EventRecomputeView(_UserScopedMixin, APIView):
         return Response(EventSerializer(event, context={"request": request}).data)
 
 
+class EventSkipView(_UserScopedMixin, APIView):
+    """POST /api/events/{id}/skip — "안 감" 표시. DELETE — 표시 되돌리기.
+
+    표시한 일정은 리포트·학습에서 빠지고 알람이 울리지 않는다(`Event.skipped_at`).
+    계획과 관측은 지우지 않는다. 되돌리면 그대로 다시 쓰인다. 두 번 불러도 같다(처음
+    표시한 시각을 유지한다). 응답은 일정 객체다 — 같은 날 다음 일정이 첫 알람이 될 수
+    있어서 앱은 목록을 다시 받아 알람을 다시 건다. 계약은 docs/iter3/skip-event-api.md.
+    (Partly AI-generated (Claude))
+    """
+
+    def post(self, request, pk: int):
+        return self._mark(request, pk, timezone.now())
+
+    def delete(self, request, pk: int):
+        return self._mark(request, pk, None)
+
+    def _mark(self, request, pk: int, skipped_at):
+        qs = self.get_queryset().filter(pk=pk)
+        if not qs.exists():
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        # 조건부 update 라 동시에 두 번 와도 먼저 표시한 시각이 남는다.
+        if skipped_at is None:
+            qs.filter(skipped_at__isnull=False).update(skipped_at=None, updated_at=timezone.now())
+        else:
+            qs.filter(skipped_at__isnull=True).update(skipped_at=skipped_at, updated_at=skipped_at)
+        event = qs.get()
+        return Response(EventSerializer(event, context={"request": request}).data)
+
+
 class EventRiskOptionsView(_UserScopedMixin, APIView):
     """GET /api/events/{id}/risk-options. No upstream calls or plan mutations."""
 
