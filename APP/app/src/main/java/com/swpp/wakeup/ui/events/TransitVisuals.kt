@@ -225,7 +225,7 @@ internal fun bicycleMetrics(option: RouteOption): List<Pair<String, String>> = l
 
 // Partly AI-generated (Claude)
 /**
- * 카드 오른쪽 위 배지들("최단 시간", "최소 비용", "최소 환승"). 서버 문구 그대로.
+ * 카드 오른쪽 위 배지들("최단 시간", "최소 비용", "최소 환승", "최소 도보" 중 최대 3개). 서버 문구 그대로.
  * 목록 카드와 지도 미리보기가 같이 쓴다.
  */
 @Composable

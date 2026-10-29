@@ -92,7 +92,7 @@ data class RouteOption(
 /** 경로 선택 화면의 수단 탭. Figma 순서대로 둔다. */
 enum class RouteMode(val label: String, val candidateLimit: Int) {
     CAR("자동차", 4),
-    TRANSIT("대중교통", 3),
+    TRANSIT("대중교통", 5),
     WALK("도보", 1),
     BICYCLE("자전거", 1),
 }

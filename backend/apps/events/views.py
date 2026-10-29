@@ -818,7 +818,7 @@ class RouteCandidateView(APIView):
        사용을 제한하지 않으면서, 전 세계 경로 프록시로 쓰이는 길을 막는다.
 
     카카오는 대중교통 후보를 항상 15개 주는데 대부분 같은 버스의 다른 환승
-    조합이다. `clients.route_candidates()` 가 대중교통 대표를 최대 3개로 추린다.
+    조합이다. `clients.route_candidates()` 가 대중교통 대표를 최대 5개로 추린다.
     응답은 수단별 목록과 구버전 앱용 `results`를 함께 제공한다.
 
     **호출 비용** — 한 번에 외부 API 를 최대 4번 부른다. 사용자가 일정 추가

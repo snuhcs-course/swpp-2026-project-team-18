@@ -93,7 +93,7 @@ def valid_transit_badges(candidate: dict) -> bool:
     badges = candidate.get("badges")
     if not isinstance(badges, list):
         return False
-    allowed = {"최단 시간", "최소 비용", "최소 환승"}
+    allowed = {"최단 시간", "최소 비용", "최소 환승", "최소 도보"}
     if any(not isinstance(badge, str) or badge not in allowed for badge in badges):
         return False
     return len(badges) == len(set(badges)) and candidate.get("reason") == (

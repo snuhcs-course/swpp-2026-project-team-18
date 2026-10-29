@@ -400,7 +400,7 @@ private fun RouteCard(
                 )
             }
             Spacer(Modifier.weight(1f))
-            // 배지는 여러 개일 수 있다("최단 시간", "최소 비용", "최소 환승"). 서버 문구 그대로.
+            // 배지는 최대 3개다("최단 시간", "최소 비용", "최소 환승", "최소 도보" 중). 서버 문구 그대로.
             RouteBadges(option.badges)
         }
         if (option.travelMode == RouteMode.BICYCLE) {

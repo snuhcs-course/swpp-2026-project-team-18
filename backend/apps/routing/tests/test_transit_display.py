@@ -10,7 +10,21 @@ from apps.routing import clients
 START, END = (37.48, 126.93), (37.50, 126.95)
 
 
-def route(name, seconds=1200, fare=1500, transfers=0, alternatives=(), distance=3000):
+def route(name, seconds=1200, fare=1500, transfers=0, alternatives=(), distance=3000, walk=0):
+    """버스 한 구간짜리 경로. `walk` 초만큼 환승 도보를 뒤에 붙인다(좌표가 없어 앞뒤 도보는 0)."""
+    steps = [
+        {
+            "properties": {
+                "type": "BUS",
+                "time": seconds - 120 - walk,
+                "vehicles": [{"name": name, "type": "지선"}, *alternatives],
+                "stops": [{"name": "승차 정류장"}, {"name": "하차 정류장"}],
+            },
+            "path": {"points": [[START[1], START[0]], [END[1], END[0]]]},
+        }
+    ]
+    if walk:
+        steps.append({"properties": {"type": "WALKING", "time": walk}})
     return {
         "properties": {
             "totalTime": seconds,
@@ -18,17 +32,7 @@ def route(name, seconds=1200, fare=1500, transfers=0, alternatives=(), distance=
             "transfers": transfers,
             "fare": {"value": fare},
         },
-        "steps": [
-            {
-                "properties": {
-                    "type": "BUS",
-                    "time": seconds - 120,
-                    "vehicles": [{"name": name, "type": "지선"}, *alternatives],
-                    "stops": [{"name": "승차 정류장"}, {"name": "하차 정류장"}],
-                },
-                "path": {"points": [[START[1], START[0]], [END[1], END[0]]]},
-            }
-        ],
+        "steps": steps,
     }
 
 
@@ -48,7 +52,8 @@ def candidates(upstream, routes):
 
 
 def test_one_candidate_can_satisfy_all_three_criteria(upstream):
-    items = candidates(upstream, [route("5511"), route("501", 1800, 1800, 1)])
+    # 네 기준을 모두 만족해도 배지는 카드 한 줄에 들어가는 3개까지다.
+    items = candidates(upstream, [route("5511"), route("501", 1500, 1800, 1, walk=300)])
     assert items["5511"]["badges"] == ["최단 시간", "최소 비용", "최소 환승"]
     assert items["5511"]["reason"] == "최단 시간"
     assert items["501"]["badges"] == []
@@ -57,9 +62,11 @@ def test_one_candidate_can_satisfy_all_three_criteria(upstream):
 
 
 def test_same_winner_does_not_give_cheapest_badge_to_runner_up(upstream):
-    items = candidates(upstream, [route("A", 1200, 1000, 1), route("B", 1800, 2000, 0)])
+    items = candidates(
+        upstream, [route("A", 1200, 1000, 1, walk=300), route("B", 1800, 2000, 0)]
+    )
     assert items["A"]["badges"] == ["최단 시간", "최소 비용"]
-    assert items["B"]["badges"] == ["최소 환승"]
+    assert items["B"]["badges"] == ["최소 환승", "최소 도보"]
 
 
 def test_fewest_transfers_works_without_a_direct_route(upstream):
@@ -100,7 +107,7 @@ def test_unknown_fare_is_not_zero_or_the_cheapest(upstream):
 
 
 def test_known_zero_fare_is_a_valid_cheapest_candidate(upstream):
-    items = candidates(upstream, [route("A", fare=0), route("B", 1800, 1500)])
+    items = candidates(upstream, [route("A", fare=0), route("B", 1500, 1500)])
     assert "최소 비용" in items["A"]["badges"]
     assert "최소 비용" not in items["B"]["badges"]
 
