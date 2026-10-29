@@ -453,6 +453,8 @@ private fun MainHost(
                     onMorningClick = viewModel::openMorning,
                     onRetry = viewModel::refresh,
                     modifier = Modifier.padding(innerPadding),
+                    onMissedTrackClick = viewModel::startMissedAlarmTracking,
+                    onMissedDismiss = viewModel::dismissMissedAlarm,
                 )
 
                 is AppRoute.AlarmDecision -> {
