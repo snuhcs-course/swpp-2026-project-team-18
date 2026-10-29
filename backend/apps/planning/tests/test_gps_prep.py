@@ -168,11 +168,16 @@ class TestWithinExpected:
     """고정 분이 아니라 사용자의 예상 준비 시간 대비 비율로 거른다."""
 
     def test_ratio_window_follows_the_user(self):
-        # 평소 20분인 사람: 5~80분만 믿는다
-        assert prep_observations.within_expected([4.0, 5.0, 80.0, 81.0], 20.0) == [5.0, 80.0]
-        # 평소 90분인 사람: 같은 200분도 믿는다
-        assert prep_observations.within_expected([200.0], 90.0) == [200.0]
-        assert prep_observations.within_expected([200.0], 20.0) == []
+        # 평소 20분인 사람: 10~30분만 믿는다
+        assert prep_observations.within_expected([9.0, 10.0, 30.0, 31.0], 20.0) == [10.0, 30.0]
+        # 평소 90분인 사람: 같은 120분도 믿는다
+        assert prep_observations.within_expected([120.0], 90.0) == [120.0]
+        assert prep_observations.within_expected([120.0], 20.0) == []
+
+    def test_window_is_half_to_one_and_a_half_of_the_set_value(self):
+        """사용자 10-29: 55분으로 정했으면 27.5~82.5분만 학습한다."""
+        samples = [150.0, 120.0, 83.0, 82.5, 60.0, 27.5, 27.0]
+        assert prep_observations.within_expected(samples, 55.0) == [82.5, 60.0, 27.5]
 
     def test_keeps_newest_and_caps(self, monkeypatch):
         monkeypatch.setattr(prep_observations, "GPS_PREP_MAX_SAMPLES", 2)
@@ -192,9 +197,9 @@ class TestEstimatePrepWithGps:
     def test_samples_pull_onboarding_value_and_add_variance(self, user, place):
         """온보딩 값 하나뿐이던 사용자도 GPS 아침이 쌓이면 변동성이 생긴다."""
         event = make_event(user, place, 10)
-        prep = estimators.estimate_prep(event, user.profile, 30, gps_samples=[40.0, 50.0, 45.0])
-        # w = 3 / (3 + 3) = 0.5 → 평균은 30 과 45 의 가운데
-        assert prep.distribution.mean == pytest.approx(37.5)
+        prep = estimators.estimate_prep(event, user.profile, 30, gps_samples=[40.0, 44.0, 42.0])
+        # w = 3 / (3 + 3) = 0.5 → 평균은 30 과 42 의 가운데
+        assert prep.distribution.mean == pytest.approx(36.0)
         assert prep.has_variance
         assert prep.source == "observed"
 
@@ -203,11 +208,31 @@ class TestEstimatePrepWithGps:
         assert estimators.GPS_PREP_SHRINKAGE_K < estimators.BLOCK_SHRINKAGE_K
 
     def test_far_off_mornings_do_not_move_the_estimate(self, user, place):
-        """온보딩 30분인 사람의 5분·150분 아침은 판정 오류로 보고 버린다."""
+        """온보딩 30분인 사람은 15~45분 밖의 아침을 버린다."""
         event = make_event(user, place, 10)
-        prep = estimators.estimate_prep(event, user.profile, 30, gps_samples=[5.0, 150.0])
+        prep = estimators.estimate_prep(
+            event, user.profile, 30, gps_samples=[5.0, 14.0, 46.0, 150.0]
+        )
         assert prep.distribution == Normal(30.0, 0.0)
         assert prep.source == "onboarding"
+
+    def test_set_value_not_inflated_records_decides_what_is_far_off(self, user, place):
+        """블록 기록이 사전값을 끌어올려도 GPS 아침은 정한 값(신고 범위) 기준으로 거른다.
+
+        샤워 20~30분(정한 값 평균 25분 → 37.5분까지)인데 45분 기록 5개로 사전값이 35분이 됐다.
+        섞은 값을 기준으로 쓰면 52.5분까지 통과해서 40분 아침이 다시 끌어올린다.
+        """
+        shower = RoutineBlock.objects.create(
+            user=user, name="샤워", default_min_minutes=20, default_max_minutes=30, order=0
+        )
+        event = make_event(user, place, 10)
+        observations = {shower.pk: (45.0, 0.0, 5)}
+        without = estimators.estimate_prep(event, user.profile, 30, observations, gps_samples=[])
+        prep = estimators.estimate_prep(
+            event, user.profile, 30, observations, gps_samples=[40.0] * 3
+        )
+        assert without.distribution.mean == pytest.approx(35.0)
+        assert prep.distribution.mean == pytest.approx(without.distribution.mean)
 
     def test_block_breakdown_is_rescaled_to_the_total(self, user, place):
         RoutineBlock.objects.create(
@@ -217,10 +242,10 @@ class TestEstimatePrepWithGps:
             user=user, name="옷 입기", default_min_minutes=10, default_max_minutes=10, order=1
         )
         event = make_event(user, place, 10)
-        prep = estimators.estimate_prep(event, user.profile, 30, gps_samples=[40.0] * 3)
-        # 사전 20분, GPS 40분, w=0.5 → 30분. 블록 비율(1:1)은 유지한다.
-        assert prep.distribution.mean == pytest.approx(30.0)
-        assert [row["minutes"] for row in prep.breakdown] == [15.0, 15.0]
+        prep = estimators.estimate_prep(event, user.profile, 30, gps_samples=[28.0] * 3)
+        # 사전 20분, GPS 28분, w=0.5 → 24분. 블록 비율(1:1)은 유지한다.
+        assert prep.distribution.mean == pytest.approx(24.0)
+        assert [row["minutes"] for row in prep.breakdown] == [12.0, 12.0]
         assert prep.block_count == 2
 
 
@@ -230,7 +255,7 @@ class TestAlarmUsesGps:
         assert before.prep_minutes == 30
 
         for day in (1, 2, 3, 4, 5, 6):
-            gps_morning(user, place, day, 50)
+            gps_morning(user, place, day, 42)
         after = services.compute_and_store(make_event(user, place, 21))
 
         assert after.prep_minutes > before.prep_minutes
@@ -246,7 +271,7 @@ class TestAlarmUsesGps:
 
     def test_away_morning_with_prep_uses_what_home_mornings_taught(self, user, place):
         for day in (1, 2, 3, 4, 5, 6):
-            gps_morning(user, place, day, 50)
+            gps_morning(user, place, day, 42)
         home = services.compute_and_store(make_event(user, place, 20))
         away = services.compute_and_store(make_event(
             user, place, 21, origin_lat=37.4979, origin_lng=127.0276, include_prep=True,

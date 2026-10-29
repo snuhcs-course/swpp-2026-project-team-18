@@ -221,10 +221,16 @@ def estimate_prep(
     (`prep_observations.gps_prep_samples`). 있으면 블록·온보딩 추정을 사전값으로
     두고 그쪽으로 끌어당긴다.
     """
-    return _with_gps_samples(
-        _estimate_prep_prior(event, profile, fallback_minutes, observations),
-        gps_samples or [],
+    prior = _estimate_prep_prior(event, profile, fallback_minutes, observations)
+    # GPS 아침을 거르는 기준은 사용자가 **정한** 값(블록 신고 범위·온보딩)이다. 블록 기록을
+    # 섞은 값을 기준으로 쓰면 잘못 누른 기록이 기준까지 끌어올려 걸러야 할 아침이 통과한다
+    # (사용자 10-29 "55분 세팅한 거에서 지나치게 벗어난 건 학습에서 제외").
+    declared = (
+        _estimate_prep_prior(event, profile, fallback_minutes, None)
+        if prior.source == "observed"
+        else prior
     )
+    return _with_gps_samples(prior, gps_samples or [], declared.distribution.mean)
 
 
 def _spread(d: dist.Distribution) -> float:
@@ -235,7 +241,9 @@ def _spread(d: dist.Distribution) -> float:
     return max(0.0, (d.quantile(0.8413) - d.quantile(0.1587)) / 2.0)
 
 
-def _with_gps_samples(prior: PrepEstimate, samples: list[float]) -> PrepEstimate:
+def _with_gps_samples(
+    prior: PrepEstimate, samples: list[float], expected_minutes: float | None = None
+) -> PrepEstimate:
     """GPS 출발 기준 실제 준비 시간으로 사전 추정을 갱신한다.
 
     섞는 방식은 블록 관측과 같은 shrinkage 다(`dist.blend`). k 만 작다.
@@ -247,9 +255,10 @@ def _with_gps_samples(prior: PrepEstimate, samples: list[float]) -> PrepEstimate
     블록 내역은 총시간 비율로 늘이거나 줄인다. 블록 기록은 "어디에 시간을
     썼나" 의 비율로만 남고, 총량은 GPS 쪽을 따른다.
     """
-    # 사용자의 예상 준비 시간 대비 터무니없는 아침은 뺀다. 기준은 GPS 를 섞기
-    # 전의 추정이다 — 섞은 값을 기준으로 쓰면 걸러진 표본이 다시 기준을 움직인다.
-    samples = within_expected(samples, prior.distribution.mean)
+    # 정한 준비 시간에서 크게 벗어난 아침은 뺀다. 기준은 GPS 를 섞기 전의 값이다 — 섞은
+    # 값을 기준으로 쓰면 걸러진 표본이 다시 기준을 움직인다.
+    expected = prior.distribution.mean if expected_minutes is None else expected_minutes
+    samples = within_expected(samples, expected)
     n = len(samples)
     if n == 0:
         return prior

@@ -3,7 +3,8 @@
 
 GPS 출발이 잡힌 아침은 출발 뒤에 누른 블록 기록을 이미 거른다. 출발이 아예 잡히지 않은
 아침에 "마침" 을 한참 뒤에 누르면(샤워 10~20분인데 95분) 그 값이 그대로 학습됐다. 기준은
-이동 시간 학습의 실제/예측 비율과 같은 폭으로, 신고 최소의 0.25배 ~ 신고 최대의 4배다.
+GPS 준비 시간과 같은 폭으로, 신고 최소의 0.5배 ~ 신고 최대의 1.5배다(사용자 10-29에 0.25~4배에서
+좁혔다).
 """
 
 from __future__ import annotations
@@ -57,11 +58,11 @@ def kept(qs=None) -> list[float]:
 
 
 class TestRange:
-    def test_bounds_are_a_quarter_of_min_and_four_times_max(self, user):
-        shower = block(user)  # 10~20분 → 2.5~80분
-        for minutes in (2.4, 2.5, 15, 80, 80.1):
+    def test_bounds_are_half_of_min_and_one_and_a_half_times_max(self, user):
+        shower = block(user)  # 10~20분 → 5~30분
+        for minutes in (4.9, 5, 15, 30, 30.1):
             record(user, shower, minutes)
-        assert kept() == [2.5, 15, 80]
+        assert kept() == [5, 15, 30]
 
     def test_forgot_to_press_and_pressed_right_away_are_dropped(self, user):
         shower = block(user)
@@ -73,23 +74,23 @@ class TestRange:
     def test_zero_minimum_has_no_lower_bound(self, user):
         coffee = block(user, "커피", lo=0, hi=10)
         record(user, coffee, 0)
-        record(user, coffee, 40)
-        record(user, coffee, 41)
-        assert kept() == [0, 40]
+        record(user, coffee, 15)
+        record(user, coffee, 16)
+        assert kept() == [0, 15]
 
     def test_zero_maximum_still_keeps_a_few_minutes(self, user):
-        """신고가 0~0분이어도 상한이 0 이 되지 않는다(최소 1분 기준, 4분까지)."""
+        """신고가 0~0분이어도 상한이 0 이 되지 않는다(최소 1분 기준, 1.5분까지)."""
         pill = block(user, "약", lo=0, hi=0)
-        for minutes in (0, 3, 4, 5):
+        for minutes in (0, 1, 1.5, 2):
             record(user, pill, minutes)
-        assert kept() == [0, 3, 4]
+        assert kept() == [0, 1, 1.5]
 
     def test_each_record_is_judged_by_its_own_block(self, user):
         shower = block(user)
         breakfast = block(user, "아침", lo=20, hi=40)
-        record(user, shower, 100)  # 샤워 상한 80분 밖
-        record(user, breakfast, 100)  # 아침 상한 160분 안
-        assert kept() == [100]
+        record(user, shower, 45)  # 샤워 상한 30분 밖
+        record(user, breakfast, 45)  # 아침 상한 60분 안
+        assert kept() == [45]
         assert prep_observations.usable_block_observations(
             BlockObservation.objects.all()
         ).get().block == breakfast
@@ -97,10 +98,10 @@ class TestRange:
     def test_widening_the_block_brings_records_back(self, user):
         """기준은 지금 신고 범위다. 범위를 고치면 그 기준으로 다시 본다."""
         breakfast = block(user, "아침", lo=5, hi=10)
-        record(user, breakfast, 45)
+        record(user, breakfast, 20)
         assert kept() == []
         RoutineBlock.objects.filter(pk=breakfast.pk).update(default_max_minutes=15)
-        assert kept() == [45]
+        assert kept() == [20]
 
 
 class TestWhereItApplies:
