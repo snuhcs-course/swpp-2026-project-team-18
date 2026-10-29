@@ -74,8 +74,12 @@ def preferred_route(user, dest_lat: float, dest_lng: float, candidates: list[dic
         (c for c in choices if _goes_to(c, profile, dest_lat, dest_lng)), None
     )
     if same is not None:
-        if any(candidate["key"] == same.key for candidate in candidates):
-            return _result(same.key, same.mode, SAME_DESTINATION)
+        # 버스 번호만 다른 경로는 한 후보로 합쳐 온다. 전에 고른 key 가 대표가 아니어도 그 후보다.
+        match = next(
+            (c for c in candidates if same.key in (c.get("member_keys") or [c["key"]])), None
+        )
+        if match is not None:
+            return _result(match["key"], same.mode, SAME_DESTINATION)
         fastest = _fastest(by_mode.get(same.mode))
         if fastest is not None:
             return _result(fastest["key"], same.mode, SAME_DESTINATION)

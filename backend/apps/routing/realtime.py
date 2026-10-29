@@ -496,11 +496,34 @@ def bus_arrivals(segment: dict) -> dict:
     if not rows:
         return {}
 
+    result: dict = {}
     route_name = str(segment.get("vehicle") or "")
     item = next((row for row in rows if _bus_route_matches(row, route_name)), None)
-    if item is None:
-        return {}
+    if item is not None:
+        arrivals = _bus_row_arrivals(item)
+        if arrivals:
+            result["arrivals"] = arrivals
+        headway = _safe_int(item.get("term"))
+        if headway is not None and headway > 0:
+            result["headway_minutes"] = headway
 
+    # 같은 구간의 대체 버스도 이 정류장 응답에 있다. 호출을 늘리지 않고 같이 붙인다.
+    others: dict[str, list[dict]] = {}
+    for vehicle in segment.get("alt_vehicles") or []:
+        name = str(vehicle.get("name") or "")
+        if not name:
+            continue
+        row = next((r for r in rows if _bus_route_matches(r, name)), None)
+        found = _bus_row_arrivals(row) if row is not None else []
+        if found:
+            others[name] = found
+    if others:
+        result["alt_arrivals"] = others
+    return result
+
+
+def _bus_row_arrivals(item: dict) -> list[dict]:
+    """정류장 응답 한 행(한 노선)의 다음·그다음 버스."""
     arrivals = []
     for suffix in ("1", "2"):
         # 초 단위 ETA 는 traTime 이다. arrmsgSec 는 이름과 달리 초가 아니라
@@ -521,14 +544,7 @@ def bus_arrivals(segment: dict) -> dict:
                 "crowding": _bus_crowding(item, suffix),
             }
         )
-
-    result: dict = {}
-    if arrivals:
-        result["arrivals"] = arrivals[:2]
-    headway = _safe_int(item.get("term"))
-    if headway is not None and headway > 0:
-        result["headway_minutes"] = headway
-    return result
+    return arrivals[:2]
 
 
 # ---------------------------------------------------------------------------
@@ -575,10 +591,23 @@ def enrich_candidates(candidates: list[dict]) -> None:
             return bus_arrivals(sample)
         return {}
 
+    def sample_of(segments: list[dict]) -> dict:
+        """묶음의 대표 구간. 버스는 후보마다 대체 버스가 다를 수 있어 모두 모은다."""
+        first = segments[0]
+        if first.get("kind") != "bus":
+            return first
+        alts, seen = [], set()
+        for segment in segments:
+            for vehicle in segment.get("alt_vehicles") or []:
+                if vehicle.get("name") not in seen:
+                    seen.add(vehicle.get("name"))
+                    alts.append(vehicle)
+        return {**first, "alt_vehicles": alts}
+
     workers = min(4, len(groups))
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="jit-realtime") as pool:
         future_groups = {
-            pool.submit(load, segments[0]): segments for segments in groups.values()
+            pool.submit(load, sample_of(segments)): segments for segments in groups.values()
         }
         for future in as_completed(future_groups):
             segments = future_groups[future]
@@ -595,3 +624,7 @@ def enrich_candidates(candidates: list[dict]) -> None:
                     segment["arrivals"] = [dict(item) for item in realtime["arrivals"]]
                 if "headway_minutes" in realtime:
                     segment["headway_minutes"] = realtime["headway_minutes"]
+                for vehicle in segment.get("alt_vehicles") or []:
+                    found = (realtime.get("alt_arrivals") or {}).get(vehicle.get("name"))
+                    if found:
+                        vehicle["arrivals"] = [dict(item) for item in found]

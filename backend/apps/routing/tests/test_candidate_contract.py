@@ -56,6 +56,8 @@ def upstream(monkeypatch):
         return data, data is None
 
     monkeypatch.setattr(clients, "_get", get)
+    # 대중교통 6개가 같은 정류장에서 타고 내린다. 합치지 않아야 수단별 상한을 볼 수 있다.
+    monkeypatch.setattr(clients, "_same_shape", lambda a, b: False)
     return responses, calls
 
 

@@ -108,6 +108,12 @@ TRANSIT_FILL_MAX_EXTRA_SECONDS = 20 * 60
 # 대중교통 배지 상한. 경로 카드 한 줄에 들어가야 한다.
 TRANSIT_MAX_BADGES = 3
 
+# 버스 번호만 다른 경로를 한 카드로 합칠 때(사용자 요청 10-29), 타는 곳·내리는 곳 이름이
+# 같아도 탑승 시간이 이만큼 넘게 다르면 돌아가는 버스라 따로 둔다. 정류장은 이름이 **완전히
+# 같을 때만** 같은 곳이다(사용자 10-29). 가까운 정류장을 좌표로 묶었다가("신림사거리" 와
+# "신림사거리.신림역" 은 200m) 되돌렸다 — 다른 정류장 버스가 한 카드에 섞이면 엉뚱한 곳에서 기다린다.
+TRANSIT_MERGE_MAX_RIDE_DIFF_SECONDS = 5 * 60
+
 
 def _get(url: str) -> tuple[dict | None, bool]:
     """(json, degraded). 실패해도 예외를 던지지 않는다."""
@@ -1047,8 +1053,7 @@ def _transit_pool(
     if degraded or not data or data.get("status") != "OK":
         return [], {}, True
 
-    by_chain: dict[str, dict] = {}
-    durations: dict[str, float] = {}
+    routes: list[tuple[float, dict]] = []
     for route in data.get("routes") or []:
         props = route.get("properties") or {}
         seconds = props.get("totalTime")
@@ -1057,16 +1062,10 @@ def _transit_pool(
         chain = _vehicle_chain(route)
         if not chain:
             continue
-        chain_key = ">".join(chain)
         labels = _mode_labels(route)
         minutes = max(1, round(seconds / 60))
-        segments = _segments(route, seconds, start_lat, start_lng, end_lat, end_lng)
-        alt_count = sum(len(segment.get("alt_vehicles", [])) for segment in segments)
-        detail = " → ".join(chain)
-        if alt_count:
-            detail += f" (대체 {alt_count}개)"
         item = {
-            "key": f"transit:{chain_key}",
+            "key": f"transit:{'>'.join(chain)}",
             "kind": "transit",
             "mode": "+".join(labels) if labels else "대중교통",
             "minutes": minutes,
@@ -1074,10 +1073,9 @@ def _transit_pool(
             "transfers": props.get("transfers") or 0,
             # 일부 후보는 요금 계산이 비어 온다. 0 으로 위조하지 않고 None 을 유지한다.
             "fare": (props.get("fare") or {}).get("value"),
-            "detail": detail,
             "source": "kakao_transit",
             # 앱이 가로 막대로 그린다. 합은 totalTime 과 같다.
-            "segments": segments,
+            "segments": _segments(route, seconds, start_lat, start_lng, end_lat, end_lng),
         }
         if with_path:
             path = transit_route_path(route)
@@ -1089,12 +1087,85 @@ def _transit_pool(
         item["summary"] = _summary_bits(
             minutes, item["distance_m"], item["transfers"], item["fare"]
         )
-        prev = by_chain.get(chain_key)
-        if prev is None or seconds < durations[prev["key"]]:
-            by_chain[chain_key] = item
-            durations[item["key"]] = seconds
+        routes.append((seconds, item))
 
-    return list(by_chain.values()), durations, False
+    # 빠른 것부터 본다. 먼저 온 것이 대표다.
+    #
+    # - 같은 노선 조합이 또 오면 버린다(전과 같다). 같은 정류장이면 버스만 대체 노선에 더한다.
+    # - 노선 조합은 달라도 버스 번호만 다르면 한 후보로 합친다(사용자 요청 10-29). 대표가 아닌
+    #   경로의 버스는 같은 구간의 대체 노선(`alt_vehicles`)이 된다. 앱은 대체 노선을 이미 승차
+    #   행의 칩으로 그린다. 합친 경로의 key 는 `member_keys` 에 남는다 — 일정에 저장된 key 가
+    #   대표가 아니어도 이 카드로 찾는다([resolve_route]).
+    groups: list[dict] = []
+    durations: dict[str, float] = {}
+    for seconds, item in sorted(routes, key=lambda pair: (pair[0], pair[1]["key"])):
+        durations.setdefault(item["key"], seconds)
+        group = next(
+            (g for g in groups if item["key"] in g["member_keys"] or _same_shape(g, item)),
+            None,
+        )
+        if group is None:
+            item["member_keys"] = [item["key"]]
+            item["minutes_max"] = item["minutes"]
+            groups.append(item)
+            continue
+        if not _same_shape(group, item):
+            continue
+        _merge_vehicles(group, item)
+        if item["key"] not in group["member_keys"]:
+            group["member_keys"].append(item["key"])
+        group["minutes_max"] = max(group["minutes_max"], item["minutes"])
+
+    for group in groups:
+        alt_count = sum(len(s.get("alt_vehicles", [])) for s in group["segments"])
+        group["detail"] = _transit_label(group["key"])
+        if alt_count:
+            group["detail"] += f" (대체 {alt_count}개)"
+    return groups, durations, False
+
+
+def _ride_legs(item: dict) -> list[dict]:
+    """버스·지하철 구간만. 도보·대기는 탄 곳과 내린 곳이 같으면 따라서 같다."""
+    return [s for s in item.get("segments") or [] if s.get("kind") in ("bus", "subway")]
+
+
+def _same_leg(a: dict, b: dict) -> bool:
+    """같은 정류장에서 타고 같은 정류장에서 내리는 구간인가. 이름이 완전히 같아야 한다.
+
+    이름이 없으면 같은 곳인지 알 수 없어 합치지 않는다.
+    """
+    if a["kind"] != b["kind"]:
+        return False
+    # 지하철은 노선이 곧 경로다. 버스만 번호가 달라도 된다.
+    if a["kind"] == "subway" and a.get("vehicle") != b.get("vehicle"):
+        return False
+    stops_a, stops_b = a.get("stops") or [], b.get("stops") or []
+    return (
+        bool(stops_a and stops_b)
+        and stops_a[0] == stops_b[0]
+        and stops_a[-1] == stops_b[-1]
+        and abs(a["seconds"] - b["seconds"]) <= TRANSIT_MERGE_MAX_RIDE_DIFF_SECONDS
+    )
+
+
+def _same_shape(a: dict, b: dict) -> bool:
+    """버스 번호만 다른 경로인가. 탑승 구간마다 [_same_leg] 다."""
+    legs_a, legs_b = _ride_legs(a), _ride_legs(b)
+    return len(legs_a) == len(legs_b) and all(map(_same_leg, legs_a, legs_b))
+
+
+def _merge_vehicles(into: dict, other: dict) -> None:
+    """`other` 의 버스를 `into` 의 같은 구간 대체 노선에 더한다. 대표·중복은 뺀다."""
+    for leg, extra in zip(_ride_legs(into), _ride_legs(other)):
+        alts = leg.setdefault("alt_vehicles", [])
+        names = {leg.get("vehicle")} | {v["name"] for v in alts}
+        for vehicle in (
+            {"name": extra.get("vehicle") or "", "vehicle_type": extra.get("vehicle_type") or ""},
+            *extra.get("alt_vehicles", []),
+        ):
+            if vehicle["name"] and vehicle["name"] not in names:
+                names.add(vehicle["name"])
+                alts.append(dict(vehicle))
 
 
 def _walk_seconds(item: dict) -> int:
@@ -1110,8 +1181,9 @@ def _ride_kinds(item: dict) -> frozenset[str]:
 
 
 def _transit_lines(item: dict) -> set[str]:
-    """타는 노선 이름. 남는 칸을 채울 때 이미 고른 경로와 겹치는지 본다."""
-    return set(item["key"].removeprefix("transit:").split(">"))
+    """타는 노선 이름. 남는 칸을 채울 때 이미 고른 경로와 겹치는지 본다. 합친 경로의 버스도 센다."""
+    keys = item.get("member_keys") or [item["key"]]
+    return {line for key in keys for line in key.removeprefix("transit:").split(">")}
 
 
 def _transit_candidates(
@@ -1555,8 +1627,11 @@ def resolve_route(
             return None, True
         fastest = min(items, key=lambda c: (durations[c["key"]], c["key"]))
         for item in items:
-            if item["key"] == route_key:
-                return _with_alternative(item, fastest), False
+            if route_key in item["member_keys"]:
+                # 버스 번호만 다른 경로를 합친 후보라 대표 버스가 날마다 바뀔 수 있다. key 는
+                # 고른 그대로 돌려준다. 바꾸면 `route_choice_honored` 가 거짓이 된다.
+                found = item if item is fastest else _with_alternative(item, fastest)
+                return {**found, "key": route_key}, False
         # 카카오가 그 조합을 더 주지 않는다. 그때는 가장 빠른 대중교통으로 대체한다.
         # 대체한 것이 곧 최단이므로 붙일 대안이 없다 — 화면은 대체 사실을
         # `route_choice_honored` 로 이미 알린다.

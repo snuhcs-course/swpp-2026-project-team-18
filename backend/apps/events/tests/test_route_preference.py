@@ -99,6 +99,17 @@ class TestPreferredRoute:
         assert result["preferred_key"] == "transit:5513"
         assert result["preferred_basis"] == pref.SAME_DESTINATION
 
+    def test_bus_merged_into_another_card_picks_that_card(self, user, campus):
+        """버스 번호만 다른 경로는 한 카드로 온다. 전에 고른 5516 이 대표가 아니어도 그 카드다."""
+        chose(user, campus, "transit:5516", 1)
+        merged = [
+            *CANDIDATES,
+            {"key": "transit:6514", "kind": "transit", "minutes": 30, "transfers": 0,
+             "member_keys": ["transit:6514", "transit:5516"]},
+        ]
+
+        assert prefer(user, CAMPUS, merged)["preferred_key"] == "transit:6514"
+
     def test_nearby_place_counts_as_the_same_destination(self, user):
         near = Place.objects.create(name="정문", lat=CAMPUS[0] + 0.0005, lng=CAMPUS[1])
         chose(user, near, "walk", 1)

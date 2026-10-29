@@ -45,7 +45,8 @@ What the MVP supports:
    search, a pick on the map, or your current home), origin (home by default), and a route chosen from
    grouped Kakao candidates: transit, walk, bicycle or car, with server-written guidance.
    Up to five transit options, one per axis (fastest, fewest transfers, least walking,
-   subway only, bus only, mixed, cheapest) and then routes with lines not shown yet
+   subway only, bus only, mixed, cheapest) and then routes with lines not shown yet; routes that
+   differ only by bus number are one option listing every bus
    ([docs/iter3/transit-candidates.md](docs/iter3/transit-candidates.md)).
    [Weekly repeats](docs/iter2/weekly-recurrence.md) show seven days ahead, with an independent alarm for each occurrence
 3. **See the alarm and why** — the server computes it; the decision screen breaks out

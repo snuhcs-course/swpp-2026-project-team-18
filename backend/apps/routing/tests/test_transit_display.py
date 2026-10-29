@@ -41,6 +41,9 @@ def upstream(monkeypatch):
     data = {"status": "OK", "routes": []}
     get = Mock(return_value=(data, False))
     monkeypatch.setattr(clients, "_get", get)
+    # [route] 는 모두 같은 정류장에서 타고 내려서 그대로면 한 후보로 합쳐진다. 이 파일은 서로 다른
+    # 경로 사이의 배지·표시만 본다. 합치기는 test_transit_merge.py 가 본다.
+    monkeypatch.setattr(clients, "_same_shape", lambda a, b: False)
     return data, get
 
 
