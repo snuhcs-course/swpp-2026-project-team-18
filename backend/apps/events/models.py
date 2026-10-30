@@ -189,7 +189,7 @@ class Event(models.Model):
     # 기본값이라 `AddField` 가 기존 행을 채운 뒤 **DB 기본값을 남기지 않는다.**
     # 그러면 이 컬럼을 모르는 구버전 코드의 INSERT 가 NOT NULL 제약을 위반해
     # **쓰기만 500** 이 된다. 읽기와 `/api/health` 는 정상이라 겉으로는 멀쩡해
-    # 보인다 — 실제로 그 조합을 한 번 겪었다(docs/team-setup.md 8절).
+    # 보인다 — 실제로 그 조합을 한 번 겪었다(docs/team-setup.md 배포).
     route_key = models.CharField(
         "선택 경로", max_length=120, blank=True, default="", db_default=""
     )

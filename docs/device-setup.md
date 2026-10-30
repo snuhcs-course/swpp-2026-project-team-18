@@ -8,8 +8,11 @@
 에뮬레이터는 Android Studio → Device Manager에서 켠다. 준비된 Mac 기기는 `JIT_API_34`다.
 ADB 경로는 [앱 안내](../APP/README.md)의 터미널 설정을 사용한다.
 
+기기는 **Android 14(API 34) 이상**이어야 한다. `adb shell getprop ro.build.version.sdk`로 확인한다.
+
 - **USB:** 빌드 번호를 7번 눌러 개발자 옵션을 켜고, USB 디버깅을 허용한 뒤 케이블을 연결한다.
-  기기에 뜨는 디버깅 승인 창을 허용한다.
+  기기에 뜨는 디버깅 승인 창을 허용한다. 창이 안 뜨면 `unauthorized` 상태로 남는다.
+  케이블을 다시 꽂거나 개발자 옵션의 "USB 디버깅 권한 승인 취소" 후 다시 연결한다.
 - **무선:** PC와 기기를 같은 네트워크에 연결한다. 무선 디버깅의 페어링 주소로
   `adb pair <IP:포트>`를 실행한 뒤, 기본 화면의 연결 주소로 `adb connect <IP:포트>`를 실행한다.
   페어링과 연결 포트는 다르다.

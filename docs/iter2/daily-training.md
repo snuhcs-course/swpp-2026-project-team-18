@@ -48,7 +48,7 @@ python -m pytest apps/prediction apps/planning/tests/test_plan_revision.py apps/
 
 - [GitHub 운영 DB dry-run](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/runs/39122961929) 성공. 실제 Secret/DB 연결과 저장 없는 계산을 확인했다.
 - [수동 train](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/runs/39124213969) 성공. 별도 읽기 전용 DB 조회로 아티팩트 0→1건 / 활성 전역 1건 / 관측 13건 저장을 확인했다. 이동 원값 이력이 없어 경로 보정은 0건이다.
-- **남은 확인:** 20:29/20:49 일회성 검증 예약을 설정했으나 21:00 KST 조회까지 저장소 전체 `event=schedule` 실행은 0건이다. 원인은 확인되지 않았다. 검증용 예약은 제거하고 매일 23:17 설정만 남겼다. 실제 정기 실행 기록의 `event=schedule`/`train` 성공을 확인해야 R-3 검증이 끝난다. 수동 실행을 예약 성공으로 보지 않는다.
+- **예약 실행 확인(2026-10-30):** `event=schedule` 실행이 10/22~10/28 매일 성공했다. 10/29는 운영 DB에 0.13~0.14 마이그레이션이 없어 `migrate --check`에서 멈췄다. 배포가 `main`을 따라잡으면 다시 돈다.
 
 운영 DB는 기존 코드의 추가 마이그레이션 7개를 백업 후 적용했으며 배치 실행 전 누락은 0개다. 원값 이력이 없는 과거 이동 8건/미완성 쌍 2건은 학습에서 제외한다.
 

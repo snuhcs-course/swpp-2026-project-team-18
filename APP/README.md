@@ -8,8 +8,7 @@ Kotlin·Jetpack Compose 앱이며 기본 서버는 `https://justintime-api.onren
 
 - Android Studio와 **Android SDK Platform 37**
 - Gradle JDK: Android Studio 내장 **JBR 25**
-- 실행 기기: **Android 14(API 34) 이상**
-- 팀에서 받은 `app/google-services.json`
+- 실행 기기: **Android 14(API 34) 이상**. 13 이하 기기에는 설치되지 않는다.
 
 공용 서버를 쓰려면 `local.properties`의 `devServerHost` 줄을 제거하고 다시 빌드한다.
 `sdk.dir`은 유지한다.
@@ -19,6 +18,7 @@ Kotlin·Jetpack Compose 앱이며 기본 서버는 `https://justintime-api.onren
 1. 저장소의 **`APP` 폴더**를 열고 Gradle Sync를 완료한다.
 2. Device Manager에서 API 34 이상 기기를 켠다. 준비된 Mac 기기는
    **`JIT_API_34`(Pixel 6a, Android 14)**다. 새 Apple Silicon 기기는 ARM64 이미지를 사용한다.
+   실기기는 USB 디버깅을 켜고 연결한 뒤 폰의 "USB 디버깅 허용"을 눌러야 목록에 뜬다([기기 설정](../docs/device-setup.md)).
 3. 실행 기기를 선택하고 Run ▶을 누른다.
 4. 이메일로 로그인한다. 조회용 계정은 `demo@demo.com` / `demo1234`이며,
    일정·루틴을 만드는 시연은 전용 계정을 사용한다.
@@ -71,7 +71,7 @@ devServerHost=10.0.2.2
 ./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
-최신 로컬 검증은 디버그 JVM 테스트 677건/lint 오류 0이며, QA 빌드의 실제 에뮬레이터 UI/전체 E2E 결과는 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다. [BE-20 직접 테스트](../docs/iter2/weekly-recurrence.md)에서 반복 일정 생성/개별 OFF/삭제를 확인할 수 있다. Firebase 개인 설정 없이 QA 변형을 검증하려면 다음을 실행한다.
+2026-10-30 기준 JVM 테스트 738건이 통과한다. 에뮬레이터 UI·E2E 결과는 [MVP 체크리스트](../docs/demo-checklist.md)에 기록한다. Firebase 개인 설정 없이 QA 변형을 검증하려면 다음을 실행한다.
 
 ```bash
 ./gradlew :app:testE2eUnitTest :app:lintE2e :app:assembleE2e :app:assembleE2eAndroidTest -PjitE2e=true

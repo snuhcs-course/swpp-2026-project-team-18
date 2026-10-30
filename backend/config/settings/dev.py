@@ -33,7 +33,7 @@ if not os.getenv("DATABASE_URL", "").strip():
         "\n"
         "  팀 Neon 을 쓸 때 (기본):\n"
         "    backend/.env 의 DATABASE_URL 에 Neon direct 주소를 넣는다.\n"
-        "    주소는 관리자에게 받는다 (docs/team-setup.md 1절).\n"
+        "    주소는 관리자에게 받는다 (docs/team-setup.md 구성).\n"
         "\n"
         "  일회용 로컬 DB 로 잠깐 돌릴 때:\n"
         '    $env:DATABASE_URL="sqlite:///$env:TEMP/jit_scratch.sqlite3"\n'

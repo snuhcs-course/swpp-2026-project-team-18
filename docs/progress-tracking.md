@@ -179,6 +179,8 @@ w = 경과 분 ÷ (경과 분 + PACE_SHRINKAGE_MINUTES)      # PACE_SHRINKAGE_MI
 계산 방법 카드에는 이동과 버퍼만 남는다. 준비 항목을 0분으로 그리지 않는다 —
 0분은 "준비를 순식간에 한다" 로 읽히고, 사실은 **해당되지 않는다**.
 
+일정마다 `include_prep` 로 이 규칙을 뒤집을 수 있다(서버만, [include-prep](iter3/include-prep-api.md)).
+
 ### prep 를 0 으로 넣으면 안 되는 이유
 
 `estimate_prep` 가 돌려주는 `PrepEstimate` 를 `Normal(0, 0)` 으로 만들어
@@ -204,13 +206,10 @@ w = 경과 분 ÷ (경과 분 + PACE_SHRINKAGE_MINUTES)      # PACE_SHRINKAGE_MI
 따라가야 한다. 지금은 **재계산이 사용자가 버튼을 누를 때만** 일어난다
 (`PlanSyncWorker` 는 6시간마다 돌지만 조회와 알람 등록만 한다).
 
-### 먼저 할 일 — 재계산에 throttle 이 없다
+### 재계산에는 throttle 이 있다
 
-`EventRecomputeView` 에는 `throttle_scope` 도 `throttle_classes` 도 없고,
-`DEFAULT_THROTTLE_CLASSES` 도 설정에 없다. 즉 지금 이 엔드포인트는 **무제한**
-이다. 사람이 누를 때만 불리던 동안에는 드러나지 않았지만, 자동 호출을 붙이는
-순간 카카오 하루 한도를 태울 수 있는 구멍이 된다. `route` scope(120/hour)를
-먼저 붙인다.
+자동 호출은 카카오 하루 한도를 태울 수 있다. 그래서 `EventRecomputeView` 에
+`route` scope throttle 을 붙였다.
 
 ### 갱신 대상과 주기
 
@@ -286,16 +285,7 @@ w = 경과 분 ÷ (경과 분 + PACE_SHRINKAGE_MINUTES)      # PACE_SHRINKAGE_MI
 2회를 부르므로 24회다. 사용자 3명이 각자 하루 2건이면 144회 — 하루 1,000건
 안에 넉넉히 들어온다.
 
-## 6. 작업 순서
-
-1. 지각 기준을 약속 시각으로 (§1) — 지금 화면이 틀린 값을 보여주고 있다
-2. 준비 시간 조건부 (§4, 서버) — 단계와 계산 방법 카드가 이 값에 딸려 있다
-3. 움직임 감지 (§2)
-4. 실시간 도착 예정 (§3)
-5. 경로 주기 갱신 (§5) — throttle 먼저
-6. 피그마 반영, 전체 검증, 실기기 확인
-
-## 7. 검증
+## 6. 검증
 
 숫자가 아니라 **말이 맞는지**를 본다.
 

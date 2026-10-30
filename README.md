@@ -55,7 +55,8 @@ What the MVP supports:
 4. **Wake up reliably** — `setAlarmClock` (survives Doze, shows the system next-alarm
    icon), full screen over the lock screen, re-registered after reboot, app update and
    clock changes, 5-minute snooze. Home switches save to the server; only enabled alarms
-   for the next 7 days are registered
+   for the next 7 days are registered. If a force-stop cleared an alarm, home says so and
+   offers to start tracking
 5. **Log the morning** — dismissing the alarm starts one-tap-per-block prep logging and
    GPS trip tracking
 6. **Commute** — departure and arrival are detected on the device (arrival = the first
@@ -92,7 +93,9 @@ make the screen look finished while being untrue.
 - On-time probability *value* — the pipeline is complete; the value waits for travel
   variance evidence (above)
 - Replanning while moving ⑦ — colors, ETA and the live route; no checkpoints or causes
-- Route choice — grouped candidates, fastest default and guidance work. Four car variants (BE-8), arrival-time/operating-hour routing (BE-11) and optional bicycle-road ratio (BE-14) remain
+- Route choice — grouped candidates, fastest default and guidance work. The server also
+  returns `preferred_key` (the user's past choice), which the app does not use yet. Four car
+  variants (BE-8), arrival-time/operating-hour routing (BE-11) and optional bicycle-road ratio (BE-14) remain
 - Weekly and detailed reports ⑧⑨ — built; the Figma panels for sleep, alarm snoozes and
   per-weekday auto-adjustment are left out because nothing records that data yet
 - Sign-in — the server accepts Kakao and Google ID tokens (`POST /api/auth/social/{provider}`,
@@ -103,6 +106,9 @@ make the screen look finished while being untrue.
 
 - Replanning before departure ⑥ and a "switch to this route" action
 - Group rooms ⑩⑪
+- More than one home (e.g. a family home)
+- A manual "arrived" button — the server accepts arrival observations with
+  `detector: "manual"` and no location, but the app has no button yet
 - Editing a saved event — the server side is ready (`PATCH /api/events/{id}`: a time or τ
   change recomputes without a new route lookup, a place or route change looks the route up
   again; contract in [docs/iter3/event-edit-api.md](docs/iter3/event-edit-api.md)), but the
@@ -277,8 +283,9 @@ budget for static maps.
 │   ├── config/settings/          base · dev · prod · test · local_suite
 │   ├── scripts/                  HTTP checks and DB tools
 │   └── Dockerfile                migrate, then gunicorn
-├── docs/                         setup guides, design notes, the board image
-├── .github/workflows/ci.yml      CI
+├── docs/                         setup guides, design notes, iteration records
+├── qa/demo/                      emulator end-to-end runner
+├── .github/workflows/            ci.yml (CI) · train-models.yml (nightly training)
 └── render.yaml                   Render Blueprint
 ```
 
@@ -286,8 +293,9 @@ budget for static maps.
 
 ## Verification
 
-Latest local integration evidence (2026-10-19, BE-20 integration): **1,250 backend tests, 231 PostgreSQL event/plan-history regressions, 677 Android JVM tests, 8 HTTP suites with zero failures (2 skips), lint zero errors, emulator E2E 597 seconds**. Weekly recurrence selection, per-occurrence OFF/deletion and device alarm schedules were checked on the actual emulator UI. This uses recorded/fixed upstream routing replay; public deployment and live upstream validation are separate. See the [current checklist](docs/demo-checklist.md), [TODO](task.md) and [direct tests](docs/iter2/weekly-recurrence.md).
-
+Latest local run (2026-10-30, 0.14.0): **1,583 backend tests and 738 Android JVM tests pass.**
+The PostgreSQL regressions, HTTP suites, lint and emulator E2E were last run on 2026-10-19
+(0.11.0) with replayed routing; see the [demo checklist](docs/demo-checklist.md).
 
 Four suites run locally and in CI on every push to `main` and every pull request
 ([`ci.yml`](.github/workflows/ci.yml)). CI uses no secrets. Local feature checks can use `:app:testE2eUnitTest` and `:app:lintE2e` with `-PjitE2e=true`; see [QA setup](qa/demo/README.md).
@@ -330,7 +338,7 @@ Excluded from coverage: tests, migrations and seed commands on the server
 `ComposableSingletons`), `ui/theme` and the app entry points in the app
 (`coverageExcludes` in [`app/build.gradle.kts`](APP/app/build.gradle.kts)).
 
-The middle one is the unusual part. `scripts/check_*.py` drive a **running** Django
+The HTTP suite is the unusual part. `scripts/check_*.py` drive a **running** Django
 server over HTTP, which catches what the Django test client does not: a URL that was
 never wired up, a serializer field the app reads under a different name, a missing
 permission class. `run_local_suite.py` starts the server, stops it afterwards, and
@@ -342,8 +350,7 @@ the team's Neon database; the scripts create close to a hundred accounts per run
 Without `KAKAO_REST_API_KEY` the checks that need route lookups are **skipped rather
 than failed**, so CI never burns the daily free quota. Lint blocks errors only.
 
-For the deployed server, `python scripts/check_deployed.py` runs HTTP checks (it covers
-the 0.3.0 features and whether `routes/live` is deployed; it is being extended), and
+For the deployed server, `python scripts/check_deployed.py` runs HTTP checks and
 `/api/health` reports the running version.
 
 ---
@@ -371,7 +378,7 @@ token in the body is the credential).
 - Sign-up requires `terms_agreed: true` and is limited to 10 attempts/IP/hour (429 with `Retry-After`). Profile prep time accepts 5–240 minutes or null.
 - `destination_is_home:true` resolves the current profile home without a Place row. Risk distributions use modeled `bins.mass`, not observation counts; `travel_sample_count` is persisted correction provenance.
 - Alarm enablement and password validation
-  contracts are documented in [backend setup](backend/README.md#프론트-연결-계약-be-16).
+  contracts are documented in [backend setup](backend/README.md#api-계약).
 - Batch uploads are idempotent on `(user, client_uuid)`. Detection happens mid-commute
   where there is often no network, so the app queues records and resends them; a retry
   must not create a second row
@@ -433,6 +440,9 @@ shares a single app and key.**
 
 ## Documentation
 
+- [task.md](task.md) — current to-do list and owners (Korean)
+- [docs/iter3/](docs/iter3) — server contracts the app still has to wire up (Korean)
+- [docs/iter2/summary.md](docs/iter2/summary.md) — iteration 2 record (Korean)
 - [APP/README.md](APP/README.md) — running the app in Android Studio, macOS and Windows (Korean)
 - [backend/README.md](backend/README.md) — local backend setup and isolated verification (Korean)
 - [docs/demo-checklist.md](docs/demo-checklist.md) — MVP rehearsal, pass criteria and verified scope (Korean)
@@ -454,4 +464,4 @@ SNU SWPP 2026 Fall · Team 18 · Momentum
 
 Each iteration has three roles — **UI** (Figma, screens, research), **BE** (backend,
 unit tests, QA) and **PM** (schedule, decisions, integration, deliverables). The PM
-rotates every iteration.
+rotates every iteration. Iteration 3: PM 박준하 · BE 김수연 · UI 김진호.

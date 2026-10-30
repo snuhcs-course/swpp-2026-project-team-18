@@ -19,6 +19,16 @@
 | `device_wake.ps1` | 화면 깨우기 + 잠금 상태 확인 |
 | `device_ui.ps1` | UI 계층 덤프. 스크린샷이 검게 나올 때 화면 대신 읽는다 |
 | `device_shot.ps1` | 스크린샷 |
+| `use_device.ps1` | 실기기로 붙일 준비 |
+
+에뮬레이터 검증용 보조 스크립트도 있다.
+
+| 스크립트 | 용도 |
+| --- | --- |
+| `e2e_login.ps1` · `emu_relogin.ps1` | 재설치 후 로그인 · 재시작 후 로그인 |
+| `e2e_add_event.ps1` | 일정 추가 화면을 끝까지 진행하며 단계마다 스크린샷 |
+| `shot.ps1` · `tap.ps1` | 화면 캡처(축소) · adb 입력 |
+| `coverage_summary.py` | JaCoCo 결과를 층별 표로 요약([README](../../README.md#verification)) |
 
 ## 자주 쓰는 순서
 
@@ -48,6 +58,5 @@ cd APP
 - **`.ps1` 은 UTF-8 BOM 으로 저장한다.** Windows PowerShell 5.1 은 BOM 이
   없는 파일을 CP949 로 읽어서, 한글 주석의 멀티바이트가 따옴표처럼 해석돼
   파싱이 깨진다. 이 디렉터리의 스크립트는 전부 BOM 이 붙어 있다.
-- **Tailscale 은 팀 공용으로 쓰지 않는다.** 앱은 공개 HTTPS 서버를 보므로
-  VPN 이 필요 없다. 무선 디버깅이 막히는 망(eduroam 등)에서만 각자 자기
-  계정으로 쓰면 된다. 근거는 `docs/team-setup.md` 7절.
+- **무선 디버깅이 막히는 망(eduroam 등)**에서는 USB·개인 핫스팟을 쓰거나 각자 계정의
+  Tailscale을 쓴다. 앱 자체는 공개 HTTPS 서버를 보므로 VPN이 필요 없다.
