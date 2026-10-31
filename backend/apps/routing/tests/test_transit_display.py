@@ -103,7 +103,8 @@ def test_same_chain_keeps_shortest_actual_time(upstream):
 
 
 def test_unknown_fare_is_not_zero_or_the_cheapest(upstream):
-    items = candidates(upstream, [route("A", fare=None), route("B", 1800, 1500)])
+    # B 는 느린 경로(1.5배) 안쪽이어야 요금 대표로 들어온다.
+    items = candidates(upstream, [route("A", fare=None), route("B", 1700, 1500)])
     assert items["A"]["fare"] is None
     assert "최소 비용" not in items["A"]["badges"]
     assert "최소 비용" in items["B"]["badges"]
@@ -127,7 +128,8 @@ def test_failure_keeps_the_existing_degraded_contract(upstream):
 
 def test_representatives_still_include_each_best_axis(upstream):
     routes = [route(f"fast{i}", 1200 + i * 60, 3000, 2) for i in range(8)]
-    routes += [route("fewest", 2400, 2500, 0), route("cheapest", 3000, 1000, 1)]
+    # 환승 최소는 느려도 들어온다. 요금 최소는 느린 경로(1.5배) 안쪽이어야 한다.
+    routes += [route("fewest", 2400, 2500, 0), route("cheapest", 1700, 1000, 1)]
     items = candidates(upstream, routes)
     assert len(items) <= clients.CANDIDATE_LIMITS["transit"]
     assert {"fast0", "fewest", "cheapest"} <= items.keys()

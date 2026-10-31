@@ -25,6 +25,8 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.observations import alarm_logs
+from apps.observations.models import TripReroute, current_route_key
+from apps.planning import live_switch
 from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
@@ -200,6 +202,80 @@ class EventSkipView(_UserScopedMixin, APIView):
             qs.filter(skipped_at__isnull=True).update(skipped_at=skipped_at, updated_at=skipped_at)
         event = qs.get()
         return Response(EventSerializer(event, context={"request": request}).data)
+
+
+# 바꾸기를 받는 시간 범위. 일정 시작 6시간 전부터 6시간 뒤까지가 그 일정의 이동이다.
+# 엉뚱한 일정 id 로 온 바꾸기가 멀쩡한 이동을 학습에서 빼지 않게 한다.
+REROUTE_WINDOW = timedelta(hours=6)
+
+
+class EventRerouteView(_UserScopedMixin, APIView):
+    """POST /api/events/{id}/reroute — 이동 중 [이 경로로 바꾸기]. (Partly AI-generated (Claude))
+
+    body: `{"route_key": "transit:2호선", "reason": "late_now"}`. `reason` 은 앱이 바꾸자는
+    알림(`/api/routes/live` 의 `switch_suggestion.reason`)을 보고 눌렀을 때 그 값, 아니면 생략.
+
+    **이번 이동만 바꾼다.** `Event.route_key` 와 알람 계획은 그대로다. 이후 `routes/live` 는 바꾼
+    경로를 기준으로 비교한다. 바꾼 이동은 이동 학습에서 빠진다(`TripReroute`). 계약은
+    docs/iter3/reroute-api.md.
+    """
+
+    def post(self, request, pk: int):
+        event = self.get_queryset().select_related("alarm_plan").filter(pk=pk).first()
+        if event is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        route_key = request.data.get("route_key")
+        reason = request.data.get("reason") or ""
+        route_key = route_key.strip() if isinstance(route_key, str) else ""
+        if not _is_route_key(route_key):
+            return _error(
+                "invalid_route_key",
+                "route_key 는 walk·bicycle·car 이거나 transit: 로 시작해야 한다(120자 이하).",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        if reason not in ("", live_switch.REASON_LATE_NOW):
+            return _error(
+                "invalid_reason",
+                f"reason 은 비우거나 {live_switch.REASON_LATE_NOW} 이어야 한다.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        now = timezone.now()
+        if not (event.start_at - REROUTE_WINDOW <= now <= event.start_at + REROUTE_WINDOW):
+            return _error(
+                "outside_trip",
+                "일정 시작 6시간 전부터 6시간 뒤까지만 경로를 바꿀 수 있다.",
+                status.HTTP_409_CONFLICT,
+            )
+        current = current_route_key(event)
+        if route_key == current:
+            return _error(
+                "same_route", "지금 경로와 같다.", status.HTTP_409_CONFLICT,
+            )
+
+        reroute = TripReroute.objects.create(
+            user=request.user,
+            event=event,
+            from_route_key=current[:120],
+            to_route_key=route_key,
+            reason=reason,
+        )
+        return Response(
+            {
+                "event_id": event.pk,
+                "from_route_key": reroute.from_route_key,
+                "to_route_key": reroute.to_route_key,
+                "reason": reroute.reason,
+                "rerouted_at": timezone.localtime(reroute.rerouted_at).isoformat(),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+def _is_route_key(key: str) -> bool:
+    if not key or len(key) > 120:
+        return False
+    return key in ("walk", "bicycle", "car") or (key.startswith("transit:") and len(key) > len("transit:"))
 
 
 class EventRiskOptionsView(_UserScopedMixin, APIView):
@@ -818,7 +894,7 @@ class RouteCandidateView(APIView):
        사용을 제한하지 않으면서, 전 세계 경로 프록시로 쓰이는 길을 막는다.
 
     카카오는 대중교통 후보를 항상 15개 주는데 대부분 같은 버스의 다른 환승
-    조합이다. `clients.route_candidates()` 가 대중교통 대표를 최대 5개로 추린다.
+    조합이다. `clients.route_candidates()` 가 대중교통 대표를 최대 7개로 추린다.
     응답은 수단별 목록과 구버전 앱용 `results`를 함께 제공한다.
 
     **호출 비용** — 한 번에 외부 API 를 최대 4번 부른다. 사용자가 일정 추가
@@ -949,6 +1025,13 @@ class RouteLiveView(_UserScopedMixin, APIView):
     이때도 다시 계산한 선택 경로의 `path` 를 `route` 로 내려 준다. `is_alternative`
     와 `faster_minutes` 는 각각 false, 0 이다.
 
+    ## 늦으면 바꾸자고 한다 (P2, 10-31)
+
+    응답의 `arrival` 은 기준 경로로 지금 가면 언제 닿는지(학습 보정 적용), `switch_suggestion`
+    은 **그 경로로는 일정 시작에 늦고** 같은 응답의 대안이 더 일찍 닿을 때만 채워진다
+    (`planning.live_switch`). 안 늦으면 null 이다. 바꾸는 것은 사용자가
+    `POST /api/events/{id}/reroute` 로 한다. 계약은 docs/iter3/reroute-api.md.
+
     ## 왜 GET 이 아닌가
 
     좌표가 쿼리스트링에 들어가면 배포 서버의 접근 로그에 사용자의 이동 기록이
@@ -998,9 +1081,10 @@ class RouteLiveView(_UserScopedMixin, APIView):
         plan = getattr(event, "alarm_plan", None)
         # 계획이 실제로 쓴 경로가 기준이다. 사용자가 고르지 않았으면 서버가 고른
         # 것이 여기 남아 있으므로, `Event.route_key` 가 비어도 비교할 대상이 있다.
-        chosen = (getattr(plan, "route_key", "") or event.route_key or "").strip()
+        # 이동 중에 바꿨으면(`events/{id}/reroute`) 바꾼 경로가 기준이다.
+        chosen = current_route_key(event, plan)
         if not chosen:
-            return Response({"route": None, "degraded": False})
+            return Response({"route": None, "degraded": False, **_NO_SWITCH})
 
         route, degraded = clients.resolve_route(
             chosen,
@@ -1010,7 +1094,7 @@ class RouteLiveView(_UserScopedMixin, APIView):
             end_lng=destination[1],
         )
         if degraded or not route:
-            return Response({"route": None, "degraded": True})
+            return Response({"route": None, "degraded": True, **_NO_SWITCH})
 
         alt = route.get("alternative")
         if alt:
@@ -1037,5 +1121,19 @@ class RouteLiveView(_UserScopedMixin, APIView):
             {
                 "route": live_route,
                 "degraded": False,
+                **_switch_fields(event, route),
             }
         )
+
+
+# 판정을 못 할 때의 모양. 키는 늘 있다.
+_NO_SWITCH = {"arrival": None, "switch_suggestion": None}
+
+
+def _switch_fields(event, route: dict) -> dict:
+    """도착 예상과 "늦으니 바꾸자" 제안(`planning.live_switch`). 실패해도 경로는 내려간다."""
+    try:
+        return live_switch.assess(event, route)
+    except Exception as exc:  # 방어선. 경로 선은 이동 중 화면의 본체다.
+        logger.warning("이동 중 바꾸기 판정 실패: %s", type(exc).__name__)
+        return dict(_NO_SWITCH)

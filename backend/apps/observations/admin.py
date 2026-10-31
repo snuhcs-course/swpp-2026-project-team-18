@@ -10,7 +10,7 @@
 
 from django.contrib import admin
 
-from .models import DWELL_CONFIRM_SECONDS, AlarmLog, TripObservation
+from .models import DWELL_CONFIRM_SECONDS, AlarmLog, TripObservation, TripReroute
 
 
 class DwellFilter(admin.SimpleListFilter):
@@ -124,3 +124,35 @@ class AlarmLogAdmin(admin.ModelAdmin):
     @admin.display(description="일정", ordering="event__title")
     def event_title(self, obj):
         return obj.event.title if obj.event_id else "—"
+
+
+@admin.register(TripReroute)
+class TripRerouteAdmin(admin.ModelAdmin):
+    """이동 중 경로 변경. **읽기 전용이다.** 앱의 [이 경로로 바꾸기]만 남긴다.
+
+    이 행이 있는 일정은 이동 학습에서 빠진다(`prediction.learning`). 손으로 더하면 멀쩡한
+    이동이 학습에서 사라진다. (Partly AI-generated (Claude))
+    """
+
+    list_display = ("rerouted_at", "user_email", "event_title", "from_route_key", "to_route_key", "reason")
+    list_filter = ("reason",)
+    search_fields = ("user__email", "user__nickname", "event__title", "to_route_key")
+    date_hierarchy = "rerouted_at"
+    ordering = ("-rerouted_at", "-id")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("user", "event")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="사용자", ordering="user__email")
+    def user_email(self, obj):
+        return obj.user.email
+
+    @admin.display(description="일정", ordering="event__title")
+    def event_title(self, obj):
+        return obj.event.title

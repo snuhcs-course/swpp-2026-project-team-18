@@ -29,7 +29,7 @@ def upstream(monkeypatch):
     responses = {
         clients.TRANSIT_URL: {
             "status": "OK",
-            "routes": [route(f"551{i}", 1200 + i * 60) for i in range(6)],
+            "routes": [route(f"551{i}", 1200 + i * 60) for i in range(8)],
         },
         clients.WALK_URL: {
             "status": "OK",
@@ -56,7 +56,7 @@ def upstream(monkeypatch):
         return data, data is None
 
     monkeypatch.setattr(clients, "_get", get)
-    # 대중교통 6개가 같은 정류장에서 타고 내린다. 합치지 않아야 수단별 상한을 볼 수 있다.
+    # 대중교통 8개가 같은 정류장에서 타고 내린다. 합치지 않아야 수단별 상한을 볼 수 있다.
     monkeypatch.setattr(clients, "_same_shape", lambda a, b: False)
     return responses, calls
 
@@ -66,9 +66,9 @@ def test_candidates_are_grouped_without_losing_other_modes(api, upstream):
     assert response.status_code == 200
     body = response.data
     assert {mode: len(body[mode]) for mode in ("car", "transit", "walk", "bicycle")} == {
-        "car": 1, "transit": 5, "walk": 1, "bicycle": 1,
+        "car": 1, "transit": 7, "walk": 1, "bicycle": 1,
     }
-    assert len(body["results"]) == 8
+    assert len(body["results"]) == 10
     assert body["fastest_key"] == body["results"][0]["key"] == "car"
     assert body["degraded"] is False
     for mode in ("car", "transit", "walk", "bicycle"):
@@ -76,21 +76,21 @@ def test_candidates_are_grouped_without_losing_other_modes(api, upstream):
     assert len(upstream[1]) == 4
 
 
-def test_mode_caps_allow_all_eleven_candidates_without_a_global_cutoff(api, monkeypatch):
+def test_mode_caps_allow_all_thirteen_candidates_without_a_global_cutoff(api, monkeypatch):
     candidates = [
         {
             "key": f"{mode}:{i}" if mode in {"car", "transit"} else mode,
             "kind": mode, "mode": mode, "minutes": minutes + i, "transfers": 0,
         }
-        for mode, count, minutes in (("car", 5, 10), ("transit", 6, 20), ("walk", 2, 30), ("bicycle", 2, 40))
+        for mode, count, minutes in (("car", 5, 10), ("transit", 8, 20), ("walk", 2, 30), ("bicycle", 2, 40))
         for i in range(count)
     ]
     monkeypatch.setattr(clients, "route_candidates", lambda **kwargs: (candidates, False))
     response = api.get("/api/routes/candidates", {"dest_lat": END[0], "dest_lng": END[1]})
     assert response.status_code == 200
     body = response.data
-    assert [len(body[mode]) for mode in ("car", "transit", "walk", "bicycle")] == [4, 5, 1, 1]
-    assert len(body["results"]) == 11
+    assert [len(body[mode]) for mode in ("car", "transit", "walk", "bicycle")] == [4, 7, 1, 1]
+    assert len(body["results"]) == 13
     assert body["fastest_key"] == "car:0"
 
 

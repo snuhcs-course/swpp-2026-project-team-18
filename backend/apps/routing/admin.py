@@ -11,7 +11,7 @@
 
 from django.contrib import admin
 
-from .models import GLOBAL_SIGNATURE, RouteCorrection
+from .models import GLOBAL_SIGNATURE, TIME_BUCKET_LABELS, RouteCorrection, UserTravelProfile
 
 
 class ScopeFilter(admin.SimpleListFilter):
@@ -58,4 +58,29 @@ class RouteCorrectionAdmin(admin.ModelAdmin):
 
     @admin.display(description="시간대", ordering="hour_bucket")
     def hour_display(self, obj):
-        return "전체" if obj.hour_bucket < 0 else f"{obj.hour_bucket}시"
+        if obj.hour_bucket < 0:
+            return "전체"
+        return TIME_BUCKET_LABELS.get(obj.hour_bucket, f"{obj.hour_bucket}시")
+
+
+@admin.register(UserTravelProfile)
+class UserTravelProfileAdmin(admin.ModelAdmin):
+    """사용자별 걷는 속도. **읽기 전용이다.** 밤 학습이 도보 일정으로 다시 만든다.
+
+    `walk_ratio` 는 기록 평균이고, 알람에 실제로 곱하는 값은 `walk_factor_display` 다
+    (1.0 에서 표본 수만큼 옮기고 0.7~1.5 로 자른 값).
+    """
+
+    list_display = ("user", "walk_ratio", "walk_samples", "walk_factor_display", "updated_at")
+    search_fields = ("user__email", "user__nickname")
+    ordering = ("user_id",)
+
+    @admin.display(description="곱하는 값")
+    def walk_factor_display(self, obj):
+        return f"×{obj.walk_factor:.3f}"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

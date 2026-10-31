@@ -46,7 +46,8 @@ COPIED_FIELDS = (
 # Raw inputs and correction provenance can change while the rounded alarm
 # decision stays identical. Keep both in the reusable snapshot.
 DEDUP_FIELDS = (
-    *PlanRevision.DECISION_FIELDS, "requested_route_key", "route_minutes_raw", "travel_sample_count",
+    *PlanRevision.DECISION_FIELDS, "requested_route_key", "route_minutes_raw", "walk_minutes_raw",
+    "travel_sample_count",
 )
 
 
@@ -56,6 +57,7 @@ def record_revision(
     *,
     trigger: str = "",
     route_minutes_raw: int | None = None,
+    walk_minutes_raw: int | None = None,
 ) -> PlanRevision | None:
     """방금 저장한 계획을 이력에 남긴다. 결정값과 경로 입력이 모두 같으면 None.
 
@@ -71,6 +73,7 @@ def record_revision(
         event_start_at=event.start_at,
         requested_route_key=(event.route_key or "")[:120],
         route_minutes_raw=route_minutes_raw,
+        walk_minutes_raw=walk_minutes_raw,
         trigger=trigger or "",
     )
 
@@ -160,6 +163,8 @@ def decision_revisions(event_ids) -> dict[int, PlanRevision]:
         PlanRevision.objects.filter(event_id__in=event_ids)
         .only(
             "event_id", "computed_at", "status", "route_minutes_raw", "route_key", "travel_mode",
+            # 이동 학습이 읽는다. 시간대는 계획한 출발 시각으로, 걷는 속도는 도보 원값으로.
+            "depart_by", "walk_minutes_raw",
             # 버퍼 조정(`buffers`)이 읽는다.
             "buffer_minutes", "on_time_probability", "tau_used",
         )

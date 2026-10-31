@@ -240,6 +240,15 @@ class Event(models.Model):
     skipped_at = models.DateTimeField(
         "안 감 표시 시각", null=True, blank=True, default=None, db_default=None
     )
+    # 준비 시간 학습에서 이 아침을 뺀 시각. null 이면 학습에 쓴다.
+    #
+    # 간 일정이지만 그날 준비 기록이 평소와 동떨어진 아침이다(알람을 끄고 다시 잠들었거나
+    # 출발이 늦게 잡힘). "안 감" 과 달리 리포트·알람에는 그대로 두고 준비 학습(GPS 준비
+    # 시간·블록 기록)에서만 뺀다. 앱 화면은 없다. 사용자가 요청하면
+    # `manage.py exclude_prep_mornings` 로 붙이고 뗀다(`planning.prep_observations`).
+    prep_learning_excluded_at = models.DateTimeField(
+        "준비 학습 제외 시각", null=True, blank=True, default=None, db_default=None
+    )
 
     created_at = models.DateTimeField("생성 시각", auto_now_add=True)
     updated_at = models.DateTimeField("수정 시각", auto_now=True)

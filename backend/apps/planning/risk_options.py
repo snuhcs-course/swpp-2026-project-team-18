@@ -38,14 +38,15 @@ def build_risk_options(event) -> dict:
         result["unavailable_reason"] = "저장된 경로 원값이 없습니다. 알람을 다시 계산해 주세요."
         return result
 
-    prep, travel = services.estimate_components(event, {
-        "minutes": revision.route_minutes_raw,
-        "key": plan.route_key,
-        "mode": plan.travel_mode,
-    })
-    total = estimators.total_distribution(prep, travel)
     # 실제 알람과 같은 버퍼여야 선택지의 알람 시각이 "이걸 고르면 이렇게 울린다" 가 된다.
     buffer = buffers.current(event.user_id)
+    prep, travel = services.estimate_components(event, {
+        "minutes": revision.route_minutes_raw,
+        "walk_minutes": revision.walk_minutes_raw,
+        "key": plan.route_key,
+        "mode": plan.travel_mode,
+    }, buffer_minutes=buffer.minutes)
+    total = estimators.total_distribution(prep, travel)
     if total.quantile(.99) <= total.quantile(.5) + 1e-9:
         result["unavailable_reason"] = "소요시간의 변동 폭을 아직 몰라 위험별 선택지를 계산할 수 없습니다."
         return result

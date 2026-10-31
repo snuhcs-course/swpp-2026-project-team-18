@@ -40,6 +40,15 @@ class RouteCandidateMappingTest {
     }
 
     @Test
+    fun `대중교통은 일곱 개까지 보인다`() {
+        val choice = map("""
+            {"transit":[${(1..8).joinToString { candidate("transit:$it", 10 + it) }}],
+             "car":[],"walk":[],"bicycle":[],"fastest_key":"transit:1"}
+        """)
+        assertEquals((1..7).map { "transit:$it" }, choice.optionsOf(RouteMode.TRANSIT).map { it.key })
+    }
+
+    @Test
     fun `구버전 results로 전환하고 잘못된 최단 키는 실제 후보로 대체한다`() {
         val choice = map("""
             {"results":[${candidate("transit:A", 10)},

@@ -31,9 +31,24 @@ SQLite 에는 `STDDEV` 집계가 없다. `django.db.models.StdDev` 는 Postgres 
 | 결정 시점 경로 원값이 없다 | 현재 보정값을 다시 학습하면 중복 보정이 됨 |
 | 실제 소요가 0분 | 출발·도착이 같은 fix 로 판정됐다 |
 | 블록 기록이 같은 일정의 GPS 출발보다 늦다 | 나간 뒤에 눌러 이동 시간이 섞였다 |
-| 블록 기록이 블록 신고 범위의 0.25배 미만·4배 초과 | 누르는 걸 잊었거나 안 한 블록을 눌렀다 |
+| 블록 기록이 블록 신고 최소의 0.5배 미만·최대의 1.5배 초과 | 누르는 걸 잊었거나 안 한 블록을 눌렀다 |
 | 일정을 "안 감" 으로 표시했다(`Event.skipped_at`) | 그날은 등굣길·등교 준비가 아니다 |
 | 출발·도착을 직접 눌렀다(`manual`) | 누른 시각이 실제보다 늦기 쉽다. 리포트에만 쓴다 |
+| 이동 중에 경로를 바꿨다(`TripReroute`) | 결정 시점 원값은 원래 경로의 것이다. 이동 학습만 뺀다 |
+
+## 이동 보정을 세 단계로 푼다 (P2 A-1·A-2, 10-30)
+
+한 비율(실제 ÷ 카카오 원값)에 걷는 속도, 시간대, 경로의 성질이 섞여 있다. 밤 학습은
+이 순서로 하나씩 떼어 낸다. 쓸 때는 셋을 곱한다(`estimators.estimate_travel`).
+
+1. **걷는 속도**(사용자별, `UserTravelProfile`). 도보로 간 일정만 쓴다. 기록 평균을
+   저장하고, 쓸 때 1.0 에서 n / (n + 5) 만큼 옮겨 0.7~1.5 로 자른다. 그다음 모든 표본의
+   예측을 "원값 + 걷는 분 × (걷는 속도 − 1)" 로 고친다. 대중교통은 도보 구간만 고친다.
+2. **시간대**(전역·이동 종류별, 출근·낮·퇴근·밤 × 주중·주말). 구간 평균 비율 ÷ 그 종류 전체
+   평균 비율을 저장한다. 종류는 경로 key 로 정한다(`travel_kind`, `travel_mode` 는 화면용 이름). 쓸 때 1.0 에서 n / (n + 5) 만큼 옮긴다. 구간은 **결정 시점 계획의
+   출발 시각**(`depart_by`)으로 고른다. 알람 계산도 계획한 출발 시각으로 고른다.
+3. **경로·전역 보정**. 1·2를 곱한 예측과 실제의 비율로 배운다. 그래야 걷는 속도와 아침
+   지연이 경로 계수에 한 번 더 들어가지 않는다.
 """
 
 from __future__ import annotations
@@ -41,7 +56,7 @@ from __future__ import annotations
 import logging
 import statistics
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from django.db import transaction
@@ -49,13 +64,20 @@ from django.db.models import F
 from django.utils import timezone as dj_tz
 
 from apps.planning import history
+from apps.planning.estimators import walk_adjusted_minutes
 from apps.planning.models import AlarmPlan
 from apps.planning.prep_observations import usable_block_observations
 from apps.routing.models import (
     GLOBAL_SIGNATURE,
     MAX_FACTOR,
     MIN_FACTOR,
+    WALK,
     RouteCorrection,
+    UserTravelProfile,
+    shrink_to_one,
+    time_bucket,
+    travel_kind,
+    walk_factor,
 )
 
 from .models import ModelArtifact
@@ -86,14 +108,24 @@ class TravelSample:
 
     signature: str
     mode: str
+    # 결정 시점 계획의 출발 시각(시). 계획에 없으면 실제 출발 시각이다.
     hour: int
     weekday_type: str
     predicted_minutes: float
     actual_minutes: float
+    user_id: int | None = None
+    # 예측 중 걷는 분. 도보 경로는 예측 전체, 대중교통은 도보 구간 합이다. 모르면 0.
+    walk_minutes: float = 0.0
+    # 이동 종류(walk·transit 등, `routing.models.travel_kind`). `mode` 는 화면용 이름이다.
+    kind: str = ""
 
     @property
     def ratio(self) -> float:
         return self.actual_minutes / self.predicted_minutes
+
+    @property
+    def time_bucket(self) -> int:
+        return time_bucket(self.hour)
 
 
 def _weekday_type(when: datetime) -> str:
@@ -110,7 +142,7 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
     버린 건수를 이유별로 함께 돌려준다. "표본이 왜 이렇게 적지" 를 추적할 수
     있어야 한다 — 조용히 버리면 학습이 안 되는 이유를 알 수 없다.
     """
-    from apps.observations.models import TripObservation
+    from apps.observations.models import TripObservation, TripReroute
 
     qs = TripObservation.objects.annotate(event_skipped_at=F("event__skipped_at")).order_by(
         "event_id", "observed_at", "id"
@@ -141,8 +173,18 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
             slot[obs.kind] = obs
 
     revisions = history.decision_revisions(by_event)
+    # 이동 중에 경로를 바꾼 일정. 결정 시점 원값은 원래 경로의 것이라 실측과 맞지 않는다.
+    rerouted = set(
+        TripReroute.objects.filter(event_id__in=list(by_event)).values_list("event_id", flat=True)
+    )
+    obs_users = {
+        event_id: next(iter(pair.values())).user_id for event_id, pair in by_event.items() if pair
+    }
     samples: list[TravelSample] = []
     for event_id, pair in by_event.items():
+        if event_id in rerouted:
+            dropped["이동 중 경로 변경"] += 1
+            continue
         depart = pair.get(TripObservation.Kind.DEPART)
         arrive = pair.get(TripObservation.Kind.ARRIVE)
         if depart is None or arrive is None:
@@ -165,14 +207,27 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
             dropped["비율 범위 밖"] += 1
             continue
 
+        mode = (revision.travel_mode or "")[:20]
+        kind = travel_kind(revision.route_key, mode)
+        # 시간대는 **계획한** 출발 시각으로 고른다. 알람 계산도 계획한 출발 시각으로 찾는다
+        # (`planning.services.estimate_components`). 실제 출발로 고르면 늦게 나간 아침이
+        # 다음 구간에 들어가 계산과 칸이 어긋난다.
+        planned = dj_tz.localtime(revision.depart_by or depart.observed_at)
+        if kind == WALK:
+            walk = float(predicted)
+        else:
+            walk = float(min(revision.walk_minutes_raw or 0, predicted))
         samples.append(
             TravelSample(
                 signature=(revision.route_key or "")[:120],
-                mode=(revision.travel_mode or "")[:20],
-                hour=dj_tz.localtime(depart.observed_at).hour,
-                weekday_type=_weekday_type(dj_tz.localtime(depart.observed_at)),
+                mode=mode,
+                hour=planned.hour,
+                weekday_type=_weekday_type(planned),
                 predicted_minutes=float(predicted),
                 actual_minutes=float(actual),
+                user_id=obs_users.get(event_id),
+                walk_minutes=walk,
+                kind=kind,
             )
         )
 
@@ -193,32 +248,118 @@ def _summarize(samples: list[TravelSample]) -> tuple[float, float, int]:
     return factor, sd, len(samples)
 
 
+def walk_ratios(samples: list[TravelSample]) -> dict[int, tuple[float, int]]:
+    """사용자별 걷는 속도 기록 `(평균 비율, 표본 수)`. 도보로 간 일정만 쓴다."""
+    by_user: dict[int, list[float]] = defaultdict(list)
+    for s in samples:
+        if s.kind == WALK and s.user_id is not None:
+            by_user[s.user_id].append(s.ratio)
+    return {uid: (statistics.fmean(ratios), len(ratios)) for uid, ratios in by_user.items()}
+
+
+def walk_adjusted(samples: list[TravelSample], factors: dict[int, float]) -> list[TravelSample]:
+    """각 표본의 예측에 그 사용자의 걷는 속도를 반영한다(걷는 분에만)."""
+    return [
+        replace(
+            s,
+            predicted_minutes=walk_adjusted_minutes(
+                s.predicted_minutes, s.walk_minutes, factors.get(s.user_id, 1.0)
+            ),
+        )
+        for s in samples
+    ]
+
+
+def time_ratios(samples: list[TravelSample]) -> dict[tuple[str, int, str], tuple[float, int]]:
+    """(이동 종류, 시간대 구간, 요일) → `(구간 평균 비율 ÷ 종류 전체 평균 비율, 표본 수)`.
+
+    종류로 나눈다(walk·transit …). 수단 이름("버스", "버스+지하철")으로 나누면 같은 대중교통
+    아침이 여러 칸으로 흩어진다.
+    """
+    by_kind: dict[str, list[float]] = defaultdict(list)
+    cells: dict[tuple[str, int, str], list[float]] = defaultdict(list)
+    for s in samples:
+        if not s.kind:
+            continue
+        by_kind[s.kind].append(s.ratio)
+        cells[(s.kind, s.time_bucket, s.weekday_type)].append(s.ratio)
+    out = {}
+    for (kind, bucket, weekday), ratios in cells.items():
+        overall = statistics.fmean(by_kind[kind])
+        relative = statistics.fmean(ratios) / overall if overall > 0 else 1.0
+        out[(kind, bucket, weekday)] = (min(max(relative, MIN_FACTOR), MAX_FACTOR), len(ratios))
+    return out
+
+
+def detimed(samples: list[TravelSample], cells: dict[tuple[str, int, str], tuple[float, int]]):
+    """각 표본의 예측에 그 시간대 계수(1.0 에서 옮긴 값)를 곱한다."""
+    out = []
+    for s in samples:
+        relative, n = cells.get((s.kind, s.time_bucket, s.weekday_type), (1.0, 0))
+        out.append(replace(s, predicted_minutes=s.predicted_minutes * shrink_to_one(relative, n)))
+    return out
+
+
 @transaction.atomic
 def update_route_corrections(user=None) -> dict:
-    """`TripObservation` → `RouteCorrection`.
+    """`TripObservation` → `UserTravelProfile` · `RouteCorrection`.
 
-    세 수준으로 만든다. 구체적인 것이 없으면 추정기가 상위로 떨어진다.
+    머리말 "이동 보정을 세 단계로 푼다" 순서다. 경로·전역 보정은 세 수준으로 만든다.
+    구체적인 것이 없으면 추정기가 상위로 떨어진다.
 
-        (경로, 수단, 시간대, 요일)   가장 구체적
-        (경로, 수단, 전체, 요일)
+        (경로, 수단, 전체, 요일)     경로 전용, 표본 3건부터
         ("",  수단, 전체, 전체)     전역
+        ("",  "",  전체, 전체)     수단까지 무시한 최후의 전역
+        ("",  수단, 구간, 요일)     시간대 상대 계수(곱하는 값)
 
     `user` 를 주면 그 사용자 관측만 쓴다. 보정 자체는 사용자별로 나누지
-    않는다 — 2호선이 아침에 얼마나 지연되는지는 누가 타도 같다.
+    않는다 — 2호선이 아침에 얼마나 지연되는지는 누가 타도 같다. 걷는 속도만 사용자별이다.
     """
     samples, dropped = collect_travel_samples(user=user)
+
+    # 1. 걷는 속도
+    walks = walk_ratios(samples)
+    profile_ids = []
+    for uid, (ratio, n) in walks.items():
+        row, _ = UserTravelProfile.objects.update_or_create(
+            user_id=uid,
+            defaults={
+                "walk_ratio": round(min(max(ratio, MIN_FACTOR), MAX_FACTOR), 4),
+                "walk_samples": n,
+            },
+        )
+        profile_ids.append(row.pk)
+    factors = {uid: walk_factor(ratio, n) for uid, (ratio, n) in walks.items()}
+    if user is None:
+        # 다른 사용자는 지금 기록이 없다(일정을 "안 감" 으로 표시하는 등). 1.0 으로 돌아간다.
+        UserTravelProfile.objects.exclude(pk__in=profile_ids).delete()
+    elif user.pk not in factors:
+        UserTravelProfile.objects.filter(user=user).delete()
+    adjusted = walk_adjusted(samples, factors)
+
+    # 2. 시간대
+    cells = time_ratios(adjusted)
+    written_ids = []
+    for (kind, bucket, weekday), (relative, n) in cells.items():
+        row, _ = RouteCorrection.objects.update_or_create(
+            route_signature=GLOBAL_SIGNATURE,
+            mode=kind,
+            hour_bucket=bucket,
+            weekday_type=weekday,
+            defaults={"factor": round(relative, 4), "sd_minutes": 0.0, "sample_count": n},
+        )
+        written_ids.append(row.pk)
+
+    # 3. 경로·전역
     buckets: dict[tuple[str, str, int, str], list[TravelSample]] = defaultdict(list)
-    for s in samples:
-        # 경로·수단·시간대·요일
-        buckets[(s.signature, s.mode, s.hour, s.weekday_type)].append(s)
-        # 경로·수단·요일 (시간대 무시)
+    for s in detimed(adjusted, cells):
+        # 경로·수단·요일
         buckets[(s.signature, s.mode, -1, s.weekday_type)].append(s)
         # 전역
         buckets[(GLOBAL_SIGNATURE, s.mode, -1, RouteCorrection.WeekdayType.ANY)].append(s)
         # 수단까지 무시한 최후의 전역. 새 수단을 처음 쓸 때 쓸 값이다.
         buckets[(GLOBAL_SIGNATURE, "", -1, RouteCorrection.WeekdayType.ANY)].append(s)
 
-    written_ids = []
     for (signature, mode, hour, weekday), rows in buckets.items():
         # 경로 전용 보정은 표본이 모여야 만든다. 전역은 항상 만든다.
         if signature != GLOBAL_SIGNATURE and len(rows) < MIN_ROUTE_SAMPLES:
@@ -244,10 +385,12 @@ def update_route_corrections(user=None) -> dict:
     removed = 0
     if user is None:
         # 전체 재학습에서 사라진 버킷을 남기면 과거 보정이 새 전역값보다 우선한다.
+        # 예전 시(時) 단위 경로 행도 여기서 지워진다.
         # n=0 수동 보정과 일부 사용자만 학습한 경우의 공유 보정은 지우지 않는다.
         removed, _ = RouteCorrection.objects.filter(sample_count__gt=0).exclude(pk__in=written_ids).delete()
     return {"written": len(written_ids), "removed": removed,
-            "samples": len(samples), "dropped": dropped}
+            "samples": len(samples), "dropped": dropped,
+            "walk_profiles": len(profile_ids), "time_rows": len(cells)}
 
 
 # ---------------------------------------------------------------------------

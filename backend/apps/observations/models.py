@@ -279,3 +279,61 @@ class AlarmLog(models.Model):
 
     def __str__(self):
         return f"{self.event_id} {self.get_kind_display()} {self.occurred_at:%m-%d %H:%M}"
+
+
+# Partly AI-generated (Claude)
+class TripReroute(models.Model):
+    """이동 중에 경로를 바꾼 기록(P2, 10-31). 앱의 [이 경로로 바꾸기] 한 번이 한 행이다.
+
+    **이번 이동만 바꾼다.** `Event.route_key` 와 계획(`AlarmPlan`)은 그대로다. 다음 일정과
+    반복 규칙은 원래 고른 경로를 쓴다. 이동 중 경로 갱신(`/api/routes/live`)은 마지막으로
+    바꾼 경로를 기준으로 삼는다.
+
+    **바꾼 이동은 이동 학습에서 뺀다.** 결정 시점 계획의 카카오 원값은 원래 경로의 것이라
+    실측과 맞지 않는다(`prediction.learning`, 버린 이유 "이동 중 경로 변경"). 준비 시간과
+    안전 버퍼(지각 이력)에는 그대로 쓴다 — 도착 시각은 사실이다.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="trip_reroutes",
+        verbose_name="사용자",
+    )
+    event = models.ForeignKey(
+        "events.Event",
+        on_delete=models.CASCADE,
+        related_name="trip_reroutes",
+        verbose_name="일정",
+    )
+    from_route_key = models.CharField("원래 경로", max_length=120, blank=True)
+    to_route_key = models.CharField("바꾼 경로", max_length=120)
+    # 바꾸자고 알린 이유. 사용자가 알림 없이 바꿨으면 빈 값이다.
+    reason = models.CharField("알린 이유", max_length=20, blank=True, default="", db_default="")
+    rerouted_at = models.DateTimeField("바꾼 시각", auto_now_add=True)
+
+    class Meta:
+        db_table = "observations_trip_reroute"
+        verbose_name = "이동 중 경로 변경"
+        verbose_name_plural = "이동 중 경로 변경"
+        ordering = ["-rerouted_at", "-id"]
+        indexes = [
+            models.Index(fields=["event", "rerouted_at"], name="trip_reroute_event_time_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.event_id} {self.from_route_key or '—'} → {self.to_route_key}"
+
+
+def current_route_key(event, plan=None) -> str:
+    """이동 중 기준 경로. 마지막으로 바꾼 경로, 없으면 계획이 쓴 경로, 없으면 고른 경로."""
+    rerouted = (
+        TripReroute.objects.filter(event=event)
+        .order_by("-rerouted_at", "-id")
+        .values_list("to_route_key", flat=True)
+        .first()
+    )
+    if rerouted:
+        return rerouted
+    plan = plan if plan is not None else getattr(event, "alarm_plan", None)
+    return (getattr(plan, "route_key", "") or event.route_key or "").strip()

@@ -107,6 +107,9 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"  표본 {result['samples']}건 → 보정 {result['written']}행"
             )
+            self.stdout.write(
+                f"  걷는 속도 {result.get('walk_profiles', 0)}명 · 시간대 계수 {result.get('time_rows', 0)}행"
+            )
             self.stdout.write(f"  더 이상 유효하지 않은 학습 보정 {result.get('removed', 0)}행 제거")
             for reason, n in sorted((result.get("dropped") or {}).items()):
                 self.stdout.write(f"  버림: {reason} {n}건")

@@ -89,10 +89,14 @@ data class RouteOption(
 }
 
 // AI-generated (Claude)
-/** 경로 선택 화면의 수단 탭. Figma 순서대로 둔다. */
+/**
+ * 경로 선택 화면의 수단 탭. Figma 순서대로 둔다.
+ *
+ * [candidateLimit] 는 서버 `CANDIDATE_LIMITS` 와 같다. 대중교통은 7개다(사용자 요청 10-31).
+ */
 enum class RouteMode(val label: String, val candidateLimit: Int) {
     CAR("자동차", 4),
-    TRANSIT("대중교통", 5),
+    TRANSIT("대중교통", 7),
     WALK("도보", 1),
     BICYCLE("자전거", 1),
 }

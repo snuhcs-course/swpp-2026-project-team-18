@@ -43,6 +43,7 @@ from django.utils import timezone
 
 from apps.events.models import Event
 from apps.events.recurrence import in_window
+from apps.routing.models import walk_factor_for
 
 from . import buffers, history, services
 from .models import AlarmPlan, PlanRevision
@@ -104,12 +105,14 @@ def refresh_upcoming(
     )
     inputs = services.prep_inputs(user.pk)
     buffer = buffers.current(user.pk)
+    walk_factor = walk_factor_for(user.pk)
     for event in events:
         outcome = _refresh(
             event,
             trigger=trigger,
             inputs=inputs,
             buffer=buffer,
+            walk_factor=walk_factor,
             started=event.pk in started,
             cutoff=now + protect,
             dry_run=dry_run,
@@ -148,6 +151,7 @@ def _refresh(
     trigger: str,
     inputs: tuple[dict, list[float]],
     buffer: buffers.Buffer,
+    walk_factor: float,
     started: bool,
     cutoff,
     dry_run: bool,
@@ -166,7 +170,8 @@ def _refresh(
     if revision is None:
         return SKIP_NO_RAW
     return _remix(
-        event, plan, revision, trigger=trigger, inputs=inputs, buffer=buffer, dry_run=dry_run
+        event, plan, revision, trigger=trigger, inputs=inputs, buffer=buffer,
+        walk_factor=walk_factor, dry_run=dry_run,
     )
 
 
@@ -201,6 +206,7 @@ def refresh_edited(event: Event, *, start_before) -> AlarmPlan | None:
         trigger=PlanRevision.Trigger.UPDATE,
         inputs=services.prep_inputs(event.user_id),
         buffer=buffers.current(event.user_id),
+        walk_factor=walk_factor_for(event.user_id),
         dry_run=False,
     )
     return plan
@@ -214,15 +220,19 @@ def _remix(
     trigger: str,
     inputs: tuple[dict, list[float]],
     buffer: buffers.Buffer,
+    walk_factor: float,
     dry_run: bool,
 ) -> str:
     """이력의 카카오 원값으로 분포를 다시 섞어 계획에 쓴다. 경로 필드는 그대로 둔다."""
     route = {
         "minutes": revision.route_minutes_raw,
+        "walk_minutes": revision.walk_minutes_raw,
         "key": plan.route_key,
         "mode": plan.travel_mode,
     }
-    prep, travel = services.estimate_components(event, route, inputs=inputs)
+    prep, travel = services.estimate_components(
+        event, route, inputs=inputs, buffer_minutes=buffer.minutes, walk_factor=walk_factor
+    )
     # 경로 출처(`kakao_transit` 등)는 직전 계획의 출처 앞부분이다(`alarm_fields`).
     route_source = (plan.travel_source or "").split("+", 1)[0]
     fields = services.alarm_fields(
@@ -238,6 +248,7 @@ def _remix(
             setattr(plan, name, value)
         plan.save(update_fields=[*fields, "computed_at"])
         history.record_revision(
-            event, plan, trigger=trigger, route_minutes_raw=revision.route_minutes_raw
+            event, plan, trigger=trigger, route_minutes_raw=revision.route_minutes_raw,
+            walk_minutes_raw=revision.walk_minutes_raw,
         )
     return CHANGED

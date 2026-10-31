@@ -46,6 +46,7 @@ from rest_framework.exceptions import ValidationError
 from apps.events.geo import validate_route_distance
 from apps.events.models import Event
 from apps.routing import clients
+from apps.routing.models import BICYCLE, CAR, WALK, travel_kind, walk_factor_for
 
 from . import buffers, estimators, history, prep_observations
 from .models import AlarmPlan, PlanRevision
@@ -207,10 +208,13 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
     #
     # 준비: 루틴 블록이 있으면 블록 조합에서, 없으면 온보딩 값 하나에서.
     # 이동: 카카오 점추정치에 관측된 경로 보정을 적용.
-    prep, travel = estimate_components(event, route)
+    buffer = buffers.current(event.user_id)
+    prep, travel = estimate_components(event, route, buffer_minutes=buffer.minutes)
 
     # 5) 시각으로 환산. 경로를 다시 조회하지 않는 재계산(`refresh`)과 같은 규칙이다.
-    defaults.update(alarm_fields(event, prep, travel, route_source=route.get("source") or ""))
+    defaults.update(
+        alarm_fields(event, prep, travel, route_source=route.get("source") or "", buffer=buffer)
+    )
     defaults.update(
         {
             "travel_mode": (route.get("mode") or "")[:20],
@@ -234,6 +238,7 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         trigger=trigger,
         # 카카오가 준 분 그대로(G2). 계획의 `travel_minutes` 는 보정·τ 분위수가 들어간 값이다.
         route_minutes_raw=_raw_minutes(route),
+        walk_minutes_raw=walk_raw_minutes(route),
     )
 
 
@@ -317,13 +322,22 @@ def prep_inputs(user_id: int) -> tuple[dict, list[float]]:
 
 
 def estimate_components(
-    event: Event, route: dict, *, inputs: tuple[dict, list[float]] | None = None,
+    event: Event,
+    route: dict,
+    *,
+    inputs: tuple[dict, list[float]] | None = None,
+    buffer_minutes: int | None = None,
+    walk_factor: float | None = None,
 ) -> tuple[estimators.PrepEstimate | None, estimators.TravelEstimate]:
     """Shared preparation/travel model for stored plans and risk previews.
 
     ``route["minutes"]`` must be the upstream raw estimate, never the corrected
     or quantile-allocated ``AlarmPlan.travel_minutes``. ``inputs`` is
     ``prep_inputs(event.user_id)``; pass it when computing many events of one user.
+
+    걷는 분은 ``route["walk_minutes"]`` 가 있으면 그것(이력에서 다시 계산할 때), 없으면
+    경로 응답의 구간에서 구한다(`walk_raw_minutes`). ``buffer_minutes``·``walk_factor`` 를
+    비우면 사용자의 지금 값을 읽는다. 여러 일정을 한 번에 계산하면 미리 구해 넘긴다.
     """
     profile = event.user.profile
     # **준비 단계가 없는 일정은 준비 시간을 넣지 않는다.**
@@ -346,17 +360,49 @@ def estimate_components(
             observations=observations,
             gps_samples=gps_samples,
         )
+    if buffer_minutes is None:
+        buffer_minutes = buffers.current(event.user_id).minutes
+    if walk_factor is None:
+        walk_factor = walk_factor_for(event.user_id)
+    raw = float(route["minutes"])
+    if "walk_minutes" in route:
+        walk = route["walk_minutes"]
+        if walk is None and travel_kind(route.get("key"), route.get("mode")) == WALK:
+            walk = raw
+    else:
+        walk = walk_raw_minutes(route)
     travel = estimators.estimate_travel(
-        minutes=route["minutes"],
+        minutes=raw,
         route_key=route.get("key", "") or "",
         mode=route.get("mode", "") or "",
-        # 보정은 출발 시각의 시간대로 나뉘어 있다. 출발 시각은 알람 계산
-        # 결과라 아직 모르므로 일정 시작 시각으로 근사한다 — 같은 아침이라
-        # 시간대 버킷이 거의 같다.
-        depart_at=event.start_at,
+        # 시간대 계수는 **계획한 출발 시각**으로 고른다. 학습도 결정 시점 계획의 출발 시각을
+        # 쓴다(`prediction.learning`). 출발 시각은 이 계산의 결과라 아직 모르므로
+        # 시작 − 버퍼 − 카카오 원값으로 근사한다. 구간이 몇 시간 단위라 이 정도면 맞는다.
+        depart_at=event.start_at - timedelta(minutes=buffer_minutes + raw),
+        walk_minutes=float(walk or 0.0),
+        walk_factor=walk_factor,
     )
 
     return prep, travel
+
+
+# Partly AI-generated (Claude)
+def walk_raw_minutes(route: dict) -> int | None:
+    """경로 원값 중 걷는 분. 도보 경로는 원값 전체, 대중교통은 도보 구간 합(집→정류장,
+    환승, 정류장→목적지), 자동차·자전거는 0. 대중교통인데 구간이 없으면 None(모른다).
+    """
+    kind = travel_kind(route.get("key"), route.get("mode"))
+    if kind == WALK:
+        return _raw_minutes(route)
+    if kind in (CAR, BICYCLE):
+        return 0
+    segments = route.get("segments")
+    if not segments:
+        return None
+    seconds = sum(
+        int(seg.get("seconds") or 0) for seg in segments if seg.get("kind") == "walk"
+    )
+    return int(round(seconds / 60))
 
 
 # Partly AI-generated (Claude)
@@ -399,13 +445,15 @@ def _upsert(
     *,
     trigger: str = "",
     route_minutes_raw: int | None = None,
+    walk_minutes_raw: int | None = None,
 ) -> AlarmPlan:
     plan, _created = AlarmPlan.objects.update_or_create(event=event, defaults=defaults)
     # Partly AI-generated (Claude)
     # 같은 트랜잭션에서 이력을 남긴다(db-schema.md A2). 계획은 덮어쓰지만 이력은 쌓인다 —
     # 결정 시점의 계획을 나중에 고를 수 있게 한다. 이력 쓰기가 실패해도 계획은 남는다.
     history.record_revision(
-        event, plan, trigger=trigger, route_minutes_raw=route_minutes_raw
+        event, plan, trigger=trigger, route_minutes_raw=route_minutes_raw,
+        walk_minutes_raw=walk_minutes_raw,
     )
     return plan
 

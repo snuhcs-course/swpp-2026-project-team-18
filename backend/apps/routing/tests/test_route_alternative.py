@@ -103,6 +103,10 @@ def test_고른_경로보다_빠른_후보가_있으면_붙인다(two_routes):
     assert alt["label"] == "9호선"
     assert alt["faster_minutes"] == 4
     assert alt["path"] == FASTER_PATH
+    # 이동 중 바꾸기 판정이 대안의 도착 예상을 따로 낸다(`planning.live_switch`).
+    assert alt["minutes"] == 16
+    assert alt["mode"]
+    assert any(s["kind"] in ("bus", "subway") for s in alt["segments"])
 
 
 def test_대안을_붙여도_호출은_한_번이다(two_routes):

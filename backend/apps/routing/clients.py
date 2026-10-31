@@ -95,15 +95,17 @@ def meters_per_unit(level: int) -> float:
 WALK_CANDIDATE_MAX_MINUTES = 40
 
 # 수단별 상한. 한 수단의 후보 때문에 다른 수단이 전체 목록에서 잘리지 않는다.
-# 대중교통은 5개다. 3개일 때는 시간·환승·요금 기준만 들어가 비슷한 경로만 나왔다
-# (사용자 요청 10-29 "최대한 다양한 옵션이 나오게").
-CANDIDATE_LIMITS = {"car": 4, "transit": 5, "walk": 1, "bicycle": 1}
+# 대중교통은 7개다. 3개일 때는 시간·환승·요금 기준만 들어가 비슷한 경로만 나왔고
+# (사용자 요청 10-29 "최대한 다양한 옵션이 나오게"), 5개일 때는 기준별 대표가 칸을 다 채워
+# 첫 차만 다른 경로가 못 들어왔다(사용자 요청 10-31 "최대 7개로").
+CANDIDATE_LIMITS = {"car": 4, "transit": 7, "walk": 1, "bicycle": 1}
 
-# 대중교통 남는 칸을 채울 때 빼는 느린 경로. 가장 빠른 것의 1.5배 이상이거나 20분 이상
-# 더 걸리면 다양하다는 이유만으로는 넣지 않는다. 기준별 대표(환승 최소 등)에는 걸지
-# 않는다 — 30분 걸려도 환승 없는 버스를 고르는 사람이 있다.
-TRANSIT_FILL_MAX_RATIO = 1.5
-TRANSIT_FILL_MAX_EXTRA_SECONDS = 20 * 60
+# 대중교통 느린 경로. 가장 빠른 것의 1.5배 이상이거나 20분 이상 더 걸리면 남는 칸에도,
+# 환승 최소를 뺀 기준별 대표에도 넣지 않는다. 환승 최소만 예외다 — 30분 걸려도 환승 없는
+# 버스를 고르는 사람이 있다. 10-31 복은길→홍대입구역에서 64분 심야버스가 "도보 최소"(50초 덜
+# 걸음)로, 61분 버스가 "버스만" 으로 칸을 차지해 35분 152 → 2호선이 빠졌다.
+TRANSIT_SLOW_MAX_RATIO = 1.5
+TRANSIT_SLOW_MAX_EXTRA_SECONDS = 20 * 60
 
 # 대중교통 배지 상한. 경로 카드 한 줄에 들어가야 한다.
 TRANSIT_MAX_BADGES = 3
@@ -1180,6 +1182,17 @@ def _ride_kinds(item: dict) -> frozenset[str]:
     )
 
 
+def _first_rides(item: dict) -> set[str]:
+    """첫 승차 구간에서 탈 수 있는 노선. 대체 버스도 센다. 첫 차가 다르면 출발지에서 걸어가는
+    정류장이 다르다."""
+    legs = _ride_legs(item)
+    if not legs:
+        return set()
+    names = {legs[0].get("vehicle") or ""}
+    names |= {v.get("name") or "" for v in legs[0].get("alt_vehicles") or []}
+    return names - {""}
+
+
 def _transit_lines(item: dict) -> set[str]:
     """타는 노선 이름. 남는 칸을 채울 때 이미 고른 경로와 겹치는지 본다. 합친 경로의 버스도 센다."""
     keys = item.get("member_keys") or [item["key"]]
@@ -1193,11 +1206,11 @@ def _transit_candidates(
     end_lng: float,
     with_path: bool = False,
 ) -> tuple[list[dict], bool]:
-    """대중교통 후보. 중복을 합치고 기준별 대표를 최대 5개 남긴다.
+    """대중교통 후보. 중복을 합치고 기준별 대표를 최대 7개 남긴다.
 
     ``with_path`` 는 경로 폴리라인을 함께 담는다. 기본값은 False 다. `route_candidates` 는
     경로 선택 화면의 미리보기를 위해, `best_route` 는 알람 지도에 쓰려고 켠다.
-    후보 목록은 카카오가 준 15개가 아니라 추린 5개 이하만 내리고, 거기서도
+    후보 목록은 카카오가 준 15개가 아니라 추린 7개 이하만 내리고, 거기서도
     [preview_path] 로 점과 자릿수를 줄인다.
 
     고르는 순서(이미 담긴 경로는 건너뛴다):
@@ -1209,11 +1222,12 @@ def _transit_candidates(
       5. 버스만 타는 것 중 가장 빠른 것
       6. 지하철과 버스를 섞는 것 중 가장 빠른 것
       7. 요금이 가장 싼 것(요금 모르는 경로는 뺀다)
-      8. 남는 칸: 이미 고른 경로에 없는 노선이 많은 것부터. 너무 느린 것은 뺀다
-         ([TRANSIT_FILL_MAX_RATIO], [TRANSIT_FILL_MAX_EXTRA_SECONDS]).
+      8. 남는 칸: 첫 차가 아직 목록에 없는 경로를 빠른 순으로, 그다음 이미 고른 경로에 없는
+         노선이 많은 것부터.
 
-    2~7의 동률은 빠른 쪽이다. 3개였을 때는 1·2·7과 지하철 최단만 봐서, 같은 노선을 조금씩
-    바꾼 경로가 남는 칸을 채웠다(사용자 요청 10-29). (Partly AI-generated (Claude))
+    너무 느린 경로([TRANSIT_SLOW_MAX_RATIO], [TRANSIT_SLOW_MAX_EXTRA_SECONDS])는 2(환승 최소)
+    말고는 넣지 않는다. 2~7의 동률은 빠른 쪽이다. 3개였을 때는 1·2·7과 지하철 최단만 봐서, 같은
+    노선을 조금씩 바꾼 경로가 남는 칸을 채웠다(사용자 요청 10-29). (Partly AI-generated (Claude))
     """
     pool, durations, degraded = _transit_pool(
         start_lat, start_lng, end_lat, end_lng, with_path=with_path
@@ -1222,27 +1236,7 @@ def _transit_candidates(
         return [], True
 
     walks = {c["key"]: _walk_seconds(c) for c in pool}
-
-    # 배지는 대표 선택과 별개다. 같은 경로가 여러 기준을 만족하거나 동률이면
-    # 해당 배지를 모두 준다(카드 한 줄에 들어가게 최대 3개). 요금 미상(None)은 최소
-    # 비용 비교에서 제외한다.
     fastest_seconds = min(durations[c["key"]] for c in pool)
-    fewest_transfers = min(c["transfers"] for c in pool)
-    least_walk = min(walks.values())
-    priced = [c for c in pool if c["fare"] is not None]
-    cheapest_fare = min((c["fare"] for c in priced), default=None)
-    for item in pool:
-        badges = []
-        if durations[item["key"]] == fastest_seconds:
-            badges.append("최단 시간")
-        if item["fare"] is not None and item["fare"] == cheapest_fare:
-            badges.append("최소 비용")
-        if item["transfers"] == fewest_transfers:
-            badges.append("최소 환승")
-        if walks[item["key"]] == least_walk:
-            badges.append("최소 도보")
-        item["badges"] = badges[:TRANSIT_MAX_BADGES]
-        item["reason"] = item["badges"][0] if item["badges"] else ""
 
     def fastest(item):
         return durations[item["key"]], item["key"]
@@ -1263,25 +1257,60 @@ def _transit_candidates(
             return None
         return min(items, key=lambda c: (*(f(c) for f in first), *fastest(c)))
 
+    cutoff = min(
+        fastest_seconds * TRANSIT_SLOW_MAX_RATIO,
+        fastest_seconds + TRANSIT_SLOW_MAX_EXTRA_SECONDS,
+    )
+    quick = [c for c in pool if durations[c["key"]] < cutoff]
+
     take(best(pool))
     take(best(pool, lambda c: c["transfers"]))
-    take(best(pool, lambda c: walks[c["key"]]))
-    take(best([c for c in pool if _ride_kinds(c) == {"subway"}]))
-    take(best([c for c in pool if _ride_kinds(c) == {"bus"}]))
-    take(best([c for c in pool if _ride_kinds(c) == {"bus", "subway"}]))
-    take(best(priced, lambda c: c["fare"]))
+    take(best(quick, lambda c: walks[c["key"]]))
+    take(best([c for c in quick if _ride_kinds(c) == {"subway"}]))
+    take(best([c for c in quick if _ride_kinds(c) == {"bus"}]))
+    take(best([c for c in quick if _ride_kinds(c) == {"bus", "subway"}]))
+    take(best([c for c in quick if c["fare"] is not None], lambda c: c["fare"]))
 
-    # 남는 칸. 빠른 순으로 채우면 가장 빠른 경로의 버스 번호만 바꾼 것들이 들어온다.
-    cutoff = min(
-        fastest_seconds * TRANSIT_FILL_MAX_RATIO,
-        fastest_seconds + TRANSIT_FILL_MAX_EXTRA_SECONDS,
-    )
-    rest = [c for c in pool if c["key"] not in seen and durations[c["key"]] < cutoff]
+    # 남는 칸.
+    #
+    # - 첫 차가 아직 목록에 없는 경로가 먼저다. 빠른 순이다. 출발지에서 걸어가는 정류장이 달라
+    #   실제로 다른 선택지다(사용자 10-31: 5519 → 152 → 2호선만 보이고 152 정류장까지 걸어가는
+    #   152 → 2호선이 없었다). 노선이 이미 다 보인다고 뒤로 밀지 않는다.
+    # - 그다음은 이미 고른 경로에 없는 노선이 많은 것. 빠른 순으로만 채우면 가장 빠른 경로의
+    #   뒤 버스 번호만 바꾼 것들이 들어온다.
+    rest = [c for c in quick if c["key"] not in seen]
     while rest and len(picked) < limit:
+        firsts = set().union(*(_first_rides(c) for c in picked))
         used = set().union(*(_transit_lines(c) for c in picked))
-        nxt = best(rest, lambda c: -len(_transit_lines(c) - used))
+
+        def fill_order(c):
+            if not _first_rides(c) & firsts:
+                return (0, 0, *fastest(c))
+            return (1, -len(_transit_lines(c) - used), *fastest(c))
+
+        nxt = min(rest, key=fill_order)
         take(nxt)
         rest.remove(nxt)
+
+    # 배지는 대표 선택과 별개다. **보이는 후보끼리** 비교한다 — 느려서 빠진 경로가 "최소 도보"
+    # 를 가져가면 보이는 카드에는 배지가 없다. 같은 경로가 여러 기준을 만족하거나 동률이면
+    # 해당 배지를 모두 준다(카드 한 줄에 들어가게 최대 3개). 요금 미상(None)은 최소 비용
+    # 비교에서 제외한다.
+    fewest_transfers = min(c["transfers"] for c in picked)
+    least_walk = min(walks[c["key"]] for c in picked)
+    cheapest_fare = min((c["fare"] for c in picked if c["fare"] is not None), default=None)
+    for item in picked:
+        badges = []
+        if durations[item["key"]] == fastest_seconds:
+            badges.append("최단 시간")
+        if item["fare"] is not None and item["fare"] == cheapest_fare:
+            badges.append("최소 비용")
+        if item["transfers"] == fewest_transfers:
+            badges.append("최소 환승")
+        if walks[item["key"]] == least_walk:
+            badges.append("최소 도보")
+        item["badges"] = badges[:TRANSIT_MAX_BADGES]
+        item["reason"] = item["badges"][0] if item["badges"] else ""
 
     return picked, False
 
@@ -1567,6 +1596,11 @@ def _with_alternative(chosen: dict, fastest: dict) -> dict:
             "label": _transit_label(fastest["key"]),
             "faster_minutes": faster_by,
             "path": fastest.get("path") or [],
+            # 이동 중 바꾸기 판정(`planning.live_switch`)이 쓴다. 도착 예상에 걷는 속도를
+            # 반영하고 첫 승차의 실시간 도착을 붙이려면 원값과 구간이 필요하다.
+            "minutes": fastest["minutes"],
+            "mode": fastest.get("mode") or "",
+            "segments": fastest.get("segments") or [],
         },
     }
 

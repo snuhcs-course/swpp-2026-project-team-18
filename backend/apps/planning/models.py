@@ -372,6 +372,9 @@ class PlanRevision(models.Model):
     )
     # 카카오가 준 분 그대로(G2). `travel_minutes` 는 보정·τ 분위수가 들어간 값이다.
     route_minutes_raw = models.PositiveIntegerField("경로 원값(분)", null=True, blank=True)
+    # 원값 중 걷는 분(P2 A-2). 도보 경로는 원값 전체, 대중교통은 도보 구간 합, 자동차·자전거는 0.
+    # 경로 조회 없이 다시 계산할 때도 걷는 속도를 같은 구간에만 곱하려고 남긴다. 비면 모른다.
+    walk_minutes_raw = models.PositiveIntegerField("도보 원값(분)", null=True, blank=True)
     trigger = models.CharField(
         "계산한 이유",
         max_length=16,

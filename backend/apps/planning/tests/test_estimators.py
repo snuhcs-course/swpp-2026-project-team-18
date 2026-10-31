@@ -309,8 +309,59 @@ class TestEstimateTravel:
         assert est.distribution.quantile(0.5) == pytest.approx(22.0)
         assert est.source == "observed_route"
 
-    def test_hour_specific_correction_wins(self):
-        """아침 8시와 낮 2시의 지연은 다르다. 시간대가 맞는 보정을 쓴다."""
+    def test_time_of_day_factor_multiplies(self):
+        """출근 구간 계수는 경로 보정에 곱한다. 1.0 에서 표본 수만큼 옮긴다(n / (n + 5))."""
+        from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection
+
+        RouteCorrection.objects.create(
+            route_signature=GLOBAL_SIGNATURE, mode="transit", hour_bucket=-1,
+            weekday_type=RouteCorrection.WeekdayType.ANY,
+            factor=1.10, sd_minutes=1.0, sample_count=100,
+        )
+        RouteCorrection.objects.create(
+            route_signature=GLOBAL_SIGNATURE, mode="transit", hour_bucket=6,
+            weekday_type=RouteCorrection.WeekdayType.WEEKDAY,
+            factor=1.30, sd_minutes=0.0, sample_count=5,
+        )
+        monday_8_30 = datetime(2026, 9, 21, 8, 30, tzinfo=KST)
+        est = estimate_travel(20.0, "transit:2호선", "transit", monday_8_30)
+        # 시간대 계수 = 1 + 5/10 × 0.3 = 1.15
+        assert est.time_factor == pytest.approx(1.15)
+        assert est.factor == pytest.approx(1.10)
+        assert est.distribution.mean == pytest.approx(20.0 * 1.10 * 1.15)
+        # DB 에서 온 UTC 시각도 서울 시각으로 구간을 고른다.
+        from_db = estimate_travel(20.0, "transit:2호선", "transit", monday_8_30.astimezone(timezone.utc))
+        assert from_db.distribution.mean == pytest.approx(20.0 * 1.10 * 1.15)
+
+        # 낮(9~17시)·주말 출근 시각은 기록이 없으니 1.0 이다.
+        noon = estimate_travel(20.0, "transit:2호선", "transit", datetime(2026, 9, 21, 14, 0, tzinfo=KST))
+        saturday = estimate_travel(20.0, "transit:2호선", "transit", datetime(2026, 9, 26, 8, 30, tzinfo=KST))
+        for other in (noon, saturday):
+            assert other.time_factor == 1.0
+            assert other.distribution.mean == pytest.approx(22.0)
+        # 다른 수단에는 쓰지 않는다.
+        assert estimate_travel(20.0, "walk:x", "walk", monday_8_30).time_factor == 1.0
+
+    def test_time_factor_without_samples_stays_at_one(self):
+        """손으로 넣은 n=0 시간대 행은 아무것도 바꾸지 않는다. 기록이 쌓여야 움직인다."""
+        from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection
+
+        RouteCorrection.objects.create(
+            route_signature=GLOBAL_SIGNATURE, mode="transit", hour_bucket=-1,
+            weekday_type=RouteCorrection.WeekdayType.ANY,
+            factor=1.0, sd_minutes=1.0, sample_count=100,
+        )
+        RouteCorrection.objects.create(
+            route_signature=GLOBAL_SIGNATURE, mode="transit", hour_bucket=6,
+            weekday_type=RouteCorrection.WeekdayType.WEEKDAY,
+            factor=2.0, sd_minutes=0.0, sample_count=0,
+        )
+        est = estimate_travel(20.0, "", "transit", datetime(2026, 9, 21, 8, 0, tzinfo=KST))
+        assert est.time_factor == 1.0
+        assert est.distribution.mean == pytest.approx(20.0)
+
+    def test_old_hourly_route_rows_are_ignored(self):
+        """예전 시(時) 단위 경로 행은 쓰지 않는다. 밤 전체 재학습이 지운다."""
         from apps.routing.models import RouteCorrection
 
         RouteCorrection.objects.create(
@@ -323,12 +374,26 @@ class TestEstimateTravel:
             weekday_type=RouteCorrection.WeekdayType.WEEKDAY,
             factor=1.30, sd_minutes=5.0, sample_count=50,
         )
-        est = estimate_travel(20.0, "transit:2호선", "transit",
-                              datetime(2026, 9, 21, 8, 30, tzinfo=KST))  # 월요일 8시
-        assert est.distribution.mean == pytest.approx(26.0)
-        same_instant_utc = datetime(2026, 9, 21, 8, 30, tzinfo=KST).astimezone(timezone.utc)
-        from_db = estimate_travel(20.0, "transit:2호선", "transit", same_instant_utc)
-        assert from_db.distribution.mean == pytest.approx(26.0)
+        est = estimate_travel(20.0, "transit:2호선", "transit", datetime(2026, 9, 21, 8, 30, tzinfo=KST))
+        assert est.distribution.mean == pytest.approx(20.0)
+        assert est.factor == pytest.approx(1.0)
+
+    def test_total_factor_is_capped(self):
+        """경로 보정 × 시간대 계수도 학습 범위(4배)를 넘지 않는다."""
+        from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection
+
+        RouteCorrection.objects.create(
+            route_signature=GLOBAL_SIGNATURE, mode="transit", hour_bucket=-1,
+            weekday_type=RouteCorrection.WeekdayType.ANY,
+            factor=3.5, sd_minutes=1.0, sample_count=100,
+        )
+        RouteCorrection.objects.create(
+            route_signature=GLOBAL_SIGNATURE, mode="transit", hour_bucket=6,
+            weekday_type=RouteCorrection.WeekdayType.WEEKDAY,
+            factor=2.0, sd_minutes=0.0, sample_count=1000,
+        )
+        est = estimate_travel(10.0, "", "transit", datetime(2026, 9, 21, 7, 0, tzinfo=KST))
+        assert est.distribution.mean == pytest.approx(40.0)
 
     def test_signature_is_trimmed_and_bounded(self):
         assert route_signature("  transit:2호선  ") == "transit:2호선"

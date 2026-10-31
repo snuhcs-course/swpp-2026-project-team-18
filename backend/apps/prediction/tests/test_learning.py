@@ -18,11 +18,12 @@ import pytest
 from apps.events.models import Event, Place
 from apps.observations.models import TripObservation
 from apps.planning import history
+from apps.planning.estimators import estimate_travel
 from apps.planning.models import AlarmPlan
 from apps.prediction import learning
 from apps.prediction.models import ModelArtifact
 from apps.routines.models import BlockObservation, RoutineBlock
-from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection
+from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection, UserTravelProfile, walk_factor_for
 
 KST = timezone(timedelta(hours=9))
 pytestmark = pytest.mark.django_db
@@ -75,8 +76,14 @@ def make_trip(
     mode="transit",
     accuracy=15.0,
     skip_arrive=False,
+    planned_depart=None,
+    walk_minutes_raw=None,
 ):
-    """출발·도착 쌍과 그 근거가 되는 알람 계획을 만든다."""
+    """출발·도착 쌍과 그 근거가 되는 알람 계획을 만든다.
+
+    `planned_depart` 는 계획의 출발 시각이다. 비우면 실제 출발(`depart_at`)과 같다.
+    """
+    planned_depart = planned_depart or depart_at
     event = Event.objects.create(
         user=user,
         place=place,
@@ -87,9 +94,9 @@ def make_trip(
         user=user,
         event=event,
         status=AlarmPlan.Status.OK,
-        alarm_at=depart_at - timedelta(minutes=30),
-        depart_by=depart_at,
-        arrive_at=depart_at + timedelta(minutes=predicted),
+        alarm_at=planned_depart - timedelta(minutes=30),
+        depart_by=planned_depart,
+        arrive_at=planned_depart + timedelta(minutes=predicted),
         prep_minutes=30,
         travel_minutes=predicted,
         buffer_minutes=10,
@@ -97,8 +104,10 @@ def make_trip(
         route_key=route_key,
     )
     # 실제 계산과 같은 경로 원값 이력을 출발 전 시각에 남긴다.
-    plan.computed_at = depart_at - timedelta(minutes=1)
-    history.record_revision(event, plan, route_minutes_raw=predicted)
+    plan.computed_at = min(depart_at, planned_depart) - timedelta(minutes=1)
+    history.record_revision(
+        event, plan, route_minutes_raw=predicted, walk_minutes_raw=walk_minutes_raw
+    )
     TripObservation.objects.create(
         user=user, event=event, kind=TripObservation.Kind.DEPART,
         detector=TripObservation.Detector.GPS, observed_at=depart_at,
@@ -122,6 +131,23 @@ def make_trip(
 
 
 class TestCollectTravelSamples:
+    def test_rerouted_trips_are_left_out(self, user, place):
+        """이동 중에 경로를 바꾼 일정은 원래 경로의 원값과 맞지 않는다. 이동 학습에서 뺀다."""
+        from apps.observations.models import TripReroute
+
+        kept = make_trip(user, place, predicted=20, actual_minutes=24,
+                         depart_at=datetime(2026, 9, 21, 8, 0, tzinfo=KST))
+        switched = make_trip(user, place, predicted=20, actual_minutes=35,
+                             depart_at=datetime(2026, 9, 22, 8, 0, tzinfo=KST))
+        TripReroute.objects.create(user=user, event=switched, from_route_key="transit:2호선",
+                                   to_route_key="transit:5513", reason="late_now")
+
+        samples, dropped = learning.collect_travel_samples()
+
+        assert [s.actual_minutes for s in samples] == [24.0]
+        assert dropped["이동 중 경로 변경"] == 1
+        assert kept.pk != switched.pk
+
     def test_pairs_become_samples(self, user, place):
         make_trip(user, place, predicted=20, actual_minutes=24,
                   depart_at=datetime(2026, 9, 21, 8, 0, tzinfo=KST))
@@ -228,11 +254,18 @@ class TestUpdateRouteCorrections:
         assert result["samples"] == 3
 
         row = RouteCorrection.objects.get(
-            route_signature="transit:2호선", mode="transit", hour_bucket=8,
+            route_signature="transit:2호선", mode="transit", hour_bucket=-1,
             weekday_type="weekday",
         )
         assert row.factor == pytest.approx(1.2, abs=1e-3)
         assert row.sample_count == 3
+        # 표본이 한 구간뿐이면 그 구간 계수는 1.0 이다(수단 전체 평균과 같다).
+        cell = RouteCorrection.objects.get(
+            route_signature=GLOBAL_SIGNATURE, mode="transit", hour_bucket=6,
+            weekday_type="weekday",
+        )
+        assert cell.factor == pytest.approx(1.0)
+        assert cell.sample_count == 3
 
     def test_residual_sd_is_measured_after_correction(self, user, place):
         """**보정 후** 잔차의 표준편차여야 한다.
@@ -243,7 +276,7 @@ class TestUpdateRouteCorrections:
         self._many(user, place, [1.2, 1.2, 1.2])
         learning.update_route_corrections()
         row = RouteCorrection.objects.get(
-            route_signature="transit:2호선", hour_bucket=8, weekday_type="weekday",
+            route_signature="transit:2호선", hour_bucket=-1, weekday_type="weekday",
             mode="transit",
         )
         assert row.factor == pytest.approx(1.2, abs=1e-3)
@@ -275,20 +308,67 @@ class TestUpdateRouteCorrections:
         for row in RouteCorrection.objects.all():
             assert 0.25 <= row.factor <= 4.0
 
-    def test_hourly_buckets_are_separate(self, user, place):
-        """아침 8시와 낮 2시의 지연은 다르다."""
+    def test_time_of_day_is_a_separate_relative_factor(self, user, place):
+        """아침 8시(출근)와 낮 2시(낮)의 지연은 다르다. 경로 행은 나누지 않고 시간대 행을 곱한다.
+
+        수단 전체 평균 비율이 1.2 다. 출근 1.4 → 1.4/1.2, 낮 1.0 → 1.0/1.2.
+        """
         self._many(user, place, [1.4, 1.4, 1.4], hour=8)
         self._many(user, place, [1.0, 1.0, 1.0], hour=14)
+        result = learning.update_route_corrections()
+        assert result["time_rows"] == 2
+
+        rush = RouteCorrection.objects.get(
+            route_signature=GLOBAL_SIGNATURE, mode="transit", hour_bucket=6, weekday_type="weekday",
+        )
+        day = RouteCorrection.objects.get(
+            route_signature=GLOBAL_SIGNATURE, mode="transit", hour_bucket=9, weekday_type="weekday",
+        )
+        assert rush.factor == pytest.approx(1.4 / 1.2, abs=1e-3)
+        assert day.factor == pytest.approx(1.0 / 1.2, abs=1e-3)
+        assert (rush.sample_count, day.sample_count) == (3, 3)
+        assert rush.sd_minutes == 0.0
+
+        # 경로 행은 시간대를 나누지 않는다. 시간대 계수(1.0 에서 3/8 만큼 옮긴 값)를 떼고 배운다.
+        assert not RouteCorrection.objects.filter(
+            route_signature="transit:2호선", hour_bucket__gte=0
+        ).exists()
+        route_row = RouteCorrection.objects.get(
+            route_signature="transit:2호선", mode="transit", hour_bucket=-1, weekday_type="weekday",
+        )
+        rush_used = 1 + 3 / 8 * (1.4 / 1.2 - 1)
+        day_used = 1 + 3 / 8 * (1.0 / 1.2 - 1)
+        expected = (1.4 / rush_used + 1.0 / day_used) / 2
+        assert route_row.factor == pytest.approx(expected, abs=1e-3)
+
+    def test_bucket_is_the_planned_departure(self, user, place):
+        """계획은 8시 50분(출근), 실제로는 9시 10분에 나갔다. 출근 구간에 들어간다.
+
+        알람 계산도 계획한 출발 시각으로 구간을 고른다. 늦게 나간 아침이 낮 구간에 들어가면
+        계산과 칸이 어긋난다.
+        """
+        make_trip(
+            user, place, predicted=20, actual_minutes=24,
+            depart_at=datetime(2026, 9, 21, 9, 10, tzinfo=KST),
+            planned_depart=datetime(2026, 9, 21, 8, 50, tzinfo=KST),
+        )
+        samples, _ = learning.collect_travel_samples()
+        assert [s.hour for s in samples] == [8]
         learning.update_route_corrections()
-        morning = RouteCorrection.objects.get(
-            route_signature="transit:2호선", hour_bucket=8, weekday_type="weekday",
-            mode="transit",
+        assert RouteCorrection.objects.filter(
+            route_signature=GLOBAL_SIGNATURE, hour_bucket=6
+        ).exists()
+        assert not RouteCorrection.objects.filter(hour_bucket=9).exists()
+
+    def test_old_hourly_route_rows_are_removed_on_a_full_run(self, user, place):
+        """예전 시(時) 단위 경로 행이 남아도 쓰이지 않지만, 전체 재학습에서 지운다."""
+        RouteCorrection.objects.create(
+            route_signature="transit:2호선", mode="transit", hour_bucket=8,
+            weekday_type="weekday", factor=1.5, sd_minutes=2.0, sample_count=4,
         )
-        noon = RouteCorrection.objects.get(
-            route_signature="transit:2호선", hour_bucket=14, weekday_type="weekday",
-            mode="transit",
-        )
-        assert morning.factor > noon.factor
+        self._many(user, place, [1.1, 1.2, 1.3])
+        learning.update_route_corrections()
+        assert not RouteCorrection.objects.filter(route_signature="transit:2호선", hour_bucket=8).exists()
 
     def test_rerunning_updates_instead_of_duplicating(self, user, place):
         self._many(user, place, [1.1, 1.2, 1.3])
@@ -301,6 +381,135 @@ class TestUpdateRouteCorrections:
         result = learning.update_route_corrections()
         assert result["written"] == 0
         assert not RouteCorrection.objects.exists()
+
+
+class TestWalkSpeed:
+    """걷는 속도(P2 A-2). 사용자별이고, 도보로 간 일정에서만 배운다."""
+
+    def _walks(self, user, place, ratios, *, predicted=20):
+        for i, r in enumerate(ratios):
+            make_trip(
+                user, place, predicted=predicted, actual_minutes=predicted * r,
+                depart_at=datetime(2026, 9, 21, 14, 0, tzinfo=KST) + timedelta(days=i * 7),
+                route_key="walk", mode="walk",
+            )
+
+    def test_profile_is_the_mean_walk_ratio(self, user, place):
+        self._walks(user, place, [1.1, 1.2, 1.3, 1.2, 1.2])
+        result = learning.update_route_corrections()
+        assert result["walk_profiles"] == 1
+
+        profile = UserTravelProfile.objects.get(user=user)
+        assert profile.walk_ratio == pytest.approx(1.2)
+        assert profile.walk_samples == 5
+        # 1.0 에서 5/10 만큼 옮긴다.
+        assert profile.walk_factor == pytest.approx(1.1)
+        assert walk_factor_for(user.pk) == pytest.approx(1.1)
+
+    def test_real_walk_label_teaches_walking(self, user, place):
+        """경로 후보의 수단은 "도보" 로 저장된다. key("walk")로 도보 일정을 알아본다."""
+        for i in range(5):
+            make_trip(
+                user, place, predicted=20, actual_minutes=24,
+                depart_at=datetime(2026, 9, 21, 14, 0, tzinfo=KST) + timedelta(days=i * 7),
+                route_key="walk", mode="도보",
+            )
+        learning.update_route_corrections()
+        assert UserTravelProfile.objects.get(user=user).walk_samples == 5
+        assert RouteCorrection.objects.filter(
+            route_signature=GLOBAL_SIGNATURE, mode="walk", hour_bucket=9
+        ).exists()
+
+    def test_transit_labels_share_one_time_cell(self, user, place):
+        """"버스"·"버스+지하철" 은 같은 대중교통이다. 시간대 칸 하나에 모인다."""
+        for i, label in enumerate(["버스", "버스+지하철", "지하철"]):
+            make_trip(
+                user, place, predicted=20, actual_minutes=24,
+                depart_at=datetime(2026, 9, 21, 8, 0, tzinfo=KST) + timedelta(days=i * 7),
+                route_key=f"transit:{i}", mode=label,
+            )
+        result = learning.update_route_corrections()
+        assert result["time_rows"] == 1
+        cell = RouteCorrection.objects.get(route_signature=GLOBAL_SIGNATURE, hour_bucket=6)
+        assert (cell.mode, cell.sample_count) == ("transit", 3)
+
+    def test_transit_trips_do_not_teach_walking(self, user, place):
+        TestUpdateRouteCorrections()._many(user, place, [1.3, 1.3, 1.3])
+        learning.update_route_corrections()
+        assert not UserTravelProfile.objects.exists()
+        assert walk_factor_for(user.pk) == 1.0
+
+    def test_walk_factor_is_clipped(self, user, place):
+        """기록 평균이 3.9 여도 곱하는 값은 1.5 에서 멈춘다. 저장 값은 DB 범위 안이다."""
+        self._walks(user, place, [3.9, 3.9, 3.9])
+        learning.update_route_corrections()
+        profile = UserTravelProfile.objects.get(user=user)
+        assert 0.25 <= profile.walk_ratio <= 4.0
+        assert profile.walk_factor == pytest.approx(1.5)
+
+    def test_walk_speed_is_not_counted_twice(self, user, place):
+        """걷는 속도를 뗀 뒤 경로 보정을 배우므로, 둘을 곱하면 실제와 같아진다.
+
+        떼지 않으면 경로 보정도 1.2 가 되어 1.1 × 1.2 로 실제보다 길게 잡는다.
+        """
+        self._walks(user, place, [1.1, 1.2, 1.3, 1.2, 1.2])
+        learning.update_route_corrections()
+
+        monday_2pm = datetime(2026, 11, 2, 14, 0, tzinfo=KST)
+        est = estimate_travel(
+            20.0, "walk", "walk", monday_2pm,
+            walk_minutes=20.0, walk_factor=walk_factor_for(user.pk),
+        )
+        assert est.walk_factor == pytest.approx(1.1)
+        assert est.factor == pytest.approx(1.2 / 1.1, abs=1e-3)
+        assert est.distribution.mean == pytest.approx(24.0, abs=0.01)
+
+    def test_transit_adjusts_only_the_walking_part(self, user, place):
+        """대중교통 30분 중 걷는 10분에만 걷는 속도(1.2)를 곱한다. 예측 32분 → 비율 34/32."""
+        self._walks(user, place, [1.4] * 5)
+        for i in range(3):
+            make_trip(
+                user, place, predicted=30, actual_minutes=34,
+                depart_at=datetime(2026, 9, 22, 8, 0, tzinfo=KST) + timedelta(days=i * 7),
+                walk_minutes_raw=10,
+            )
+        learning.update_route_corrections()
+
+        row = RouteCorrection.objects.get(
+            route_signature="transit:2호선", mode="transit", hour_bucket=-1, weekday_type="weekday",
+        )
+        assert row.factor == pytest.approx(34 / 32, abs=1e-3)
+
+    def test_transit_walk_minutes_never_exceed_the_route(self, user, place):
+        make_trip(
+            user, place, predicted=20, actual_minutes=22,
+            depart_at=datetime(2026, 9, 21, 8, 0, tzinfo=KST), walk_minutes_raw=35,
+        )
+        samples, _ = learning.collect_travel_samples()
+        assert samples[0].walk_minutes == 20.0
+
+    def test_profiles_without_walk_trips_go_back_to_one(self, user, place, django_user_model):
+        """전체 재학습은 도보 기록이 없어진 사용자의 걷는 속도를 지운다(1.0 으로 돌아간다)."""
+        other = django_user_model.objects.create_user(
+            email="walker@example.com", password="Qm5-silver-harbor-31", nickname="걷기"
+        )
+        UserTravelProfile.objects.create(user=other, walk_ratio=1.3, walk_samples=4)
+        self._walks(user, place, [1.2, 1.2])
+
+        learning.update_route_corrections()
+
+        assert list(UserTravelProfile.objects.values_list("user_id", flat=True)) == [user.pk]
+
+    def test_user_run_touches_only_that_user(self, user, place, django_user_model):
+        other = django_user_model.objects.create_user(
+            email="walker@example.com", password="Qm5-silver-harbor-31", nickname="걷기"
+        )
+        UserTravelProfile.objects.create(user=other, walk_ratio=1.3, walk_samples=4)
+        UserTravelProfile.objects.create(user=user, walk_ratio=1.3, walk_samples=4)
+
+        learning.update_route_corrections(user=user)
+
+        assert list(UserTravelProfile.objects.values_list("user_id", flat=True)) == [other.pk]
 
 
 # ---------------------------------------------------------------------------

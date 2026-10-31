@@ -116,9 +116,15 @@ class TravelEstimate:
     distribution: dist.Distribution
     # 카카오가 준 원래 점추정치(분). 보정 전 값이다.
     raw_minutes: float = 0.0
+    # 경로(또는 전역) 보정 계수. 시간대·걷는 속도는 따로 곱한다(아래 둘).
     factor: float = 1.0
     source: str = "kakao"
     sample_count: int = 0
+    # 계획한 출발 시각의 시간대 계수. 기록이 없으면 1.0 이다.
+    time_factor: float = 1.0
+    # 사용자의 걷는 속도 계수와, 그 계수를 곱한 걷는 분(원값 기준).
+    walk_factor: float = 1.0
+    walk_minutes: float = 0.0
 
     @property
     def has_variance(self) -> bool:
@@ -377,27 +383,35 @@ def route_signature(route_key: str) -> str:
     return (route_key or "").strip()[:120]
 
 
-def _lookup_correction(signature: str, mode: str, when: datetime):
-    """가장 구체적인 보정부터 찾아 (경로별, 전역) 쌍으로 돌려준다."""
-    from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection
-
+def _local(when: datetime | None) -> datetime | None:
     if when is not None and dj_tz.is_aware(when):
-        when = dj_tz.localtime(when)
-    hour = when.hour if when else -1
-    weekday = (
+        return dj_tz.localtime(when)
+    return when
+
+
+def _weekday_type(when: datetime | None) -> str:
+    from apps.routing.models import RouteCorrection
+
+    return (
         RouteCorrection.WeekdayType.WEEKEND
         if when and when.weekday() >= 5
         else RouteCorrection.WeekdayType.WEEKDAY
     )
 
+
+def _lookup_correction(signature: str, mode: str, when: datetime | None):
+    """시간대를 나누지 않은 보정을 (경로별, 전역) 쌍으로 돌려준다. 구체적인 것부터 찾는다."""
+    from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection
+
+    weekday = _weekday_type(_local(when))
+
     def pick(sig: str):
-        qs = RouteCorrection.objects.filter(route_signature=sig)
-        # 시간대·요일이 맞는 것 → 요일만 맞는 것 → 아무거나. 구체적인 순서다.
+        qs = RouteCorrection.objects.filter(route_signature=sig, hour_bucket=-1)
+        # 수단·요일이 맞는 것 → 수단만 맞는 것 → 아무거나. 시간대는 따로 곱한다(`_time_factor`).
         for flt in (
-            {"mode": mode, "hour_bucket": hour, "weekday_type": weekday},
-            {"mode": mode, "hour_bucket": -1, "weekday_type": weekday},
-            {"mode": mode, "hour_bucket": -1, "weekday_type": RouteCorrection.WeekdayType.ANY},
-            {"hour_bucket": -1, "weekday_type": RouteCorrection.WeekdayType.ANY},
+            {"mode": mode, "weekday_type": weekday},
+            {"mode": mode, "weekday_type": RouteCorrection.WeekdayType.ANY},
+            {"weekday_type": RouteCorrection.WeekdayType.ANY},
         ):
             found = qs.filter(**flt).first()
             if found is not None:
@@ -409,28 +423,76 @@ def _lookup_correction(signature: str, mode: str, when: datetime):
     return specific, global_
 
 
+def _time_factor(kind: str, when: datetime | None) -> tuple[float, int]:
+    """계획한 출발 시각의 시간대 계수와 그 표본 수. 기록이 없으면 (1.0, 0).
+
+    전역·이동 종류별 행(`mode` = walk·transit 등 종류, `hour_bucket` = 구간 시작 시)이다. 1.0 에서 시작해 표본 수만큼 기록
+    쪽으로 옮긴다(`RouteCorrection.time_factor`).
+    """
+    from apps.routing.models import GLOBAL_SIGNATURE, RouteCorrection, time_bucket
+
+    when = _local(when)
+    if when is None or not kind:
+        return 1.0, 0
+    row = RouteCorrection.objects.filter(
+        route_signature=GLOBAL_SIGNATURE,
+        mode=kind,
+        hour_bucket=time_bucket(when.hour),
+        weekday_type=_weekday_type(when),
+    ).first()
+    if row is None:
+        return 1.0, 0
+    return row.time_factor, row.sample_count
+
+
+def walk_adjusted_minutes(raw: float, walk_minutes: float, walk_factor: float) -> float:
+    """걷는 속도를 반영한 예측(분). 걷는 분에만 계수를 곱한다.
+
+    도보 경로는 `walk_minutes == raw` 라 원값 전체에 곱하는 것과 같다. 학습
+    (`prediction.learning`)도 같은 식으로 예측을 고친 뒤 비율을 내므로 걷는 속도가 경로
+    보정에 두 번 들어가지 않는다.
+    """
+    walk = min(max(float(walk_minutes or 0.0), 0.0), float(raw))
+    return float(raw) + walk * (walk_factor - 1.0)
+
+
 def estimate_travel(
     minutes: float,
     route_key: str,
     mode: str,
     depart_at: datetime | None,
+    *,
+    walk_minutes: float = 0.0,
+    walk_factor: float = 1.0,
 ) -> TravelEstimate:
     """이동 시간 분포를 만든다.
 
-    카카오 점추정치에 관측된 보정을 적용한다. 보정이 없으면 sd=0 으로 두어
-    τ 가 이동 시간을 움직이지 않게 한다 — 변동성을 모르는데 움직이면 거짓이다.
+    카카오 점추정치에 세 가지를 곱한다.
+
+        예측 = (원값 + 걷는 분 × (걷는 속도 − 1)) × 시간대 계수 × 경로 보정
+
+    걷는 속도와 시간대 계수는 기록이 없으면 1.0 이다. 경로 보정이 아예 없으면 sd=0 으로
+    두어 τ 가 이동 시간을 움직이지 않게 한다 — 변동성을 모르는데 움직이면 거짓이다.
+
+    `depart_at` 은 계획한 출발 시각이다. 시간대 계수와 요일을 고르는 데 쓴다.
     """
+    from apps.routing.models import MAX_FACTOR, MIN_FACTOR, travel_kind
+
     raw = float(minutes)
+    walk = min(max(float(walk_minutes or 0.0), 0.0), raw)
+    predicted = walk_adjusted_minutes(raw, walk, walk_factor)
     signature = route_signature(route_key)
     specific, global_ = _lookup_correction(signature, mode or "", depart_at)
 
     if specific is None and global_ is None:
         return TravelEstimate(
-            distribution=dist.Normal(raw, 0.0),
+            distribution=dist.Normal(predicted, 0.0),
             raw_minutes=raw,
             factor=1.0,
             source="kakao",
             sample_count=0,
+            walk_factor=walk_factor,
+            walk_minutes=walk,
         )
 
     # 경로 전용이 있으면 전역과 shrinkage 로 섞는다. 표본 3건짜리 경로 값을
@@ -451,12 +513,19 @@ def estimate_travel(
         factor, sd, count = global_.factor, global_.sd_minutes, global_.sample_count
         source = "observed_global"
 
+    time_factor, _time_n = _time_factor(travel_kind(route_key, mode or ""), depart_at)
+    # 곱한 결과가 학습 범위를 넘지 않게 한다. 범위 밖은 데이터 오류로 보는 기준이다.
+    total = min(max(factor * time_factor, MIN_FACTOR), MAX_FACTOR)
+
     return TravelEstimate(
-        distribution=dist.Normal(raw * factor, sd),
+        distribution=dist.Normal(predicted * total, sd),
         raw_minutes=raw,
         factor=factor,
         source=source,
         sample_count=count,
+        time_factor=time_factor,
+        walk_factor=walk_factor,
+        walk_minutes=walk,
     )
 
 

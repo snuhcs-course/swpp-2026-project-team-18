@@ -28,6 +28,7 @@ GPS 출발(`TripObservation`, kind=depart, detector=gps)은 사용자가 아무�
 | 일정을 "안 감" 으로 표시했다 | 그날 아침은 등교 준비가 아니다 |
 | 같은 일정의 GPS 출발보다 늦게 찍혔다 | 나간 뒤에 눌러 이동 시간이 섞였다 |
 | 블록 신고 범위 최소의 0.5배 미만·최대의 1.5배 초과 | 누르는 걸 잊었다가 한참 뒤에 눌렀거나 안 한 블록을 바로 눌렀다 |
+| 사용자가 그 아침을 준비 학습에서 뺐다 | 아래 "사용자가 고른 아침" |
 
 세 번째는 GPS 출발이 아예 잡히지 않은 아침을 위한 것이다. 출발 관측이 없으면
 두 번째 조건이 아무것도 거르지 못한다. 기준은 GPS 준비 시간과 같은 폭(0.5~1.5배)이고,
@@ -42,6 +43,14 @@ GPS 출발(`TripObservation`, kind=depart, detector=gps)은 사용자가 아무�
 제외" 하자고 해서 **정한 값의 0.5~1.5배**만 쓴다(55분이면 27.5~82.5분).
 
 대가: 정한 값이 실제와 크게 다르면 학습으로 고쳐지지 않는다. 그때는 설정을 고쳐야 한다.
+
+## 사용자가 고른 아침도 뺀다 (사용자 10-30)
+
+비율 기준은 정한 값에서 나오므로 사람이 보기에 이상한 아침이 남을 수 있다(55분이면
+82.5분까지 들어간다). 사용자가 "80분 넘어가는 거 수기로 제외" 를 요청했다. 지우지 않고
+일정에 표시만 붙인다(`Event.prep_learning_excluded_at`). 표시한 아침은 GPS 준비 시간과
+블록 기록 모두에서 빠지고, 표시를 떼면 다시 들어간다. 붙이고 떼는 것은
+`manage.py exclude_prep_mornings` 다. 리포트·알람·이동 시간 학습은 그대로다.
 
 리포트(`reports.services`)는 이 조건으로 거르지 않는다. 사용자가 누른 기록은 그대로
 보여 주고, 알람과 학습만 거른다. "안 감" 일정은 리포트에서도 빠진다.
@@ -106,6 +115,11 @@ def exclude_skipped(qs):
     return qs.exclude(event__skipped_at__isnull=False)
 
 
+def exclude_marked(qs):
+    """관측 쿼리셋에서 사용자가 준비 학습에서 뺀 아침의 것을 뺀다. 일정이 없는 기록은 둔다."""
+    return qs.exclude(event__prep_learning_excluded_at__isnull=False)
+
+
 def within_block_range(qs):
     """블록 기록 쿼리셋에서 블록 신고 범위의 0.5~1.5배 밖인 기록을 뺀다."""
     low = ExpressionWrapper(
@@ -120,8 +134,8 @@ def within_block_range(qs):
 
 
 def usable_block_observations(qs):
-    """알람·학습에 쓸 블록 기록. 머리말 표의 세 조건을 모두 건다."""
-    return within_block_range(exclude_after_departure(exclude_skipped(qs)))
+    """알람·학습에 쓸 블록 기록. 머리말 표의 조건을 모두 건다."""
+    return within_block_range(exclude_after_departure(exclude_marked(exclude_skipped(qs))))
 
 
 def within_expected(samples: list[float], expected_minutes: float) -> list[float]:
@@ -138,6 +152,15 @@ def gps_prep_samples(user_id: int) -> list[float]:
 
     사용자별 비율 검사(`within_expected`)는 여기서 하지 않는다. 기준인 예상 준비
     시간이 일정마다(고른 블록마다) 달라서 추정기가 한다.
+    """
+    return [minutes for _, minutes in gps_prep_by_event(user_id)]
+
+
+def gps_prep_by_event(user_id: int, *, include_marked: bool = False) -> list[tuple[int, float]]:
+    """`(일정 id, GPS 준비 시간(분))` 목록. 최근 아침부터.
+
+    `include_marked` 면 사용자가 학습에서 뺀 아침도 넣는다. 빼기 명령
+    (`exclude_prep_mornings`)이 이미 뺀 아침을 함께 보여 줄 때 쓴다.
 
     일정마다 한 개다. **그 일정의 첫 GPS 출발** − **그 전 마지막 알람 끄기** 다.
     미루기 뒤 다시 울려 끈 경우 마지막 끄기부터 준비를 시작한 것으로 본다.
@@ -147,6 +170,7 @@ def gps_prep_samples(user_id: int) -> list[float]:
         자고 준비를 넣은 아침도. 남의 집 준비는 평소 준비와 다르다)
       - 사용자가 준비를 뺀 일정(`include_prep` false). 준비하지 않고 나간 아침이다
       - "안 감" 으로 표시한 일정. 나갔다 돌아왔거나 다른 데 간 아침이다
+      - 사용자가 준비 학습에서 뺀 아침(`include_marked` 가 아닐 때)
       - 오차 반경이 150m 를 넘는 출발 fix
       - 출발 전에 끈 기록이 없는 일정(알람 없이 나갔거나 기록이 안 올라옴)
       - 1분 미만·6시간 초과(짝이 잘못된 것)
@@ -163,9 +187,10 @@ def gps_prep_samples(user_id: int) -> list[float]:
         )
         .exclude(event__include_prep=False)
         .exclude(event__skipped_at__isnull=False)
-        .order_by("event_id", "observed_at")
-        .values_list("event_id", "observed_at")
     )
+    if not include_marked:
+        departs = exclude_marked(departs)
+    departs = departs.order_by("event_id", "observed_at").values_list("event_id", "observed_at")
     first_depart: dict[int, object] = {}
     for event_id, observed_at in departs:
         first_depart.setdefault(event_id, observed_at)
@@ -184,12 +209,12 @@ def gps_prep_samples(user_id: int) -> list[float]:
         if event_id not in last_dismiss or occurred_at > last_dismiss[event_id]:
             last_dismiss[event_id] = occurred_at
 
-    samples: list[float] = []
+    samples: list[tuple[int, float]] = []
     for event_id, depart_at in sorted(first_depart.items(), key=lambda kv: kv[1], reverse=True):
         dismissed_at = last_dismiss.get(event_id)
         if dismissed_at is None:
             continue
         minutes = (depart_at - dismissed_at).total_seconds() / 60.0
         if GPS_PREP_MIN_MINUTES <= minutes <= GPS_PREP_MAX_MINUTES:
-            samples.append(round(minutes, 1))
+            samples.append((event_id, round(minutes, 1)))
     return samples

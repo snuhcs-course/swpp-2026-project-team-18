@@ -65,6 +65,7 @@ class TestNoData:
         out = run()
 
         assert "표본 0건 → 보정 0행" in out
+        assert "걷는 속도 0명 · 시간대 계수 0행" in out
         assert "관측이 없어 저장하지 않았다" in out
         assert not ModelArtifact.objects.exists()
         assert not RouteCorrection.objects.exists()
@@ -111,6 +112,8 @@ class TestRouteCorrections:
         out = run()
 
         assert f"표본 {learning.MIN_ROUTE_SAMPLES}건" in out
+        # 모두 월요일 8시 대중교통이라 시간대 칸은 (대중교통, 출근, 주중) 하나다.
+        assert "걷는 속도 0명 · 시간대 계수 1행" in out
         row = RouteCorrection.objects.get(
             route_signature="transit:2호선", hour_bucket=-1, mode="transit",
             weekday_type="weekday",
