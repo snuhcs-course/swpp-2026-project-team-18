@@ -51,11 +51,35 @@ interface EventsApi {
         @Body body: EventUpdateRequest,
     ): Response<EventDto>
 
+    /**
+     * 일정 수정(docs/iter3/event-edit-api.md). 본문은 이미 직렬화한 JSON 이다.
+     *
+     * [EventUpdateRequest] 를 쓰지 않는 이유: 기본 Gson 은 null 필드를 빼고 보내서 출발지·장소·
+     * 준비 시간 포함 여부를 **지울 수 없다.** `JsonObject` 도 Retrofit 의 Gson 을 거치면 null 이
+     * 빠진다. 그래서 [com.swpp.wakeup.data.repository.EventEditPatch] 가 만든 문자열을 그대로 싣는다.
+     */
+    @PATCH("api/events/{id}")
+    suspend fun patch(
+        @Path("id") id: Long,
+        @Body body: okhttp3.RequestBody,
+    ): Response<EventDto>
+
     @DELETE("api/events/{id}")
     suspend fun delete(@Path("id") id: Long): Response<Unit>
 
     @POST("api/events/{id}/recompute")
     suspend fun recompute(@Path("id") id: Long): Response<EventDto>
+
+    /**
+     * "안 감" 표시(docs/iter3/skip-event-api.md). 멱등이고 응답은 일정 객체다.
+     * 없는 일정·남의 일정은 본문 없는 404.
+     */
+    @POST("api/events/{id}/skip")
+    suspend fun skip(@Path("id") id: Long): Response<EventDto>
+
+    /** "안 감" 표시를 되돌린다. 멱등이고 응답은 일정 객체다. */
+    @DELETE("api/events/{id}/skip")
+    suspend fun unskip(@Path("id") id: Long): Response<EventDto>
 
     /**
      * 기기 캘린더 일정을 가져온다.
@@ -176,6 +200,14 @@ interface EventsApi {
     @POST("api/routes/live")
     suspend fun liveRoute(@Body body: LiveRouteRequest): Response<LiveRouteResponse>
 
+    /**
+     * 이동 중 경로 바꾸기(docs/iter3/reroute-api.md, todo §2 "이동 중 늦으면 경로 바꾸기").
+     * **이번 이동만 바꾼다.** 일정의 `route_key` 와 알람 계획은 그대로다. 201 이 성공이다.
+     * 400 `invalid_route_key`·`invalid_reason`, 404 남의 일정, 409 `same_route`·`outside_trip`(시작 ±6시간 밖).
+     */
+    @POST("api/events/{id}/reroute")
+    suspend fun reroute(@Path("id") id: Long, @Body body: RerouteRequest): Response<RerouteResponse>
+
     companion object {
         /** 한 번에 받아올 일정 수. 서버 PAGE_SIZE(20)를 덮어쓴다. */
         const val DEFAULT_LIMIT = 200
@@ -198,6 +230,51 @@ data class LiveRouteRequest(
 data class LiveRouteResponse(
     val route: LiveRouteDto? = null,
     val degraded: Boolean = false,
+    /** 기준 경로(고른 경로, 바꿨으면 바꾼 경로)로 지금 가면 언제 닿는지. 구버전 서버면 null */
+    val arrival: LiveArrivalDto? = null,
+    /**
+     * 지금 경로로는 일정 시작에 늦고 같은 응답의 대안이 더 일찍 닿을 때만 온다(`planning/live_switch.py`).
+     * 안 늦으면 null 이다. 바꾸기는 `POST /api/events/{id}/reroute`.
+     */
+    @SerializedName("switch_suggestion") val switchSuggestion: SwitchSuggestionDto? = null,
+)
+
+// Partly AI-generated (Claude)
+data class LiveArrivalDto(
+    @SerializedName("route_key") val routeKey: String? = null,
+    @SerializedName("arrive_at") val arriveAt: String? = null,
+    /** 일정 시작보다 늦는 분(반올림). 안 늦으면 0 */
+    @SerializedName("late_minutes") val lateMinutes: Int? = null,
+    /** 첫 승차 대기를 실시간 도착으로 바꿨는지 */
+    val realtime: Boolean = false,
+)
+
+// Partly AI-generated (Claude)
+data class SwitchSuggestionDto(
+    /** 지금은 `late_now` 하나다 */
+    val reason: String? = null,
+    @SerializedName("route_key") val routeKey: String? = null,
+    /** "9호선 → 2호선" */
+    val label: String? = null,
+    @SerializedName("arrive_at") val arriveAt: String? = null,
+    /** 대안으로도 늦는 분. 0 이면 대안으로는 안 늦는다 */
+    @SerializedName("late_minutes") val lateMinutes: Int? = null,
+    /** 대안이 몇 분 일찍 닿는가(1 이상) */
+    @SerializedName("saves_minutes") val savesMinutes: Int? = null,
+    val realtime: Boolean = false,
+)
+
+/** `POST /api/events/{id}/reroute` 본문. [reason] 은 바꾸자는 알림을 보고 눌렀을 때만 */
+data class RerouteRequest(
+    @SerializedName("route_key") val routeKey: String,
+    val reason: String? = null,
+)
+
+data class RerouteResponse(
+    @SerializedName("from_route_key") val fromRouteKey: String? = null,
+    @SerializedName("to_route_key") val toRouteKey: String? = null,
+    val reason: String? = null,
+    @SerializedName("rerouted_at") val reroutedAt: String? = null,
 )
 
 data class LiveRouteDto(
@@ -291,6 +368,16 @@ data class EventDto(
     @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
     @SerializedName("repeat_weekdays") val repeatWeekdays: List<Int>? = null,
     @SerializedName("recurrence_id") val recurrenceId: Long? = null,
+    /**
+     * "안 감" 으로 표시했는가. 서버만 바꾼다(읽기 전용).
+     * 구버전 서버가 키를 보내지 않으면 false 다.
+     */
+    val skipped: Boolean = false,
+    @SerializedName("skipped_at") val skippedAt: String? = null,
+    /** 고른 준비 시간 포함 여부. null 이면 출발지로 정함(include-prep-api.md) */
+    @SerializedName("include_prep") val includePrep: Boolean? = null,
+    /** 지금 알람에 준비 시간이 들어갔는가. 구버전 서버면 null */
+    @SerializedName("prep_applies") val prepApplies: Boolean? = null,
 )
 
 /**
@@ -308,7 +395,21 @@ data class RouteCandidateResponse(
     val walk: List<RouteCandidateDto>? = null,
     val bicycle: List<RouteCandidateDto>? = null,
     @SerializedName("fastest_key") val fastestKey: String? = null,
-)
+    /**
+     * 기본으로 고를 후보(todo §1 "경로 선택 기본값을 이전 선택 이동수단으로"). 같은 목적지(100m 안)의
+     * 최근 선택, 없으면 최근 선택 10개에서 가장 많이 고른 수단의 후보. 고를 근거가 없거나 그 수단의
+     * 후보가 없으면 셋 다 null 이고 그때는 [fastestKey] 를 쓴다. 구버전 서버도 null 이다.
+     */
+    @SerializedName("preferred_key") val preferredKey: String? = null,
+    @SerializedName("preferred_mode") val preferredMode: String? = null,
+    /** `same_destination` / `recent_mode` */
+    @SerializedName("preferred_basis") val preferredBasis: String? = null,
+) {
+    companion object {
+        const val BASIS_SAME_DESTINATION = "same_destination"
+        const val BASIS_RECENT_MODE = "recent_mode"
+    }
+}
 
 data class RouteOriginDto(
     val label: String?,
@@ -324,6 +425,11 @@ data class RouteCandidateDto(
     /** "지하철+도보+버스" */
     val mode: String,
     val minutes: Int,
+    /**
+     * 버스 번호만 다른 후보를 한 카드로 합쳤을 때 가장 오래 걸리는 쪽의 분(transit-candidates.md §6).
+     * [minutes] 보다 크면 "34~36분" 처럼 범위로 쓴다. 합치지 않았거나 구버전 서버면 null.
+     */
+    @SerializedName("minutes_max") val minutesMax: Int? = null,
     @SerializedName("distance_m") val distanceM: Int?,
     val transfers: Int = 0,
     /**
@@ -577,7 +683,8 @@ data class AlarmPlanDto(
      *
      * `travel_time_source` 는 `kakao_transit` 등 카카오 경로 추정이고, 이동 기록으로
      * 보정되면 `+observed_route`/`+observed_global` 이 붙는다(④ 이동 줄의 첫 마디),
-     * `prep_source` 는 `onboarding`/`default`, `buffer_source` 는 `fixed` 다.
+     * `prep_source` 는 `onboarding`/`default`, `buffer_source` 는 `fixed`(기본값) 또는
+     * `learned`(지각 이력으로 조정, [BUFFER_LEARNED]) 다.
      * 화면에서 "이건 학습된 값" 처럼 오해하지 않게 서버가 명시해 준다.
      */
     @SerializedName("prep_source") val prepSource: String?,
@@ -635,6 +742,10 @@ data class AlarmPlanDto(
         const val BASIS_TRAVEL_ONLY = "travel_only"
 
         /** [AlarmPlanDto.prepSource] 의 값. */
+        /** 안전 버퍼를 지각 이력으로 조정했다. 아니면 `fixed` */
+        const val BUFFER_LEARNED = "learned"
+        const val BUFFER_FIXED = "fixed"
+
         const val PREP_OBSERVED = "observed"
         const val PREP_DECLARED_RANGE = "declared_range"
         const val PREP_DECLARED_POINT = "declared_point"
@@ -869,6 +980,11 @@ data class EventCreateRequest(
     @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
     /** 0 = 월요일 / 6 = 일요일. 비어 있으면 한 번짜리 일정이다. */
     @SerializedName("repeat_weekdays") val repeatWeekdays: List<Int> = emptyList(),
+    /**
+     * 집이 아닌 출발지에서도 준비 시간을 넣는가(docs/iter3/include-prep-api.md). 켜면 true,
+     * 끄면 null(보내지 않음 = 출발지로 정함: 집이면 넣고 따로 골랐으면 뺌). 구버전 서버는 무시한다.
+     */
+    @SerializedName("include_prep") val includePrep: Boolean? = null,
 )
 
 data class EventUpdateRequest(

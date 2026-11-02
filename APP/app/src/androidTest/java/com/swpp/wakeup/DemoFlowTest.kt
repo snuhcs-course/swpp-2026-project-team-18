@@ -173,7 +173,9 @@ class DemoFlowTest {
     }
 
     private fun openPlan() {
-        ui.click(By.res("next_alarm"), "home_list")
+        // 알람이 울린 뒤에는 "다음 알람" 카드에서 빠진다. 목록의 행(제목)으로 연다.
+        // 행 안에 "안 감으로 표시" 도 눌리므로 행 가운데가 아니라 제목을 누른다.
+        ui.click(By.res("event_title_${config.getLong("event_id")}"), "home_list")
         find(By.res("plan_scroll"), timeout = 90_000)
         find(By.textContains(config.getString("event_title")), timeout = 90_000)
     }

@@ -43,10 +43,18 @@ internal class ReportWeekNavigator(
         load(_state.value.week)
     }
 
+    /** 마지막으로 시작한 불러오기. 늦게 끝난 옛 응답이 새 응답을 덮지 못하게 한다 */
+    private var loadGeneration = 0L
+
     fun load(week: LocalDate?) {
+        val gen = ++loadGeneration
         _state.update { it.copy(loading = true, error = null, week = week) }
         scope.launch {
-            when (val result = weekly(week)) {
+            val result = weekly(week)
+            // "안 감" 표시와 되돌리기가 몇 초 사이로 같은 주를 다시 부른다. 먼저 시작한
+            // 응답이 나중에 끝나면 틀린 상태를 보여 주므로 버린다. (Partly AI-generated (Claude))
+            if (gen != loadGeneration) return@launch
+            when (result) {
                 is ReportResult.Success -> _state.update {
                     it.copy(loading = false, error = null, weekly = result.data)
                 }
@@ -68,6 +76,9 @@ internal class ReportWeekNavigator(
             }
         }
     }
+
+    /** 보고 있는 주를 다시 불러온다. "안 감" 표시 뒤에 쓴다 */
+    fun reload() = load(_state.value.week)
 
     /** 한 주 앞뒤로 이동한다. 기준은 보고 있는 주, 없으면 지난 주다. */
     fun shift(weeks: Long) {

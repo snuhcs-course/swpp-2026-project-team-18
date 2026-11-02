@@ -152,4 +152,30 @@ class ReportWeekNavigatorTest {
         assertEquals("마지막으로 본 주를 다시 연다", sep28, fake.requested.last())
         assertEquals(sep28, nav.state.value.weekly?.weekStart)
     }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `늦게 끝난 옛 응답은 새 응답을 덮지 않는다`() = runTest {
+        // "안 감" 표시와 되돌리기가 몇 초 사이로 같은 주를 다시 부르는 경우다.
+        val first = kotlinx.coroutines.CompletableDeferred<ReportResult<WeeklyReportView>>()
+        var calls = 0
+        val nav = ReportWeekNavigator(
+            scope = this,
+            weekly = {
+                calls++
+                if (calls == 1) first.await() else ReportResult.Success(week(oct12))
+            },
+            calibration = { ReportResult.Failure("없음") },
+            today = { LocalDate.of(2026, 10, 14) },
+        )
+
+        nav.load(oct5)
+        nav.reload()
+        advanceUntilIdle()
+        first.complete(ReportResult.Success(week(oct5)))
+        advanceUntilIdle()
+
+        assertEquals(oct12, nav.state.value.weekly?.weekStart)
+        assertFalse(nav.state.value.loading)
+    }
 }

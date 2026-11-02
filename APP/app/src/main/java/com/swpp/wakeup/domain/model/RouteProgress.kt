@@ -239,6 +239,14 @@ enum class TripStage(val label: String) {
     val canJudgeLateness: Boolean
         get() = this == PREPARING || this == IN_TRANSIT || this == ARRIVED
 
+    /**
+     * "도착했어요" 를 내놓는 단계인가. 가는 중인데 도착이 아직 없을 때만이다.
+     * 출발 확인이 안 된 아침도 포함한다 — GPS 가 출발을 못 잡았으면 도착도 못 잡기 쉽다.
+     * (Partly AI-generated (Claude))
+     */
+    val canMarkArrived: Boolean
+        get() = this == IN_TRANSIT || this == DEPARTURE_UNKNOWN
+
     companion object {
         /** 화면에 그릴 순서. 진행 막대의 단계 표시가 이 순서를 쓴다 */
         val ordered: List<TripStage> = listOf(BEFORE_ALARM, PREPARING, IN_TRANSIT, ARRIVED)

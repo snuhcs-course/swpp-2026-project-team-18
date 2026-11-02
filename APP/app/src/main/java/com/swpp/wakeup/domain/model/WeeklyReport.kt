@@ -72,6 +72,12 @@ data class WeeklyReportView(
     val deviations: List<DeviationLine>,
     /** 기록 반영 문장. 계획이 없던 주·구버전 서버면 null */
     val learningLabel: String?,
+    /** "안 감으로 표시한 일정 2건은 빼고 계산함". 없으면 null */
+    val skippedNote: String? = null,
+    /** 이 주에 한 안전 버퍼 조정의 이유 문장(서버 `reason_text`). 조정이 없으면 빈 목록 */
+    val bufferNotes: List<String> = emptyList(),
+    /** "지금 안전 버퍼 8분 · 지각 기록으로 조정됨". [bufferNotes] 가 있을 때만 */
+    val bufferCurrentLabel: String? = null,
 ) {
     val hasArrivals: Boolean get() = arrivedCount > 0
 
@@ -132,6 +138,13 @@ data class ReportDay(
     val representative: MorningOutcome?
         get() = outcomes.filter { it.slackMinutes != null }.minByOrNull { it.slackMinutes!! }
             ?: outcomes.firstOrNull()
+
+    /**
+     * [eventId] 를 빼면 남는 일정이 없는가. ⑨ 에서 마지막 일정을 "안 감" 으로 표시하면
+     * ⑧ 로 돌아간다. id 가 없는 일정도 ⑨ 가 보여 줄 수 있으므로 남는 것으로 센다.
+     * (Partly AI-generated (Claude))
+     */
+    fun isEmptyWithout(eventId: Long): Boolean = outcomes.none { it.eventId != eventId }
 }
 
 enum class OutcomeResult { ON_TIME, LATE, UNOBSERVED }
@@ -163,6 +176,11 @@ data class MorningOutcome(
     val slackMinutes: Double?,
     /** 이 주 지각이 이 일정 하나뿐인가 */
     val isOnlyLateOfWeek: Boolean,
+    /**
+     * ⑨ 가 '안 감으로 표시' 를 내놓는가. 서버가 도착 기록 없음(`unobserved`)이라 하고
+     * id 가 있을 때만. 도착 기록이 있는 아침은 간 것이다.
+     */
+    val skippable: Boolean = false,
 )
 
 enum class RowKind { DURATION, TIME }

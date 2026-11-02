@@ -116,6 +116,20 @@ class MorningSessionStore(context: Context) {
         prefs.edit { remove(KEY_SESSION) }
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * [eventId] 의 기록일 때만 닫고 그 기록을 돌려준다. 다른 일정의 기록이거나 없으면 null.
+     *
+     * 출발·도착 판정과 "안 감" 표시가 부른다. 다른 일정의 기록을 지우면 그 아침이 사라진다.
+     */
+    fun closeFor(eventId: Long): MorningSession? {
+        val session = current() ?: return null
+        if (session.eventId != eventId) return null
+        clear()
+        Log.i(TAG, "아침 기록을 닫는다: 일정 $eventId, 기록하지 않은 블록 ${session.remaining.size}개")
+        return session
+    }
+
     /** 소유자 표시까지 전부 지운다. **로그아웃·계정 전환에서 부른다.** */
     fun wipe() {
         prefs.edit { clear() }

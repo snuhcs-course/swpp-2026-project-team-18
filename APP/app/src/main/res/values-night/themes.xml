@@ -3,5 +3,10 @@
     <style name="Base.Theme.APP" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Customize your dark theme here. -->
         <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
+        <!-- 밝은 테마와 같다. 앱은 테마와 상관없이 어두운 남색이다(values/themes.xml 참고). -->
+        <item name="android:windowBackground">@color/jit_bg</item>
+        <item name="android:windowSplashScreenBackground">@color/jit_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/jit_bg</item>
     </style>
 </resources>

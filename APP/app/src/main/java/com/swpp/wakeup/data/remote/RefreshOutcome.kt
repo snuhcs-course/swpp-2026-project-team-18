@@ -27,8 +27,8 @@ import java.io.IOException
  */
 internal sealed interface RefreshOutcome {
 
-    /** 갱신 성공. */
-    data class Renewed(val access: String) : RefreshOutcome
+    /** 갱신 성공. [refresh] 는 서버가 회전시켰을 때만 온다 */
+    data class Renewed(val access: String, val refresh: String? = null) : RefreshOutcome
 
     /**
      * 서버가 refresh 를 거절했다. 다시 로그인해야 한다.
@@ -52,7 +52,13 @@ internal sealed interface RefreshOutcome {
          * @param access 응답 본문의 새 access 토큰. 없으면 null.
          * @param error 요청 중 던져진 예외. 없으면 null.
          */
-        fun of(code: Int?, access: String?, error: Throwable? = null): RefreshOutcome {
+        fun of(
+            code: Int?,
+            access: String?,
+            error: Throwable? = null,
+            /** 회전된 새 refresh. 비어 있으면 없는 것으로 본다 */
+            refresh: String? = null,
+        ): RefreshOutcome {
             if (error != null) {
                 // IOException 은 "닿지 못했다" 다. 그 외 예외(직렬화 오류 등)도
                 // 서버의 판단이 아니므로 같게 다룬다 — 지우지 않는다.
@@ -62,7 +68,8 @@ internal sealed interface RefreshOutcome {
             if (code == null) return Undecided("응답이 없다")
 
             return when {
-                code in 200..299 && !access.isNullOrBlank() -> Renewed(access)
+                code in 200..299 && !access.isNullOrBlank() ->
+                    Renewed(access, refresh?.takeIf { it.isNotBlank() })
 
                 // 200 인데 토큰이 없다. 서버 계약이 깨진 것이라 재로그인으로
                 // 몰 근거가 안 된다. 다음 요청에서 다시 시도한다.

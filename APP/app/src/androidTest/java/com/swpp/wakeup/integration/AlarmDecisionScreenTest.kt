@@ -38,9 +38,9 @@ import org.junit.runner.RunWith
  *   합계가 화면에 있어야 한다.
  * - 집에서 출발하지 않는 일정은 준비 줄을 그리지 않는다. 0분 줄은 "준비를 순식간에
  *   한다" 로 읽힌다.
- * - 계산되지 않은 알람은 이유를 말하고, 다시 계산·위험 바꾸기 같은 계산된 알람용
+ * - 계산되지 않은 알람은 이유를 말하고, 위험 바꾸기 같은 계산된 알람용
  *   버튼을 내놓지 않는다. 삭제는 어느 상태에서나 할 수 있다.
- * - 버튼이 맞는 동작으로 이어진다(다시 계산은 카카오 쿼터를 쓰므로 누를 때만).
+ * - 버튼이 맞는 동작으로 이어진다. "다시 계산" 은 없다(서버가 자동으로 다시 계산한다).
  */
 @RunWith(AndroidJUnit4::class)
 class AlarmDecisionScreenTest {
@@ -84,7 +84,6 @@ class AlarmDecisionScreenTest {
                     onBack = { calls += "back" },
                     onChangeRisk = { calls += "risk" },
                     onEditBlocks = { calls += "blocks" },
-                    onRecompute = { calls += "recompute" },
                     onDelete = { calls += "delete" },
                 )
             }
@@ -122,12 +121,12 @@ class AlarmDecisionScreenTest {
     fun `버튼은 각자의 동작으로 이어진다`() {
         show(planFrom(eventJson(computedPlan)))
 
-        compose.onNodeWithText("다시 계산").performScrollTo().performClick()
+        compose.onNodeWithText("다시 계산").assertDoesNotExist()
         compose.onNodeWithText("지각 위험 바꾸기").performScrollTo().performClick()
         compose.onNodeWithText("일정 삭제").performScrollTo().performClick()
         compose.onNodeWithText("확인").performScrollTo().performClick()
 
-        assertEquals(listOf("recompute", "risk", "delete", "back"), calls)
+        assertEquals(listOf("risk", "delete", "back"), calls)
     }
 
     @Test

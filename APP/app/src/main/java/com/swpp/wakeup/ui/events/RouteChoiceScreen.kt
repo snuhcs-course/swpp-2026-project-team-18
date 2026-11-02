@@ -203,6 +203,7 @@ fun RouteChoiceScreen(
                         origin = choice.originLabel,
                         destination = choice.destination,
                         onPreview = if (previewable) ({ onPreview(option.key) }) else null,
+                        caption = choice.preferredCaption?.takeIf { option.key == choice.preferredKey },
                     )
                     if (option.key == choice.selectedKey) {
                         RouteGuide(option.guide)
@@ -350,6 +351,8 @@ private fun RouteCard(
     destination: String = "도착",
     /** 지도 미리보기를 연다. null 이면 좌표가 없어 "지도로 보기" 를 달지 않는다 */
     onPreview: (() -> Unit)? = null,
+    /** 기본으로 고른 이유. "지난번에 고른 경로" (Figma ⑬-b `484:9`). 없으면 그리지 않는다 */
+    caption: String? = null,
 ) {
     // 카드 전체가 지도로 가는 카드인가(자동차·도보·자전거). 대중교통은 카드가 고르기다.
     val cardOpensMap = onPreview != null && option.opensPreviewOnTap
@@ -402,6 +405,15 @@ private fun RouteCard(
             Spacer(Modifier.weight(1f))
             // 배지는 최대 3개다("최단 시간", "최소 비용", "최소 환승", "최소 도보" 중). 서버 문구 그대로.
             RouteBadges(option.badges)
+        }
+        caption?.let {
+            Text(
+                text = it,
+                color = JitColor.Accent,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.testTag("route_preferred"),
+            )
         }
         if (option.travelMode == RouteMode.BICYCLE) {
             // Figma 13-d: 자전거는 요약 줄 대신 지표 칸(거리·자전거도로). 규칙은 [bicycleMetrics].

@@ -49,7 +49,7 @@ object LocalStores {
      * 정리될 때 취소된다. 팀이 이미 한 번 당했고 그래서 Room 삭제는
      * [OfflineCache.wipeDetached] 로 분리돼 있다.
      *
-     * 여기는 SharedPreferences 파일 일곱 개라 그 방식까지 필요하지 않다 — 작고,
+     * 여기는 작은 SharedPreferences 파일 몇 개라 그 방식까지 필요하지 않다 — 작고,
      * 블로킹 시간이 화면 전환 한 프레임 안에 들어온다. 정말 옮겨야 한다면
      * 화면 수명과 분리된 스코프를 써야 하고, `viewModelScope` 는 답이 아니다.
      */
@@ -83,6 +83,14 @@ object LocalStores {
 
         runCatching { LiveRouteStore(app).wipe() }
             .onFailure { Log.w(TAG, "실시간 경로 사본 삭제 실패", it) }
+        // Partly AI-generated (Claude) — 앞 사용자의 도착 기록과 이동 중 단계다.
+        runCatching { ArrivalStore(app).wipe() }
+            .onFailure { Log.w(TAG, "도착 기록 삭제 실패", it) }
+        runCatching { TripProgressStore(app).wipe() }
+            .onFailure { Log.w(TAG, "이동 단계 사본 삭제 실패", it) }
+        // Partly AI-generated (Claude) — 기기에만 둔 다른 집(todo §2 "집 여러 개")
+        runCatching { SavedHomesStore(app).wipe() }
+            .onFailure { Log.w(TAG, "다른 집 목록 삭제 실패", it) }
         // Partly AI-generated (Claude) — ⑱ 캘린더 연동. 앞 사용자가 고른 캘린더다.
         runCatching { CalendarLinkStore(app).wipe() }
             .onFailure { Log.w(TAG, "캘린더 연동 삭제 실패", it) }

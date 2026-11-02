@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
@@ -80,6 +81,8 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     onMissedTrackClick: () -> Unit = {},
     onMissedDismiss: () -> Unit = {},
+    /** "안 감으로 표시"(true) · "되돌리기"(false) */
+    onSkipToggle: (Long, Boolean) -> Unit = { _, _ -> },
 ) {
     LazyColumn(
         modifier = modifier
@@ -150,12 +153,16 @@ fun HomeScreen(
             item(key = "section-${section.label}") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionHeader(section.label, section.dateLabel)
+                    val actionsEnabled = !state.loading && !state.offline &&
+                        state.alarmUpdatingId == null && state.skipUpdatingId == null
                     EventGroupPanel(
                         events = section.events,
                         highlightedId = state.nextAlarm?.id,
                         onEventClick = onEventClick,
                         onAlarmToggle = onAlarmToggle,
-                        alarmsEnabled = !state.loading && !state.offline && state.alarmUpdatingId == null,
+                        alarmsEnabled = actionsEnabled,
+                        markableIds = state.markableIds,
+                        onSkipToggle = onSkipToggle,
                     )
                 }
             }
@@ -685,6 +692,8 @@ private fun EventGroupPanel(
     alarmsEnabled: Boolean,
     onEventClick: (UpcomingEvent) -> Unit,
     onAlarmToggle: (Long, Boolean) -> Unit,
+    markableIds: Set<Long> = emptySet(),
+    onSkipToggle: (Long, Boolean) -> Unit = { _, _ -> },
 ) {
     Column(
         modifier = Modifier
@@ -706,6 +715,8 @@ private fun EventGroupPanel(
                     onClick = { onEventClick(event) },
                     alarmEnabled = alarmsEnabled,
                     onAlarmToggle = { onAlarmToggle(event.id, it) },
+                    markable = event.id in markableIds,
+                    onSkipToggle = { onSkipToggle(event.id, it) },
                 )
             }
         }
@@ -723,12 +734,18 @@ private fun EventGroupPanel(
 private fun EventPanel(
     event: UpcomingEvent, highlighted: Boolean, onClick: () -> Unit,
     alarmEnabled: Boolean, onAlarmToggle: (Boolean) -> Unit,
+    /** 셋째 줄에 "안 감으로 표시" 를 내놓는가([HomeViewModel.UiState.markableIds]) */
+    markable: Boolean = false,
+    onSkipToggle: (Boolean) -> Unit = {},
 ) {
     val accent = riskColor(event.risk)
     val shape = RoundedCornerShape(JitRadius.Card)
+    // 안 간 일정은 흐리게. 행 전체에 alpha 를 주면 "되돌리기" 까지 흐려지므로 네 칸에 따로 준다.
+    val dim = if (event.skipped) Modifier.alpha(SKIPPED_ALPHA) else Modifier
 
     Row(
         modifier = Modifier
+            .testTag("event_row_${event.id}")
             .fillMaxWidth()
             .clip(shape)
             .then(if (highlighted) Modifier.border(1.dp, JitColor.Accent, shape) else Modifier)
@@ -737,7 +754,7 @@ private fun EventPanel(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 왼쪽: 알람 시각 + AM/PM. 알람을 계산하지 못했으면 "—".
-        Column(modifier = Modifier.width(52.dp)) {
+        Column(modifier = Modifier.width(52.dp).then(dim)) {
             Text(
                 text = event.alarmClock ?: "—",
                 color = if (event.hasAlarm) JitColor.TextPrimary else JitColor.TextSecondary,
@@ -752,9 +769,9 @@ private fun EventPanel(
 
         Spacer(Modifier.width(12.dp))
 
-        // 가운데: 색 점 + 제목 (+ 태그 칩) / "장소 · 9:00AM 시작"
+        // 가운데: 색 점 + 제목 (+ 태그 칩) / "장소 · 9:00AM 시작" / ("안 감으로 표시" · "되돌리기")
         Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = dim, verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     Modifier
                         .size(6.dp)
@@ -763,9 +780,10 @@ private fun EventPanel(
                 )
                 Spacer(Modifier.width(7.dp))
                 // 긴 제목이 칩을 밀어내지 않도록 제목만 줄여 말줄임한다.
+                // 테스트는 이 제목을 누른다. 행 안에 "안 감으로 표시" 도 눌리므로 행 가운데를 누르면 안 된다.
                 Text(
                     text = event.title,
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier.testTag("event_title_${event.id}").weight(1f, fill = false),
                     color = JitColor.TextPrimary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
@@ -784,22 +802,48 @@ private fun EventPanel(
                 fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = dim,
             )
+            // 셋째 줄. 오늘까지의 일정 중 도착하지 않은 것에만 "안 감으로 표시", 안 간
+            // 일정에는 "되돌리기". 둘 다 아니면 그리지 않는다(행 높이가 그대로).
+            val skipAction = when {
+                event.skipped -> "되돌리기"
+                markable -> "안 감으로 표시"
+                else -> null
+            }
+            if (skipAction != null) {
+                Text(
+                    text = skipAction,
+                    color = if (event.skipped) JitColor.Accent else JitColor.TextSecondary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag(if (event.skipped) "event_unskip_${event.id}" else "event_skip_${event.id}")
+                        .clickable(
+                            enabled = alarmEnabled,
+                            role = Role.Button,
+                            onClickLabel = skipAction,
+                        ) { onSkipToggle(!event.skipped) }
+                        .padding(vertical = 4.dp),
+                )
+            }
         }
 
         Spacer(Modifier.width(12.dp))
 
         // 오른쪽: 스위치 / 확률. 알람을 계산하지 못한 일정은 확률 자리에 사유를 둔다.
-        Column(horizontalAlignment = Alignment.End) {
-            AlarmSwitch(event, alarmEnabled, onAlarmToggle)
+        Column(modifier = dim, horizontalAlignment = Alignment.End) {
+            // 안 간 일정은 서버가 알람을 껐다. 켜도 울리지 않으므로 스위치를 막는다.
+            AlarmSwitch(event, alarmEnabled && !event.skipped, onAlarmToggle)
             // 확률이 없으면 빈칸이다(숫자를 만들지 않는다). 빈 줄은 남겨 스위치 위치가
             // 행마다 달라지지 않게 한다.
             Text(
                 text = when {
+                    event.skipped -> "안 감"
                     event.planStatus != PLAN_STATUS_OK -> event.planStatusLabel ?: "알람 계산 불가"
                     else -> event.onTimeProbability?.let { "$it%" }.orEmpty()
                 },
-                color = if (event.onTimeProbability == null) JitColor.TextSecondary else accent,
+                color = if (event.onTimeProbability == null || event.skipped) JitColor.TextSecondary else accent,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.End,
@@ -851,6 +895,9 @@ private fun AlarmSwitch(event: UpcomingEvent, enabled: Boolean, onToggle: (Boole
 // Partly AI-generated (Claude)
 /** [UpcomingEvent.planStatus] 의 "알람 계산 완료" 값 */
 private const val PLAN_STATUS_OK = "ok"
+
+/** "안 감" 으로 표시한 행의 흐리기(Figma ③ 변형 `455:9`) */
+private const val SKIPPED_ALPHA = 0.45f
 
 @Composable
 private fun AddEventButton(onClick: () -> Unit) {

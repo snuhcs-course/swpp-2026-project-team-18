@@ -3,6 +3,18 @@
     <style name="Base.Theme.APP" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Customize your light theme here. -->
         <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <!--
+          화면은 언제나 어두운 남색이다(Compose 가 그린다). 창 바탕도 같게 둬서 앱을 열 때
+          흰 화면이 번쩍이지 않게 한다.
+        -->
+        <item name="android:windowBackground">@color/jit_bg</item>
+        <!--
+          Android 12+ 스플래시(Figma "앱 로고 시안" A). 런처 아이콘과 같은 링과 점을 남색 위에 둔다.
+          minSdk 34 라 android: 속성을 바로 쓴다.
+        -->
+        <item name="android:windowSplashScreenBackground">@color/jit_bg</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/jit_bg</item>
     </style>
 
     <style name="Theme.APP" parent="Base.Theme.APP" />

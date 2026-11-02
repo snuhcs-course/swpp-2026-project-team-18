@@ -150,22 +150,22 @@ fun MapPickScreen(
             val frameHeightDp = state.imageHeightDp.takeIf { it > 0 } ?: heightDp
             val frameWidthPx = with(density) { frameWidthDp.dp.toPx() }
             val frameHeightPx = with(density) { frameHeightDp.dp.toPx() }
-            val frameCenterOffset = MapCameraMath.offsetPx(
-                point = frameCenter,
-                center = state.center,
-                metersPerPixel = metersPerPixel,
-            )
-            val persistentFrameScale = MapCameraMath.frameScale(frameLevel, state.level)
-            val visualTransform = mapVisualTransform(
-                pan = gestureState.pan,
-                zoom = gestureState.zoom,
-                frameCenterOffset = frameCenterOffset,
-                persistentFrameScale = persistentFrameScale,
+            // 마지막 bitmap과 현재 카메라 사이의 차이 및 손짓을 한 변환으로 합친다. 경로
+            // 지도(④-a)와 같은 셈이다([MapCameraMath.layer]).
+            fun layerOf(pan: Offset, zoom: Float): MapCameraMath.Layer = MapCameraMath.layer(
+                pan = pan,
+                zoom = zoom,
+                frameCenter = frameCenter,
+                frameLevel = frameLevel,
+                cameraCenter = state.center,
+                cameraLevel = state.level,
+                cameraMetersPerPixel = metersPerPixel,
                 frameWidthPx = frameWidthPx,
                 frameHeightPx = frameHeightPx,
                 viewportWidthPx = widthPx.toFloat(),
                 viewportHeightPx = heightPx.toFloat(),
             )
+            val visualTransform = layerOf(gestureState.pan, gestureState.zoom)
 
             // 터치 영역은 움직이는 이미지가 아니라 viewport 전체다. 큰 이미지를
             // 밀었을 때 드러난 가장자리에서도 다음 손짓을 바로 이어 갈 수 있다.
@@ -176,21 +176,8 @@ fun MapPickScreen(
                         state = gestureState,
                         enabled = bitmap != null,
                         onGestureEnd = { pan, zoom ->
-                            val end = mapVisualTransform(
-                                pan = pan,
-                                zoom = zoom,
-                                frameCenterOffset = frameCenterOffset,
-                                persistentFrameScale = persistentFrameScale,
-                                frameWidthPx = frameWidthPx,
-                                frameHeightPx = frameHeightPx,
-                                viewportWidthPx = widthPx.toFloat(),
-                                viewportHeightPx = heightPx.toFloat(),
-                            )
-                            onGestureEnd(
-                                end.committedPan,
-                                end.committedZoom,
-                                metersPerPixel,
-                            )
+                            val end = layerOf(pan, zoom)
+                            onGestureEnd(end.commitPan, end.commitZoom, end.commitMetersPerPixel)
                         },
                     ),
             ) {
@@ -203,10 +190,10 @@ fun MapPickScreen(
                             .align(Alignment.Center)
                             .requiredSize(frameWidthDp.dp, frameHeightDp.dp)
                             .graphicsLayer {
-                                translationX = visualTransform.frameTranslation.x
-                                translationY = visualTransform.frameTranslation.y
-                                scaleX = visualTransform.frameScale
-                                scaleY = visualTransform.frameScale
+                                translationX = visualTransform.translation.x
+                                translationY = visualTransform.translation.y
+                                scaleX = visualTransform.scale
+                                scaleY = visualTransform.scale
                             },
                     )
                 }
@@ -374,74 +361,6 @@ fun MapPickScreen(
 }
 
 // ---------------------------------------------------------------------------
-
-/** 마지막 bitmap과 현재 카메라 사이의 차이 및 손짓을 한 변환으로 합친 값. */
-private data class MapVisualTransform(
-    val frameScale: Float,
-    val frameTranslation: Offset,
-    val overlayZoom: Float,
-    val overlayPan: Offset,
-    /** overscan 경계 보정은 빼고 실제 사용자가 움직인 만큼만 남긴 값. */
-    val committedPan: Offset,
-    /** 자동 빈 면 보정을 제외한 실제 사용자 pinch 배율. */
-    val committedZoom: Float,
-)
-
-private fun mapVisualTransform(
-    pan: Offset,
-    zoom: Float,
-    frameCenterOffset: Offset,
-    persistentFrameScale: Float,
-    frameWidthPx: Float,
-    frameHeightPx: Float,
-    viewportWidthPx: Float,
-    viewportHeightPx: Float,
-): MapVisualTransform {
-    // 두 배 overscan도 한 번에 아주 크게 축소하면 viewport보다 작아질 수 있다.
-    // 배경만 작아져 빈 테두리가 생기지 않도록 보이는 동안만 최소 배율을 둔다.
-    val minimumCoverScale = max(
-        viewportWidthPx / frameWidthPx.coerceAtLeast(1f),
-        viewportHeightPx / frameHeightPx.coerceAtLeast(1f),
-    )
-    val frameZoom = MapCameraMath.resolveFrameZoom(
-        persistentFrameScale = persistentFrameScale,
-        gestureScale = zoom,
-        minimumCoverScale = minimumCoverScale,
-    )
-    val totalFrameScale = frameZoom.displayScale
-    val overlayZoom = frameZoom.overlayScale
-    val scaledFrameCenterOffset = frameCenterOffset * overlayZoom
-    val displayedPan = MapCameraMath.clampPan(
-        requested = pan,
-        frameCenterOffset = scaledFrameCenterOffset,
-        frameWidthPx = frameWidthPx,
-        frameHeightPx = frameHeightPx,
-        frameScale = totalFrameScale,
-        viewportWidthPx = viewportWidthPx,
-        viewportHeightPx = viewportHeightPx,
-    )
-    // 마지막 frame이 새 카메라에서 너무 멀면 빈 면을 막기 위해 기본 보정이
-    // 생긴다. 그 보정까지 새 camera pan으로 넘기면 손을 떼는 순간 지도가 튄다.
-    val coverageCorrection = MapCameraMath.clampPan(
-        requested = Offset.Zero,
-        frameCenterOffset = scaledFrameCenterOffset,
-        frameWidthPx = frameWidthPx,
-        frameHeightPx = frameHeightPx,
-        frameScale = totalFrameScale,
-        viewportWidthPx = viewportWidthPx,
-        viewportHeightPx = viewportHeightPx,
-    )
-    return MapVisualTransform(
-        frameScale = totalFrameScale,
-        frameTranslation = scaledFrameCenterOffset + displayedPan,
-        overlayZoom = overlayZoom,
-        overlayPan = displayedPan,
-        committedPan = displayedPan - coverageCorrection,
-        // overlayZoom에는 오래된 frame이 빈 면을 만들지 않게 하는 자동 확대가
-        // 들어 있다. 카메라에는 실제 pinch만 확정해야 연속 손짓이 역전되지 않는다.
-        committedZoom = frameZoom.committedGestureScale,
-    )
-}
 
 @Composable
 private fun MapTopBar(query: String, onBack: () -> Unit) {

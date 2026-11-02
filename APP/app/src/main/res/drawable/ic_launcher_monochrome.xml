@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 테마 아이콘(Android 13+ 단색). 전경과 같은 모양을 한 색으로 그리고 시스템이 칠한다. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M52,28 H56 A2,2 0 0 1 58,30 V35 H50 V30 A2,2 0 0 1 52,28 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,37 A20,20 0 1,1 54,77 A20,20 0 1,1 54,37 Z"
+        android:strokeWidth="6"
+        android:strokeColor="#FFFFFFFF" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,51.5 A5.5,5.5 0 1,1 54,62.5 A5.5,5.5 0 1,1 54,51.5 Z" />
+</vector>

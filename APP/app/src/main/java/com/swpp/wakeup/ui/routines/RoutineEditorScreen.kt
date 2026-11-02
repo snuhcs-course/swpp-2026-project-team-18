@@ -156,7 +156,7 @@ fun RoutineEditorScreen(
 
         if (state.isEventMode) {
             JitPrimaryButton(
-                label = if (state.dirty) "저장하고 알람 다시 계산" else "바뀐 항목 없음",
+                label = if (state.dirty) "저장하고 알람에 반영" else "바뀐 항목 없음",
                 onClick = onSaveEventBlocks,
                 enabled = state.dirty && !state.saving,
                 loading = state.saving,
@@ -175,7 +175,7 @@ fun RoutineEditorScreen(
                 loading = state.saving,
             )
             Text(
-                text = "정의를 고쳐도 이미 계산된 알람은 그대로임. 알람 화면의 \"다시 계산\" 으로 반영함",
+                text = "정의를 고치면 앞으로의 알람에 자동으로 반영됨. 이미 울린 알람은 그대로임",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )

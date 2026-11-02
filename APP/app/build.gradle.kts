@@ -63,6 +63,17 @@ val apiBaseUrl: String = when {
 val emulatorBaseUrl: String =
     if (devServerHost != null) EMULATOR_SERVER_URL else apiBaseUrl
 
+/**
+ * 소셜 로그인 공개 식별자(docs/iter3/social-login-api.md). `local.properties` 가 있으면 그 값,
+ * 없으면 커밋된 `gradle.properties` 값. 비밀이 아니다 — APK 에 그대로 들어간다.
+ */
+fun socialId(name: String): String =
+    localProps.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
+        ?: (project.findProperty(name) as String?)?.trim().orEmpty()
+
+val kakaoNativeAppKey: String = socialId("kakaoNativeAppKey")
+val googleWebClientId: String = socialId("googleWebClientId")
+
 // 공용 서버(https)만 쓰는 빌드에서는 평문 트래픽이 필요 없다. 로컬 백엔드는
 // http 라서 허용해야 한다. 매니페스트 플레이스홀더로 넘겨 빌드마다 결정한다.
 val needsCleartext: Boolean = !apiBaseUrl.startsWith("https://")
@@ -118,6 +129,11 @@ android {
         // AndroidManifest 의 android:usesCleartextTraffic 값. 로컬 백엔드(http)
         // 를 쓸 때만 켠다.
         manifestPlaceholders["usesCleartextTraffic"] = needsCleartext.toString()
+
+        // 소셜 로그인. 카카오 계정 로그인(브라우저)이 `kakao{앱 키}://oauth` 로 돌아온다.
+        buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$kakaoNativeAppKey\"")
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
+        manifestPlaceholders["kakaoScheme"] = "kakao$kakaoNativeAppKey"
     }
 
     buildFeatures {
@@ -245,6 +261,12 @@ dependencies {
 
     // WorkManager. 앱이 닫혀 있어도 관측을 올리고 알람 등록을 갱신한다.
     implementation(libs.androidx.work.runtime.ktx)
+
+    // 소셜 로그인(카카오·구글). ID 토큰만 받아 서버로 보낸다.
+    implementation(libs.kakao.sdk.user)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.googleid)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

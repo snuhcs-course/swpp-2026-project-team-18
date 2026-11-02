@@ -45,6 +45,15 @@ room = "2.8.5"
 # 2.12.0 은 아직 rc 다. 알람이 주 기능인 앱에서 배경 실행 라이브러리를 rc 로
 # 쓸 이유가 없다.
 work = "2.11.2"
+# --- 소셜 로그인 (docs/iter3/social-login-api.md §6) ---
+# 카카오 SDK 는 카카오 저장소(settings.gradle.kts)에서 받는다. ID 토큰만 쓴다.
+kakaoSdk = "2.26.0"
+# Credential Manager 1.7 은 아직 alpha 다. googleid 는 Sign in with Google 옵션을 준다.
+# googleid 1.2.x 는 Kotlin 2.4 메타데이터로 빌드돼 이 프로젝트(AGP 내장 Kotlin 2.3.20)가 읽지
+# 못한다. Kotlin 을 올리기 전까지 1.1.1 에 둔다.
+credentials = "1.6.0"
+#noinspection GradleDependency
+googleId = "1.1.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -97,6 +106,11 @@ androidx-room-compiler = { group = "androidx.room", name = "room-compiler", vers
 
 # WorkManager. 앱이 닫혀 있어도 관측을 올리고 알람을 갱신한다.
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+# 소셜 로그인. 받은 ID 토큰만 서버(`POST /api/auth/social/{provider}`)로 보낸다.
+kakao-sdk-user = { group = "com.kakao.sdk", name = "v2-user", version.ref = "kakaoSdk" }
+androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
+androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
+googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleId" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -35,9 +35,6 @@
     <string name="signup_rule_mix">영문과 숫자를 함께 포함</string>
     <string name="signup_terms">이용약관 및 개인정보처리방침에 동의</string>
 
-    <!-- 소셜 로그인은 back-spec 5.1 에서 제외됐다. 버튼은 디자인에만 남아 있다. -->
-    <string name="login_social_not_wired">소셜 로그인은 아직 없음. 이메일로 로그인한다.</string>
-
     <!-- 로그인·가입 성공 후 홈에서 한 번 보여준다 -->
     <string name="auth_welcome">%1$s님 환영합니다</string>
 

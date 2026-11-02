@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
@@ -34,19 +35,22 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.R
+import com.swpp.wakeup.domain.model.SocialNotice
+import com.swpp.wakeup.domain.model.SocialProvider
 import com.swpp.wakeup.ui.common.JitPrimaryButton
 import com.swpp.wakeup.ui.common.JitSocialButton
 import com.swpp.wakeup.ui.common.JitTextField
 import com.swpp.wakeup.ui.theme.JitColor
+import com.swpp.wakeup.ui.theme.JitRadius
 import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTheme
 
 /**
  * 로그인 화면. Figma "7. 로그인" (node 23:2).
  *
- * 이메일·비밀번호가 기본 경로다. back-spec.md 5.1 이 SimpleJWT 로 확정돼 있고,
- * 소셜 로그인은 OAuth 심사 부담 때문에 제외됐다. 소셜 버튼은 디자인에 남겨
- * 두었으나 아직 동작하지 않는다.
+ * 이메일·비밀번호가 기본 경로다. 카카오·Google 버튼은 SDK 로 ID 토큰을 받아 서버로 보낸다
+ * (docs/iter3/social-login-api.md). 처음 가입이면 약관 화면([SocialTermsScreen])으로,
+ * 이미 그 이메일로 가입했으면 이메일 칸 위에 안내 카드를 띄운다.
  *
  * 상태를 갖지 않는다. 값과 콜백을 모두 호출자가 넘긴다. [AuthViewModel] 이
  * 상태를 소유하고 [LoginActivity] 가 연결한다.
@@ -87,7 +91,12 @@ fun LoginScreen(
     modifier: Modifier = Modifier,
     /** 잠든 공용 서버를 깨우는 중. 오래 걸릴 때만 true 가 된다. */
     waking: Boolean = false,
+    /** 소셜 로그인 확인 중인 제공자. 그 버튼은 "확인 중…", 나머지 입력은 막는다 */
+    socialBusy: SocialProvider? = null,
+    /** 이메일 칸 위의 안내 카드(이미 가입한 이메일·쓸 수 없음). Figma ⑦ 변형 `496:9` */
+    socialNotice: SocialNotice? = null,
 ) {
+    val busy = loading || socialBusy != null
     Column(
         modifier = modifier
             .testTag("login_scroll")
@@ -123,13 +132,15 @@ fun LoginScreen(
             textAlign = TextAlign.Center
         )
 
+        socialNotice?.let { SocialNoticeCard(it) }
+
         JitTextField(
             label = stringResource(R.string.auth_email),
             value = email,
             onValueChange = onEmailChange,
             keyboardType = KeyboardType.Email,
             inputTag = "login_email",
-            enabled = !loading
+            enabled = !busy
         )
 
         JitTextField(
@@ -140,7 +151,7 @@ fun LoginScreen(
             keyboardType = KeyboardType.Password,
             inputTag = "login_password",
             imeAction = ImeAction.Done,
-            enabled = !loading
+            enabled = !busy
         )
 
         if (error != null) {
@@ -178,7 +189,7 @@ fun LoginScreen(
                 fontSize = 12.sp
             )
             Spacer(Modifier.width(6.dp))
-            TextButton(onClick = onSignupClick, enabled = !loading) {
+            TextButton(onClick = onSignupClick, enabled = !busy) {
                 Text(
                     text = stringResource(R.string.auth_signup),
                     color = JitColor.Accent,
@@ -190,19 +201,57 @@ fun LoginScreen(
 
         DividerWithLabel(stringResource(R.string.auth_or))
 
+        // 누른 버튼만 "확인 중…" 이고 다른 버튼은 흐리게 막는다(Figma ⑦ 변형 `496:9` ③).
         JitSocialButton(
-            label = stringResource(R.string.login_google),
+            label = if (socialBusy == SocialProvider.GOOGLE) "Google 확인 중…" else stringResource(R.string.login_google),
             container = Color.White,
             symbol = JitColor.GoogleSymbol,
-            onClick = onGoogleClick
+            onClick = onGoogleClick,
+            modifier = Modifier.testTag("login_google"),
+            enabled = !busy,
         )
 
         JitSocialButton(
-            label = stringResource(R.string.login_kakao),
+            label = if (socialBusy == SocialProvider.KAKAO) "카카오 확인 중…" else stringResource(R.string.login_kakao),
             container = JitColor.Kakao,
             symbol = JitColor.KakaoSymbol,
-            onClick = onKakaoClick
+            onClick = onKakaoClick,
+            modifier = Modifier.testTag("login_kakao"),
+            enabled = !busy,
         )
+    }
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 소셜 로그인 안내(Figma ⑦ 변형 `496:9`). 이미 가입한 이메일이면 강조 테두리와 원래 로그인 방법,
+ * 서버·빌드에 키가 없으면 이메일로 로그인하라는 한 줄.
+ */
+@Composable
+private fun SocialNoticeCard(notice: SocialNotice) {
+    val shape = RoundedCornerShape(JitRadius.Card)
+    Column(
+        modifier = Modifier
+            .testTag("social_notice")
+            .fillMaxWidth()
+            .clip(shape)
+            .background(JitColor.Surface)
+            .then(if (notice.amber) Modifier.border(1.5.dp, JitColor.Amber, shape) else Modifier)
+            .padding(horizontal = 14.dp, vertical = if (notice.amber) 14.dp else 12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (notice.amber) 6.dp else 4.dp),
+    ) {
+        Text(
+            text = notice.title,
+            color = if (notice.amber) JitColor.Amber else JitColor.TextPrimary,
+            fontSize = if (notice.amber) 13.sp else 12.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = notice.body,
+            color = if (notice.amber) JitColor.TextPrimary else JitColor.TextSecondary,
+            fontSize = if (notice.amber) 11.sp else 10.sp,
+        )
+        notice.footnote?.let { Text(text = it, color = JitColor.TextSecondary, fontSize = 9.sp) }
     }
 }
 

@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -24,19 +25,24 @@ import com.google.android.gms.location.Priority
 import com.google.gson.Gson
 import com.swpp.wakeup.alarm.AlarmNotifications
 import com.swpp.wakeup.data.local.LiveRouteStore
+import com.swpp.wakeup.data.local.TripProgressStore
 import com.swpp.wakeup.data.local.withDiskDefaults
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.TripObservationInput
 import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ArrivalVerdict
+import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.LiveRouteRefreshGate
+import com.swpp.wakeup.domain.model.RerouteAlert
+import com.swpp.wakeup.domain.model.TripProgress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
@@ -64,6 +70,7 @@ class TripTrackingService : Service() {
 
     private lateinit var queue: TripObservationQueue
     private lateinit var liveRouteStore: LiveRouteStore
+    private lateinit var progressStore: TripProgressStore
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
     private val repository by lazy { EventRepository() }
 
@@ -88,8 +95,22 @@ class TripTrackingService : Service() {
      */
     private var movingSinceMillis: Long? = null
 
+    /** "도착했어요" 를 누른 시각. 누르지 않았으면 null. 그 뒤에는 GPS 도착만 잠시 더 기다린다 */
+    private var manualArrivedAtMillis: Long? = null
+
+    /** 이 이동에서 이미 알린 경로 바꾸기 제안의 경로 key. 같은 경로는 다시 알리지 않는다 */
+    private val rerouteNotifiedKeys = mutableSetOf<String>()
+
+    /** 버스·지하철에 타고 있다고 보는 마감(벽시계 ms). 그동안 바꾸자는 알림을 미룬다 */
+    private var ridingUntilMillis: Long? = null
+
     private val deadlineRunnable = Runnable {
         Log.i(TAG, "마감 시각이 지나 추적을 멈춘다")
+        stopSelf()
+    }
+
+    private val manualGraceRunnable = Runnable {
+        Log.i(TAG, "수동 도착 뒤 기다림이 끝나 추적을 멈춘다")
         stopSelf()
     }
 
@@ -136,6 +157,7 @@ class TripTrackingService : Service() {
         super.onCreate()
         queue = TripObservationQueue(this)
         liveRouteStore = LiveRouteStore(this)
+        progressStore = TripProgressStore(this)
         AlarmNotifications.ensureChannels(this)
     }
 
@@ -143,6 +165,26 @@ class TripTrackingService : Service() {
         if (intent?.action == ACTION_STOP) {
             Log.i(TAG, "사용자가 추적을 중지했다")
             stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_MANUAL_ARRIVE) {
+            handleManualArrival(intent.getLongExtra(EXTRA_EVENT_ID, -1L))
+            // 추적 중이 아니었으면 이 시작은 이것 하나로 끝난다.
+            if (schedule == null) stopSelf()
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_REROUTE) {
+            handleReroute(
+                eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1L),
+                routeKey = intent.getStringExtra(EXTRA_ROUTE_KEY).orEmpty(),
+            )
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_REFRESH_LIVE) {
+            // 화면에서 경로를 바꿨다. 다음 위치에서 바로 새 경로를 받는다.
+            liveRouteGate.reset()
+            runCatching { NotificationManagerCompat.from(this).cancel(AlarmNotifications.NOTIFICATION_REROUTE) }
+            if (schedule == null) stopSelf()
             return START_NOT_STICKY
         }
 
@@ -179,15 +221,30 @@ class TripTrackingService : Service() {
         liveRouteGate.reset()
         liveRouteSessionGeneration++
         liveRouteStore.beginSession()
+        // 디스크의 도착을 먼저 되살린다. 프로세스가 죽었다 살아났으면 메모리가 비어 있다.
+        ArrivalRecords.restore(this)
+        // 집을 나선 뒤 죽은 추적이면 그 단계부터 이어 간다(todo §2 "추적 서비스 재시작 복원").
+        val resumed = if (redelivered) progressStore.current(parsed.eventId) else null
         if (redelivered) {
             TripLiveState.restoreLiveRoute(liveRouteStore.current(parsed.eventId))
         } else {
             liveRouteStore.clear()
-            TripLiveState.clear()
+            progressStore.clear()
+            // 앞 일정의 도착은 남긴다. 지우면 이미 도착한 일정이 홈에 다시 나타난다.
+            TripLiveState.resetForNewTrip(parsed.eventId)
+            ArrivalRecords.forget(this, parsed.eventId)
         }
-        movingSinceMillis = null
+        movingSinceMillis = resumed?.movingSinceMillis
+        manualArrivedAtMillis = null
+        handler.removeCallbacks(manualGraceRunnable)
+        if (!redelivered) rerouteNotifiedKeys.clear()
+        resumed?.rerouteNotifiedKeys?.let(rerouteNotifiedKeys::addAll)
+        ridingUntilMillis = null
 
         schedule = parsed
+        // 화면이 "이 일정을 추적 중인가" 를 안다. 아침 기록 화면의 안내 문구와
+        // "안 감" 표시 때 추적을 멈출지가 이 값으로 정해진다.
+        TripLiveState.beginTracking(parsed.eventId)
         geofence = TripGeofence(
             home = parsed.homeLat?.let { lat ->
                 parsed.homeLng?.let { lng -> GeoPoint(lat, lng) }
@@ -195,7 +252,9 @@ class TripTrackingService : Service() {
             destination = parsed.destLat?.let { lat ->
                 parsed.destLng?.let { lng -> GeoPoint(lat, lng) }
             },
-        )
+        ).also { fence ->
+            resumed?.let { fence.resumeInTransit(it.sawOriginFix, it.departureMissed) }
+        }
 
         // startForeground 는 즉시 불러야 한다. 늦으면 시스템이 죽인다.
         promoteToForeground(initialNotificationText(parsed))
@@ -205,6 +264,19 @@ class TripTrackingService : Service() {
             Log.i(TAG, "이미 마감 시각이 지났다. 추적하지 않는다")
             stopSelf()
             return START_NOT_STICKY
+        }
+        if (redelivered && TripLiveState.arrivalFor(parsed.eventId) != null) {
+            // 죽기 전에 도착을 기록했다(GPS·"도착했어요"). 이 이동은 끝났다.
+            Log.i(TAG, "다시 전달된 일정 ${parsed.eventId} 은 이미 도착했다. 추적하지 않는다")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (resumed != null) {
+            Log.i(TAG, "이동 중이던 추적을 이어 간다: 일정 ${parsed.eventId}")
+            // 나간 직후 죽었으면 아침 기록이 열린 채일 수 있다. 출발 규칙과 같게 닫는다.
+            if (resumed.sawOriginFix) {
+                MorningClose.close(this, parsed.eventId, MorningClose.Reason.DEPARTED, System.currentTimeMillis())
+            }
         }
         handler.postDelayed(deadlineRunnable, remaining)
 
@@ -228,9 +300,169 @@ class TripTrackingService : Service() {
         return START_REDELIVER_INTENT
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * "도착했어요"(화면 버튼·알림 버튼). GPS 가 도착을 못 잡았을 때의 보조다.
+     *
+     * 최근 위치를 붙여 기록하고 화면에 바로 "도착" 을 알린다. GPS 는 [MANUAL_GRACE_MILLIS]
+     * 동안만 더 본다 — 그 사이 GPS 도착이 나면 서버가 그쪽을 먼저 쓰고, 오래 켜 두면
+     * 배터리만 먹는다.
+     */
+    private fun handleManualArrival(eventId: Long) {
+        if (eventId <= 0L) return
+        val current = schedule
+        val now = System.currentTimeMillis()
+        if (current == null || current.eventId != eventId) {
+            // 다른 일정을 추적 중이거나 추적 중이 아니다. 위치 없이 기록만 한다.
+            ManualArrival.record(this, eventId, fix = null, destination = null, nowMillis = now)
+            return
+        }
+        val fence = geofence
+        if (fence?.phase == TripGeofence.Phase.ARRIVED || manualArrivedAtMillis != null) return
+
+        val destination = current.destLat?.let { lat -> current.destLng?.let { lng -> GeoPoint(lat, lng) } }
+        val recorded = ManualArrival.record(
+            context = this,
+            eventId = eventId,
+            fix = fence?.lastAcceptedFix,
+            destination = destination,
+            nowMillis = now,
+        )
+        if (!recorded) return
+        manualArrivedAtMillis = now
+        scope.launch { queue.flush() }
+        updateNotification(TITLE_ARRIVED, "${current.eventLine} · 도착을 기록했다")
+        handler.postDelayed(manualGraceRunnable, MANUAL_GRACE_MILLIS)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 알림의 [바꾸기]. 이번 이동만 바꾼다(reroute-api.md). 성공하면 제안을 치우고 다음 위치에서
+     * 바꾼 경로로 새 선을 받는다. 실패하면 같은 자리에 이유를 띄운다(버튼 없이).
+     */
+    private fun handleReroute(eventId: Long, routeKey: String) {
+        if (eventId <= 0L || routeKey.isBlank()) {
+            if (schedule == null) stopSelf()
+            return
+        }
+        scope.launch {
+            val result = repository.reroute(eventId, routeKey, fromSuggestion = true)
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    is EventRepository.Result.Success -> {
+                        Log.i(TAG, "이동 중 경로를 바꿨다: 일정 $eventId → $routeKey")
+                        runCatching {
+                            NotificationManagerCompat.from(this@TripTrackingService)
+                                .cancel(AlarmNotifications.NOTIFICATION_REROUTE)
+                        }
+                        liveRouteGate.reset()
+                    }
+
+                    is EventRepository.Result.Failure -> {
+                        Log.w(TAG, "경로를 바꾸지 못했다: ${result.message}")
+                        postRerouteNotification(
+                            eventId = eventId,
+                            title = "경로를 바꾸지 못했어요",
+                            text = result.message,
+                            switchIntent = null,
+                        )
+                    }
+                }
+                if (schedule == null) stopSelf()
+            }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /** 새 현재-위치 경로를 받은 뒤. 늦고 더 일찍 닿는 경로가 있으면 한 번 알린다([RerouteAlert]). */
+    private fun maybeAlertReroute(current: AlarmSchedule, route: LiveRoute) {
+        val suggestion = route.suggestion ?: return
+        val notify = RerouteAlert.shouldNotify(
+            suggestion = suggestion,
+            notifiedKeys = rerouteNotifiedKeys,
+            nowMillis = System.currentTimeMillis(),
+            ridingUntilMillis = ridingUntilMillis,
+            remainingMinutes = route.minutes,
+            remainingMeters = geofence?.distanceToDestinationM,
+        )
+        if (!notify) return
+        rerouteNotifiedKeys += suggestion.routeKey
+        // 다시 시작해도 같은 제안을 또 띄우지 않는다.
+        persistProgress()
+        postRerouteNotification(
+            eventId = current.eventId,
+            title = RerouteAlert.headline(route.lateMinutes),
+            text = RerouteAlert.body(suggestion),
+            switchIntent = reroutePendingIntent(current.eventId, suggestion.routeKey),
+        )
+        Log.i(TAG, "경로 바꾸기 제안: 일정 ${current.eventId} → ${suggestion.routeKey}")
+    }
+
+    // Partly AI-generated (Claude)
+    /** 이동 중인 추적의 단계·기준 시각을 디스크에 남긴다([TripProgress]). 집을 나선 뒤에만 */
+    private fun persistProgress() {
+        val current = schedule ?: return
+        val fence = geofence ?: return
+        if (fence.phase != TripGeofence.Phase.IN_TRANSIT) return
+        val saved = runCatching {
+            progressStore.save(
+                TripProgress(
+                    eventId = current.eventId,
+                    movingSinceMillis = movingSinceMillis,
+                    sawOriginFix = fence.sawOriginFix,
+                    departureMissed = fence.departureMissed,
+                    rerouteNotifiedKeys = rerouteNotifiedKeys.toList(),
+                    savedAtMillis = System.currentTimeMillis(),
+                )
+            )
+        }.getOrDefault(false)
+        if (!saved) Log.w(TAG, "이동 단계를 디스크에 남기지 못했다: 일정 ${current.eventId}")
+    }
+
+    private fun postRerouteNotification(
+        eventId: Long,
+        title: String,
+        text: String,
+        switchIntent: PendingIntent?,
+    ) {
+        val canPost = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!canPost) return
+        runCatching {
+            NotificationManagerCompat.from(this).notify(
+                AlarmNotifications.NOTIFICATION_REROUTE,
+                AlarmNotifications.rerouteNotification(
+                    context = this,
+                    eventId = eventId,
+                    title = title,
+                    text = text,
+                    switchIntent = switchIntent,
+                    dismissIntent = TripArrivalReceiver.rerouteDismissIntent(this),
+                ),
+            )
+        }.onFailure { Log.e(TAG, "경로 제안 알림 실패", it) }
+    }
+
+    /** 알림의 [바꾸기]. 경로마다 다른 PendingIntent 가 되게 data 를 둔다 */
+    private fun reroutePendingIntent(eventId: Long, routeKey: String): PendingIntent = PendingIntent.getService(
+        this,
+        2,
+        Intent(this, TripTrackingService::class.java)
+            .setAction(ACTION_REROUTE)
+            .setData("jit://reroute/$eventId/${android.net.Uri.encode(routeKey)}".toUri())
+            .putExtra(EXTRA_EVENT_ID, eventId)
+            .putExtra(EXTRA_ROUTE_KEY, routeKey),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
     override fun onDestroy() {
         handler.removeCallbacks(deadlineRunnable)
         handler.removeCallbacks(blindRunnable)
+        handler.removeCallbacks(manualGraceRunnable)
+        // 이동이 끝났다. 바꾸자는 제안도 더 이상 뜻이 없다.
+        runCatching { NotificationManagerCompat.from(this).cancel(AlarmNotifications.NOTIFICATION_REROUTE) }
         liveRouteSessionGeneration++
         runCatching { fused.removeLocationUpdates(callback) }
         // 남은 관측을 마지막으로 한 번 올려 본다. scope 를 바로 닫으면
@@ -246,6 +478,9 @@ class TripTrackingService : Service() {
         // 몇 시간 전 좌표를 현재 위치처럼 그리고, 사용자는 그 진행률로 여유가
         // 있다고 판단한다. 도착·마감·사용자 중지 모두 여기를 지나간다.
         schedule?.eventId?.let(liveRouteStore::clear)
+        // 이동이 끝났다(도착·마감·중지·로그아웃). 이 인스턴스가 추적하던 것만 지운다 — 추적 없이
+        // 알림 버튼으로 잠깐 뜬 인스턴스가 다시 전달될 추적의 사본을 지우면 안 된다.
+        if (schedule != null) progressStore.clear()
         liveRouteGate.reset()
         TripLiveState.clearTracking()
         Log.i(TAG, "추적 종료 (대기 관측 ${pending}건)")
@@ -273,8 +508,21 @@ class TripTrackingService : Service() {
             atMillis = if (location.time > 0) location.time else System.currentTimeMillis(),
         )
 
+        // 버스·지하철에 타고 있는지(속도로). 탄 동안은 경로를 바꾸자고 하지 않는다(todo §2 ③).
+        ridingUntilMillis = RerouteAlert.ridingUntil(
+            ridingUntilMillis,
+            speedMps = if (location.hasSpeed()) location.speed else null,
+            atMillis = fix.atMillis,
+        )
+
         val phaseBefore = fence.phase
         val decision = fence.offer(fix)
+
+        // 집을 나섰거나 도착했으면 아침 기록을 닫는다(todo P0). 화면이 없어도 돼야
+        // 하므로 서비스가 직접 한다. 판정 규칙은 [MorningClose.reasonFor] 에 있다.
+        MorningClose.reasonFor(phaseBefore, fence.phase, fence.sawOriginFix)?.let { reason ->
+            MorningClose.close(this, current.eventId, reason, System.currentTimeMillis())
+        }
 
         // 이동이 시작된 시각을 여기서 한 번만 잡는다.
         //
@@ -287,6 +535,8 @@ class TripTrackingService : Service() {
         // (`departureMissed`) 그 사람도 이동 중이다.
         if (movingSinceMillis == null && fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE) {
             movingSinceMillis = fix.atMillis
+            // 집을 나섰다. 이 단계와 기준 시각은 프로세스가 죽어도 이어 가야 한다.
+            persistProgress()
         }
 
         // 판정 결과와 무관하게 **매 위치를** 화면에 내보낸다. 판정이 난 순간만
@@ -381,6 +631,8 @@ class TripTrackingService : Service() {
             TripGeofence.isUsable(fix) -> armBlindTimer()
         }
 
+        // 수동으로 도착을 기록했으면 알림은 "도착 기록함" 에 둔다. GPS 도착만 더 기다린다.
+        if (manualArrivedAtMillis != null) return
         refreshProgressNotification(current, fence, fix.atMillis)
     }
 
@@ -465,6 +717,7 @@ class TripTrackingService : Service() {
                 return@launch
             }
             Log.i(TAG, "현재 위치 경로 갱신: 일정 ${current.eventId}, ${route.minutes}분")
+            withContext(Dispatchers.Main) { maybeAlertReroute(current, route) }
         }
     }
 
@@ -563,6 +816,15 @@ class TripTrackingService : Service() {
         ) == PackageManager.PERMISSION_GRANTED
         if (!canPost) return
 
+        // 이동 중이고 아직 도착이 없을 때만 "도착했어요" 를 단다. GPS 가 도착을 못 잡으면
+        // 사용자가 알림에서 바로 끝낼 수 있다(todo §2 "도착 판정 버튼").
+        val arriveIntent = schedule?.eventId
+            ?.takeIf {
+                phase == AlarmNotifications.TripPhaseLabel.IN_TRANSIT && manualArrivedAtMillis == null &&
+                    TripLiveState.arrivalFor(it) == null
+            }
+            ?.let(::arrivePendingIntent)
+
         runCatching {
             NotificationManagerCompat.from(this).notify(
                 AlarmNotifications.NOTIFICATION_TRIP,
@@ -572,6 +834,7 @@ class TripTrackingService : Service() {
                     text = text,
                     stopIntent = stopPendingIntent(),
                     phase = phase,
+                    arriveIntent = arriveIntent,
                 ),
             )
         }
@@ -650,8 +913,9 @@ class TripTrackingService : Service() {
      * 시스템이 그 알림을 함께 치워서 **아무도 결과를 보지 못했다.**
      */
     private fun postArrivalResult(current: AlarmSchedule, fix: LocationFix) {
-        // 알림 권한과 무관하게 결과를 보존한다. onDestroy는 현재 위치만 지운다.
-        TripLiveState.recordArrival(current.eventId, fix.atMillis)
+        // 알림 권한과 무관하게 결과를 보존한다. onDestroy는 현재 위치만 지운다. 디스크에도 남겨
+        // 앱 프로세스가 다시 시작돼도 도착이 남게 한다(todo §2 "앱 재시작 후 도착 판정 복원").
+        ArrivalRecords.record(this, current.eventId, fix.atMillis)
         val verdict = ArrivalVerdict(
             arrivedAtMillis = fix.atMillis,
             // 약속 시각은 일정 시작 시각이다. 계획이 추정한 도착 예정
@@ -713,11 +977,45 @@ class TripTrackingService : Service() {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
+    /** 알림의 "도착했어요". 이동 중일 때만 단다. */
+    private fun arrivePendingIntent(eventId: Long): PendingIntent = PendingIntent.getService(
+        this,
+        1,
+        Intent(this, TripTrackingService::class.java)
+            .setAction(ACTION_MANUAL_ARRIVE)
+            .putExtra(EXTRA_EVENT_ID, eventId),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
     companion object {
         private const val TAG = "TripTrackingService"
 
         /** 단계를 아직 모르거나 단정할 수 없을 때의 알림 제목 */
         private const val TITLE_TRACKING = "이동 기록 중"
+
+        /** 수동 도착 뒤의 알림 제목 */
+        private const val TITLE_ARRIVED = "도착 기록함"
+
+        /** 수동 도착 뒤 GPS 도착을 더 기다리는 시간 */
+        private const val MANUAL_GRACE_MILLIS = 3 * 60_000L
+
+        const val ACTION_MANUAL_ARRIVE = "com.swpp.wakeup.action.TRIP_MANUAL_ARRIVE"
+        const val ACTION_REROUTE = "com.swpp.wakeup.action.TRIP_REROUTE"
+        const val ACTION_REFRESH_LIVE = "com.swpp.wakeup.action.TRIP_REFRESH_LIVE"
+        const val EXTRA_EVENT_ID = "event_id"
+        const val EXTRA_ROUTE_KEY = "route_key"
+
+        // Partly AI-generated (Claude)
+        /**
+         * 화면에서 경로를 바꾼 뒤. 추적 중이면 다음 위치에서 바로 새 선을 받고 알림 제안을 치운다.
+         * 추적 중이 아니면 할 일이 없다(서비스를 새로 띄우지 않는다).
+         */
+        fun refreshLiveRoute(context: Context, eventId: Long) {
+            if (TripLiveState.trackingEventId.value != eventId) return
+            runCatching {
+                context.startService(Intent(context, TripTrackingService::class.java).setAction(ACTION_REFRESH_LIVE))
+            }.onFailure { Log.w(TAG, "추적 서비스에 경로 갱신을 넘기지 못했다", it) }
+        }
 
         const val ACTION_START = "com.swpp.wakeup.action.TRIP_START"
         const val ACTION_STOP = "com.swpp.wakeup.action.TRIP_STOP"
@@ -745,6 +1043,26 @@ class TripTrackingService : Service() {
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_SCHEDULE, Gson().toJson(schedule))
             context.startForegroundService(intent)
+        }
+
+        // Partly AI-generated (Claude)
+        /**
+         * "도착했어요". 이 일정을 추적 중이면 서비스가 마지막 위치를 붙여 기록하고,
+         * 아니면 위치 없이 바로 기록한다(서비스를 새로 띄우지 않는다).
+         */
+        fun markArrived(context: Context, eventId: Long) {
+            if (TripLiveState.trackingEventId.value != eventId) {
+                ManualArrival.record(context, eventId, fix = null, destination = null)
+                return
+            }
+            val intent = Intent(context, TripTrackingService::class.java)
+                .setAction(ACTION_MANUAL_ARRIVE)
+                .putExtra(EXTRA_EVENT_ID, eventId)
+            runCatching { context.startService(intent) }
+                .onFailure {
+                    Log.w(TAG, "추적 서비스에 수동 도착을 넘기지 못했다. 위치 없이 기록한다", it)
+                    ManualArrival.record(context, eventId, fix = null, destination = null)
+                }
         }
 
         fun stop(context: Context) {

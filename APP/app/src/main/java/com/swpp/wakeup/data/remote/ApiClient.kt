@@ -27,19 +27,22 @@ object ApiClient {
         tokenStore = store
     }
 
+    // Partly AI-generated (Claude)
     /**
-     * 비밀번호를 로그에서 지운다.
+     * 비밀번호와 토큰을 로그에서 지운다.
      *
      * `Level.BODY` 는 API 작업에 유용하지만 회원가입·로그인 요청 본문에 비밀번호
      * 원문이 그대로 찍힌다. logcat 은 adb 로 누구나 읽을 수 있고 화면 공유·버그
      * 리포트에 섞여 나간다. 디버그 빌드라도 남길 이유가 없다.
      *
+     * 토큰도 같다(todo §2 토큰 암호화 저장). 기기에는 Keystore 로 암호화해 두고 logcat 에
+     * 원문을 찍으면 암호화한 뜻이 없다. 인증 헤더는 [HttpLoggingInterceptor.redactHeader] 로,
+     * 본문의 `access`·`refresh`·`id_token` 은 [redactSecrets] 로 가린다.
+     *
      * 값만 가리고 필드 이름은 남긴다. 어떤 필드가 갔는지는 디버깅에 필요하다.
      */
     private val redactingLogger = HttpLoggingInterceptor.Logger { message ->
-        HttpLoggingInterceptor.Logger.DEFAULT.log(SECRET_FIELD.replace(message) {
-            "\"${it.groupValues[1]}\":\"***\""
-        })
+        HttpLoggingInterceptor.Logger.DEFAULT.log(redactSecrets(message))
     }
 
     private val logging = HttpLoggingInterceptor(redactingLogger).apply {
@@ -48,7 +51,14 @@ object ApiClient {
         } else {
             HttpLoggingInterceptor.Level.NONE
         }
+        // Partly AI-generated (Claude) — `Authorization: Bearer …` 의 값을 `██` 로 찍는다.
+        redactHeader("Authorization")
     }
+
+    // Partly AI-generated (Claude)
+    /** 로그 한 줄에서 비밀번호·토큰 값을 `***` 로 바꾼다. */
+    internal fun redactSecrets(message: String): String =
+        SECRET_FIELD.replace(message) { "\"${it.groupValues[1]}\":\"***\"" }
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -158,6 +168,16 @@ object ApiClient {
         }
     }
 
+    /** 실패 응답의 `error.code`. 예 `same_route`. 없거나 읽지 못하면 null (Partly AI-generated (Claude)) */
+    fun parseErrorCode(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return try {
+            Gson().fromJson(raw, ApiErrorEnvelope::class.java)?.error?.code?.takeIf { it.isNotBlank() }
+        } catch (e: JsonSyntaxException) {
+            null
+        }
+    }
+
     /**
      * 실패 응답의 **필드별** 오류를 뽑는다. `details` 안의 것이다.
      *
@@ -191,9 +211,18 @@ object ApiClient {
         }
     }
 
-    /** `"password":"..."`, `"password_confirm":"..."` 형태를 잡는다. */
-    private val SECRET_FIELD =
-        Regex("\"(password|password_confirm|old_password|new_password)\"\\s*:\\s*\"[^\"]*\"")
+    // Partly AI-generated (Claude)
+    /**
+     * `"password":"..."`, `"refresh":"..."` 형태를 잡는다. 토큰 필드(`access`·`refresh`·`id_token`)는
+     * 로그인·갱신·로그아웃·소셜 로그인 본문에 실린다.
+     *
+     * 값은 JSON 이스케이프(`\"`)를 건너 닫는 따옴표까지 잡는다. 첫 `"` 에서 멈추면 따옴표가 든
+     * 비밀번호의 뒷부분이 로그에 남는다.
+     */
+    private val SECRET_FIELD = Regex(
+        "\"(password|password_confirm|old_password|new_password|access|refresh|id_token)\"" +
+            "\\s*:\\s*\"(?:[^\"\\\\]|\\\\.)*\""
+    )
 
     // ---------------------------------------------------------------------
     // 타임아웃

@@ -40,7 +40,7 @@ needed it (4–15 min).
 
 What the MVP supports:
 
-1. **Sign up and onboard** — server-checked password, terms consent, home address, prep time (5–240 minutes); sign-up allows 10 attempts per IP per hour
+1. **Sign up and onboard** — email with a server-checked password, or Kakao/Google; terms consent, home address, prep time (5–240 minutes); sign-up allows 10 attempts per IP per hour
 2. **Add an event** — title, time, category (which sets τ), destination (Kakao place
    search, a pick on the map, or your current home), origin (home by default), and a route chosen from
    grouped Kakao candidates: transit, walk, bicycle or car, with server-written guidance.
@@ -48,9 +48,14 @@ What the MVP supports:
    subway only, bus only, mixed, cheapest) and then routes with lines not shown yet; routes that
    differ only by bus number are one option listing every bus
    ([docs/iter3/transit-candidates.md](docs/iter3/transit-candidates.md)).
-   [Weekly repeats](docs/iter2/weekly-recurrence.md) show seven days ahead, with an independent alarm for each occurrence
+   [Weekly repeats](docs/iter2/weekly-recurrence.md) show seven days ahead, with an independent alarm for each occurrence.
+   A saved event can be edited later from its decision screen (only changed fields are sent,
+   [docs/iter3/event-edit-api.md](docs/iter3/event-edit-api.md)); leaving from somewhere other
+   than home asks whether to include prep time
+   ([docs/iter3/include-prep-api.md](docs/iter3/include-prep-api.md)). An event you will not go
+   to can be marked "안 감" so its alarm stays off and it is left out of learning and reports
 3. **See the alarm and why** — the server computes it; the decision screen breaks out
-   prep, travel and buffer, each labeled as estimated, observed or fixed, with a progress bar and
+   prep, travel and buffer, each labeled as estimated, observed, learned or fixed, with a progress bar and
    a route map. A faster alternative from the origin is drawn on the map
 4. **Wake up reliably** — `setAlarmClock` (survives Doze, shows the system next-alarm
    icon), full screen over the lock screen, re-registered after reboot, app update and
@@ -62,7 +67,10 @@ What the MVP supports:
 6. **Commute** — departure and arrival are detected on the device (arrival = the first
    valid location within 100 m of the destination). While you are moving, the app fetches the
    fastest route from your current position every minute and draws it in purple; the
-   progress bar shows a live ETA and colors the lateness outlook
+   progress bar shows a live ETA and colors the lateness outlook. If the current route will
+   make you late and another one arrives earlier, a heads-up notification and a card offer to
+   switch for this trip only (not while riding, not within 5 minutes of arrival). If GPS misses
+   the arrival, "도착했어요" on the card or the tracking notification records it
 7. **Choose risk** — server-modeled safe/normal/gamble choices update the alarm and device schedule. Missing uncertainty has an explicit empty state
 8. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
    offline. Prep observations feed the next calculation directly, using only mornings within
@@ -92,48 +100,47 @@ make the screen look finished while being untrue.
 
 - On-time probability *value* — the pipeline is complete; the value waits for travel
   variance evidence (above)
-- Replanning while moving ⑦ — colors, ETA and the live route; no checkpoints or causes
-- Route choice — grouped candidates, fastest default and guidance work. The server also
-  returns `preferred_key` (the user's past choice), which the app does not use yet. Four car
-  variants (BE-8), arrival-time/operating-hour routing (BE-11) and optional bicycle-road ratio (BE-14) remain
+- Replanning while moving ⑦ — colors, ETA, the live route and a switch suggestion when late;
+  no checkpoints or causes
+- Route choice — grouped candidates, a default from your past choice (`preferred_key`, else
+  the fastest) and guidance work. Four car variants (BE-8), arrival-time/operating-hour
+  routing (BE-11) and optional bicycle-road ratio (BE-14) remain
 - Weekly and detailed reports ⑧⑨ — built; the Figma panels for sleep, alarm snoozes and
   per-weekday auto-adjustment are left out because nothing records that data yet
-- Sign-in — the server accepts Kakao and Google ID tokens (`POST /api/auth/social/{provider}`,
-  [docs/iter3/social-login-api.md](docs/iter3/social-login-api.md)), but the app's social
-  buttons still show a notice
+- More than one home — other homes (a family home, a dorm) are kept on the device and offered
+  first in the origin search, with prep time included; "기본으로" makes one the server's home.
+  The server still stores a single home until `SavedPlace` exists
+  ([docs/iter3/backend-requests.md](docs/iter3/backend-requests.md))
+- Sign-in with Kakao and Google — the app gets an ID token from the Kakao SDK or Credential
+  Manager and sends it to `POST /api/auth/social/{provider}`
+  ([docs/iter3/social-login-api.md](docs/iter3/social-login-api.md)); first-time accounts see
+  a terms screen, an email already used by another account gets a notice, and settings can
+  link or unlink either provider. It works only after each signing key is registered in the
+  consoles (Kakao key hash, Google Android client SHA-1) and the server has both keys
+  ([app guide](APP/README.md#소셜-로그인))
 
 **Not started**
 
-- Replanning before departure ⑥ and a "switch to this route" action
+- Replanning before departure ⑥
 - Group rooms ⑩⑪
-- More than one home (e.g. a family home)
-- A manual "arrived" button — the server accepts arrival observations with
-  `detector: "manual"` and no location, but the app has no button yet
-- Editing a saved event — the server side is ready (`PATCH /api/events/{id}`: a time or τ
-  change recomputes without a new route lookup, a place or route change looks the route up
-  again; contract in [docs/iter3/event-edit-api.md](docs/iter3/event-edit-api.md)), but the
-  app has no edit screen
-- Preparation time when leaving from somewhere other than home — the server takes
-  `include_prep` per event ([docs/iter3/include-prep-api.md](docs/iter3/include-prep-api.md)),
-  but the app has no switch for it yet
-- Marking an event as not attended — the server takes `POST/DELETE /api/events/{id}/skip`
-  and leaves those mornings out of reports, learning and alarms
-  ([docs/iter3/skip-event-api.md](docs/iter3/skip-event-api.md)), but the app has no button for it yet
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
 - User-defined tags (BE-21) and sleep-time calculation (BE-22)
-- Encrypted token storage — tokens sit in plain SharedPreferences; required before a
-  real release. The server can now revoke refresh tokens (`POST /api/auth/logout`,
-  `POST /api/auth/me/logout-all`, [docs/iter3/token-security-api.md](docs/iter3/token-security-api.md)),
-  but the app's logout does not call it yet and refresh-token rotation stays off
+- Refresh-token rotation on the server stays off until this app version is deployed: the app now
+  stores a rotated refresh token, so `JWT_ROTATE_REFRESH_TOKENS=1` can be set on Render after release
+  ([docs/iter3/token-security-api.md](docs/iter3/token-security-api.md))
 - Battery-optimization guidance
 
 **Runtime limitations** (route scope and previously identified recovery/map issues)
 
-1. Live/alternative routes compare within the selected mode. The candidate picker separately uses `fastest_key` across its available candidates
-2. Arrival restoration after app process restart is not implemented
-3. When the tracking service restarts, the moving state and the live route are lost
-4. Map panning can jump twice as far during consecutive gestures while a response is slow
-5. A small pinch (12%) snaps a whole zoom level
+1. Live/alternative routes compare within the selected mode. The candidate picker opens on the server's `preferred_key` (last choice for the same destination, else the most used mode) and falls back to `fastest_key`
+2. Static maps only have whole zoom levels: a pinch below about 1.34× (or above 0.75×) snaps back,
+   a larger one moves to the nearest level. When you let go, the map keeps what was on screen,
+   even if the previous tile is still loading
+
+Arrivals are kept on the device for three days and, after a reinstall or on another device,
+read back from the server's observations, so an arrived event stays arrived after the app
+restarts. If the system kills the tracking service in transit, it resumes in transit with the
+original departure time instead of waiting for a new departure.
 
 ---
 

@@ -59,15 +59,6 @@ import kotlin.math.roundToInt
 /** 지도 높이. 피그마 ④-a 의 260 을 그대로 쓴다 */
 private val MAP_HEIGHT = 260.dp
 
-private data class MapLayerTransform(
-    val scale: Float,
-    val translation: Offset,
-    /** 빈 가장자리를 내보이지 않는 범위에서 실제로 화면에 적용한 pan. */
-    val committedPan: Offset,
-    /** 마지막 frame의 자동 경계 보정을 제외한 실제 사용자 pinch 배율. */
-    val committedZoom: Float,
-)
-
 /**
  * 선택한 경로와 실시간 위치를 띄우는 지도 (Figma ④-a / 이동 중 ④-d).
  *
@@ -156,56 +147,24 @@ fun RouteMapCard(
                 viewHeightPx = frameHeightPx,
             )
 
-            fun layerTransform(pan: Offset, zoom: Float): MapLayerTransform {
-                val persistentFrameScale = MapCameraMath.frameScale(frameLevel, state.level)
-                // overscan 가장자리보다 멀리 끌거나 빠르게 축소해도 빈 바탕을
-                // 드러내지 않는다. 다음 frame이 오면 자연스럽게 1배로 돌아온다.
-                val coverScale = max(
-                    widthPx.toFloat() / frameWidthPx.coerceAtLeast(1),
-                    heightPx.toFloat() / frameHeightPx.coerceAtLeast(1),
-                )
-                val frameZoom = MapCameraMath.resolveFrameZoom(
-                    persistentFrameScale = persistentFrameScale,
-                    gestureScale = zoom,
-                    minimumCoverScale = coverScale,
-                )
-                val scale = frameZoom.displayScale
-                val shownMetersPerPixel = frameViewport.metersPerPixel / scale
-                val frameCenterOffset = MapCameraMath.offsetPx(
-                    point = frameCenter,
-                    center = state.center,
-                    metersPerPixel = shownMetersPerPixel,
-                )
-                val safePan = MapCameraMath.clampPan(
-                    requested = pan,
-                    frameCenterOffset = frameCenterOffset,
-                    frameWidthPx = frameWidthPx.toFloat(),
-                    frameHeightPx = frameHeightPx.toFloat(),
-                    frameScale = scale,
-                    viewportWidthPx = widthPx.toFloat(),
-                    viewportHeightPx = heightPx.toFloat(),
-                )
-                val coverageCorrection = MapCameraMath.clampPan(
-                    requested = Offset.Zero,
-                    frameCenterOffset = frameCenterOffset,
-                    frameWidthPx = frameWidthPx.toFloat(),
-                    frameHeightPx = frameHeightPx.toFloat(),
-                    frameScale = scale,
-                    viewportWidthPx = widthPx.toFloat(),
-                    viewportHeightPx = heightPx.toFloat(),
-                )
-                return MapLayerTransform(
-                    scale = scale,
-                    translation = frameCenterOffset + safePan,
-                    // 마지막 frame을 화면에 덮기 위한 자동 보정은 사용자의
-                    // 손짓이 아니다. 카메라로 넘기면 손을 떼는 순간 옆으로 튄다.
-                    committedPan = safePan - coverageCorrection,
-                    // 화면을 덮기 위한 자동 배율은 제외하고 실제 pinch만 확정한다.
-                    committedZoom = frameZoom.committedGestureScale,
-                )
-            }
+            // 옛 frame·카메라·손짓을 한 변환으로 합친다. overscan 가장자리보다 멀리 끌거나
+            // 빠르게 축소해도 빈 바탕을 드러내지 않고, 손을 떼면 보이던 그대로를 카메라로
+            // 넘긴다([MapCameraMath.layer]). 장소 고르기 지도(⑰)와 같은 셈이다.
+            fun layerOf(pan: Offset, zoom: Float): MapCameraMath.Layer = MapCameraMath.layer(
+                pan = pan,
+                zoom = zoom,
+                frameCenter = frameCenter,
+                frameLevel = frameLevel,
+                cameraCenter = state.center,
+                cameraLevel = state.level,
+                cameraMetersPerPixel = desiredMetersPerPixel,
+                frameWidthPx = frameWidthPx.toFloat(),
+                frameHeightPx = frameHeightPx.toFloat(),
+                viewportWidthPx = widthPx.toFloat(),
+                viewportHeightPx = heightPx.toFloat(),
+            )
 
-            val transform = layerTransform(gesture.pan, gesture.zoom)
+            val transform = layerOf(gesture.pan, gesture.zoom)
 
             LaunchedEffect(widthDp, heightDp, state.center, state.level) {
                 onViewport(widthDp, heightDp)
@@ -218,12 +177,8 @@ fun RouteMapCard(
                         state = gesture,
                         enabled = state.image != null,
                     ) { pan, zoom ->
-                        val committed = layerTransform(pan, zoom)
-                        onGestureEnd(
-                            committed.committedPan,
-                            committed.committedZoom,
-                            desiredMetersPerPixel,
-                        )
+                        val end = layerOf(pan, zoom)
+                        onGestureEnd(end.commitPan, end.commitZoom, end.commitMetersPerPixel)
                     },
             ) {
                 Box(

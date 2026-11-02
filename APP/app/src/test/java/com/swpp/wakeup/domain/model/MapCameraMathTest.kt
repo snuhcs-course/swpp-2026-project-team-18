@@ -115,6 +115,141 @@ class MapCameraMathTest {
         assertEquals(1, MapCameraMath.zoomLevelDelta(0.49f))
     }
 
+    // --- todo §2 "작은 핀치에 한 단계 줌" (Partly AI-generated (Claude)) -----------
+
+    @Test
+    fun `살짝 벌리거나 모은 손가락은 단계를 바꾸지 않는다`() {
+        // 예전에는 12% 만 벌려도 두 배로 튀었다.
+        assertEquals(0, MapCameraMath.zoomLevelDelta(1.12f))
+        assertEquals(0, MapCameraMath.zoomLevelDelta(1.3f))
+        assertEquals(0, MapCameraMath.zoomLevelDelta(0.89f))
+        assertEquals(0, MapCameraMath.zoomLevelDelta(0.8f))
+    }
+
+    @Test
+    fun `분명히 벌리거나 모으면 가까운 단계로 바꾼다`() {
+        assertEquals(-1, MapCameraMath.zoomLevelDelta(1.35f))
+        assertEquals(1, MapCameraMath.zoomLevelDelta(0.74f))
+        assertEquals(-2, MapCameraMath.zoomLevelDelta(3f))
+        assertEquals("세 단계까지만", 3, MapCameraMath.zoomLevelDelta(0.05f))
+        assertEquals(0, MapCameraMath.zoomLevelDelta(Float.NaN))
+    }
+
+    // --- todo §2 "지도 연속 이동 거리 두 배" (Partly AI-generated (Claude)) ---------
+
+    private val viewportW = 360f
+    private val viewportH = 260f
+    private val frameW = 720f
+    private val frameH = 520f
+
+    private fun layer(
+        pan: Offset,
+        zoom: Float,
+        frame: GeoPoint,
+        frameLevel: Int,
+        camera: GeoPoint,
+        level: Int,
+        metersPerPixel: Double,
+    ) = MapCameraMath.layer(
+        pan = pan,
+        zoom = zoom,
+        frameCenter = frame,
+        frameLevel = frameLevel,
+        cameraCenter = camera,
+        cameraLevel = level,
+        cameraMetersPerPixel = metersPerPixel,
+        frameWidthPx = frameW,
+        frameHeightPx = frameH,
+        viewportWidthPx = viewportW,
+        viewportHeightPx = viewportH,
+    )
+
+    private fun commit(start: GeoPoint, level: Int, layer: MapCameraMath.Layer) =
+        MapCameraMath.finishGesture(
+            center = start,
+            level = level,
+            panPx = layer.commitPan,
+            zoomScale = layer.commitZoom,
+            metersPerPixel = layer.commitMetersPerPixel,
+            minLevel = 1,
+            maxLevel = 12,
+        )
+
+    /** [point] 가 손을 떼는 순간 화면 가운데에 보였는가 */
+    private fun assertShownAtCenter(
+        point: GeoPoint,
+        camera: GeoPoint,
+        metersPerPixel: Double,
+        layer: MapCameraMath.Layer,
+    ) {
+        val shown = MapCameraMath.offsetPx(point, camera, metersPerPixel) * layer.overlayZoom + layer.overlayPan
+        assertEquals("x", 0f, shown.x, 0.5f)
+        assertEquals("y", 0f, shown.y, 0.5f)
+    }
+
+    @Test
+    fun `축소하며 끈 손짓은 보이던 곳으로 간다`() {
+        // 예전에는 새 단계(두 배 축척)로 옮겨서 끈 거리의 두 배 가까이 더 갔다.
+        val start = GeoPoint(37.46, 126.952)
+        val end = layer(Offset(40f, -10f), 0.6f, start, 6, start, 6, 2.0)
+        val camera = commit(start, 6, end)
+
+        assertEquals(7, camera.level)
+        assertShownAtCenter(camera.center, start, 2.0, end)
+    }
+
+    @Test
+    fun `새 지도를 기다리는 동안 이어 끈 손짓도 보이던 곳으로 간다`() {
+        val start = GeoPoint(37.46, 126.952)
+        // 첫 손짓: 끌기. 배경은 아직 start 의 것이다.
+        val first = layer(Offset(120f, 40f), 1f, start, 6, start, 6, 2.0)
+        val afterFirst = commit(start, 6, first)
+        assertShownAtCenter(afterFirst.center, start, 2.0, first)
+
+        // 손을 뗀 직후 화면이 그대로다(옛 배경을 옮긴 만큼 보여 준다).
+        val resting = layer(Offset.Zero, 1f, start, 6, afterFirst.center, 6, 2.0)
+        assertEquals(first.translation.x, resting.translation.x, 0.5f)
+        assertEquals(first.translation.y, resting.translation.y, 0.5f)
+
+        // 둘째 손짓: 같은 옛 배경 위에서 다시 끌기.
+        val second = layer(Offset(-60f, 30f), 1f, start, 6, afterFirst.center, 6, 2.0)
+        val afterSecond = commit(afterFirst.center, 6, second)
+        assertShownAtCenter(afterSecond.center, afterFirst.center, 2.0, second)
+
+        // 두 번 끈 거리의 합만큼만 옮겼다.
+        val total = MapCameraMath.offsetPx(start, afterSecond.center, 2.0)
+        assertEquals(60f, total.x, 0.5f)
+        assertEquals(70f, total.y, 0.5f)
+    }
+
+    @Test
+    fun `옛 배경이 화면을 덮도록 당긴 만큼도 카메라로 넘긴다`() {
+        // 한 단계 축소한 카메라에 옛 배경(0.5배)이 꼭 맞아 움직일 틈이 없다. 끌어도 화면은
+        // 그대로이므로 카메라는 화면 가운데(옛 배경의 중심)로 가야 새 지도가 와도 튀지 않는다.
+        val frame = GeoPoint(37.46, 126.952)
+        val camera = GeoPoint(37.462, 126.955)
+        val end = layer(Offset(30f, 0f), 1f, frame, 6, camera, 7, 4.0)
+        assertEquals(0f, end.translation.x, 0.5f)
+        assertEquals(0f, end.translation.y, 0.5f)
+
+        val next = commit(camera, 7, end)
+        assertShownAtCenter(next.center, camera, 4.0, end)
+        val fromFrame = MapCameraMath.offsetPx(frame, next.center, 4.0)
+        assertEquals(0f, fromFrame.x, 0.5f)
+        assertEquals(0f, fromFrame.y, 0.5f)
+    }
+
+    @Test
+    fun `확대한 손짓은 손가락 배율로 옮긴다`() {
+        // 1.6배로 벌리며 끌었다. 한 단계(두 배)로 맞추지만 이동은 보이던 1.6배 축척으로 셈한다.
+        val start = GeoPoint(35.1796, 129.0756)
+        val end = layer(Offset(-80f, 50f), 1.6f, start, 6, start, 6, 2.0)
+        val camera = commit(start, 6, end)
+        assertEquals(5, camera.level)
+        assertEquals(2.0 / 1.6, end.commitMetersPerPixel, 1e-6)
+        assertShownAtCenter(camera.center, start, 2.0, end)
+    }
+
     @Test
     fun `오래된 frame의 빈 면 방지 배율을 사용자 줌으로 확정하지 않는다`() {
         // 두 단계 전 frame은 현재 카메라에서 0.25배여야 하지만, 2배 overscan이

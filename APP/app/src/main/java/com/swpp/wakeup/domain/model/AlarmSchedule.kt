@@ -76,7 +76,11 @@ data class AlarmSchedule(
     val canLogBlocks: Boolean get() = prepBlocks.isNotEmpty()
 
     companion object {
-        private const val TRACKING_GRACE_MILLIS = 60 * 60 * 1000L
+        /**
+         * 일정 시작 뒤 추적을 이어 가는 시간. 홈 목록([HomeList])도 같은 값을 써서
+         * "아직 끝나지 않은 이동" 의 창이 추적 마감과 어긋나지 않게 한다.
+         */
+        const val TRACKING_GRACE_MILLIS = 60 * 60 * 1000L
     }
 }
 

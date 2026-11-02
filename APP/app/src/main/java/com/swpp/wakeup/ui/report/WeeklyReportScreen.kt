@@ -131,6 +131,16 @@ fun WeeklyReportScreen(
 
         if (report.showTiles) Tiles(report)
 
+        // "안 감" 으로 뺀 일정 수. 타일이 없어도 보인다(Figma ⑧ `465:9`).
+        report.skippedNote?.let {
+            Text(
+                text = it,
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.testTag("report_skipped"),
+            )
+        }
+
         report.gapNotice?.let {
             // 관측 공백이 결론을 흔들 만큼 크면 정시율을 앞세우지 않는다.
             NoticeCard(dot = JitColor.Amber, title = it.title, body = it.body, caption = it.caption)
@@ -143,7 +153,27 @@ fun WeeklyReportScreen(
 
         if (report.showDeviations) DeviationCard(report)
 
+        if (report.bufferNotes.isNotEmpty()) BufferCard(report)
+
         longTerm?.let { VerdictCard(it) }
+    }
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 이 주에 서버가 안전 버퍼를 바꾼 이유(todo §2 "안전 버퍼 표시", Figma ⑧ `482:9`).
+ * 버퍼를 사용자가 직접 정하는 입력은 없다(사용자 결정 10-28). 이유 문장은 서버 것을 그대로 쓴다.
+ */
+@Composable
+private fun BufferCard(report: WeeklyReportView) {
+    JitCard(padding = 14.dp, gap = 6.dp, modifier = Modifier.testTag("report_buffer")) {
+        Text("안전 버퍼 조정 · 이번 주", color = JitColor.TextSecondary, fontSize = 11.sp)
+        report.bufferNotes.forEach {
+            Text(text = it, color = JitColor.TextPrimary, fontSize = 11.sp)
+        }
+        report.bufferCurrentLabel?.let {
+            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
+        }
     }
 }
 

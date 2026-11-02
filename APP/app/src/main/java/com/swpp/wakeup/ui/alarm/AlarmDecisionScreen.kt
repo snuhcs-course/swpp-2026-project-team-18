@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.domain.model.ArrivalOutlook
+import com.swpp.wakeup.domain.model.RerouteBanner
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.home.HomeViewModel
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -67,13 +69,6 @@ fun AlarmDecisionScreen(
     onChangeRisk: () -> Unit,
     /** 이 아침에 할 블록 고르기. 저장하면 이 일정만 즉시 재계산된다 */
     onEditBlocks: () -> Unit,
-    /**
-     * 알람만 다시 계산.
-     *
-     * 루틴 블록 **정의**를 고친 뒤 지금 반영하고 싶을 때 쓴다. 서버가 카카오
-     * 경로 API 를 부르므로 사용자가 누를 때만 호출한다.
-     */
-    onRecompute: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     /** 진행 바에 쓸 이름과 아바타 두 글자 */
@@ -96,6 +91,22 @@ fun AlarmDecisionScreen(
     onRouteMapGestureEnd: (pan: Offset, zoom: Float, metersPerPixel: Double) -> Unit =
         { _, _, _ -> },
     onRouteMapRecenter: () -> Unit = {},
+    /** "안 감으로 표시"(skip-event-api.md §6) */
+    onSkip: () -> Unit = {},
+    /** "안 감" 표시 되돌리기 */
+    onUnskip: () -> Unit = {},
+    /** 표시를 저장하는 중. 두 버튼을 막는다 */
+    skipBusy: Boolean = false,
+    /** "도착했어요"(수동 도착). null 이면 버튼을 그리지 않는다 */
+    onArrive: (() -> Unit)? = null,
+    /** "일정 수정"(event-edit-api.md). null 이면 그리지 않는다 */
+    onEdit: (() -> Unit)? = null,
+    /** 이동 중 늦을 때의 경로 바꾸기 카드([com.swpp.wakeup.domain.model.RerouteAlert.banner]). null 이면 없다 */
+    rerouteBanner: RerouteBanner? = null,
+    /** [이 경로로 바꾸기]. 경로 key 를 받는다 */
+    onReroute: (String) -> Unit = {},
+    /** 경로를 바꾸는 중 */
+    rerouteBusy: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -162,23 +173,35 @@ fun AlarmDecisionScreen(
             Text(text = plan.eventPlace, color = JitColor.TextSecondary, fontSize = 11.sp)
         }
 
+        if (plan.skipped) SkippedCard(onUnskip = onUnskip, enabled = !skipBusy)
+
         if (plan.isComputed) {
-            RecommendedAlarmCard(plan)
+            // 안 간 일정의 알람은 울리지 않는다. 근거는 남기되 흐리게 둔다(Figma ④ 변형).
+            if (plan.skipped) {
+                Box(Modifier.alpha(SKIPPED_ALPHA)) { RecommendedAlarmCard(plan) }
+            } else {
+                RecommendedAlarmCard(plan)
+            }
             BreakdownCard(plan)
 
             // 계산 근거 바로 아래에 "지금 어디쯤" 을 둔다. 같은 여정을 계획과
             // 실제 두 면에서 보여 주는 것이고, 순서가 바뀌면 진행률이 어느
-            // 계획에 대한 것인지 연결이 끊긴다.
-            TripProgressCard(
-                nickname = nickname,
-                initials = initials,
-                stage = stage,
-                progress = progress,
-                outlook = outlook,
-                // 전망이 있으면 예상 도착 시각을, 없으면 계획한 도착 예정을 쓴다.
-                arrivalAt = arrivalClock ?: plan.arrivalAt,
-                freshness = freshness,
-            )
+            // 계획에 대한 것인지 연결이 끊긴다. 안 간 일정에는 이동이 없다.
+            if (!plan.skipped) {
+                TripProgressCard(
+                    nickname = nickname,
+                    initials = initials,
+                    stage = stage,
+                    progress = progress,
+                    outlook = outlook,
+                    // 전망이 있으면 예상 도착 시각을, 없으면 계획한 도착 예정을 쓴다.
+                    arrivalAt = arrivalClock ?: plan.arrivalAt,
+                    freshness = freshness,
+                    onArrive = onArrive,
+                )
+                // 늦는다는 전망 바로 아래에 바꿀 길을 둔다(Figma ⑦ 변형 `491:9`).
+                rerouteBanner?.let { RerouteCard(banner = it, onReroute = onReroute, busy = rerouteBusy) }
+            }
 
             routeMap?.let { map ->
                 RouteMapCard(
@@ -205,10 +228,13 @@ fun AlarmDecisionScreen(
             // 알람은 이미 자동으로 등록돼 있고 켬/끔은 홈의 스위치가 맡는다.
             // 이 버튼은 근거를 확인하고 닫는 용도라 "확인" 으로 쓴다.
             JitPrimaryButton(label = "확인", onClick = onBack)
-            Row(
+            // 안 간 일정은 알람이 울리지 않으므로 알람을 바꾸는 두 입구를 숨긴다.
+            if (!plan.skipped) Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
             ) {
+                // "다시 계산" 은 없앴다. 서버가 블록 정의·밤 학습 뒤 알아서 다시 계산하고,
+                // 임박한 일정은 경로 갱신 워커가 15분마다 새로 받는다(todo §2 ③).
                 Text(
                     text = "지각 위험 바꾸기",
                     color = JitColor.TextSecondary,
@@ -220,23 +246,41 @@ fun AlarmDecisionScreen(
                         .clickable(onClick = onChangeRisk)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
-                Text(
-                    text = "다시 계산",
-                    color = JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onRecompute)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
             }
         }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
         ) {
+            // 도착한 일정은 간 것이다. 표시를 내놓지 않는다. 표시한 일정은 위 카드가 되돌린다.
+            if (!plan.skipped && stage != TripStage.ARRIVED) {
+                Text(
+                    text = "안 감으로 표시",
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag("event_skip")
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = !skipBusy, onClick = onSkip)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
+            // 알람을 정한 뒤에도 제목·시각·장소·출발지·경로·종류를 고친다(Figma ④ `489:9`).
+            onEdit?.let { edit ->
+                Text(
+                    text = "일정 수정",
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag("event_edit")
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = edit)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
             Text(
                 text = "일정 삭제",
                 color = JitColor.Red,
@@ -250,6 +294,39 @@ fun AlarmDecisionScreen(
         }
     }
 }
+
+// Partly AI-generated (Claude)
+/** "안 감" 으로 표시한 일정 안내와 되돌리기(Figma ④ 변형 `463:17`). */
+@Composable
+private fun SkippedCard(onUnskip: () -> Unit, enabled: Boolean) {
+    JitCard(padding = 14.dp, gap = 6.dp) {
+        JitDotLabel(
+            text = "안 감으로 표시한 일정",
+            dotColor = JitColor.TextSecondary,
+            fontSize = 12,
+            dotSize = 6.dp,
+        )
+        Text(
+            text = "알람이 울리지 않고 리포트·학습에서 빠짐",
+            color = JitColor.TextSecondary,
+            fontSize = 11.sp,
+        )
+        Text(
+            text = "되돌리기",
+            color = JitColor.Accent,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .testTag("event_unskip")
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = enabled, onClick = onUnskip)
+                .padding(vertical = 6.dp),
+        )
+    }
+}
+
+/** 안 간 일정의 "적용 알람" 흐리기 */
+private const val SKIPPED_ALPHA = 0.45f
 
 @Composable
 private fun RecommendedAlarmCard(plan: AlarmPlanView) {
@@ -285,48 +362,10 @@ private fun RecommendedAlarmCard(plan: AlarmPlanView) {
             )
         }
 
+        // 이 카드는 알람 시각과 정시 확률만 둔다(todo §2 "적용 알람 정보 줄이기", Figma ④ `1:18`).
+        // 경로 기준·계산 시각·경로 대체 경고는 "계산 방법" 으로 옮겼다. 도착 예정은 그 카드의
+        // 합계 줄에 이미 있다.
         ProbabilityRow(plan)
-
-        // 어느 경로를 기준으로 계산했는지. 알람 시각만 보면 "왜 이 시각인가" 의
-        // 절반(이동 시간)이 어디서 왔는지 알 수 없다.
-        val basis = listOfNotNull(
-            plan.routeDetail?.takeIf { it.isNotBlank() },
-            plan.routeDistanceM?.let { "%.1fkm".format(it / 1000.0) },
-        )
-        if (basis.isNotEmpty()) {
-            Text(
-                text = basis.joinToString(" · ") + " 기준",
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
-            )
-        }
-        plan.arrivalLine?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
-        }
-
-        // 이 시각을 **언제** 계산했는지. 백그라운드가 임박한 일정의 경로를
-        // 15분마다 다시 조회하므로 알람 시각과 이동 시간이 조용히 바뀐다.
-        // 표시하지 않으면 사용자는 화면의 숫자가 방금 받은 것인지 어제 계산한
-        // 것인지 모르고, 배차가 바뀌었는데도 낡은 값을 믿고 움직인다.
-        computedAgoLabel(plan.computedAtMillis)?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
-        }
-
-        // 고른 경로가 사라져 다른 경로로 계산했다.
-        //
-        // **조용히 넘기면 안 된다.** 사용자는 자기가 고른 노선대로 계산된
-        // 알람이라고 믿고 그 노선을 타러 간다. 서버는 이 사실을
-        // `route_choice_honored=false` 로 알려 주는데 화면이 읽지 않고 있었다.
-        if (plan.routeFellBack) {
-            JitDotLabel(
-                text = "고른 경로가 없어져 다른 경로로 계산함. 경로를 다시 고르는 것이 정확함",
-                dotColor = JitColor.Amber,
-                textColor = JitColor.Amber,
-                fontSize = 10,
-                bold = false,
-                dotSize = 6.dp,
-            )
-        }
     }
 }
 
@@ -387,6 +426,28 @@ private fun ProbabilityRow(plan: AlarmPlanView) {
 private fun BreakdownCard(plan: AlarmPlanView) {
     JitCard(padding = 14.dp, gap = 9.dp) {
         Text("계산 방법", color = JitColor.TextSecondary, fontSize = 11.sp)
+        // 어느 경로를 기준으로 계산했는지. 알람 시각만 보면 "왜 이 시각인가" 의
+        // 절반(이동 시간)이 어디서 왔는지 알 수 없다. 문장은 앱이 경로 key 로 만든다([RouteBasis]).
+        plan.routeBasis?.let {
+            Text(
+                text = it,
+                color = JitColor.TextPrimary,
+                fontSize = 11.sp,
+                modifier = Modifier.testTag("plan_route_basis"),
+            )
+        }
+        // 고른 경로가 사라져 다른 경로로 계산했다. **조용히 넘기면 안 된다.** 사용자는 자기가
+        // 고른 노선대로 계산된 알람이라고 믿고 그 노선을 타러 간다(`route_choice_honored=false`).
+        if (plan.routeFellBack) {
+            JitDotLabel(
+                text = "고른 경로가 없어져 다른 경로로 계산함. 경로를 다시 고르는 것이 정확함",
+                dotColor = JitColor.Amber,
+                textColor = JitColor.Amber,
+                fontSize = 10,
+                bold = false,
+                dotSize = 6.dp,
+            )
+        }
 
         // 항목별로 막대를 따로 그리면 길이가 **각자의 최대값 기준**이라 셋을
         // 서로 비교할 수 없다. 하나의 바를 비율대로 쪼개면 "이동이 준비의 1.5배"
@@ -429,6 +490,13 @@ private fun BreakdownCard(plan: AlarmPlanView) {
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
+        }
+        // 이 시각을 **언제** 계산했는지. 백그라운드가 임박한 일정의 경로를
+        // 15분마다 다시 조회하므로 알람 시각과 이동 시간이 조용히 바뀐다.
+        // 표시하지 않으면 사용자는 화면의 숫자가 방금 받은 것인지 어제 계산한
+        // 것인지 모르고, 배차가 바뀌었는데도 낡은 값을 믿고 움직인다.
+        computedAgoLabel(plan.computedAtMillis)?.let {
+            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
         }
     }
 }
@@ -700,7 +768,6 @@ private fun AlarmDecisionPreview() {
             onBack = {},
             onChangeRisk = {},
             onEditBlocks = {},
-            onRecompute = {},
             onDelete = {},
         )
     }
