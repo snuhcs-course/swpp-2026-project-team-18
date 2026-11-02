@@ -365,6 +365,7 @@ class TripTrackingService : Service() {
                         Log.i(TAG, "이동 중 경로를 바꿨다: 일정 $eventId → $routeKey")
                         // 출발 전에 바꾼 경우 그 확인 결과는 옛 경로 기준이다.
                         TripLiveState.clearPreDeparture(eventId)
+                        TripLiveState.recordReroute(eventId, routeKey)
                         runCatching {
                             NotificationManagerCompat.from(this@TripTrackingService)
                                 .cancel(AlarmNotifications.NOTIFICATION_REROUTE)
@@ -710,13 +711,12 @@ class TripTrackingService : Service() {
             requestUpdates(highAccuracy = true)
         }
 
-        // 출발했으니 출발 전 확인은 끝이다. 그때 알린 제안은 이동 중 제안과 따로 센다.
+        // 출발했으니 출발 전 확인은 끝이다. 알린 제안 키는 이번 이동 동안 그대로 두어 같은 제안을 다시 알리지 않는다.
         if (phaseBefore == TripGeofence.Phase.BEFORE_DEPARTURE &&
             fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE
         ) {
             handler.removeCallbacks(preDepartureRunnable)
             TripLiveState.clearPreDeparture(current.eventId)
-            rerouteNotifiedKeys.clear()
         }
         // 판정에 쓸 위치를 받았으면 "위치를 못 받는 중" 시계를 다시 잰다. 나간 뒤에는 필요 없다.
         when {

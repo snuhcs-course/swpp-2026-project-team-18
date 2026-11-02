@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.swpp.wakeup.data.local.LastEmailStore
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.ui.auth.LoginActivity
 import org.junit.After
@@ -51,6 +52,7 @@ class AuthFlowTest {
     @Before
     fun launchLoggedOut() {
         TokenStore(InstrumentationRegistry.getInstrumentation().targetContext).clear()
+        LastEmailStore(InstrumentationRegistry.getInstrumentation().targetContext).clear()
         scenario = ActivityScenario.launch(LoginActivity::class.java)
     }
 

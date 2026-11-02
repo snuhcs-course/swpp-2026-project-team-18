@@ -1,6 +1,7 @@
 package com.swpp.wakeup.data.local
 
 import android.content.Context
+import androidx.core.content.edit
 
 // Partly AI-generated (Claude)
 /**
@@ -23,11 +24,11 @@ class LastEmailStore(context: Context) {
     fun save(email: String) {
         val clean = email.trim()
         if (clean.isEmpty()) return
-        prefs.edit().putString(KEY_EMAIL, clean).apply()
+        prefs.edit { putString(KEY_EMAIL, clean) }
     }
 
     fun clear() {
-        prefs.edit().clear().apply()
+        prefs.edit { clear() }
     }
 
     private companion object {

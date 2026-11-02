@@ -94,6 +94,17 @@ object TripLiveState {
         _morningClosed.compareAndSet(closed, null)
     }
 
+    // Partly AI-generated (Claude)
+    /** 마지막으로 경로를 바꾼 기록. 알림의 [바꾸기]와 화면 버튼이 같은 곳에 남겨 화면이 따라가게 한다. */
+    data class Rerouted(val eventId: Long, val routeKey: String, val atMillis: Long)
+
+    private val _rerouted = MutableStateFlow<Rerouted?>(null)
+    val rerouted: StateFlow<Rerouted?> = _rerouted.asStateFlow()
+
+    fun recordReroute(eventId: Long, routeKey: String, atMillis: Long = System.currentTimeMillis()) {
+        _rerouted.value = Rerouted(eventId, routeKey, atMillis)
+    }
+
     /** 지금 추적 중인 일정. 추적 중이 아니면 null */
     private val _trackingEventId = MutableStateFlow<Long?>(null)
     val trackingEventId: StateFlow<Long?> = _trackingEventId.asStateFlow()
@@ -245,6 +256,7 @@ object TripLiveState {
         _arrival.value = null
         _arrivals.value = emptyMap()
         _morningClosed.value = null
+        _rerouted.value = null
     }
 
     /**
@@ -255,6 +267,7 @@ object TripLiveState {
         clearTracking()
         forgetArrival(eventId)
         _morningClosed.value = null
+        _rerouted.update { if (it?.eventId == eventId) null else it }
     }
 
     /** 이 일정을 추적하는 중인 경우에만 위치를 준다. */

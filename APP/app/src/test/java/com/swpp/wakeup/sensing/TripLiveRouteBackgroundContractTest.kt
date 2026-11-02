@@ -43,6 +43,15 @@ class TripLiveRouteBackgroundContractTest {
         assertFalse(viewModel.contains("altPath = live.path"))
     }
 
+    // Partly AI-generated (Claude)
+    @Test
+    fun `알림에서 경로를 바꾸면 화면이 따라가도록 기록한다`() {
+        val service = readSource("sensing/TripTrackingService.kt")
+        val start = service.indexOf("private fun handleReroute(")
+        assertTrue(start >= 0)
+        assertTrue(service.substring(start).contains("TripLiveState.recordReroute("))
+    }
+
     @Test
     fun `출발 전 확인은 이동 중 경로 사본과 일정 경로를 건드리지 않는다`() {
         val service = readSource("sensing/TripTrackingService.kt")

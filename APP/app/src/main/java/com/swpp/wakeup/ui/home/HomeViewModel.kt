@@ -691,6 +691,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         TripLiveState.restoreLiveRoute(liveRouteStore.current())
         // 앱 프로세스가 다시 시작돼도 이미 도착한 일정은 도착으로 남긴다(todo §2).
         ArrivalRecords.restore(application)
+        // Partly AI-generated (Claude)
+        // 알림에서 바꾼 경로도 화면에 반영한다. null(추적 종료·로그아웃)이면 지금처럼 그대로 둔다.
+        viewModelScope.launch {
+            TripLiveState.rerouted.collect { r ->
+                if (r != null) {
+                    _state.update { it.copy(rerouteApplied = AppliedReroute(r.eventId, r.atMillis, r.routeKey)) }
+                }
+            }
+        }
         viewModelScope.launch {
             TripLiveState.snapshot.collect { snapshot ->
                 if (snapshot == null) clearLiveRoutePath()
@@ -953,11 +962,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = repository.reroute(eventId, routeKey, fromSuggestion = true)) {
                 is EventRepository.Result.Success -> {
-                    _state.update {
-                        it.copy(
-                            rerouteApplied = AppliedReroute(eventId, System.currentTimeMillis(), routeKey),
-                        )
-                    }
+                    // 화면 상태는 init 의 수집기가 TripLiveState.rerouted 에서 채운다(알림 경로와 같은 원천).
+                    TripLiveState.recordReroute(eventId, routeKey)
                     runCatching { TripTrackingService.refreshLiveRoute(app, eventId) }
                         .onFailure { Log.w(TAG, "경로 바꾼 뒤 추적 갱신 요청 실패", it) }
                     notify("경로를 바꿨습니다. 곧 바꾼 경로로 다시 그립니다")
