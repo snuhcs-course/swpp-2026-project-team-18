@@ -126,8 +126,9 @@ make the screen look finished while being untrue.
 **Runtime limitations** (route scope and previously identified recovery/map issues)
 
 1. Live/alternative routes compare within the selected mode. The candidate picker opens on the server's `preferred_key` (last choice for the same destination, else the most used mode) and falls back to `fastest_key`
-2. Map panning can jump twice as far during consecutive gestures while a response is slow
-3. A small pinch (12%) snaps a whole zoom level
+2. Static maps only have whole zoom levels: a pinch below about 1.34× (or above 0.75×) snaps back,
+   a larger one moves to the nearest level. When you let go, the map keeps what was on screen,
+   even if the previous tile is still loading
 
 Arrivals are kept on the device for three days and, after a reinstall or on another device,
 read back from the server's observations, so an arrived event stays arrived after the app
