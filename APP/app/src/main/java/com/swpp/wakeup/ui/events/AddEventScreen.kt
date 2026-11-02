@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
@@ -134,7 +135,11 @@ fun AddEventScreen(
     onSubmit: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** "여기서 자고 출발해요 (준비 시간 포함)". 출발지가 집이 아닐 때만 보인다 */
+    onIncludePrepChange: (Boolean) -> Unit = {},
 ) {
+    // 일정 수정이면 같은 화면을 수정 모드로 쓴다(Figma ⑫ 변형 `488:9`).
+    val editing = state.isEditing
     // 검색 칸은 "검색" 을 눌렀을 때만 펼친다. 고르면 접는다.
     // 도착지는 아직 아무것도 없으면 처음부터 펼쳐 둔다 — 무엇을 할지 바로 보이게.
     var originSearching by rememberSaveable { mutableStateOf(false) }
@@ -154,19 +159,33 @@ fun AddEventScreen(
             ),
         verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
     ) {
-        ScreenHeader(title = "일정 추가", onBack = onBack, enabled = !state.submitting)
+        ScreenHeader(title = if (editing) "일정 수정" else "일정 추가", onBack = onBack, enabled = !state.submitting)
 
-        Text(
-            text = "무슨 일정인가?",
-            color = JitColor.TextPrimary,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = "도착 시각에서 거꾸로 계산해 알람을 정함",
-            color = JitColor.TextSecondary,
-            fontSize = 13.sp,
-        )
+        if (editing) {
+            // 반복 회차는 그 회차만 바뀐다. 반복 규칙은 만들 때만 정한다(event-edit-api.md §5).
+            Text(
+                text = if (state.recurring) {
+                    "반복 일정의 이 회차만 바뀜. 요일은 고칠 수 없음"
+                } else {
+                    "바꾼 항목만 저장함. 장소·출발지를 바꾸면 경로를 다시 고름"
+                },
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.testTag("edit_note"),
+            )
+        } else {
+            Text(
+                text = "무슨 일정인가?",
+                color = JitColor.TextPrimary,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "도착 시각에서 거꾸로 계산해 알람을 정함",
+                color = JitColor.TextSecondary,
+                fontSize = 13.sp,
+            )
+        }
 
         JitTextField(
             label = "일정 제목",
@@ -178,8 +197,8 @@ fun AddEventScreen(
         )
 
         DateRow(state.date, onDateChange, enabled = !state.submitting)
-        // Figma 순서: 날짜 → 반복 → 시작 시각
-        RepeatRow(state.repeatWeekdays, onRepeatDayToggle, enabled)
+        // Figma 순서: 날짜 → 반복 → 시작 시각. 수정에서는 반복을 고칠 수 없어 숨긴다.
+        if (!editing) RepeatRow(state.repeatWeekdays, onRepeatDayToggle, enabled)
         TimeRow(state.hour, state.minute, onTimeChange, enabled = !state.submitting)
 
         // Figma 13-a 출발·도착 지정: 각 줄 [값] [집] [검색].
@@ -289,6 +308,16 @@ fun AddEventScreen(
             }
         }
 
+        // 집이 아닌 곳에서 자고 바로 나서는 날(친구 집·본가·숙소). 서버 기본 규칙은 출발지를 따로
+        // 고르면 준비 시간을 빼서 알람이 준비 시간만큼 늦게 울린다(include-prep-api.md §5 ①).
+        if (state.origin != null) {
+            IncludePrepRow(
+                checked = state.includePrep,
+                enabled = enabled,
+                onChange = onIncludePrepChange,
+            )
+        }
+
         // Figma 순서: 출발지 → 도착지 → 경로 → 종류 → "일정 추가"
         val canPickRoute = state.canPickRoute(hasHome)
         RouteRow(
@@ -317,12 +346,45 @@ fun AddEventScreen(
         Spacer(Modifier.height(4.dp))
 
         JitPrimaryButton(
-            label = "일정 추가",
+            label = if (editing) "수정 저장" else "일정 추가",
             modifier = Modifier.testTag("event_submit"),
             onClick = onSubmit,
             enabled = state.canSubmit,
             loading = state.submitting,
         )
+    }
+}
+
+// Partly AI-generated (Claude)
+/** "여기서 자고 출발해요 (준비 시간 포함)" 스위치 한 줄(Figma ⑫ 변형 `488:50`). */
+@Composable
+private fun IncludePrepRow(checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Card))
+            .background(JitColor.Surface)
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onChange)
+            .testTag("include_prep")
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = "여기서 자고 출발해요 (준비 시간 포함)",
+                color = JitColor.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = if (checked) "준비 시간을 넣어 알람을 앞당김" else "끄면 이동 시간만 계산함",
+                color = JitColor.TextSecondary,
+                fontSize = 10.sp,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        // 줄 전체가 스위치다. 안쪽 Switch 는 그리기만 한다(이중 입력을 막는다).
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 

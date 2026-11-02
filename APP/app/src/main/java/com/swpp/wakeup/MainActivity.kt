@@ -303,9 +303,11 @@ private fun MainHost(
     // 일정 추가·집 설정이 끝나면 홈으로 되돌린다.
     LaunchedEffect(addState.done) {
         if (addState.done) {
+            // 수정이면 알람 결정 화면으로 돌아간다(같은 goBack). 안내 문구만 다르다.
+            val message = addState.doneMessage ?: "일정을 추가했습니다"
             viewModel.goBack()
             viewModel.resetAdd()
-            snackbarHostState.showSnackbar("일정을 추가했습니다")
+            snackbarHostState.showSnackbar(message)
         }
     }
     LaunchedEffect(homeSetupState.done) {
@@ -562,6 +564,7 @@ private fun MainHost(
                         onUnskip = { viewModel.setSkipped(route.eventId, false) },
                         skipBusy = state.skipUpdatingId != null,
                         onArrive = { viewModel.markArrived(route.eventId) },
+                        onEdit = { viewModel.openEditEvent(route.eventId) },
                     )
                 }
 
@@ -577,7 +580,8 @@ private fun MainHost(
                     onContinue = { viewModel.saveRiskOption(route.eventId, it) },
                 )
 
-                AppRoute.AddEvent -> AddEventScreen(
+                // 일정 수정은 ⑫ 를 수정 모드로 다시 쓴다(addState.editingEventId).
+                AppRoute.AddEvent, is AppRoute.EditEvent -> AddEventScreen(
                     state = addState,
                     hasHome = state.hasHome,
                     homePlace = state.homePlace,
@@ -614,6 +618,7 @@ private fun MainHost(
                     onSubmit = viewModel::submitAdd,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
+                    onIncludePrepChange = viewModel::onAddIncludePrepChange,
                 )
 
                 AppRoute.RouteChoice -> RouteChoiceScreen(

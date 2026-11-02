@@ -98,6 +98,8 @@ fun AlarmDecisionScreen(
     skipBusy: Boolean = false,
     /** "도착했어요"(수동 도착). null 이면 버튼을 그리지 않는다 */
     onArrive: (() -> Unit)? = null,
+    /** "일정 수정"(event-edit-api.md). null 이면 그리지 않는다 */
+    onEdit: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -253,6 +255,20 @@ fun AlarmDecisionScreen(
                         .testTag("event_skip")
                         .clip(RoundedCornerShape(8.dp))
                         .clickable(enabled = !skipBusy, onClick = onSkip)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
+            // 알람을 정한 뒤에도 제목·시각·장소·출발지·경로·종류를 고친다(Figma ④ `489:9`).
+            onEdit?.let { edit ->
+                Text(
+                    text = "일정 수정",
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag("event_edit")
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = edit)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }

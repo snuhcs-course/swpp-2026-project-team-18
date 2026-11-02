@@ -26,6 +26,8 @@ import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.ServerVersion
 import com.swpp.wakeup.data.remote.ServerWarmup
+import com.swpp.wakeup.data.repository.EventEditPatch
+import com.swpp.wakeup.data.repository.EventEditValues
 import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.data.repository.ReportRepository
 import com.swpp.wakeup.data.repository.RoutineRepository
@@ -3172,8 +3174,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val submitting: Boolean = false,
         val error: String? = null,
         val done: Boolean = false,
+
+        /**
+         * 집이 아닌 출발지에서 준비 시간을 넣는가(include-prep-api.md, "여기서 자고 출발해요").
+         * 출발지가 집이면 스위치가 없고 이 값은 쓰지 않는다.
+         */
+        val includePrep: Boolean = false,
+
+        /** 고치는 일정. null 이면 새 일정 추가다(Figma ⑫ 변형 · 일정 수정) */
+        val editingEventId: Long? = null,
+        /** 고치기 전 값. 바뀐 필드만 보내려고 들고 있다([EventEditPatch]) */
+        val editBase: EventEditValues? = null,
+        /** 반복 일정의 한 회차를 고치는 중. 요일은 고칠 수 없고 이 회차만 바뀐다 */
+        val recurring: Boolean = false,
+        /** 저장 뒤 화면이 띄울 한 줄. null 이면 "일정을 추가했습니다" */
+        val doneMessage: String? = null,
     ) {
         val canSubmit: Boolean get() = !submitting && title.isNotBlank()
+        val isEditing: Boolean get() = editingEventId != null
 
         /**
          * 경로를 고를 수 있는 조건. 출발지와 도착지가 **둘 다** 있어야 한다.
@@ -3276,9 +3294,112 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 routeLabel = null,
                 originError = null,
                 destinationError = null,
+                // 집으로 되돌리면 스위치가 사라진다. 값도 지운다(include-prep-api.md §5 ①).
+                includePrep = if (item == null) false else it.includePrep,
             )
         }
         _routeChoice.value = null
+    }
+
+    /** "여기서 자고 출발해요 (준비 시간 포함)" */
+    fun onAddIncludePrepChange(on: Boolean) = _add.update { it.copy(includePrep = on && it.origin != null) }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 일정 수정 화면을 연다(todo §2 "알람 결정 후 수정 UI", event-edit-api.md). ⑫ 를 수정 모드로
+     * 다시 쓴다. 서버의 지금 값을 채워 두고 저장할 때 바뀐 필드만 보낸다.
+     */
+    fun openEditEvent(eventId: Long) {
+        if (_add.value.submitting) return
+        viewModelScope.launch {
+            when (val loaded = repository.loadEvent(eventId)) {
+                is EventRepository.Result.Failure -> notify("일정을 불러오지 못했습니다. ${loaded.message}")
+                is EventRepository.Result.Success -> {
+                    val dto = loaded.data
+                    val base = EventEditValues.from(dto, _state.value.homePlace)
+                    if (base == null) {
+                        notify("일정 시각을 읽지 못해 고칠 수 없습니다")
+                        return@launch
+                    }
+                    val start = base.startAt.atZoneSameInstant(ZoneId.systemDefault())
+                    val plan = dto.alarmPlan
+                    _add.value = AddState(
+                        title = base.title,
+                        date = start.toLocalDate(),
+                        hour = start.hour,
+                        minute = start.minute,
+                        tagKey = base.tagKey,
+                        place = PlaceSearch(query = base.place?.name.orEmpty()),
+                        selectedPlace = base.place,
+                        destinationIsHome = base.destinationIsHome,
+                        routeKey = base.routeKey,
+                        routeLabel = plan?.travelMinutes?.let { minutes ->
+                            listOfNotNull("${minutes}분", plan.travelMode?.takeIf(String::isNotBlank))
+                                .joinToString(" · ")
+                        },
+                        origin = base.origin,
+                        originLabel = base.origin?.name,
+                        includePrep = base.includePrep == true,
+                        editingEventId = eventId,
+                        editBase = base,
+                        recurring = dto.recurrenceId != null,
+                    )
+                    _routeChoice.value = null
+                    loadEventTags()
+                    _nav.update { it.copy(stack = it.stack + AppRoute.EditEvent(eventId), forward = true) }
+                }
+            }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /** 수정 저장. 바뀐 필드만 보내고, 저장되면 이 화면의 계획과 홈·기기 알람을 다시 맞춘다. */
+    private fun submitEdit(current: AddState, startAt: OffsetDateTime) {
+        val eventId = current.editingEventId ?: return
+        val base = current.editBase ?: return
+        val edited = EventEditValues(
+            title = current.title,
+            startAt = startAt,
+            tagKey = current.tagKey,
+            place = current.selectedPlace,
+            destinationIsHome = current.destinationIsHome,
+            origin = current.origin,
+            routeKey = current.routeKey,
+            includePrep = true.takeIf { current.includePrep && current.origin != null },
+        )
+        val patch = EventEditPatch.build(base, edited)
+        if (patch.size() == 0) {
+            _add.update { it.copy(done = true, doneMessage = "바뀐 항목이 없음") }
+            return
+        }
+        _add.update {
+            it.copy(submitting = true, error = null, originError = null, destinationError = null)
+        }
+        viewModelScope.launch {
+            when (val result = repository.updateEvent(eventId, patch)) {
+                is EventRepository.Result.Success -> {
+                    if (result.data.plan != null) {
+                        ++planLoadGeneration
+                        _plan.value = result.data.plan
+                    }
+                    _add.update { it.copy(submitting = false, done = true, doneMessage = "일정을 수정했습니다") }
+                    // 다른 날로 옮기면 그날 다른 일정의 켬/끔도 바뀐다(event-edit-api.md §4).
+                    refresh()
+                }
+
+                is EventRepository.Result.Failure -> {
+                    val errors = endpointErrorsOf(result)
+                    _add.update {
+                        it.copy(
+                            submitting = false,
+                            error = errors.general,
+                            originError = errors.origin,
+                            destinationError = errors.destination,
+                        )
+                    }
+                }
+            }
+        }
     }
 
     // AI-generated (Claude)
@@ -3332,6 +3453,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             ),
         )
 
+        if (current.isEditing) {
+            submitEdit(current, startAt)
+            return
+        }
+
         _add.update {
             it.copy(submitting = true, error = null, originError = null, destinationError = null)
         }
@@ -3345,6 +3471,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 origin = current.origin,
                 destinationIsHome = current.destinationIsHome,
                 repeatWeekdays = current.repeatWeekdays,
+                includePrep = current.includePrep,
             )
             when (result) {
                 is EventRepository.Result.Success -> {

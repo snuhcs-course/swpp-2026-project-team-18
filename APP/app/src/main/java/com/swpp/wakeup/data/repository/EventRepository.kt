@@ -53,6 +53,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.Response
 import java.io.IOException
 import java.time.Duration
@@ -297,6 +299,8 @@ class EventRepository(
         origin: PlaceSearchItem? = null,
         destinationIsHome: Boolean = false,
         repeatWeekdays: Set<Int> = emptySet(),
+        /** 집이 아닌 출발지에서 준비 시간을 넣는가. 출발지가 집이면 무시한다 */
+        includePrep: Boolean = false,
     ): Result<EventDto> = guard {
         val body = EventCreateRequest(
             title = title.trim(),
@@ -319,6 +323,7 @@ class EventRepository(
             originLabel = origin?.name,
             destinationIsHome = destinationIsHome,
             repeatWeekdays = repeatWeekdays.sorted(),
+            includePrep = true.takeIf { includePrep && origin != null },
         )
         val response = api.create(body)
         // 필드별 오류를 살린다. 가까운 출발·도착(710545a)은 `details.destination` 으로 온다.
@@ -585,6 +590,34 @@ class EventRepository(
      * 목록을 훑어 찾지 않고 상세 엔드포인트를 부른다. 목록은 페이지 경계가
      * 있어 21번째 일정부터는 찾지 못한다.
      */
+    // Partly AI-generated (Claude)
+    /** 수정 화면에 채울 일정. 서버 우선, 닿지 않으면 캐시. */
+    suspend fun loadEvent(eventId: Long): Result<EventDto> {
+        val online = guard {
+            val response = api.get(eventId)
+            unwrap(response)?.let { Result.Success(it) } ?: Result.Failure(errorMessage(response))
+        }
+        if (online is Result.Success) return online
+        return cache?.event(eventId)?.let { Result.Success(it) } ?: online
+    }
+
+    /** 일정 수정 결과. 서버가 지금 가진 일정과 알람 결정 화면용 계획(없으면 null). */
+    data class EditResult(val event: EventDto, val plan: AlarmPlanView?)
+
+    // Partly AI-generated (Claude)
+    /**
+     * 일정을 고친다(`PATCH /api/events/{id}`, event-edit-api.md). [patch] 는 [EventEditPatch] 가 만든
+     * 바뀐 필드뿐이다. 필드 오류(가까운 출발·도착 등)는 [Result.Failure.fields] 로 돌려준다.
+     */
+    suspend fun updateEvent(eventId: Long, patch: com.google.gson.JsonObject): Result<EditResult> = guard {
+        val body = patch.toString().toRequestBody(JSON_MEDIA)
+        val response = api.patch(eventId, body)
+        val dto = unwrap(response)
+            ?: return@guard failureFrom(response.code(), response.errorBody()?.string())
+        cache?.saveEvent(dto)
+        Result.Success(EditResult(dto, dto.toPlanView(ZoneId.systemDefault())))
+    }
+
     suspend fun loadPlan(eventId: Long): Result<AlarmPlanView> {
         val online = guard {
             val response = api.get(eventId)
@@ -764,6 +797,9 @@ class EventRepository(
             ?: fallbackErrorMessage(response.code())
 
     private companion object {
+        /** 일정 수정 본문. [updateEvent] 가 이미 만든 JSON 문자열을 싣는다 */
+        val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+
         const val MESSAGE_NETWORK = "서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."
 
         /**

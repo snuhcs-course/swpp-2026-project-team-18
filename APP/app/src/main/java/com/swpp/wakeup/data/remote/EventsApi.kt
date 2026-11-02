@@ -51,6 +51,19 @@ interface EventsApi {
         @Body body: EventUpdateRequest,
     ): Response<EventDto>
 
+    /**
+     * 일정 수정(docs/iter3/event-edit-api.md). 본문은 이미 직렬화한 JSON 이다.
+     *
+     * [EventUpdateRequest] 를 쓰지 않는 이유: 기본 Gson 은 null 필드를 빼고 보내서 출발지·장소·
+     * 준비 시간 포함 여부를 **지울 수 없다.** `JsonObject` 도 Retrofit 의 Gson 을 거치면 null 이
+     * 빠진다. 그래서 [com.swpp.wakeup.data.repository.EventEditPatch] 가 만든 문자열을 그대로 싣는다.
+     */
+    @PATCH("api/events/{id}")
+    suspend fun patch(
+        @Path("id") id: Long,
+        @Body body: okhttp3.RequestBody,
+    ): Response<EventDto>
+
     @DELETE("api/events/{id}")
     suspend fun delete(@Path("id") id: Long): Response<Unit>
 
@@ -308,6 +321,10 @@ data class EventDto(
      */
     val skipped: Boolean = false,
     @SerializedName("skipped_at") val skippedAt: String? = null,
+    /** 고른 준비 시간 포함 여부. null 이면 출발지로 정함(include-prep-api.md) */
+    @SerializedName("include_prep") val includePrep: Boolean? = null,
+    /** 지금 알람에 준비 시간이 들어갔는가. 구버전 서버면 null */
+    @SerializedName("prep_applies") val prepApplies: Boolean? = null,
 )
 
 /**
@@ -910,6 +927,11 @@ data class EventCreateRequest(
     @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
     /** 0 = 월요일 / 6 = 일요일. 비어 있으면 한 번짜리 일정이다. */
     @SerializedName("repeat_weekdays") val repeatWeekdays: List<Int> = emptyList(),
+    /**
+     * 집이 아닌 출발지에서도 준비 시간을 넣는가(docs/iter3/include-prep-api.md). 켜면 true,
+     * 끄면 null(보내지 않음 = 출발지로 정함: 집이면 넣고 따로 골랐으면 뺌). 구버전 서버는 무시한다.
+     */
+    @SerializedName("include_prep") val includePrep: Boolean? = null,
 )
 
 data class EventUpdateRequest(

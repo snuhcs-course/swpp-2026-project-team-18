@@ -227,6 +227,7 @@ open class FakeEventsApi : EventsApi {
 
     override suspend fun delete(id: Long): Response<Unit> = unexpected("delete")
     override suspend fun recompute(id: Long): Response<EventDto> = unexpected("recompute")
+    override suspend fun patch(id: Long, body: okhttp3.RequestBody): Response<EventDto> = unexpected("patch")
     override suspend fun skip(id: Long): Response<EventDto> = unexpected("skip")
     override suspend fun unskip(id: Long): Response<EventDto> = unexpected("unskip")
     override suspend fun importCalendar(body: CalendarImportRequest): Response<CalendarImportResponse> =
