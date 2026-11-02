@@ -23,6 +23,13 @@ object ServerLogout {
     private const val TAG = "ServerLogout"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** 로그아웃에 딸린 정리(소셜 SDK 로그아웃 등)를 화면 수명과 떼어 돌린다. 실패는 삼킨다 */
+    fun detached(block: suspend () -> Unit) {
+        scope.launch {
+            runCatching { block() }.onFailure { Log.w(TAG, "로그아웃 뒤 정리 실패(${it.javaClass.simpleName})") }
+        }
+    }
+
     fun revoke(refresh: String?, api: () -> AuthApi = { ApiClient.auth }) {
         if (refresh.isNullOrBlank() || !ApiClient.isReady) return
         scope.launch {

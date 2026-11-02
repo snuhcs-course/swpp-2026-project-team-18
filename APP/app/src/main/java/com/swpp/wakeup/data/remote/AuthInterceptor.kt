@@ -45,6 +45,10 @@ class AuthInterceptor(private val tokenStore: TokenStore) : Interceptor {
             "/api/auth/token/refresh",
             // 로그아웃은 본문의 refresh 로 판단한다. 만료된 access 를 붙이면 401 이 날 수 있다.
             "/api/auth/logout",
+            // 소셜 로그인은 ID 토큰으로 판단한다(social-login-api.md §2). 앞 세션의 access 를 붙이지
+            // 않는다. 연결·끊기(`/api/auth/me/social/...`)는 인증이 필요하므로 여기 넣지 않는다.
+            "/api/auth/social/kakao",
+            "/api/auth/social/google",
         )
     }
 }
@@ -174,6 +178,12 @@ class TokenRefreshAuthenticator(
     private companion object {
         const val TAG = "TokenRefresh"
 
-        val TOKEN_PATHS = listOf("/api/auth/token", "/api/auth/token/refresh")
+        // 소셜 로그인의 401(`social_token_invalid`)은 SDK 토큰이 틀렸다는 뜻이다. 갱신으로 풀 수 없다.
+        val TOKEN_PATHS = listOf(
+            "/api/auth/token",
+            "/api/auth/token/refresh",
+            "/api/auth/social/kakao",
+            "/api/auth/social/google",
+        )
     }
 }

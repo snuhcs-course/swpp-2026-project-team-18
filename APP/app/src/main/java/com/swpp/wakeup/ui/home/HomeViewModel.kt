@@ -27,6 +27,7 @@ import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.ServerVersion
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.repository.ArrivalRepository
+import com.swpp.wakeup.data.repository.AuthRepository
 import com.swpp.wakeup.data.repository.EventEditPatch
 import com.swpp.wakeup.data.repository.EventEditValues
 import com.swpp.wakeup.data.repository.EventRepository
@@ -35,6 +36,9 @@ import com.swpp.wakeup.data.repository.RoutineRepository
 import com.swpp.wakeup.data.repository.ServerLogout
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.ArrivalLedger
+import com.swpp.wakeup.domain.model.SocialLogin
+import com.swpp.wakeup.domain.model.SocialProvider
+import com.swpp.wakeup.ui.auth.SocialSignIn
 import com.swpp.wakeup.domain.model.CalibrationView
 import com.swpp.wakeup.domain.model.WeeklyReportView
 import com.swpp.wakeup.domain.model.AlarmSchedule
@@ -108,6 +112,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = EventRepository(cache = cache)
     private val routines = RoutineRepository(cache = cache)
 
+    /** 내 계정·로그인 연결(social-login-api.md §3). 토큰은 저장하지 않는다 */
+    private val authRepository = AuthRepository(tokenStore = tokenStore)
+
     /**
      * 리포트는 캐시하지 않는다.
      *
@@ -176,6 +183,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val notice: HomeNotice? = null,
         /** 모든 기기 로그아웃을 서버에 요청하는 중 */
         val logoutAllBusy: Boolean = false,
+
+        /** 설정 계정 카드에 보일 이메일. 소셜 자리 표시 주소(`@social.invalid`)면 null */
+        val accountEmail: String? = null,
+        /**
+         * 가진 로그인 방법(`password`·`kakao`·`google`). 아직 모르면 null — 설정을 열 때 받는다
+         * (social-login-api.md §4). (Partly AI-generated (Claude))
+         */
+        val loginMethods: List<String>? = null,
+        /** 로그인 방법을 받지 못했다. "로그인 연결" 에 다시 시도를 둔다 */
+        val loginMethodsFailed: Boolean = false,
+        /** 연결·끊기 중인 제공자 */
+        val socialLinkBusy: SocialProvider? = null,
 
         /** 집 위치 미설정이면 알람을 계산할 수 없다. 안내를 띄운다 */
         val hasHome: Boolean = true,
@@ -282,7 +301,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
     }
 
-    private val _state = MutableStateFlow(UiState(nickname = tokenStore.nickname ?: "사용자"))
+    private val _state = MutableStateFlow(
+        UiState(
+            nickname = tokenStore.nickname ?: "사용자",
+            accountEmail = SocialLogin.visibleEmail(tokenStore.email),
+        )
+    )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val _nav = MutableStateFlow(NavState())
@@ -1110,6 +1134,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         LocalStores.wipeAll(getApplication())
         tokenStore.clear()
         ServerLogout.revoke(refresh)
+        // 카카오·Google SDK 쪽 로그인도 끝낸다. 다음 로그인 때 계정 선택이 다시 뜬다(계약 §5).
+        ServerLogout.detached { SocialSignIn.signOutQuietly(getApplication()) }
         // 세션 종료 표시를 내린다. 남겨 두면 다음 로그인 직후 MainActivity 가
         // 그것을 보고 로그인 화면으로 되돌린다 — 로그인이 안 되는 것처럼 보인다.
         SessionState.clearExpired()
@@ -1150,6 +1176,91 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 else -> notify("서버에 연결되지 않아 다른 기기를 로그아웃하지 못했습니다")
             }
         }
+    }
+
+    // --- 로그인 연결 (social-login-api.md §3) — Partly AI-generated (Claude) ---------
+
+    /** 설정의 "로그인 연결" 이 쓰는 로그인 방법을 받는다(`GET /api/auth/me`) */
+    fun loadLoginMethods() {
+        viewModelScope.launch {
+            when (val result = authRepository.currentUser()) {
+                is AuthRepository.AccountResult.Success -> _state.update {
+                    it.copy(
+                        loginMethods = result.user.loginMethods.orEmpty(),
+                        loginMethodsFailed = false,
+                        accountEmail = SocialLogin.visibleEmail(result.user.email),
+                    )
+                }
+
+                is AuthRepository.AccountResult.Failure -> {
+                    Log.w(TAG, "로그인 방법을 받지 못했다: ${result.message}")
+                    _state.update { it.copy(loginMethodsFailed = it.loginMethods == null) }
+                }
+            }
+        }
+    }
+
+    /**
+     * "연결". 다른 연결·끊기가 진행 중이면 false — 화면은 SDK 를 띄우지 않는다. true 면 화면이
+     * [com.swpp.wakeup.ui.auth.SocialSignIn] 으로 토큰을 받아 [onSocialLinkOutcome] 으로 넘긴다.
+     */
+    fun beginSocialLink(provider: SocialProvider): Boolean {
+        if (_state.value.socialLinkBusy != null) return false
+        _state.update { it.copy(socialLinkBusy = provider) }
+        return true
+    }
+
+    fun onSocialLinkOutcome(provider: SocialProvider, outcome: SocialSignIn.Outcome) {
+        when (outcome) {
+            SocialSignIn.Outcome.Cancelled -> _state.update { it.copy(socialLinkBusy = null) }
+            SocialSignIn.Outcome.NotConfigured -> {
+                _state.update { it.copy(socialLinkBusy = null) }
+                notify("지금은 ${provider.label} 연결을 쓸 수 없습니다")
+            }
+            is SocialSignIn.Outcome.Failed -> {
+                _state.update { it.copy(socialLinkBusy = null) }
+                notify(outcome.message)
+            }
+            is SocialSignIn.Outcome.Token -> viewModelScope.launch {
+                applyLinkResult(
+                    provider,
+                    authRepository.linkSocial(provider, outcome.idToken),
+                    done = "${provider.asObject} 연결했습니다. 이제 ${provider.label}로도 로그인할 수 있습니다",
+                )
+            }
+        }
+    }
+
+    /** "끊기". 유일한 로그인 방법이면 화면이 버튼을 숨기고, 서버도 거절한다 */
+    fun unlinkSocial(provider: SocialProvider) {
+        if (_state.value.socialLinkBusy != null) return
+        _state.update { it.copy(socialLinkBusy = provider) }
+        viewModelScope.launch {
+            applyLinkResult(provider, authRepository.unlinkSocial(provider), done = "${provider.label} 연결을 끊었습니다")
+        }
+    }
+
+    private fun applyLinkResult(provider: SocialProvider, result: AuthRepository.AccountResult, done: String) {
+        when (result) {
+            is AuthRepository.AccountResult.Success -> {
+                _state.update {
+                    it.copy(
+                        socialLinkBusy = null,
+                        loginMethods = result.user.loginMethods.orEmpty(),
+                        loginMethodsFailed = false,
+                    )
+                }
+                notify(done)
+            }
+
+            is AuthRepository.AccountResult.Failure -> {
+                _state.update { it.copy(socialLinkBusy = null) }
+                notify(result.message)
+                // 서버와 화면이 어긋났을 수 있다(다른 기기에서 끊음 등). 다시 받아 맞춘다.
+                loadLoginMethods()
+            }
+        }
+        Log.i(TAG, "${provider.path} 연결 결과: ${result.javaClass.simpleName}")
     }
 
     /** 아바타에 쓸 두 글자. */
@@ -1277,6 +1388,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 설정 화면. 가입할 때 정한 집 주소·준비 시간·캘린더 연동을 여기서 고친다 */
     fun openSettings() {
         _nav.update { it.copy(stack = it.stack + AppRoute.Settings, forward = true) }
+        // "로그인 연결" 에 쓸 로그인 방법. 설정을 열 때마다 새로 받는다(다른 기기에서 바꿨을 수 있다).
+        loadLoginMethods()
         loadCalendarSources()
     }
 

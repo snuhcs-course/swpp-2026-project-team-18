@@ -40,7 +40,7 @@ needed it (4–15 min).
 
 What the MVP supports:
 
-1. **Sign up and onboard** — server-checked password, terms consent, home address, prep time (5–240 minutes); sign-up allows 10 attempts per IP per hour
+1. **Sign up and onboard** — email with a server-checked password, or Kakao/Google; terms consent, home address, prep time (5–240 minutes); sign-up allows 10 attempts per IP per hour
 2. **Add an event** — title, time, category (which sets τ), destination (Kakao place
    search, a pick on the map, or your current home), origin (home by default), and a route chosen from
    grouped Kakao candidates: transit, walk, bicycle or car, with server-written guidance.
@@ -107,9 +107,13 @@ make the screen look finished while being untrue.
   routing (BE-11) and optional bicycle-road ratio (BE-14) remain
 - Weekly and detailed reports ⑧⑨ — built; the Figma panels for sleep, alarm snoozes and
   per-weekday auto-adjustment are left out because nothing records that data yet
-- Sign-in — the server accepts Kakao and Google ID tokens (`POST /api/auth/social/{provider}`,
-  [docs/iter3/social-login-api.md](docs/iter3/social-login-api.md)), but the app's social
-  buttons still show a notice
+- Sign-in with Kakao and Google — the app gets an ID token from the Kakao SDK or Credential
+  Manager and sends it to `POST /api/auth/social/{provider}`
+  ([docs/iter3/social-login-api.md](docs/iter3/social-login-api.md)); first-time accounts see
+  a terms screen, an email already used by another account gets a notice, and settings can
+  link or unlink either provider. It works only after each signing key is registered in the
+  consoles (Kakao key hash, Google Android client SHA-1) and the server has both keys
+  ([app guide](APP/README.md#소셜-로그인))
 
 **Not started**
 

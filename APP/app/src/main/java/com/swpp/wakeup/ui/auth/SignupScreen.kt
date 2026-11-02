@@ -284,15 +284,17 @@ private fun RuleRow(text: String, passed: Boolean?) {
  * 이용약관 및 개인정보처리방침 동의. 체크하지 않으면 가입 버튼이 꺼진다.
  */
 @Composable
-private fun TermsAgreementRow(
+internal fun TermsAgreementRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    /** 소셜 처음 가입 화면도 같은 줄을 쓴다(Figma ⑦ 변형 `495:9`) */
+    tag: String = "signup_terms",
 ) {
     Row(
         modifier = modifier
-            .testTag("signup_terms")
+            .testTag(tag)
             .fillMaxWidth()
             .toggleable(
                 value = checked,

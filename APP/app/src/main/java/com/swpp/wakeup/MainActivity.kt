@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -55,6 +56,7 @@ import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.domain.model.ArrivalOutlook
 import com.swpp.wakeup.domain.model.RerouteAlert
+import com.swpp.wakeup.ui.auth.SocialSignIn
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripEta
 import com.swpp.wakeup.domain.model.TripStage
@@ -279,6 +281,8 @@ private fun MainHost(
     // 위치 권한은 출발·도착 판별의 전제다. 없으면 알람은 울리지만 기록이 없다.
     // 배경 위치는 요청하지 않는다 — 추적은 알람 화면에서 시작하므로 필요 없다.
     val context = LocalContext.current
+    // 소셜 연결(설정)의 SDK 창을 띄울 화면
+    val activity = LocalActivity.current
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { /* 결과는 화면에서 다시 확인한다. 거부해도 앱은 동작한다 */ }
@@ -749,6 +753,22 @@ private fun MainHost(
                     },
                     onLogoutAll = { viewModel.logoutAll(onLoggedOut) },
                     logoutAllBusy = state.logoutAllBusy,
+                    // 카카오·Google 연결(Figma ⑯ `496:29`). SDK 는 화면이 있어야 해서 여기서 부른다.
+                    onSocialLink = { provider ->
+                        val host = activity
+                        if (host != null && viewModel.beginSocialLink(provider)) {
+                            scope.launch {
+                                var outcome: SocialSignIn.Outcome = SocialSignIn.Outcome.Cancelled
+                                try {
+                                    outcome = SocialSignIn.idToken(host, provider)
+                                } finally {
+                                    viewModel.onSocialLinkOutcome(provider, outcome)
+                                }
+                            }
+                        }
+                    },
+                    onSocialUnlink = viewModel::unlinkSocial,
+                    onRetryLoginMethods = viewModel::loadLoginMethods,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                     calendarLink = calendarLinkState,

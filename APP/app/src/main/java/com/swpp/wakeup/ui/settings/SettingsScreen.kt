@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.CalendarLinkState
 import com.swpp.wakeup.domain.model.CalendarPermission
+import com.swpp.wakeup.domain.model.SocialProvider
 import com.swpp.wakeup.ui.calendar.CalendarHelpActions
 import com.swpp.wakeup.ui.calendar.CalendarHelpToggle
 import com.swpp.wakeup.ui.calendar.CalendarLinkStatus
@@ -77,6 +78,11 @@ fun SettingsScreen(
     onLogoutAll: (() -> Unit)? = null,
     /** 모든 기기 로그아웃을 서버에 요청하는 중 */
     logoutAllBusy: Boolean = false,
+    /** "로그인 연결"의 [연결](social-login-api.md §3). null 이면 그 칸을 그리지 않는다 */
+    onSocialLink: ((SocialProvider) -> Unit)? = null,
+    onSocialUnlink: (SocialProvider) -> Unit = {},
+    /** 로그인 방법을 받지 못했을 때 다시 받기 */
+    onRetryLoginMethods: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -106,7 +112,25 @@ fun SettingsScreen(
             fontSize = 13.sp,
         )
 
-        AccountCard(nickname = state.nickname, initials = avatarInitials)
+        AccountCard(nickname = state.nickname, initials = avatarInitials, email = state.accountEmail)
+
+        // 카카오·Google 연결·끊기(Figma ⑯ `496:29`).
+        onSocialLink?.let { link ->
+            SectionLabel("로그인 연결")
+            LoginConnections(
+                methods = state.loginMethods,
+                failed = state.loginMethodsFailed,
+                busy = state.socialLinkBusy,
+                onLink = link,
+                onUnlink = onSocialUnlink,
+                onRetry = onRetryLoginMethods,
+            )
+            Text(
+                text = "마지막 로그인 방법은 끊을 수 없음(버튼을 숨김). 소셜로만 가입한 계정은 비밀번호가 없음",
+                color = JitColor.TextSecondary,
+                fontSize = 9.sp,
+            )
+        }
 
         SectionLabel("기준")
 
@@ -215,8 +239,85 @@ private fun SectionLabel(text: String) {
     )
 }
 
+// Partly AI-generated (Claude)
+/**
+ * 로그인 연결(Figma ⑯ `496:29`). 연결된 제공자는 [끊기], 아니면 [연결]. 남은 로그인 방법이 하나뿐이면
+ * 끊기를 숨긴다(서버도 400 `social_last_login_method` 로 거절한다).
+ *
+ * @param methods 서버 `login_methods`. 아직 모르면 null
+ */
 @Composable
-private fun AccountCard(nickname: String, initials: String) {
+private fun LoginConnections(
+    methods: List<String>?,
+    failed: Boolean,
+    busy: SocialProvider?,
+    onLink: (SocialProvider) -> Unit,
+    onUnlink: (SocialProvider) -> Unit,
+    onRetry: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .testTag("login_connections")
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Card))
+            .background(JitColor.Surface)
+            .padding(horizontal = 15.dp, vertical = 4.dp),
+    ) {
+        SocialProvider.entries.forEachIndexed { index, provider ->
+            if (index > 0) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(JitColor.Track))
+            }
+            val linked = methods?.contains(provider.path) == true
+            val lastMethod = linked && methods.orEmpty().distinct().size <= 1
+            val status = when {
+                methods == null && failed -> "연결 상태를 확인하지 못함"
+                methods == null -> "확인 중"
+                linked -> "연결됨 · 이 계정으로 로그인할 수 있음"
+                else -> "연결 안 됨"
+            }
+            val action: Pair<String, (() -> Unit)?>? = when {
+                busy == provider -> (if (linked) "끊는 중…" else "연결 중…") to null
+                methods == null && failed -> "다시 시도" to onRetry
+                methods == null -> null
+                linked && lastMethod -> null
+                linked -> "끊기" to { onUnlink(provider) }
+                else -> "연결" to { onLink(provider) }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(if (provider == SocialProvider.KAKAO) JitColor.Kakao else JitColor.GoogleSymbol),
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(provider.label, color = JitColor.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    Text(status, color = JitColor.TextSecondary, fontSize = 10.sp)
+                }
+                action?.let { (label, onClick) ->
+                    Text(
+                        text = label,
+                        color = if (label == "연결" || label == "다시 시도") JitColor.Accent else JitColor.TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .testTag("social_${provider.path}_action")
+                            .clip(RoundedCornerShape(JitRadius.Hint))
+                            .clickable(enabled = onClick != null && busy == null) { onClick?.invoke() }
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountCard(nickname: String, initials: String, email: String?) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -240,12 +341,16 @@ private fun AccountCard(nickname: String, initials: String) {
             )
         }
         Spacer(Modifier.width(12.dp))
-        Text(
-            text = nickname,
-            color = JitColor.TextPrimary,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                text = nickname,
+                color = JitColor.TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            // 이메일을 주지 않은 소셜 계정은 자리 표시 주소라 보이지 않는다(social-login-api.md §5).
+            email?.let { Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp) }
+        }
     }
 }
 

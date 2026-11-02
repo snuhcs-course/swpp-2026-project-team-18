@@ -189,6 +189,18 @@ open class FakeAuthApi : AuthApi {
     override suspend fun logout(body: RefreshRequest): Response<Unit> = unexpected("logout")
     override suspend fun logoutAll(): Response<com.swpp.wakeup.data.remote.LogoutAllResponse> =
         unexpected("logoutAll")
+    override suspend fun socialLogin(
+        provider: String,
+        body: com.swpp.wakeup.data.remote.SocialLoginRequest,
+    ): Response<AuthResponse> = unexpected("socialLogin")
+    override suspend fun currentUser(): Response<UserDto> = unexpected("currentUser")
+    override suspend fun linkSocial(
+        provider: String,
+        body: com.swpp.wakeup.data.remote.SocialLinkRequest,
+    ): Response<com.swpp.wakeup.data.remote.SocialUserResponse> = unexpected("linkSocial")
+    override suspend fun unlinkSocial(
+        provider: String,
+    ): Response<com.swpp.wakeup.data.remote.SocialUserResponse> = unexpected("unlinkSocial")
 }
 
 /**

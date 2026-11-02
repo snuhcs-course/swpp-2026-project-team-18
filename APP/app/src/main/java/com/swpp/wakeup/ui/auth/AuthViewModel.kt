@@ -10,6 +10,9 @@ import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.remote.PasswordCheckResponse
 import com.swpp.wakeup.data.repository.AuthRepository
+import com.swpp.wakeup.domain.model.SocialLogin
+import com.swpp.wakeup.domain.model.SocialNotice
+import com.swpp.wakeup.domain.model.SocialProvider
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,8 +56,23 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         },
     )
 
-    /** 어떤 화면을 보여줄지. 네비게이션 라이브러리 없이 두 화면만 오간다. */
-    enum class Screen { LOGIN, SIGNUP }
+    /**
+     * 어떤 화면을 보여줄지. 네비게이션 라이브러리 없이 몇 화면만 오간다. [SOCIAL_TERMS] 는 소셜로
+     * 처음 가입할 때의 약관 동의(Figma ⑦ 변형 `495:9`)다.
+     */
+    enum class Screen { LOGIN, SIGNUP, SOCIAL_TERMS }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 소셜로 처음 가입하는 중. 서버가 400 `social_terms_required` 를 줬다. 같은 [idToken] 에 동의를
+     * 붙여 다시 보낸다(카카오 토큰 12시간, 구글 1시간 유효).
+     */
+    data class SocialTermsDraft(
+        val provider: SocialProvider,
+        val idToken: String,
+        val nickname: String,
+        val agreed: Boolean = false,
+    )
 
     // Partly AI-generated (Claude)
     data class UiState(
@@ -83,9 +101,22 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
          * 무슨 일이 일어나는지 화면에 적는다.
          */
         val waking: Boolean = false,
+
+        /** 소셜 로그인 중인 제공자. 그 버튼만 "확인 중…" 이고 다른 입력은 막는다 */
+        val socialBusy: SocialProvider? = null,
+        /** 로그인 화면 오류 자리의 카드(이미 가입한 이메일·쓸 수 없음). Figma ⑦ 변형 `496:9` */
+        val socialNotice: SocialNotice? = null,
+        /** 소셜로 처음 가입하는 중이면 그 내용 */
+        val socialTerms: SocialTermsDraft? = null,
     ) {
+        /** 무언가 서버를 기다리는 중. 이메일·소셜 버튼을 함께 막는다 */
+        val busy: Boolean get() = loading || socialBusy != null
+
         val canSubmitLogin: Boolean
-            get() = !loading && email.isNotBlank() && password.isNotBlank()
+            get() = !busy && email.isNotBlank() && password.isNotBlank()
+
+        val canAgreeSocialTerms: Boolean
+            get() = !busy && socialTerms?.agreed == true
 
         /**
          * 비밀번호 확인 일치. 화면 표시(✓)용 비교라 앱에서 한다.
@@ -106,7 +137,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- 입력 -------------------------------------------------------------
 
-    fun onEmailChange(value: String) = _state.update { it.copy(email = value, error = null) }
+    fun onEmailChange(value: String) =
+        _state.update { it.copy(email = value, error = null, socialNotice = null) }
     fun onPasswordChange(value: String) {
         passwordCheckJob?.cancel()
         _state.update { it.copy(password = value, error = null, passwordCheck = null, passwordCheckError = null) }
@@ -138,6 +170,104 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun consumeAuthenticated() = _state.update { it.copy(authenticatedNickname = null) }
+
+    // --- 소셜 로그인 (docs/iter3/social-login-api.md) — Partly AI-generated (Claude) -------
+
+    /**
+     * 카카오·Google 버튼. 다른 요청이 진행 중이면 false — 화면은 SDK 를 띄우지 않는다. true 면 화면이
+     * [SocialSignIn] 으로 토큰을 받아 [onSocialOutcome] 으로 넘긴다.
+     */
+    fun beginSocial(provider: SocialProvider): Boolean {
+        if (_state.value.busy) return false
+        _state.update { it.copy(socialBusy = provider, error = null, socialNotice = null) }
+        return true
+    }
+
+    fun onSocialOutcome(provider: SocialProvider, outcome: SocialSignIn.Outcome) {
+        when (outcome) {
+            SocialSignIn.Outcome.Cancelled -> _state.update { it.copy(socialBusy = null) }
+            SocialSignIn.Outcome.NotConfigured -> _state.update {
+                it.copy(socialBusy = null, socialNotice = SocialLogin.unavailableNotice(provider))
+            }
+            is SocialSignIn.Outcome.Failed -> _state.update { it.copy(socialBusy = null, error = outcome.message) }
+            is SocialSignIn.Outcome.Token -> sendSocial(provider, outcome.idToken, termsAgreed = false, nickname = null)
+        }
+    }
+
+    fun onSocialNicknameChange(value: String) = _state.update {
+        it.copy(socialTerms = it.socialTerms?.copy(nickname = value.take(SocialLogin.NICKNAME_MAX)), error = null)
+    }
+
+    fun onSocialTermsAgreedChange(value: Boolean) =
+        _state.update { it.copy(socialTerms = it.socialTerms?.copy(agreed = value)) }
+
+    /** 처음 가입 화면의 [동의하고 시작하기]. 같은 토큰에 동의를 붙여 다시 보낸다 */
+    fun agreeSocialTerms() {
+        val current = _state.value
+        val draft = current.socialTerms ?: return
+        if (!current.canAgreeSocialTerms) return
+        _state.update { it.copy(socialBusy = draft.provider, error = null) }
+        sendSocial(draft.provider, draft.idToken, termsAgreed = true, nickname = draft.nickname)
+    }
+
+    /** 처음 가입을 그만두고 로그인으로. 토큰은 버린다 */
+    fun cancelSocialTerms() =
+        _state.update { UiState(screen = Screen.LOGIN, email = it.email) }
+
+    private fun sendSocial(provider: SocialProvider, idToken: String, termsAgreed: Boolean, nickname: String?) {
+        viewModelScope.launch {
+            val hint = launch {
+                delay(WAKE_HINT_DELAY_MILLIS)
+                _state.update { it.copy(waking = true) }
+            }
+            ServerWarmup.ensureAwake()
+            hint.cancel()
+            _state.update { it.copy(waking = false) }
+
+            when (val result = repository.socialLogin(provider, idToken, termsAgreed, nickname)) {
+                is AuthRepository.SocialResult.Success -> _state.update {
+                    it.copy(socialBusy = null, error = null, authenticatedNickname = result.user.nickname)
+                }
+
+                AuthRepository.SocialResult.TermsRequired -> _state.update {
+                    it.copy(
+                        screen = Screen.SOCIAL_TERMS,
+                        socialBusy = null,
+                        error = if (termsAgreed) "약관 동의를 확인하지 못했다. 다시 시도한다." else null,
+                        socialTerms = it.socialTerms?.takeIf { draft -> draft.idToken == idToken }
+                            ?: SocialTermsDraft(
+                                provider = provider,
+                                idToken = idToken,
+                                nickname = SocialLogin.nicknameHint(idToken).orEmpty(),
+                            ),
+                    )
+                }
+
+                is AuthRepository.SocialResult.EmailInUse -> _state.update {
+                    it.copy(
+                        screen = Screen.LOGIN,
+                        socialBusy = null,
+                        socialTerms = null,
+                        socialNotice = SocialLogin.emailInUseNotice(provider, result.loginMethods),
+                    )
+                }
+
+                AuthRepository.SocialResult.Unavailable -> _state.update {
+                    it.copy(
+                        screen = Screen.LOGIN,
+                        socialBusy = null,
+                        socialTerms = null,
+                        socialNotice = SocialLogin.unavailableNotice(provider),
+                    )
+                }
+
+                is AuthRepository.SocialResult.Failure -> {
+                    ServerWarmup.invalidate()
+                    _state.update { it.copy(socialBusy = null, error = result.message) }
+                }
+            }
+        }
+    }
 
     // --- 제출 -------------------------------------------------------------
 
@@ -171,7 +301,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val WAKE_HINT_DELAY_MILLIS = 2_000L
 
     private fun submit(block: suspend () -> AuthRepository.AuthResult) {
-        _state.update { it.copy(loading = true, error = null, waking = false) }
+        _state.update { it.copy(loading = true, error = null, waking = false, socialNotice = null) }
         viewModelScope.launch {
             // 쓰기 요청 앞에서 서버를 깨운다. 로그인은 POST 라서
             // ColdStartRetryInterceptor 가 재시도해 주지 않는다 - 재시도하면
