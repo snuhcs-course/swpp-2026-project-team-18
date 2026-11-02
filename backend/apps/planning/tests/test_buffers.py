@@ -33,7 +33,9 @@ ROUTE = {
     "detail": "2호선",
     "path": [[37.48, 126.93], [37.46, 126.95]],
 }
-FIXED = Buffer(10, buffers.SOURCE_FIXED, None)
+FIXED = Buffer(buffers.DEFAULT_MINUTES, buffers.SOURCE_FIXED, None)
+# `decide` 판단 테스트의 출발점. 상·하한에서 떨어진 10분이라 늘림·줄임이 모두 보인다.
+TEN = Buffer(10, buffers.SOURCE_FIXED, None)
 
 
 @pytest.fixture
@@ -125,7 +127,7 @@ def future_event(user, place, *, hours_ahead=30) -> Event:
 
 
 class TestCurrent:
-    def test_default_is_the_fixed_ten_minutes(self, user):
+    def test_default_is_the_fixed_five_minutes(self, user):
         assert buffers.current(user.pk) == FIXED
 
     def test_latest_adjustment_wins(self, user):
@@ -141,12 +143,12 @@ class TestCurrent:
 
 class TestDecide:
     def test_too_few_mornings_keep_the_buffer(self):
-        decision = buffers.decide(FIXED, mornings([-10, -10]))
+        decision = buffers.decide(TEN, mornings([-10, -10]))
 
         assert (decision.outcome, decision.minutes) == (buffers.KEEP_FEW, 10)
 
     def test_more_lateness_than_promised_raises_by_the_median_lateness(self):
-        decision = buffers.decide(FIXED, mornings([-4, -6, -2, 12, 15, 11]))
+        decision = buffers.decide(TEN, mornings([-4, -6, -2, 12, 15, 11]))
 
         assert decision.outcome == buffers.INCREASED
         assert decision.minutes == 14
@@ -159,7 +161,7 @@ class TestDecide:
     def test_lateness_the_model_promised_is_left_to_tau(self):
         """정시 70%를 약속한 10번 중 3번 지각은 약속대로다. 버퍼가 또 막으면 이중 반영이다."""
         decision = buffers.decide(
-            FIXED, mornings([-3, -5, -2, 4, 8, 12, 9, 15, 6, 11], promise=0.7)
+            TEN, mornings([-3, -5, -2, 4, 8, 12, 9, 15, 6, 11], promise=0.7)
         )
 
         assert decision.outcome == buffers.KEEP_ON_TRACK
@@ -167,12 +169,12 @@ class TestDecide:
         assert decision.expected_late == pytest.approx(3.0)
 
     def test_one_late_morning_never_raises(self):
-        decision = buffers.decide(FIXED, mornings([-20, 12, 15, 11, 13], promise=0.99))
+        decision = buffers.decide(TEN, mornings([-20, 12, 15, 11, 13], promise=0.99))
 
         assert decision.outcome == buffers.KEEP_ON_TRACK
 
     def test_raise_is_capped_per_step_and_overall(self):
-        step = buffers.decide(FIXED, mornings([-9, -12, -9, 12, 15]))
+        step = buffers.decide(TEN, mornings([-9, -12, -9, 12, 15]))
         top = buffers.decide(Buffer(13, buffers.SOURCE_LEARNED, None), mornings([-9, -12, -9, 12, 15]))
         stuck = buffers.decide(Buffer(15, buffers.SOURCE_LEARNED, None), mornings([-9, -12, -9, 12, 15]))
 
@@ -182,26 +184,26 @@ class TestDecide:
 
     def test_a_buffer_never_used_shrinks(self):
         """모든 아침이 계획한 도착(시작 − 10분)보다 먼저 왔다."""
-        decision = buffers.decide(FIXED, mornings([12, 14, 20, 11, 10]))
+        decision = buffers.decide(TEN, mornings([12, 14, 20, 11, 10]))
 
         assert (decision.outcome, decision.minutes) == (buffers.DECREASED, 8)
 
     def test_three_mornings_are_enough(self):
-        raised = buffers.decide(FIXED, mornings([-3, -5, 12]))
-        lowered = buffers.decide(FIXED, mornings([12, 14, 11]))
+        raised = buffers.decide(TEN, mornings([-3, -5, 12]))
+        lowered = buffers.decide(TEN, mornings([12, 14, 11]))
 
         assert (raised.outcome, raised.minutes) == (buffers.INCREASED, 14)
         assert (lowered.outcome, lowered.minutes) == (buffers.DECREASED, 8)
 
     def test_one_late_morning_blocks_shrinking(self):
         """나머지가 다 넉넉해도 한 번 늦었으면 줄이지 않는다(늘리지도 않는다)."""
-        decision = buffers.decide(FIXED, mornings([-2, 20, 18, 25, 15]))
+        decision = buffers.decide(TEN, mornings([-2, 20, 18, 25, 15]))
 
         assert (decision.outcome, decision.minutes) == (buffers.KEEP_ON_TRACK, 10)
 
     def test_a_buffer_used_once_stays(self):
         """지각은 없지만 한 번은 버퍼 안으로 들어왔다(시작 6분 전 도착)."""
-        decision = buffers.decide(FIXED, mornings([12, 14, 6, 11, 10]))
+        decision = buffers.decide(TEN, mornings([12, 14, 6, 11, 10]))
 
         assert decision.outcome == buffers.KEEP_ON_TRACK
 
@@ -289,12 +291,12 @@ class TestAdjustAll:
         plan = AlarmPlan.objects.get(event=event)
         assert outcomes == {buffers.INCREASED: 1}
         assert (row.previous_minutes, row.minutes, row.reason) == (
-            10, 14, BufferAdjustment.Reason.LATE_MORE_THAN_PROMISED,
+            5, 9, BufferAdjustment.Reason.LATE_MORE_THAN_PROMISED,
         )
         assert (row.sample_count, row.late_count, row.median_late_minutes) == (6, 3, 4)
-        assert plan.buffer_minutes == 14
+        assert plan.buffer_minutes == 9
         assert plan.buffer_source == buffers.SOURCE_LEARNED
-        assert plan.arrive_at == event.start_at - timedelta(minutes=14)
+        assert plan.arrive_at == event.start_at - timedelta(minutes=9)
 
     def test_dry_run_saves_nothing(self, user, place):
         for day, slack in enumerate([-4, -6, -2, 12, 15, 11], start=1):
@@ -316,7 +318,7 @@ class TestAdjustAll:
     def test_plans_say_fixed_until_adjusted(self, user, place, route):
         plan = AlarmPlan.objects.get(event=future_event(user, place))
 
-        assert (plan.buffer_minutes, plan.buffer_source) == (10, buffers.SOURCE_FIXED)
+        assert (plan.buffer_minutes, plan.buffer_source) == (buffers.DEFAULT_MINUTES, buffers.SOURCE_FIXED)
 
 
 class TestTrainModels:
@@ -392,7 +394,7 @@ class TestReport:
 
     def test_no_adjustment_reports_the_fixed_default(self, user):
         assert reports.weekly(user)["buffer"] == {
-            "current_minutes": 10, "current_source": buffers.SOURCE_FIXED, "adjustments": [],
+            "current_minutes": buffers.DEFAULT_MINUTES, "current_source": buffers.SOURCE_FIXED, "adjustments": [],
         }
 
 

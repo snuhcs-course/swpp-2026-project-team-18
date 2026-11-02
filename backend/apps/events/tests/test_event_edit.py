@@ -150,7 +150,7 @@ class TestTimeOnly:
         for hour in (10, 8, 13):
             patch(client, pk, start_at=at(3, hour).isoformat())
         assert len(route["calls"]) == calls
-        assert plan_of(pk).arrive_at == at(3, 13) - timedelta(minutes=10)
+        assert plan_of(pk).arrive_at == at(3, 13) - timedelta(minutes=5)
 
     def test_risk_preview_still_has_a_route_after_the_edit(self, client, route):
         pk = create(client)

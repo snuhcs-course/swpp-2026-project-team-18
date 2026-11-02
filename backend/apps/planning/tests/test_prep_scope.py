@@ -123,7 +123,7 @@ class TestNotFromHome:
         )
         assert plan.travel_minutes == 20
         assert plan.buffer_minutes == services.DEFAULT_BUFFER_MINUTES
-        assert plan.total_minutes == 30
+        assert plan.total_minutes == 20 + services.DEFAULT_BUFFER_MINUTES
 
     def test_arrival_and_appointment_are_unchanged(self, user, place):
         """버퍼 규칙은 그대로다. 준비만 빠진다."""

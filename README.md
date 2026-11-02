@@ -9,7 +9,7 @@ time — it is *how sure you want to be that you won't be late*. JustInTime work
 backwards from when your event starts:
 
 ```
-alarm = event start − safety buffer (10 min to start) − τ-quantile of (prep + travel)
+alarm = event start − safety buffer (5 min to start) − τ-quantile of (prep + travel)
 ```
 
 τ is the confidence you ask for — 0.90 for a class, 0.99 for an exam or a train. The

@@ -128,7 +128,7 @@ def test_options_use_the_users_learned_buffer(context):
     services.compute_and_store(event)
     before = {o["key"]: datetime.fromisoformat(o["alarm_at"]) for o in get_options(client, event)["options"]}
     BufferAdjustment.objects.create(
-        user=event.user, previous_minutes=10, minutes=14, reason="late_more", sample_count=6,
+        user=event.user, previous_minutes=5, minutes=9, reason="late_more", sample_count=6,
         late_count=3, expected_late=.3, mean_slack_minutes=4.3, tightest_slack_minutes=-6,
     )
     plan = services.compute_and_store(event)

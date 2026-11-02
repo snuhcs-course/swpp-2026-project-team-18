@@ -88,11 +88,11 @@ class TestNoDataRegression:
         assert plan.status == AlarmPlan.Status.OK
         assert plan.prep_minutes == 30      # 온보딩 값
         assert plan.travel_minutes == 20    # 카카오 실측
-        assert plan.buffer_minutes == 10    # 고정
-        # 09:00 − 10 − 20 − 30 = 08:00
-        assert plan.alarm_at == datetime(2026, 9, 21, 8, 0, tzinfo=KST)
-        assert plan.depart_by == datetime(2026, 9, 21, 8, 30, tzinfo=KST)
-        assert plan.arrive_at == datetime(2026, 9, 21, 8, 50, tzinfo=KST)
+        assert plan.buffer_minutes == 5     # 고정
+        # 09:00 − 5 − 20 − 30 = 08:05
+        assert plan.alarm_at == datetime(2026, 9, 21, 8, 5, tzinfo=KST)
+        assert plan.depart_by == datetime(2026, 9, 21, 8, 35, tzinfo=KST)
+        assert plan.arrive_at == datetime(2026, 9, 21, 8, 55, tzinfo=KST)
 
     def test_probability_stays_null(self, user, place, stub_route):
         plan = services.compute_and_store(make_event(user, place))
