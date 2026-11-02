@@ -43,6 +43,35 @@ object TripLiveState {
 
     fun arrivalFor(eventId: Long): Arrival? = _arrival.value?.takeIf { it.eventId == eventId }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 출발·도착으로 아침 기록을 닫았다는 한 번짜리 신호. 화면이 받아 처리하고 지운다.
+     *
+     * 추적이 끝나도([clearTracking]) 남긴다 — 도착하면 서비스가 곧바로 멈추는데 그 뒤에
+     * 화면이 안내를 띄워야 한다.
+     */
+    data class MorningClosed(val eventId: Long, val reason: MorningClose.Reason, val atMillis: Long)
+
+    private val _morningClosed = MutableStateFlow<MorningClosed?>(null)
+    val morningClosed: StateFlow<MorningClosed?> = _morningClosed.asStateFlow()
+
+    fun recordMorningClosed(eventId: Long, reason: MorningClose.Reason, atMillis: Long) {
+        _morningClosed.value = MorningClosed(eventId, reason, atMillis)
+    }
+
+    /** 받은 신호만 지운다. 그 사이 새 신호가 왔으면 그대로 둔다. */
+    fun consumeMorningClosed(closed: MorningClosed) {
+        _morningClosed.compareAndSet(closed, null)
+    }
+
+    /** 지금 추적 중인 일정. 추적 중이 아니면 null */
+    private val _trackingEventId = MutableStateFlow<Long?>(null)
+    val trackingEventId: StateFlow<Long?> = _trackingEventId.asStateFlow()
+
+    fun beginTracking(eventId: Long) {
+        _trackingEventId.value = eventId
+    }
+
     /**
      * 추적 중인 여정 하나의 상태.
      *
@@ -147,12 +176,14 @@ object TripLiveState {
     fun clearTracking() {
         _snapshot.value = null
         _liveRoute.value = null
+        _trackingEventId.value = null
     }
 
     /** 로그아웃·새 추적에서는 이전 도착 결과도 지운다. */
     fun clear() {
         clearTracking()
         _arrival.value = null
+        _morningClosed.value = null
     }
 
     /** 이 일정을 추적하는 중인 경우에만 위치를 준다. */

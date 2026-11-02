@@ -28,6 +28,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -79,6 +80,9 @@ fun ReportDayScreen(
     initialEventId: Long?,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 도착 기록이 없는 일정을 "안 감" 으로 표시한다. null 이면 버튼을 그리지 않는다(미리보기) */
+    onSkip: ((Long) -> Unit)? = null,
+    skipEnabled: Boolean = true,
 ) {
     val day = report?.days?.firstOrNull { it.date == date }
 
@@ -119,7 +123,12 @@ fun ReportDayScreen(
             OutcomeChips(choosable, selected) { selectedId = it.eventId }
         }
 
-        ResultCard(selected)
+        val skippableId = selected.eventId?.takeIf { selected.skippable }
+        ResultCard(
+            outcome = selected,
+            onSkip = if (onSkip != null && skippableId != null) ({ onSkip(skippableId) }) else null,
+            skipEnabled = skipEnabled,
+        )
         PlanActualCard(selected)
         selected.cause?.let { CauseCard(it) }
         longTerm?.let { CalibrationTable(it, highlightLower = selected.tauBucketLower) }
@@ -166,7 +175,12 @@ private fun OutcomeChips(
 }
 
 @Composable
-private fun ResultCard(outcome: MorningOutcome) {
+private fun ResultCard(
+    outcome: MorningOutcome,
+    /** 있으면 카드 아래에 "안 감으로 표시" 를 단다(도착 기록 없는 일정만) */
+    onSkip: (() -> Unit)? = null,
+    skipEnabled: Boolean = true,
+) {
     val late = outcome.result == OutcomeResult.LATE
     JitCard(
         padding = 16.dp,
@@ -217,6 +231,29 @@ private fun ResultCard(outcome: MorningOutcome) {
         Text(text = outcome.contextLine, color = JitColor.TextPrimary, fontSize = 12.sp)
         outcome.confidenceLine?.let {
             Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
+        }
+        // 가지 않은 날을 나중에라도 뺄 수 있는 유일한 곳이다(홈에서는 시작 1시간 뒤에 빠진다).
+        // 되돌리기는 누른 직후의 스낵바에서만 된다 — 표시한 일정은 리포트에서 사라진다.
+        if (onSkip != null) {
+            HorizontalDivider(color = JitColor.Track)
+            Text(
+                text = "안 감으로 표시",
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .testTag("report_skip_${outcome.eventId}")
+                    .minimumInteractiveComponentSize()
+                    .clickable(enabled = skipEnabled, role = Role.Button, onClickLabel = "안 감으로 표시") {
+                        onSkip()
+                    }
+                    .alpha(if (skipEnabled) 1f else 0.5f),
+            )
+            Text(
+                text = "가지 않은 일정이면 표시함. 리포트와 학습에서 빠지고 이 화면에서도 사라짐",
+                color = JitColor.TextSecondary,
+                fontSize = 10.sp,
+            )
         }
     }
 }

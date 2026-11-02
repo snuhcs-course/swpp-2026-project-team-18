@@ -109,7 +109,11 @@ class OfflineFallbackTest {
         return (this as Result.Success).data
     }
 
-    private fun HomeData.ids() = sections.flatMap { it.events }.map { it.id }
+    /** 지금 시각으로 그린 홈 목록의 id. 저장소는 거르지 않으므로 화면 규칙([HomeData.viewAt])을 거친다 */
+    private fun HomeData.ids() =
+        viewAt(System.currentTimeMillis()).sections.flatMap { it.events }.map { it.id }
+
+    private fun HomeData.nextAlarmId() = viewAt(System.currentTimeMillis()).nextAlarm?.id
 
     // --- 홈 -----------------------------------------------------------------
 
@@ -122,7 +126,7 @@ class OfflineFallbackTest {
 
         assertTrue("호출부가 알람을 다시 등록하지 않게 캐시라고 알린다", cached.fromCache)
         assertEquals(fresh.ids(), cached.ids())
-        assertEquals(fresh.nextAlarm?.id, cached.nextAlarm?.id)
+        assertEquals(fresh.nextAlarmId(), cached.nextAlarmId())
         assertEquals("방금 정보", cached.ageLabel)
         assertTrue(cached.hasHome)
     }
@@ -130,8 +134,12 @@ class OfflineFallbackTest {
     @Test
     fun `서버가 5xx 를 돌려줘도 캐시로 홈을 채운다`() = runBlocking<Unit> {
         online(me, event(1)).loadHome().data()
+        // 홈은 프로필과 일정을 동시에 부른다. 둘 다 5xx 인 서버를 흉내 낸다.
         val down = EventRepository(
-            api = FakeEventsApi(),
+            api = object : FakeEventsApi() {
+                override suspend fun list(from: String?, to: String?, limit: Int) =
+                    httpError<Paged<EventDto>>(503)
+            },
             profileApi = object : FakeProfileApi() {
                 override suspend fun get() = httpError<ProfileDto>(503)
             },

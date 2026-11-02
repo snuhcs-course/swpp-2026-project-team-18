@@ -45,11 +45,10 @@ class AlarmScheduler(private val context: Context) {
         val before = store.all()
         before.forEach { cancelPendingIntent(it.eventId) }
 
-        val upcoming = schedules
-            .filter { it.alarmAtMillis > now }
-            .filter { it.alarmAtMillis - now <= HORIZON_MILLIS }
-            .sortedBy { it.alarmAtMillis }
-            .take(MAX_REGISTERED)
+        // 미룬 알람은 서버 시각이 지났어도 지킨다([AlarmSyncPlan]).
+        val upcoming = AlarmSyncPlan.upcoming(before, schedules, now, HORIZON_MILLIS, MAX_REGISTERED)
+        upcoming.filter { u -> schedules.none { it.eventId == u.eventId && it.alarmAtMillis == u.alarmAtMillis } }
+            .forEach { Log.i(TAG, "미룬 알람 유지: 일정 ${it.eventId} → ${it.alarmLabel}") }
 
         // 갈아 끼우면 지난 알람이 사본에서 사라진다. 울리지 않은 것은 먼저 옮겨 둔다.
         rememberMissed(dropped = before, upcoming = upcoming, nowMillis = now)
@@ -192,6 +191,20 @@ class AlarmScheduler(private val context: Context) {
     fun cancel(eventId: Long) {
         cancelPendingIntent(eventId)
         store.remove(eventId)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 한 일정의 알람을 끝낸다. "안 감" 표시에서 부른다.
+     *
+     * 등록을 풀고, 놓친 알람 사본도 처리한 것으로 둔다 — 안 가는 일정을 두고 "알람이
+     * 울리지 않았어요" 를 띄우면 안 된다. 서버 목록을 다시 받지 못해도 울리지 않는다.
+     */
+    fun cancelEvent(eventId: Long) {
+        cancel(eventId)
+        val missed = store.missedCopies()
+        missed.filter { it.eventId == eventId }.forEach { store.markHandled(it) }
+        store.replaceMissed(missed.filterNot { it.eventId == eventId })
     }
 
     /**

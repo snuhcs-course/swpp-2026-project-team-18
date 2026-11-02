@@ -57,6 +57,8 @@ data class WeeklyReportDto(
     @SerializedName("unobserved_count") val unobservedCount: Int = 0,
     @SerializedName("on_time_count") val onTimeCount: Int = 0,
     @SerializedName("late_count") val lateCount: Int = 0,
+    /** "안 감" 으로 표시해 이 주 계산에서 뺀 일정 수(skip-event-api.md). 구버전 서버면 0 */
+    @SerializedName("skipped_count") val skippedCount: Int = 0,
     /** 0.0~1.0. 도착 관측이 없으면 null */
     @SerializedName("on_time_rate") val onTimeRate: Double? = null,
     @SerializedName("median_slack_minutes") val medianSlackMinutes: Double? = null,

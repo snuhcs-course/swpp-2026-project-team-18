@@ -131,6 +131,16 @@ fun WeeklyReportScreen(
 
         if (report.showTiles) Tiles(report)
 
+        // "안 감" 으로 뺀 일정 수. 타일이 없어도 보인다(Figma ⑧ `465:9`).
+        report.skippedNote?.let {
+            Text(
+                text = it,
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.testTag("report_skipped"),
+            )
+        }
+
         report.gapNotice?.let {
             // 관측 공백이 결론을 흔들 만큼 크면 정시율을 앞세우지 않는다.
             NoticeCard(dot = JitColor.Amber, title = it.title, body = it.body, caption = it.caption)

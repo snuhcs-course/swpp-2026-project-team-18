@@ -1,6 +1,7 @@
 package com.swpp.wakeup.ui.home
 
 import android.app.Application
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -38,6 +39,8 @@ import com.swpp.wakeup.domain.model.CalendarOnboardingState
 import com.swpp.wakeup.domain.model.CalendarPermission
 import com.swpp.wakeup.domain.model.DropCost
 import com.swpp.wakeup.domain.model.EventSection
+import com.swpp.wakeup.domain.model.HomeList
+import com.swpp.wakeup.domain.model.HomeRefresh
 import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.MorningSession
@@ -52,6 +55,7 @@ import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.sensing.GeoPoint
 import com.swpp.wakeup.sensing.LocationPermissions
+import com.swpp.wakeup.sensing.MorningClose
 import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.sensing.TripLiveState
 import com.swpp.wakeup.sensing.TripObservationQueue
@@ -143,10 +147,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val loading: Boolean = true,
         val error: String? = null,
         val alarmUpdatingId: Long? = null,
+        /** "안 감" 표시·되돌리기를 저장하는 중인 일정. 그동안 다른 표시·알람 스위치를 막는다 */
+        val skipUpdatingId: Long? = null,
 
+        /** 아래 목록 값은 지금 시각으로 다시 그린 것이다([HomeList]) */
         val sections: List<EventSection> = emptyList(),
         val nextAlarm: UpcomingEvent? = null,
         val totalCount: Int = 0,
+        /** 목록을 그린 날. 머리글의 "오늘 n개" 와 "오늘" 묶음이 같은 날을 본다 */
+        val today: LocalDate = LocalDate.now(),
+        /** 행에 "안 감으로 표시" 를 내놓는 일정 id */
+        val markableIds: Set<Long> = emptySet(),
+        /** 한 번 띄우고 지우는 안내. 화면이 스낵바로 띄운다 */
+        val notice: HomeNotice? = null,
 
         /** 집 위치 미설정이면 알람을 계산할 수 없다. 안내를 띄운다 */
         val hasHome: Boolean = true,
@@ -205,7 +218,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val isEmpty: Boolean get() = !loading && error == null && totalCount == 0
         val todayLine: String
             get() {
-                val today = LocalDate.now()
                 val count = sections
                     .firstOrNull { it.events.firstOrNull()?.startDate == today }
                     ?.events?.size ?: 0
@@ -214,6 +226,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 return "$date $day · 오늘 ${count}개"
             }
     }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 한 번 띄우는 안내. [id] 가 달라 같은 문구도 두 번 뜬다.
+     *
+     * @property undoSkipEventId 있으면 "되돌리기" 를 단다. 누르면 그 일정의 "안 감" 표시를 되돌린다
+     */
+    data class HomeNotice(val id: Long, val message: String, val undoSkipEventId: Long? = null)
 
     // Partly AI-generated (Claude)
     /**
@@ -554,6 +574,33 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _calendarOnboarding = MutableStateFlow(CalendarOnboardingState())
     val calendarOnboarding: StateFlow<CalendarOnboardingState> = _calendarOnboarding.asStateFlow()
 
+    // --- 홈 목록 새로고침 (todo P0 "다가오는 일정 갱신") ---------------------
+    //
+    // 아래 선언은 모두 `init` 위에 둔다. `init` 이 [refresh]·[renderHome]·
+    // [onMorningClosedByTrip] 을 부르고 그 함수들이 이 값을 읽는다
+    // (`HomeViewModelInitOrderTest`).
+
+    /** 마지막으로 받은 홈 데이터(시각으로 거르지 않은 목록). 화면은 [renderHome] 이 그린다 */
+    private var homeData: EventRepository.HomeData? = null
+
+    /** 마지막으로 시작한 홈 불러오기. 늦게 끝난 옛 응답이 새 상태를 덮지 못하게 한다 */
+    private var homeLoadGeneration = 0L
+    private var refreshJob: Job? = null
+
+    /** 마지막 [refresh] 시작 시각(`SystemClock.elapsedRealtime`). 화면 복귀 때 다시 받을지 정한다 */
+    private var lastRefreshStartedElapsed: Long? = null
+
+    /** 다음 경계(일정 시작·마감, 알람, 자정)에 목록을 다시 거르는 타이머 */
+    private var boundaryJob: Job? = null
+
+    /** 화면이 앞에 있는가. 뒤에 있으면 경계 타이머를 돌리지 않는다 */
+    private var foreground = false
+
+    private var noticeCounter = 0L
+
+    /** 지금 추적 중인 일정. 아침 기록 화면이 "저절로 끝남" 을 말해도 되는지 본다 */
+    val trackingEventId: StateFlow<Long?> = TripLiveState.trackingEventId
+
     init {
         // 화면보다 오래 사는 서비스가 저장한 최신 성공 결과를 먼저 복원한다.
         // 이후 두 Flow 수집기는 Activity가 백그라운드여도 ViewModel이 살아 있는
@@ -571,6 +618,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 else applyLiveRoute(snapshot)
             }
         }
+        // 시작 뒤에 도착하면 그 행을 바로 뺀다.
+        viewModelScope.launch {
+            TripLiveState.arrival.collect { renderHome() }
+        }
+        // 서비스가 출발·도착으로 아침 기록을 닫았다. 화면 없이 닫혔을 수도 있다.
+        viewModelScope.launch {
+            TripLiveState.morningClosed.collect { closed -> closed?.let(::onMorningClosedByTrip) }
+        }
 
         refresh()
         // 알람 액티비티가 세션을 만들어 두었을 수 있다. 홈 카드가 보이려면
@@ -586,16 +641,25 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         JitWork.ensurePeriodicSync(getApplication())
     }
 
-    fun refresh() {
-        if (_state.value.alarmUpdatingId != null) return
-        _state.update { it.copy(loading = true, error = null) }
-        viewModelScope.launch {
+    /**
+     * 홈을 서버에서 다시 받는다.
+     *
+     * @param silent 목록이 이미 보이면 로딩 줄을 띄우지 않는다. 화면 복귀 때 쓴다
+     */
+    fun refresh(silent: Boolean = false) {
+        if (_state.value.alarmUpdatingId != null || _state.value.skipUpdatingId != null) return
+        lastRefreshStartedElapsed = SystemClock.elapsedRealtime()
+        val gen = ++homeLoadGeneration
+        val quiet = silent && homeData != null
+        if (!quiet) _state.update { it.copy(loading = true, error = null) }
+        refreshJob = viewModelScope.launch {
             when (val result = repository.loadHome()) {
                 is EventRepository.Result.Success -> {
-                    applyHome(result.data)
+                    applyHome(result.data, gen)
                 }
 
                 is EventRepository.Result.Failure -> _state.update {
+                    if (gen != homeLoadGeneration) return@update it.copy(loading = false)
                     // 배포가 뒤처졌다고 확인된 상태면 그 사실을 함께 말한다.
                     // 그러지 않으면 "불러오지 못했습니다" 만 남고, 그 증상은 앱
                     // 버그와 구별되지 않는다. 실제로 팀이 그 방향으로 시간을 썼다.
@@ -614,39 +678,245 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun applyHome(data: EventRepository.HomeData) {
+    // Partly AI-generated (Claude)
+    /**
+     * 받은 홈을 반영한다. [gen] 이 마지막으로 시작한 불러오기가 아니면 버린다.
+     *
+     * 화면 복귀 새로고침이 조용히 도는 동안 알람 스위치·"안 감" 을 누르면, 먼저 시작한
+     * 응답이 나중에 끝나 스위치를 되돌리거나 방금 끈 알람을 다시 걸 수 있다.
+     */
+    private fun applyHome(data: EventRepository.HomeData, gen: Long) {
+        if (gen != homeLoadGeneration) {
+            Log.i(TAG, "홈 응답(세대 $gen)이 더 새 요청에 밀려 버린다")
+            _state.update { it.copy(loading = false) }
+            return
+        }
+        homeData = data
         _state.update {
             it.copy(
                 loading = false,
                 error = null,
-                sections = data.sections,
-                nextAlarm = data.nextAlarm,
-                totalCount = data.totalCount,
                 hasHome = data.hasHome,
                 homeLabel = data.homeLabel,
                 onboardingPrepMin = data.onboardingPrepMin,
                 homePlace = data.toHomePlace(),
-                unplannedCount = data.unplannedCount,
                 offline = data.fromCache,
                 offlineAgeLabel = data.ageLabel,
             )
         }
+        renderHome()
         maybeAskOnboarding(data)
         syncAlarms(data.schedules, fromCache = data.fromCache)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 지금 시각으로 목록을 다시 그린다. 네트워크를 쓰지 않는다.
+     *
+     * 화면이 앞에 있으면 다음 경계(일정 시작·마감, 알람, 자정)에 다시 그리도록 타이머를
+     * 건다. 그래서 시작 시각이 지난 일정이 앱을 다시 켜지 않아도 빠진다.
+     */
+    private fun renderHome() {
+        val data = homeData ?: return
+        val now = System.currentTimeMillis()
+        val view = data.viewAt(now, arrivedEventIds(), deviceAlarms())
+        _state.update {
+            it.copy(
+                sections = view.sections,
+                nextAlarm = view.nextAlarm,
+                totalCount = view.totalCount,
+                unplannedCount = view.unplannedCount,
+                today = view.today,
+                markableIds = view.markable,
+            )
+        }
+        boundaryJob?.cancel()
+        boundaryJob = null
+        if (foreground) {
+            val wait = HomeList.recheckDelayMillis(view.nextChangeMillis, now)
+            boundaryJob = viewModelScope.launch {
+                delay(wait)
+                // 다음 renderHome 이 이 타이머를 취소하지 않도록 먼저 비운다.
+                boundaryJob = null
+                renderHome()
+            }
+        }
+    }
+
+    /**
+     * 이 기기가 아는 도착. 도착한 일정은 시작 뒤에 목록에서 빠진다.
+     * 지금은 마지막 도착 하나뿐이다(앱을 다시 켜면 잊는다).
+     */
+    private fun arrivedEventIds(): Set<Long> = setOfNotNull(TripLiveState.arrival.value?.eventId)
+
+    /** 기기에 등록된 앞으로의 알람. 미룬 알람을 "다음 알람" 에 그대로 보이게 한다. */
+    private fun deviceAlarms(): Map<Long, AlarmSchedule> =
+        runCatching { AlarmScheduler(getApplication()).registered().associateBy { it.eventId } }
+            .onFailure { Log.w(TAG, "등록된 알람을 읽지 못했다", it) }
+            .getOrDefault(emptyMap())
+
+    // Partly AI-generated (Claude)
+    /**
+     * 화면이 앞으로 왔다. 지금 시각으로 다시 그리고, 마지막 요청에서 1분이 지났으면
+     * 조용히 서버에서도 다시 받는다(다른 기기의 수정, 경로 갱신 워커, 밤 학습).
+     */
+    fun onForeground() {
+        foreground = true
+        reloadMorning()
+        renderHome()
+        val state = _state.value
+        val shouldRefresh = HomeRefresh.shouldRefreshOnResume(
+            nowElapsed = SystemClock.elapsedRealtime(),
+            lastStartElapsed = lastRefreshStartedElapsed,
+            inFlight = refreshJob?.isActive == true,
+            mutating = state.alarmUpdatingId != null || state.skipUpdatingId != null,
+        )
+        if (shouldRefresh) refresh(silent = true)
+    }
+
+    /** 화면이 뒤로 갔다. 경계 타이머를 멈춘다. */
+    fun onBackground() {
+        foreground = false
+        boundaryJob?.cancel()
+        boundaryJob = null
     }
 
     fun clearError() = _state.update { it.copy(error = null) }
 
     fun setAlarmEnabled(id: Long, enabled: Boolean) {
-        if (_state.value.loading || _state.value.offline || _state.value.alarmUpdatingId != null) return
+        val current = _state.value
+        if (current.loading || current.offline || current.alarmUpdatingId != null ||
+            current.skipUpdatingId != null
+        ) return
         _state.update { it.copy(alarmUpdatingId = id, error = null) }
+        val gen = ++homeLoadGeneration
         viewModelScope.launch {
             when (val result = repository.setAlarmEnabled(id, enabled)) {
-                is EventRepository.Result.Success -> applyHome(result.data)
+                is EventRepository.Result.Success -> applyHome(result.data, gen)
                 is EventRepository.Result.Failure -> _state.update { it.copy(error = result.message) }
             }
             _state.update { it.copy(alarmUpdatingId = null) }
         }
+    }
+
+    // --- "안 감" 표시 (skip-event-api.md §6) --------------------------------
+
+    /** 홈 행·알람 결정 화면·스낵바 "되돌리기" */
+    fun setSkipped(eventId: Long, skipped: Boolean) = runSkip(eventId, skipped) {}
+
+    /** 아침 기록 화면의 "오늘 안 가요" */
+    fun skipToday() {
+        _morning.value?.eventId?.let { setSkipped(it, true) }
+    }
+
+    /** ⑨ 상세 리포트. 그날 일정이 더 남지 않으면 ⑧ 로 돌아간다 */
+    fun skipFromReport(date: LocalDate, eventId: Long) =
+        runSkip(eventId, true) { popReportDayIfEmpty(date, eventId) }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 표시를 저장하고, 표시했으면 그 일정의 알람·추적·아침 기록을 끝낸 뒤 홈을 다시 받는다.
+     *
+     * 홈을 다시 받는 이유: 표시하면 서버가 같은 날 다음 일정을 첫 알람으로 켤 수 있다
+     * (되돌리면 다시 끈다). 동기화하지 않으면 그 알람이 울리지 않는다.
+     */
+    private fun runSkip(eventId: Long, skipped: Boolean, afterSave: () -> Unit) {
+        val current = _state.value
+        if (current.skipUpdatingId != null || current.alarmUpdatingId != null) return
+        _state.update { it.copy(skipUpdatingId = eventId) }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            val saved = repository.setSkipped(eventId, skipped)
+            if (saved is EventRepository.Result.Failure) {
+                _state.update { it.copy(skipUpdatingId = null) }
+                notify(
+                    if (skipped) "안 감으로 표시하지 못했습니다. ${saved.message}"
+                    else "되돌리지 못했습니다. ${saved.message}"
+                )
+                return@launch
+            }
+            val result = (saved as EventRepository.Result.Success).data
+
+            if (skipped) {
+                // 하나가 실패해도 나머지는 한다. 다시 받기가 실패해도 이 알람은 울리면 안 된다.
+                runCatching { AlarmScheduler(app).cancelEvent(eventId) }
+                    .onFailure { Log.e(TAG, "안 감 일정의 알람 해제 실패", it) }
+                reloadMissedAlarm()
+                if (TripLiveState.trackingEventId.value == eventId) {
+                    runCatching { TripTrackingService.stop(app) }
+                        .onFailure { Log.w(TAG, "안 감 일정의 추적 중지 실패", it) }
+                }
+                runCatching { morningStore.closeFor(eventId) }
+                    .onFailure { Log.w(TAG, "안 감 일정의 아침 기록 정리 실패", it) }
+                reloadMorning()
+            }
+
+            if (_nav.value.current == AppRoute.AlarmDecision(eventId) && result.plan != null) {
+                ++planLoadGeneration
+                _plan.value = result.plan
+            }
+            afterSave()
+            val stack = _nav.value.stack
+            if (stack.any { it == AppRoute.WeeklyReport || it is AppRoute.ReportDay }) {
+                reportNavigator.reload()
+            }
+
+            val gen = ++homeLoadGeneration
+            when (val home = repository.loadHome()) {
+                is EventRepository.Result.Success -> if (!home.data.fromCache) {
+                    applyHome(home.data, gen)
+                    notify(
+                        if (skipped) "안 감으로 표시했습니다" else "안 감 표시를 되돌렸습니다",
+                        undoSkipEventId = eventId.takeIf { skipped },
+                    )
+                } else {
+                    repository.cacheEvent(result.event)
+                    applyHome(home.data.withSkipped(eventId, skipped), gen)
+                    onSkipSavedOffline(app, eventId, skipped)
+                }
+
+                is EventRepository.Result.Failure -> {
+                    repository.cacheEvent(result.event)
+                    homeData?.let { applyHome(it.withSkipped(eventId, skipped), gen) }
+                    onSkipSavedOffline(app, eventId, skipped)
+                }
+            }
+            _state.update { it.copy(skipUpdatingId = null) }
+        }
+    }
+
+    /** 표시는 저장했지만 목록을 다시 못 받았다. 연결되면 알람을 맞추게 하고 알린다. */
+    private fun onSkipSavedOffline(app: Application, eventId: Long, skipped: Boolean) {
+        JitWork.requestPlanSync(app)
+        notify(
+            if (skipped) "표시는 저장했지만 알람 목록을 갱신하지 못했습니다. 연결되면 자동으로 맞춥니다"
+            else "되돌렸지만 알람 목록을 갱신하지 못했습니다. 연결되면 자동으로 맞춥니다",
+            undoSkipEventId = eventId.takeIf { skipped },
+        )
+    }
+
+    /** ⑨ 에서 그날 마지막 일정을 표시했으면 ⑧ 로 돌아간다. 이미 ⑨ 를 떠났으면 그대로 둔다. */
+    private fun popReportDayIfEmpty(date: LocalDate, eventId: Long) {
+        val day = report.value.weekly?.days?.firstOrNull { it.date == date }
+        if (day != null && !day.isEmptyWithout(eventId)) return
+        _nav.update {
+            if ((it.current as? AppRoute.ReportDay)?.date == date) {
+                it.copy(stack = it.stack.dropLast(1), forward = false)
+            } else {
+                it
+            }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /** 한 번 띄울 안내를 건다. 화면이 띄운 뒤 [consumeNotice] 로 지운다. */
+    private fun notify(message: String, undoSkipEventId: Long? = null) {
+        val notice = HomeNotice(++noticeCounter, message, undoSkipEventId)
+        _state.update { it.copy(notice = notice) }
+    }
+
+    fun consumeNotice(notice: HomeNotice) {
+        _state.update { if (it.notice?.id == notice.id) it.copy(notice = null) else it }
     }
 
     /**
@@ -796,10 +1066,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         ++planLoadGeneration // Ignore an older in-flight detail request.
                         _plan.value = saved.data
                     }
+                    val homeGen = ++homeLoadGeneration
                     when (val home = repository.loadHome()) {
                         is EventRepository.Result.Success -> {
                             if (!home.data.fromCache) {
-                                applyHome(home.data) // Refresh home and device alarms together.
+                                applyHome(home.data, homeGen) // Refresh home and device alarms together.
                                 null
                             } else "선택은 저장됐지만 알람 목록을 갱신하지 못했습니다. 다시 계속하기를 눌러 주세요."
                         }
@@ -916,11 +1187,44 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         reloadMissedAlarm()
     }
 
-    /** 화면에 들어올 때마다 디스크에서 다시 읽는다. 알람 액티비티가 만들었을 수 있다. */
+    /**
+     * 화면에 들어올 때마다 디스크에서 다시 읽는다. 알람 액티비티가 만들었을 수 있다.
+     *
+     * 기록이 닫혔는데(출발·도착·"안 감") 아침 기록 화면이 열려 있으면 그 화면을 닫는다.
+     * `goBack()` 은 쓰지 않는다 — `init` 아래에 선언된 위험도 화면 상태를 읽는다.
+     */
     fun reloadMorning() {
         val session = morningStore.current()
         _morning.value = session
         _state.update { it.copy(morningBlocksLeft = session?.remaining?.size) }
+        if (session == null) {
+            _nav.update {
+                if (it.current == AppRoute.MorningProgress) {
+                    it.copy(stack = it.stack.dropLast(1), forward = false)
+                } else {
+                    it
+                }
+            }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 서비스가 출발·도착으로 아침 기록을 닫았다. 아침 기록 화면을 보고 있었으면 이유를 알린다.
+     * 나중에 만들어진 ViewModel 은 홈에 있으므로 조용히 신호만 지운다.
+     */
+    private fun onMorningClosedByTrip(closed: TripLiveState.MorningClosed) {
+        val wasOnMorning = _nav.value.current == AppRoute.MorningProgress
+        reloadMorning()
+        if (wasOnMorning && _morning.value == null) {
+            notify(
+                when (closed.reason) {
+                    MorningClose.Reason.DEPARTED -> "출발이 확인돼 아침 기록을 끝냈습니다"
+                    MorningClose.Reason.ARRIVED -> "도착이 확인돼 아침 기록을 끝냈습니다"
+                }
+            )
+        }
+        TripLiveState.consumeMorningClosed(closed)
     }
 
     fun openMorning() {
@@ -942,6 +1246,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun markBlockDone(blockId: Long) {
         val session = _morning.value ?: return
+        // 서비스가 방금 기록을 닫았을 수 있다. 메모리 사본으로 저장하면 닫힌 기록이 되살아난다.
+        if (morningStore.current()?.eventId != session.eventId) {
+            Log.i(TAG, "아침 기록이 이미 닫혔다. 누른 것을 무시한다")
+            reloadMorning()
+            return
+        }
         val block = session.blocks.firstOrNull { it.blockId == blockId } ?: return
         if (block.doneAtMillis != null) return
 
@@ -982,6 +1292,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun undoLastBlock() {
         val session = _morning.value ?: return
+        if (morningStore.current()?.eventId != session.eventId) {
+            reloadMorning()
+            return
+        }
         val next = session.undoLast()
         morningStore.save(next)
         _morning.value = next

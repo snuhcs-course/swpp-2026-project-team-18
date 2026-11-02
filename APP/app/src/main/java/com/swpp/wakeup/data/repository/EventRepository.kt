@@ -32,7 +32,7 @@ import com.swpp.wakeup.data.remote.RouteSegmentDto
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ConfidenceView
-import com.swpp.wakeup.domain.model.EventSection
+import com.swpp.wakeup.domain.model.HomeList
 import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.PlanRow
@@ -49,6 +49,8 @@ import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.sensing.GeoPoint
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import retrofit2.Response
 import java.io.IOException
@@ -80,6 +82,8 @@ class EventRepository(
      * 믿어야 할지 알 수 없다.
      */
     private val cache: OfflineCache? = null,
+    /** 지금 시각(epoch ms). 테스트가 시계를 고정할 때만 바꾼다 */
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) {
 
     sealed interface Result<out T> {
@@ -96,11 +100,16 @@ class EventRepository(
         ) : Result<Nothing>
     }
 
-    /** 홈 화면이 한 번에 필요한 것. */
+    /**
+     * 홈 화면이 한 번에 필요한 것.
+     *
+     * [events] 는 **시각으로 거르지 않은** 목록이다. 무엇이 보이는지는 지금 시각에
+     * 달려 있어서 화면이 [viewAt] 으로 그때그때 정한다([HomeList]). 불러올 때 한 번만
+     * 거르면 화면을 켜 둔 동안 지난 일정이 남는다.
+     */
     data class HomeData(
-        val sections: List<EventSection>,
-        val nextAlarm: UpcomingEvent?,
-        val totalCount: Int,
+        /** 응답의 일정 전부(시작 순). 화면 목록은 [viewAt] 으로 만든다 */
+        val events: List<UpcomingEvent>,
         val hasHome: Boolean,
         val homeLabel: String?,
         /**
@@ -120,12 +129,10 @@ class EventRepository(
          * 사라진다. 추정기는 null 일 때만 30 으로 떨어진다.
          */
         val onboardingPrepMin: Int?,
-        /** 알람이 계산되지 않은 일정 수. 원인 안내에 쓴다 */
-        val unplannedCount: Int,
         /**
          * 실제로 `AlarmManager` 에 등록할 목록.
          *
-         * 화면용 [sections] 와 따로 만든다. 등록에는 epoch 밀리초와 좌표가
+         * 화면용 [events] 와 따로 만든다. 등록에는 epoch 밀리초와 좌표가
          * 필요한데 표시 문자열("7:40")에서는 되돌릴 수 없다.
          */
         val schedules: List<AlarmSchedule>,
@@ -141,7 +148,24 @@ class EventRepository(
         val fromCache: Boolean = false,
         /** "12분 전 정보". 캐시에서 왔을 때만 채운다 */
         val ageLabel: String? = null,
-    )
+    ) {
+        // Partly AI-generated (Claude)
+        /** [nowMillis] 시각의 홈 목록. 규칙은 [HomeList.view] 에 있다. */
+        fun viewAt(
+            nowMillis: Long,
+            arrived: Set<Long> = emptySet(),
+            device: Map<Long, AlarmSchedule> = emptyMap(),
+            zone: ZoneId = ZoneId.systemDefault(),
+        ): HomeList.View = HomeList.view(events, nowMillis, arrived, device, zone)
+
+        // Partly AI-generated (Claude)
+        /** 한 일정의 "안 감" 표시만 바꾼 사본. 서버는 저장했는데 목록을 다시 못 받았을 때 쓴다. */
+        fun withSkipped(eventId: Long, skipped: Boolean): HomeData =
+            copy(events = events.map { if (it.id == eventId) it.copy(skipped = skipped) else it })
+    }
+
+    /** "안 감" 표시·되돌리기의 결과. 서버가 지금 가진 일정과 알람 결정 화면용 계획(없으면 null). */
+    data class SkipResult(val event: EventDto, val plan: AlarmPlanView?)
 
     /**
      * 홈 화면 데이터. **네트워크 우선, 실패하면 캐시.**
@@ -159,13 +183,24 @@ class EventRepository(
         return loadHomeFromCache() ?: online
     }
 
-    private suspend fun loadHomeOnline(): Result<HomeData> {
-        val profileResponse = profileApi.get()
+    // Partly AI-generated (Claude)
+    /**
+     * 프로필과 일정을 **동시에** 받는다. 예전에는 차례로 불러 왕복이 두 번이었다(todo §1 후보 2).
+     *
+     * 일정은 지금 − 5시간부터만 받는다(`from`, 팀 결정 10-26). 지난 일정이 200건을 넘으면
+     * 앞으로의 일정이 응답에서 잘리던 문제도 함께 없어진다. 보이는지는 여전히
+     * [HomeList] 가 정한다 — 서버가 `from` 을 무시해도 화면은 맞다.
+     */
+    private suspend fun loadHomeOnline(): Result<HomeData> = coroutineScope {
+        val profileCall = async { profileApi.get() }
+        val pageCall = async { api.list(from = HomeList.serverFrom(nowMillis())) }
+        val profileResponse = profileCall.await()
+        val pageResponse = pageCall.await()
+        // 둘 다 실패하면 예전처럼 프로필 쪽 문구를 쓴다.
         val profile = unwrap(profileResponse)
-            ?: return Result.Failure(errorMessage(profileResponse))
-        val pageResponse = api.list()
+            ?: return@coroutineScope Result.Failure(errorMessage(profileResponse))
         val page = unwrap(pageResponse)
-            ?: return Result.Failure(errorMessage(pageResponse))
+            ?: return@coroutineScope Result.Failure(errorMessage(pageResponse))
         val events = page.results
 
         // 성공한 응답만 캐시에 남긴다. 실패 응답을 쓰면 다음 오프라인에서
@@ -173,7 +208,7 @@ class EventRepository(
         cache?.saveProfile(profile)
         cache?.saveEvents(events)
 
-        return Result.Success(buildHome(events, profile, fromCache = false, ageLabel = null))
+        Result.Success(buildHome(events, profile, fromCache = false, ageLabel = null))
     }
 
     /**
@@ -209,25 +244,19 @@ class EventRepository(
         ageLabel: String?,
     ): HomeData {
         val zone = ZoneId.systemDefault()
-        // 시작 시각이 지난 일정은 홈 목록에서 뺀다(사용자 결정 10-09). 서버에서
-        // 지우지는 않는다 — 주간 리포트·관측 학습이 지난 일정을 쓴다. 알람 등록
-        // ([schedules])은 원래 미래 알람만 걸므로 그대로 둔다.
-        val nowSecond = System.currentTimeMillis() / 1000
+        // 시각으로 거르지 않는다. 무엇이 보이는지는 화면이 지금 시각으로 정한다
+        // ([HomeList]). 서버에서 지우지도 않는다 — 주간 리포트·관측 학습이 지난
+        // 일정을 쓴다. 알람 등록([schedules])은 원래 미래 알람만 건다.
         val sorted = events.mapNotNull { it.toUpcoming(zone) }
-            .filter { it.startAtEpochSecond > nowSecond }
             .sortedBy { it.startAtEpochSecond }
 
         return HomeData(
-            sections = groupByDay(sorted, zone),
-            nextAlarm = sorted.filter { it.alarmOn && it.hasAlarm }
-                .minByOrNull { it.alarmAtEpochSecond ?: Long.MAX_VALUE },
-            totalCount = sorted.size,
+            events = sorted,
             hasHome = profile.hasHome,
             homeLabel = profile.homeLabel?.takeIf { it.isNotBlank() },
             homeLat = profile.homeLat,
             homeLng = profile.homeLng,
             onboardingPrepMin = profile.onboardingPrepMin?.takeIf { it > 0 },
-            unplannedCount = sorted.count { it.alarmAt == null },
             schedules = events.mapNotNull { it.toSchedule(zone, profile) },
             fromCache = fromCache,
             ageLabel = ageLabel,
@@ -239,6 +268,24 @@ class EventRepository(
         if (!response.isSuccessful) Result.Failure(errorMessage(response))
         else loadHomeOnline() // 같은 날 다른 일정도 자동 ON/OFF가 바뀔 수 있다.
     }
+
+    // Partly AI-generated (Claude)
+    /**
+     * "안 감" 표시([skipped] = true) 또는 되돌리기. skip-event-api.md §6.
+     *
+     * 큐에 넣지 않는다 — 되돌릴 수 있고 급하지 않다(계약 §6.4). 실패하면 화면이 알린다.
+     */
+    suspend fun setSkipped(id: Long, skipped: Boolean): Result<SkipResult> = guard {
+        val response = if (skipped) api.skip(id) else api.unskip(id)
+        val dto = unwrap(response)
+        if (dto == null) {
+            Log.w(TAG, "안 감 표시 실패(${response.code()}): 일정 $id")
+            return@guard Result.Failure(errorMessage(response))
+        }
+        cache?.saveEvent(dto)
+        Result.Success(SkipResult(dto, dto.toPlanView(ZoneId.systemDefault())))
+    }
+
 
     suspend fun createEvent(
         title: String,
@@ -1006,6 +1053,7 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
         startClock = local.format(CLOCK_12_FORMAT) + meridiem(local),
         alarmOn = alarmOn == true,
         alarmAtEpochSecond = alarmLocal?.toEpochSecond(),
+        skipped = skipped,
     )
 }
 
@@ -1280,6 +1328,7 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         altRoutePath = plan.altRoutePoints.toGeoPoints(),
         altRouteLabel = plan.altRouteLabel?.takeIf { it.isNotBlank() },
         altFasterMinutes = plan.altFasterMinutes?.takeIf { it > 0 },
+        skipped = skipped,
     )
 }
 
@@ -1357,24 +1406,3 @@ internal fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedu
     )
 }
 
-/** 날짜별로 묶고 오늘·내일에 이름을 붙인다. */
-private fun groupByDay(events: List<UpcomingEvent>, zone: ZoneId): List<EventSection> {
-    if (events.isEmpty()) return emptyList()
-    val today = LocalDate.now(zone)
-
-    return events
-        .groupBy { it.startDate }
-        .toSortedMap()
-        .map { (date, list) ->
-            val label = when (ChronoUnit.DAYS.between(today, date)) {
-                0L -> "오늘"
-                1L -> "내일"
-                else -> "${date.format(DATE_FORMAT)} ${dayLabel(date)}"
-            }
-            EventSection(
-                label = label,
-                dateLabel = "${date.format(DATE_FORMAT)} ${dayLabel(date)}",
-                events = list,
-            )
-        }
-}

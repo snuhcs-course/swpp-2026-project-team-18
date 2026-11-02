@@ -30,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -96,6 +97,12 @@ fun AlarmDecisionScreen(
     onRouteMapGestureEnd: (pan: Offset, zoom: Float, metersPerPixel: Double) -> Unit =
         { _, _, _ -> },
     onRouteMapRecenter: () -> Unit = {},
+    /** "안 감으로 표시"(skip-event-api.md §6) */
+    onSkip: () -> Unit = {},
+    /** "안 감" 표시 되돌리기 */
+    onUnskip: () -> Unit = {},
+    /** 표시를 저장하는 중. 두 버튼을 막는다 */
+    skipBusy: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -162,23 +169,32 @@ fun AlarmDecisionScreen(
             Text(text = plan.eventPlace, color = JitColor.TextSecondary, fontSize = 11.sp)
         }
 
+        if (plan.skipped) SkippedCard(onUnskip = onUnskip, enabled = !skipBusy)
+
         if (plan.isComputed) {
-            RecommendedAlarmCard(plan)
+            // 안 간 일정의 알람은 울리지 않는다. 근거는 남기되 흐리게 둔다(Figma ④ 변형).
+            if (plan.skipped) {
+                Box(Modifier.alpha(SKIPPED_ALPHA)) { RecommendedAlarmCard(plan) }
+            } else {
+                RecommendedAlarmCard(plan)
+            }
             BreakdownCard(plan)
 
             // 계산 근거 바로 아래에 "지금 어디쯤" 을 둔다. 같은 여정을 계획과
             // 실제 두 면에서 보여 주는 것이고, 순서가 바뀌면 진행률이 어느
-            // 계획에 대한 것인지 연결이 끊긴다.
-            TripProgressCard(
-                nickname = nickname,
-                initials = initials,
-                stage = stage,
-                progress = progress,
-                outlook = outlook,
-                // 전망이 있으면 예상 도착 시각을, 없으면 계획한 도착 예정을 쓴다.
-                arrivalAt = arrivalClock ?: plan.arrivalAt,
-                freshness = freshness,
-            )
+            // 계획에 대한 것인지 연결이 끊긴다. 안 간 일정에는 이동이 없다.
+            if (!plan.skipped) {
+                TripProgressCard(
+                    nickname = nickname,
+                    initials = initials,
+                    stage = stage,
+                    progress = progress,
+                    outlook = outlook,
+                    // 전망이 있으면 예상 도착 시각을, 없으면 계획한 도착 예정을 쓴다.
+                    arrivalAt = arrivalClock ?: plan.arrivalAt,
+                    freshness = freshness,
+                )
+            }
 
             routeMap?.let { map ->
                 RouteMapCard(
@@ -205,7 +221,8 @@ fun AlarmDecisionScreen(
             // 알람은 이미 자동으로 등록돼 있고 켬/끔은 홈의 스위치가 맡는다.
             // 이 버튼은 근거를 확인하고 닫는 용도라 "확인" 으로 쓴다.
             JitPrimaryButton(label = "확인", onClick = onBack)
-            Row(
+            // 안 간 일정은 알람이 울리지 않으므로 알람을 바꾸는 두 입구를 숨긴다.
+            if (!plan.skipped) Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
             ) {
@@ -235,8 +252,22 @@ fun AlarmDecisionScreen(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
+            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
         ) {
+            // 도착한 일정은 간 것이다. 표시를 내놓지 않는다. 표시한 일정은 위 카드가 되돌린다.
+            if (!plan.skipped && stage != TripStage.ARRIVED) {
+                Text(
+                    text = "안 감으로 표시",
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag("event_skip")
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = !skipBusy, onClick = onSkip)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
+            }
             Text(
                 text = "일정 삭제",
                 color = JitColor.Red,
@@ -250,6 +281,39 @@ fun AlarmDecisionScreen(
         }
     }
 }
+
+// Partly AI-generated (Claude)
+/** "안 감" 으로 표시한 일정 안내와 되돌리기(Figma ④ 변형 `463:17`). */
+@Composable
+private fun SkippedCard(onUnskip: () -> Unit, enabled: Boolean) {
+    JitCard(padding = 14.dp, gap = 6.dp) {
+        JitDotLabel(
+            text = "안 감으로 표시한 일정",
+            dotColor = JitColor.TextSecondary,
+            fontSize = 12,
+            dotSize = 6.dp,
+        )
+        Text(
+            text = "알람이 울리지 않고 리포트·학습에서 빠짐",
+            color = JitColor.TextSecondary,
+            fontSize = 11.sp,
+        )
+        Text(
+            text = "되돌리기",
+            color = JitColor.Accent,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .testTag("event_unskip")
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(enabled = enabled, onClick = onUnskip)
+                .padding(vertical = 6.dp),
+        )
+    }
+}
+
+/** 안 간 일정의 "적용 알람" 흐리기 */
+private const val SKIPPED_ALPHA = 0.45f
 
 @Composable
 private fun RecommendedAlarmCard(plan: AlarmPlanView) {

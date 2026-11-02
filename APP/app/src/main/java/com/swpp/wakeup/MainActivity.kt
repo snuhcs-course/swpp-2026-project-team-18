@@ -28,8 +28,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -198,6 +200,7 @@ private fun MainHost(
     val calendarOnboardingState by viewModel.calendarOnboarding.collectAsStateWithLifecycle()
     val reportState by viewModel.report.collectAsStateWithLifecycle()
     val morningSession by viewModel.morning.collectAsStateWithLifecycle()
+    val trackingEventId by viewModel.trackingEventId.collectAsStateWithLifecycle()
 
     // Partly AI-generated (Claude)
     // ⑧ 의 스크롤 위치. 화면 전환(AnimatedContent)이 ⑧ 을 컴포지션에서 빼므로 화면 안에
@@ -350,6 +353,29 @@ private fun MainHost(
         viewModel.onCalendarScreenResumed()
         onPauseOrDispose { }
     }
+    // 홈 목록을 지금 시각으로 다시 거르고, 1분이 지났으면 서버에서도 다시 받는다.
+    // 이것이 없으면 지난 일정이 앱을 다시 켤 때까지 남는다(todo P0). 캘린더 쪽과
+    // 이유가 달라 따로 둔다.
+    LifecycleResumeEffect(Unit) {
+        viewModel.onForeground()
+        onPauseOrDispose { viewModel.onBackground() }
+    }
+
+    // ViewModel 의 한 번짜리 안내("안 감" 표시, 아침 기록 자동 종료). 다 띄운 뒤에 지운다 —
+    // 먼저 지우면 키가 바뀌어 스낵바가 바로 취소된다.
+    LaunchedEffect(state.notice) {
+        val notice = state.notice ?: return@LaunchedEffect
+        val undoId = notice.undoSkipEventId
+        val result = snackbarHostState.showSnackbar(
+            message = notice.message,
+            actionLabel = undoId?.let { "되돌리기" },
+            duration = if (undoId != null) SnackbarDuration.Long else SnackbarDuration.Short,
+        )
+        if (result == SnackbarResult.ActionPerformed && undoId != null) {
+            viewModel.setSkipped(undoId, false)
+        }
+        viewModel.consumeNotice(notice)
+    }
 
     // 알람을 해제하고 넘어왔으면 아침 기록으로 바로 들어간다. 한 번만 한다 —
     // 사용자가 뒤로 나갔는데 다시 밀어 넣으면 화면을 벗어날 수 없다.
@@ -451,10 +477,11 @@ private fun MainHost(
                     onCalendarClick = viewModel::openCalendarImport,
                     onReportClick = viewModel::openReport,
                     onMorningClick = viewModel::openMorning,
-                    onRetry = viewModel::refresh,
+                    onRetry = { viewModel.refresh() },
                     modifier = Modifier.padding(innerPadding),
                     onMissedTrackClick = viewModel::startMissedAlarmTracking,
                     onMissedDismiss = viewModel::dismissMissedAlarm,
+                    onSkipToggle = viewModel::setSkipped,
                 )
 
                 is AppRoute.AlarmDecision -> {
@@ -532,6 +559,9 @@ private fun MainHost(
                         onRouteMapFit = viewModel::fitRouteMap,
                         onRouteMapGestureEnd = viewModel::onRouteMapGestureEnd,
                         onRouteMapRecenter = viewModel::onRouteMapRecenter,
+                        onSkip = { viewModel.setSkipped(route.eventId, true) },
+                        onUnskip = { viewModel.setSkipped(route.eventId, false) },
+                        skipBusy = state.skipUpdatingId != null,
                     )
                 }
 
@@ -740,6 +770,8 @@ private fun MainHost(
                     initialEventId = route.eventId,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
+                    onSkip = { id -> viewModel.skipFromReport(route.date, id) },
+                    skipEnabled = !reportState.loading && state.skipUpdatingId == null,
                 )
 
                 AppRoute.MorningProgress -> MorningProgressScreen(
@@ -749,6 +781,10 @@ private fun MainHost(
                     onUndo = viewModel::undoLastBlock,
                     onFinish = viewModel::finishMorning,
                     modifier = Modifier.padding(innerPadding),
+                    // 이 일정을 추적 중일 때만 "나서면 저절로 끝남" 이라고 말한다.
+                    closesOnDeparture = morningSession.let { it != null && trackingEventId == it.eventId },
+                    onSkipToday = viewModel::skipToday,
+                    skipping = state.skipUpdatingId != null,
                 )
             }
         }

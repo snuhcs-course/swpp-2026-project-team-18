@@ -156,6 +156,8 @@ internal fun WeeklyReportDto.toView(zone: ZoneId = ZoneId.systemDefault()): Week
             )
         }.orEmpty(),
         learningLabel = learningLabel(),
+        // 안 간 일정은 서버가 이미 칸·지각 줄에서 뺐다. 몇 건 뺐는지만 밝힌다.
+        skippedNote = skippedCount.takeIf { it > 0 }?.let { "안 감으로 표시한 일정 ${it}건은 빼고 계산함" },
     )
 }
 
@@ -387,6 +389,8 @@ internal fun OutcomeDto.toMorning(zone: ZoneId, weekLateCount: Int): MorningOutc
         tauBucketLower = tauBucketLower,
         slackMinutes = slackMinutes,
         isOnlyLateOfWeek = outcome == OutcomeResult.LATE && weekLateCount == 1,
+        // 서버 값 그대로 본다. OutcomeResult.UNOBSERVED 는 모르는 값까지 받아 주므로 쓰지 않는다.
+        skippable = result == OutcomeDto.RESULT_UNOBSERVED && event != null,
     )
 }
 

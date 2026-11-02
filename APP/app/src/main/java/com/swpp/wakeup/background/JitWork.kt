@@ -96,6 +96,32 @@ object JitWork {
         ensureRouteRefresh(context)
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 연결되는 대로 알람 목록을 한 번 맞춘다.
+     *
+     * "안 감" 표시는 저장했는데 홈 목록을 다시 받지 못했을 때 쓴다. 표시하면 같은 날
+     * 다음 일정이 첫 알람이 될 수 있어서, 6시간 정기 동기화를 기다리면 그 알람이 안 울린다.
+     */
+    fun requestPlanSync(context: Context) {
+        val request = OneTimeWorkRequestBuilder<PlanSyncWorker>()
+            .setConstraints(networkRequired)
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.EXPONENTIAL,
+                BACKOFF_SECONDS,
+                TimeUnit.SECONDS,
+            )
+            .build()
+
+        runCatching {
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                PLAN_SYNC_NOW,
+                ExistingWorkPolicy.KEEP,
+                request,
+            )
+        }.onFailure { Log.w(TAG, "즉시 동기화 작업 등록 실패", it) }
+    }
+
     /**
      * 임박한 일정의 경로 갱신을 예약한다. 15분 주기다.
      *
@@ -140,11 +166,15 @@ object JitWork {
                 cancelUniqueWork(ObservationUploadWorker.UNIQUE_NAME)
                 cancelUniqueWork(PlanSyncWorker.UNIQUE_NAME)
                 cancelUniqueWork(RouteRefreshWorker.UNIQUE_NAME)
+                cancelUniqueWork(PLAN_SYNC_NOW)
             }
         }.onFailure { Log.w(TAG, "작업 취소 실패", it) }
     }
 
     private const val TAG = "JitWork"
+
+    /** [requestPlanSync] 의 작업 이름 */
+    private const val PLAN_SYNC_NOW = "jit_plan_sync_now"
 
     /** 지수 백오프 시작값. WorkManager 최소값이 10초다. */
     private const val BACKOFF_SECONDS = 30L

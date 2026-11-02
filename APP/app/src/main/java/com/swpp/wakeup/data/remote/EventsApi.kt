@@ -58,6 +58,17 @@ interface EventsApi {
     suspend fun recompute(@Path("id") id: Long): Response<EventDto>
 
     /**
+     * "안 감" 표시(docs/iter3/skip-event-api.md). 멱등이고 응답은 일정 객체다.
+     * 없는 일정·남의 일정은 본문 없는 404.
+     */
+    @POST("api/events/{id}/skip")
+    suspend fun skip(@Path("id") id: Long): Response<EventDto>
+
+    /** "안 감" 표시를 되돌린다. 멱등이고 응답은 일정 객체다. */
+    @DELETE("api/events/{id}/skip")
+    suspend fun unskip(@Path("id") id: Long): Response<EventDto>
+
+    /**
      * 기기 캘린더 일정을 가져온다.
      *
      * **멱등하다.** `external_id` 로 upsert 하므로 같은 요청을 다시 보내도 행이
@@ -291,6 +302,12 @@ data class EventDto(
     @SerializedName("destination_is_home") val destinationIsHome: Boolean = false,
     @SerializedName("repeat_weekdays") val repeatWeekdays: List<Int>? = null,
     @SerializedName("recurrence_id") val recurrenceId: Long? = null,
+    /**
+     * "안 감" 으로 표시했는가. 서버만 바꾼다(읽기 전용).
+     * 구버전 서버가 키를 보내지 않으면 false 다.
+     */
+    val skipped: Boolean = false,
+    @SerializedName("skipped_at") val skippedAt: String? = null,
 )
 
 /**

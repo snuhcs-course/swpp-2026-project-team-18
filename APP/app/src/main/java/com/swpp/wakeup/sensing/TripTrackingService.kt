@@ -188,6 +188,9 @@ class TripTrackingService : Service() {
         movingSinceMillis = null
 
         schedule = parsed
+        // 화면이 "이 일정을 추적 중인가" 를 안다. 아침 기록 화면의 안내 문구와
+        // "안 감" 표시 때 추적을 멈출지가 이 값으로 정해진다.
+        TripLiveState.beginTracking(parsed.eventId)
         geofence = TripGeofence(
             home = parsed.homeLat?.let { lat ->
                 parsed.homeLng?.let { lng -> GeoPoint(lat, lng) }
@@ -275,6 +278,12 @@ class TripTrackingService : Service() {
 
         val phaseBefore = fence.phase
         val decision = fence.offer(fix)
+
+        // 집을 나섰거나 도착했으면 아침 기록을 닫는다(todo P0). 화면이 없어도 돼야
+        // 하므로 서비스가 직접 한다. 판정 규칙은 [MorningClose.reasonFor] 에 있다.
+        MorningClose.reasonFor(phaseBefore, fence.phase, fence.sawOriginFix)?.let { reason ->
+            MorningClose.close(this, current.eventId, reason, System.currentTimeMillis())
+        }
 
         // 이동이 시작된 시각을 여기서 한 번만 잡는다.
         //
