@@ -32,7 +32,7 @@ object ManualArrival {
         }
         return runCatching {
             TripObservationQueue(context).enqueue(manualArrivalOf(eventId, nowMillis, fix, destination))
-            TripLiveState.recordArrival(eventId, nowMillis)
+            ArrivalRecords.record(context, eventId, nowMillis)
             MorningClose.close(context, eventId, MorningClose.Reason.ARRIVED, nowMillis)
             Log.i(TAG, "수동 도착 기록: 일정 $eventId (위치 ${if (fix != null) "있음" else "없음"})")
             true

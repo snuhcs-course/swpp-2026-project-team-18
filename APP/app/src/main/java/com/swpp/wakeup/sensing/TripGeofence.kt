@@ -164,6 +164,22 @@ class TripGeofence(
         return nowMillis - last.atMillis <= EVIDENCE_MAX_AGE_MS
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 프로세스가 죽었다 되살아난 추적이 이미 집을 나선 상태에서 이어 간다(todo §2 "추적 서비스
+     * 재시작 복원"). 출발을 다시 기다리지 않는다 — 기다리면 밖에 있는 첫 위치를 "처음부터 집
+     * 밖" 으로 읽어 출발 시각을 놓친 것으로 남기고, 이동 시작 시각도 지금으로 다시 잡는다.
+     *
+     * 출발 판정 전에만 부른다. 이미 판정을 시작했으면 아무것도 하지 않는다.
+     */
+    fun resumeInTransit(sawOriginFix: Boolean, departureMissed: Boolean) {
+        if (phase == Phase.ARRIVED || sawFirstFix || lastAcceptedFix != null) return
+        phase = Phase.IN_TRANSIT
+        sawFirstFix = true
+        this.sawOriginFix = sawOriginFix
+        this.departureMissed = departureMissed
+    }
+
     private var sawFirstFix = false
     private var departureStreak = 0
 

@@ -26,6 +26,7 @@ import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.ServerVersion
 import com.swpp.wakeup.data.remote.ServerWarmup
+import com.swpp.wakeup.data.repository.ArrivalRepository
 import com.swpp.wakeup.data.repository.EventEditPatch
 import com.swpp.wakeup.data.repository.EventEditValues
 import com.swpp.wakeup.data.repository.EventRepository
@@ -33,6 +34,7 @@ import com.swpp.wakeup.data.repository.ReportRepository
 import com.swpp.wakeup.data.repository.RoutineRepository
 import com.swpp.wakeup.data.repository.ServerLogout
 import com.swpp.wakeup.domain.model.AlarmPlanView
+import com.swpp.wakeup.domain.model.ArrivalLedger
 import com.swpp.wakeup.domain.model.CalibrationView
 import com.swpp.wakeup.domain.model.WeeklyReportView
 import com.swpp.wakeup.domain.model.AlarmSchedule
@@ -49,6 +51,7 @@ import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.MorningSession
 import com.swpp.wakeup.domain.model.RoutineEditorState
+import com.swpp.wakeup.sensing.ArrivalRecords
 import com.swpp.wakeup.sensing.BlockObservationQueue
 import com.swpp.wakeup.sensing.CurrentLocation
 import com.swpp.wakeup.domain.model.PlanRow
@@ -553,8 +556,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 추적 중인 여정의 실시간 위치. 서비스가 [TripLiveState] 로 내보낸다 */
     val tripLive: StateFlow<TripLiveState.Snapshot?> = TripLiveState.snapshot
 
-    /** 추적 종료 후 화면에 표시할 도착 결과. 현재 위치를 재사용하지 않는다. */
-    val tripArrival: StateFlow<TripLiveState.Arrival?> = TripLiveState.arrival
+    /** 추적 종료 후 화면에 표시할 도착 결과. 현재 위치를 재사용하지 않는다. 일정 id 로 찾는다 */
+    val tripArrivals: StateFlow<Map<Long, TripLiveState.Arrival>> = TripLiveState.arrivals
 
     /**
      * 서비스가 받은 최신 현재-위치 경로. 늦을 때의 경로 바꾸기 카드가 읽는다
@@ -610,6 +613,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 마지막으로 받은 홈 데이터(시각으로 거르지 않은 목록). 화면은 [renderHome] 이 그린다 */
     private var homeData: EventRepository.HomeData? = null
 
+    /** 서버가 아는 도착. 이 기기에 도착 사본이 없을 때만 묻는다(todo §2 "앱 재시작 후 도착 판정 복원") */
+    private val arrivalRepository = ArrivalRepository()
+
+    /** 일정별 마지막 서버 도착 확인 시각(벽시계 ms). 홈을 열 때마다 같은 일정을 다시 묻지 않는다 */
+    private val arrivalCheckedAt = mutableMapOf<Long, Long>()
+
     /** 마지막으로 시작한 홈 불러오기. 늦게 끝난 옛 응답이 새 상태를 덮지 못하게 한다 */
     private var homeLoadGeneration = 0L
     private var refreshJob: Job? = null
@@ -633,6 +642,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 이후 두 Flow 수집기는 Activity가 백그라운드여도 ViewModel이 살아 있는
         // 동안 계속 상태를 맞추고, ViewModel이 새로 생겨도 이 사본에서 이어진다.
         TripLiveState.restoreLiveRoute(liveRouteStore.current())
+        // 앱 프로세스가 다시 시작돼도 이미 도착한 일정은 도착으로 남긴다(todo §2).
+        ArrivalRecords.restore(application)
         viewModelScope.launch {
             TripLiveState.snapshot.collect { snapshot ->
                 if (snapshot == null) clearLiveRoutePath()
@@ -647,7 +658,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         // 시작 뒤에 도착하면 그 행을 바로 뺀다.
         viewModelScope.launch {
-            TripLiveState.arrival.collect { renderHome() }
+            TripLiveState.arrivals.collect { renderHome() }
         }
         // 서비스가 출발·도착으로 아침 기록을 닫았다. 화면 없이 닫혔을 수도 있다.
         viewModelScope.launch {
@@ -734,6 +745,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         renderHome()
         maybeAskOnboarding(data)
         syncAlarms(data.schedules, fromCache = data.fromCache)
+        if (!data.fromCache) {
+            reconcileArrivals(
+                data.events.map { ArrivalCandidate(it.id, it.startAtMillis, it.alarmAtMillis, it.skipped) }
+            )
+        }
     }
 
     // Partly AI-generated (Claude)
@@ -771,10 +787,48 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 이 기기가 아는 도착. 도착한 일정은 시작 뒤에 목록에서 빠진다.
-     * 지금은 마지막 도착 하나뿐이다(앱을 다시 켜면 잊는다).
+     * 이 기기가 아는 도착. 도착한 일정은 시작 뒤에 목록에서 빠진다. 디스크 사본과 서버 확인으로
+     * 앱을 다시 켜도 남는다([ArrivalRecords]).
      */
-    private fun arrivedEventIds(): Set<Long> = setOfNotNull(TripLiveState.arrival.value?.eventId)
+    private fun arrivedEventIds(): Set<Long> = TripLiveState.arrivals.value.keys
+
+    // Partly AI-generated (Claude)
+    /**
+     * 이동이 있었을 법한 일정 중 이 기기가 도착을 모르는 것을 서버에 묻는다(재설치·다른 기기).
+     * 찾으면 [TripLiveState.arrivals] 가 바뀌어 홈이 다시 그려진다. 실패는 조용히 넘긴다.
+     */
+    private fun reconcileArrivals(candidates: List<ArrivalCandidate>) {
+        val now = System.currentTimeMillis()
+        val due = candidates.filter {
+            ArrivalLedger.shouldAskServer(
+                startAtMillis = it.startAtMillis,
+                alarmAtMillis = it.alarmAtMillis,
+                skipped = it.skipped,
+                knownArrival = TripLiveState.arrivalFor(it.eventId) != null,
+                nowMillis = now,
+                lastCheckedAtMillis = arrivalCheckedAt[it.eventId],
+            )
+        }
+        if (due.isEmpty()) return
+        due.forEach { arrivalCheckedAt[it.eventId] = now }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            due.forEach { candidate ->
+                arrivalRepository.serverArrival(candidate.eventId)?.let {
+                    Log.i(TAG, "서버에서 도착을 확인했다: 일정 ${candidate.eventId}")
+                    ArrivalRecords.restoreFromServer(app, candidate.eventId, it)
+                }
+            }
+        }
+    }
+
+    /** 서버에 도착을 물어볼지 정하는 데 필요한 것 */
+    private data class ArrivalCandidate(
+        val eventId: Long,
+        val startAtMillis: Long,
+        val alarmAtMillis: Long?,
+        val skipped: Boolean,
+    )
 
     /** 기기에 등록된 앞으로의 알람. 미룬 알람을 "다음 알람" 에 그대로 보이게 한다. */
     private fun deviceAlarms(): Map<Long, AlarmSchedule> =
@@ -2731,6 +2785,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 is EventRepository.Result.Success -> {
                     if (generation != planLoadGeneration) return@launch
                     _plan.value = result.data
+                    // 다른 기기에서 도착했으면 이 화면도 "도착" 이어야 한다.
+                    result.data.startAtMillis?.let { start ->
+                        reconcileArrivals(
+                            listOf(ArrivalCandidate(result.data.eventId, start, null, result.data.skipped))
+                        )
+                    }
                     initRouteMap(
                         plan = result.data,
                         // 같은 일정을 잠깐 닫았다 다시 연 경우, 1분 게이트는 지키되

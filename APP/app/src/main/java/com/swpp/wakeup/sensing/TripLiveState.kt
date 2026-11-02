@@ -34,14 +34,43 @@ object TripLiveState {
     /** 도착 결과는 추적 종료 뒤에도 필요하다. 현재 위치와 달리 좌표는 남기지 않는다. */
     data class Arrival(val eventId: Long, val atMillis: Long)
 
+    /** 마지막으로 기록한 도착 하나 */
     private val _arrival = MutableStateFlow<Arrival?>(null)
     val arrival: StateFlow<Arrival?> = _arrival.asStateFlow()
 
+    /**
+     * 이 기기가 아는 도착 전부(일정 id → 도착). 하루에 일정이 여럿이면 앞 일정의 도착도 남아야
+     * 홈에서 빠진다. 디스크 사본([com.swpp.wakeup.data.local.ArrivalStore])에서 되살린다
+     * ([restoreArrivals]). 기록·복원은 [ArrivalRecords] 가 맡는다. (Partly AI-generated (Claude))
+     */
+    private val _arrivals = MutableStateFlow<Map<Long, Arrival>>(emptyMap())
+    val arrivals: StateFlow<Map<Long, Arrival>> = _arrivals.asStateFlow()
+
+    /**
+     * 새 판정이 앞 것을 덮는다. "도착했어요" 는 도착이 없을 때만 기록되므로([ManualArrival]) 덮는
+     * 경우는 수동 뒤 GPS 도착뿐이고, 서버도 GPS 를 먼저 쓴다.
+     */
     fun recordArrival(eventId: Long, atMillis: Long) {
-        _arrival.value = Arrival(eventId, atMillis)
+        val arrival = Arrival(eventId, atMillis)
+        _arrivals.update { it + (eventId to arrival) }
+        _arrival.value = arrival
     }
 
-    fun arrivalFor(eventId: Long): Arrival? = _arrival.value?.takeIf { it.eventId == eventId }
+    /** 디스크·서버에서 읽은 도착을 더한다. 메모리에 이미 있는 일정은 그대로 둔다 */
+    fun restoreArrivals(restored: Map<Long, Long>) {
+        if (restored.isEmpty()) return
+        _arrivals.update { current ->
+            current + restored.filterKeys { it !in current }.mapValues { (id, at) -> Arrival(id, at) }
+        }
+    }
+
+    /** 한 일정의 도착을 잊는다. 같은 일정을 새로 추적하기 시작할 때 */
+    fun forgetArrival(eventId: Long) {
+        _arrivals.update { it - eventId }
+        _arrival.update { if (it?.eventId == eventId) null else it }
+    }
+
+    fun arrivalFor(eventId: Long): Arrival? = _arrivals.value[eventId]
 
     // Partly AI-generated (Claude)
     /**
@@ -179,10 +208,21 @@ object TripLiveState {
         _trackingEventId.value = null
     }
 
-    /** 로그아웃·새 추적에서는 이전 도착 결과도 지운다. */
+    /** 로그아웃에서는 이전 도착 결과도 전부 지운다. */
     fun clear() {
         clearTracking()
         _arrival.value = null
+        _arrivals.value = emptyMap()
+        _morningClosed.value = null
+    }
+
+    /**
+     * 새 추적을 시작한다. 위치·경로와 **그 일정의** 도착만 지운다. 같은 날 앞 일정의 도착은
+     * 남긴다 — 지우면 이미 도착한 일정이 홈에 다시 나타난다. (Partly AI-generated (Claude))
+     */
+    fun resetForNewTrip(eventId: Long) {
+        clearTracking()
+        forgetArrival(eventId)
         _morningClosed.value = null
     }
 

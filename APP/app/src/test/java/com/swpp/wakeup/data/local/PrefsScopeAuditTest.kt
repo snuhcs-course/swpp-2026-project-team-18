@@ -52,6 +52,11 @@ class PrefsScopeAuditTest {
             "앞 사용자가 고른 캘린더를 지금 계정이 그대로 읽게 된다",
         "data/local/LiveRouteStore.kt" to
             "현재 위치에서 시작하는 앞 사용자의 이동 경로가 들어 있다",
+        // Partly AI-generated (Claude) — todo §2 도착 복원·추적 재시작 복원
+        "data/local/ArrivalStore.kt" to
+            "앞 사용자의 일정이 도착으로 보여 지금 계정의 홈에서 일정이 빠진다",
+        "data/local/TripProgressStore.kt" to
+            "앞 사용자의 이동 중 단계로 지금 계정의 추적이 출발을 건너뛴다",
     )
 
     /**

@@ -212,7 +212,7 @@ private fun MainHost(
     val routeMap by viewModel.routeMap.collectAsStateWithLifecycle()
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
-    val tripArrival by viewModel.tripArrival.collectAsStateWithLifecycle()
+    val tripArrivals by viewModel.tripArrivals.collectAsStateWithLifecycle()
     val liveRouteSnapshot by viewModel.liveRoute.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
@@ -533,7 +533,7 @@ private fun MainHost(
                     val progress = plan
                         ?.takeIf { it.hasRoutePath }
                         ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
-                    val arrival = tripArrival?.takeIf { it.eventId == route.eventId }
+                    val arrival = tripArrivals[route.eventId]
                     val stage = plan?.let { viewModel.stageOf(it, arrival, nowMillis) }
                         ?: TripStage.BEFORE_ALARM
 

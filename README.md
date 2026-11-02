@@ -126,10 +126,13 @@ make the screen look finished while being untrue.
 **Runtime limitations** (route scope and previously identified recovery/map issues)
 
 1. Live/alternative routes compare within the selected mode. The candidate picker opens on the server's `preferred_key` (last choice for the same destination, else the most used mode) and falls back to `fastest_key`
-2. Arrival restoration after app process restart is not implemented
-3. When the tracking service restarts, the moving state and the live route are lost
-4. Map panning can jump twice as far during consecutive gestures while a response is slow
-5. A small pinch (12%) snaps a whole zoom level
+2. Map panning can jump twice as far during consecutive gestures while a response is slow
+3. A small pinch (12%) snaps a whole zoom level
+
+Arrivals are kept on the device for three days and, after a reinstall or on another device,
+read back from the server's observations, so an arrived event stays arrived after the app
+restarts. If the system kills the tracking service in transit, it resumes in transit with the
+original departure time instead of waiting for a new departure.
 
 ---
 

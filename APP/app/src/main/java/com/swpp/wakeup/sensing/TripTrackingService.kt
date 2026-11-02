@@ -25,6 +25,7 @@ import com.google.android.gms.location.Priority
 import com.google.gson.Gson
 import com.swpp.wakeup.alarm.AlarmNotifications
 import com.swpp.wakeup.data.local.LiveRouteStore
+import com.swpp.wakeup.data.local.TripProgressStore
 import com.swpp.wakeup.data.local.withDiskDefaults
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.TripObservationInput
@@ -34,6 +35,7 @@ import com.swpp.wakeup.domain.model.ArrivalVerdict
 import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.LiveRouteRefreshGate
 import com.swpp.wakeup.domain.model.RerouteAlert
+import com.swpp.wakeup.domain.model.TripProgress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -68,6 +70,7 @@ class TripTrackingService : Service() {
 
     private lateinit var queue: TripObservationQueue
     private lateinit var liveRouteStore: LiveRouteStore
+    private lateinit var progressStore: TripProgressStore
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
     private val repository by lazy { EventRepository() }
 
@@ -154,6 +157,7 @@ class TripTrackingService : Service() {
         super.onCreate()
         queue = TripObservationQueue(this)
         liveRouteStore = LiveRouteStore(this)
+        progressStore = TripProgressStore(this)
         AlarmNotifications.ensureChannels(this)
     }
 
@@ -217,16 +221,24 @@ class TripTrackingService : Service() {
         liveRouteGate.reset()
         liveRouteSessionGeneration++
         liveRouteStore.beginSession()
+        // 디스크의 도착을 먼저 되살린다. 프로세스가 죽었다 살아났으면 메모리가 비어 있다.
+        ArrivalRecords.restore(this)
+        // 집을 나선 뒤 죽은 추적이면 그 단계부터 이어 간다(todo §2 "추적 서비스 재시작 복원").
+        val resumed = if (redelivered) progressStore.current(parsed.eventId) else null
         if (redelivered) {
             TripLiveState.restoreLiveRoute(liveRouteStore.current(parsed.eventId))
         } else {
             liveRouteStore.clear()
-            TripLiveState.clear()
+            progressStore.clear()
+            // 앞 일정의 도착은 남긴다. 지우면 이미 도착한 일정이 홈에 다시 나타난다.
+            TripLiveState.resetForNewTrip(parsed.eventId)
+            ArrivalRecords.forget(this, parsed.eventId)
         }
-        movingSinceMillis = null
+        movingSinceMillis = resumed?.movingSinceMillis
         manualArrivedAtMillis = null
         handler.removeCallbacks(manualGraceRunnable)
         if (!redelivered) rerouteNotifiedKeys.clear()
+        resumed?.rerouteNotifiedKeys?.let(rerouteNotifiedKeys::addAll)
         ridingUntilMillis = null
 
         schedule = parsed
@@ -240,7 +252,9 @@ class TripTrackingService : Service() {
             destination = parsed.destLat?.let { lat ->
                 parsed.destLng?.let { lng -> GeoPoint(lat, lng) }
             },
-        )
+        ).also { fence ->
+            resumed?.let { fence.resumeInTransit(it.sawOriginFix, it.departureMissed) }
+        }
 
         // startForeground 는 즉시 불러야 한다. 늦으면 시스템이 죽인다.
         promoteToForeground(initialNotificationText(parsed))
@@ -250,6 +264,19 @@ class TripTrackingService : Service() {
             Log.i(TAG, "이미 마감 시각이 지났다. 추적하지 않는다")
             stopSelf()
             return START_NOT_STICKY
+        }
+        if (redelivered && TripLiveState.arrivalFor(parsed.eventId) != null) {
+            // 죽기 전에 도착을 기록했다(GPS·"도착했어요"). 이 이동은 끝났다.
+            Log.i(TAG, "다시 전달된 일정 ${parsed.eventId} 은 이미 도착했다. 추적하지 않는다")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (resumed != null) {
+            Log.i(TAG, "이동 중이던 추적을 이어 간다: 일정 ${parsed.eventId}")
+            // 나간 직후 죽었으면 아침 기록이 열린 채일 수 있다. 출발 규칙과 같게 닫는다.
+            if (resumed.sawOriginFix) {
+                MorningClose.close(this, parsed.eventId, MorningClose.Reason.DEPARTED, System.currentTimeMillis())
+            }
         }
         handler.postDelayed(deadlineRunnable, remaining)
 
@@ -360,6 +387,8 @@ class TripTrackingService : Service() {
         )
         if (!notify) return
         rerouteNotifiedKeys += suggestion.routeKey
+        // 다시 시작해도 같은 제안을 또 띄우지 않는다.
+        persistProgress()
         postRerouteNotification(
             eventId = current.eventId,
             title = RerouteAlert.headline(route.lateMinutes),
@@ -367,6 +396,27 @@ class TripTrackingService : Service() {
             switchIntent = reroutePendingIntent(current.eventId, suggestion.routeKey),
         )
         Log.i(TAG, "경로 바꾸기 제안: 일정 ${current.eventId} → ${suggestion.routeKey}")
+    }
+
+    // Partly AI-generated (Claude)
+    /** 이동 중인 추적의 단계·기준 시각을 디스크에 남긴다([TripProgress]). 집을 나선 뒤에만 */
+    private fun persistProgress() {
+        val current = schedule ?: return
+        val fence = geofence ?: return
+        if (fence.phase != TripGeofence.Phase.IN_TRANSIT) return
+        val saved = runCatching {
+            progressStore.save(
+                TripProgress(
+                    eventId = current.eventId,
+                    movingSinceMillis = movingSinceMillis,
+                    sawOriginFix = fence.sawOriginFix,
+                    departureMissed = fence.departureMissed,
+                    rerouteNotifiedKeys = rerouteNotifiedKeys.toList(),
+                    savedAtMillis = System.currentTimeMillis(),
+                )
+            )
+        }.getOrDefault(false)
+        if (!saved) Log.w(TAG, "이동 단계를 디스크에 남기지 못했다: 일정 ${current.eventId}")
     }
 
     private fun postRerouteNotification(
@@ -428,6 +478,9 @@ class TripTrackingService : Service() {
         // 몇 시간 전 좌표를 현재 위치처럼 그리고, 사용자는 그 진행률로 여유가
         // 있다고 판단한다. 도착·마감·사용자 중지 모두 여기를 지나간다.
         schedule?.eventId?.let(liveRouteStore::clear)
+        // 이동이 끝났다(도착·마감·중지·로그아웃). 이 인스턴스가 추적하던 것만 지운다 — 추적 없이
+        // 알림 버튼으로 잠깐 뜬 인스턴스가 다시 전달될 추적의 사본을 지우면 안 된다.
+        if (schedule != null) progressStore.clear()
         liveRouteGate.reset()
         TripLiveState.clearTracking()
         Log.i(TAG, "추적 종료 (대기 관측 ${pending}건)")
@@ -482,6 +535,8 @@ class TripTrackingService : Service() {
         // (`departureMissed`) 그 사람도 이동 중이다.
         if (movingSinceMillis == null && fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE) {
             movingSinceMillis = fix.atMillis
+            // 집을 나섰다. 이 단계와 기준 시각은 프로세스가 죽어도 이어 가야 한다.
+            persistProgress()
         }
 
         // 판정 결과와 무관하게 **매 위치를** 화면에 내보낸다. 판정이 난 순간만
@@ -858,8 +913,9 @@ class TripTrackingService : Service() {
      * 시스템이 그 알림을 함께 치워서 **아무도 결과를 보지 못했다.**
      */
     private fun postArrivalResult(current: AlarmSchedule, fix: LocationFix) {
-        // 알림 권한과 무관하게 결과를 보존한다. onDestroy는 현재 위치만 지운다.
-        TripLiveState.recordArrival(current.eventId, fix.atMillis)
+        // 알림 권한과 무관하게 결과를 보존한다. onDestroy는 현재 위치만 지운다. 디스크에도 남겨
+        // 앱 프로세스가 다시 시작돼도 도착이 남게 한다(todo §2 "앱 재시작 후 도착 판정 복원").
+        ArrivalRecords.record(this, current.eventId, fix.atMillis)
         val verdict = ArrivalVerdict(
             arrivedAtMillis = fix.atMillis,
             // 약속 시각은 일정 시작 시각이다. 계획이 추정한 도착 예정
