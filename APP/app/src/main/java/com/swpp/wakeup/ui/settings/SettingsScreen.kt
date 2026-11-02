@@ -73,6 +73,10 @@ fun SettingsScreen(
     onRequestCalendarPermission: () -> Unit = {},
     /** "캘린더가 안 보이면" 안내의 버튼. null 이면 안내를 그리지 않는다 */
     calendarHelp: CalendarHelpActions? = null,
+    /** "모든 기기에서 로그아웃"(token-security-api.md §5). null 이면 그리지 않는다 */
+    onLogoutAll: (() -> Unit)? = null,
+    /** 모든 기기 로그아웃을 서버에 요청하는 중 */
+    logoutAllBusy: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -169,6 +173,33 @@ fun SettingsScreen(
                 .clickable(onClick = onLogout)
                 .padding(vertical = 16.dp),
         )
+
+        // 다른 기기(잃어버린 폰 등)에 남은 로그인까지 끝낸다(Figma ⑯ `474:9`). 서버가 닿아야
+        // 하므로 기다리는 동안 다시 누르지 못하게 한다.
+        onLogoutAll?.let { logoutAll ->
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = if (logoutAllBusy) "로그아웃하는 중…" else "모든 기기에서 로그아웃",
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag("logout_all")
+                        .clip(RoundedCornerShape(JitRadius.Hint))
+                        .clickable(enabled = !logoutAllBusy, onClick = logoutAll)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+                Text(
+                    text = "다른 기기에 남은 로그인도 모두 끝남. 연결돼 있어야 함",
+                    color = JitColor.TextSecondary,
+                    fontSize = 9.sp,
+                )
+            }
+        }
     }
 }
 

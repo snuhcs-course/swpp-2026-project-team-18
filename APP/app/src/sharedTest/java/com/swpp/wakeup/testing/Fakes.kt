@@ -186,6 +186,34 @@ open class FakeAuthApi : AuthApi {
         unexpected("refresh")
 
     override suspend fun me(bearer: String): Response<UserDto> = unexpected("me")
+    override suspend fun logout(body: RefreshRequest): Response<Unit> = unexpected("logout")
+    override suspend fun logoutAll(): Response<com.swpp.wakeup.data.remote.LogoutAllResponse> =
+        unexpected("logoutAll")
+}
+
+/**
+ * JVM 에는 Android Keystore 가 없다. 값을 뒤집어 접두어만 붙이는 가짜 암호화.
+ * [failEncrypt]/[failDecrypt] 로 보안 저장소 오류를 흉내 낸다.
+ */
+class FakeTokenCipher(
+    var failEncrypt: Boolean = false,
+    var failDecrypt: Boolean = false,
+) : com.swpp.wakeup.data.local.TokenCipher {
+    var resets = 0
+
+    override fun encrypt(plain: String): String {
+        if (failEncrypt) throw java.security.GeneralSecurityException("암호화 실패(가짜)")
+        return com.swpp.wakeup.data.local.TokenCipher.PREFIX + plain.reversed()
+    }
+
+    override fun decrypt(stored: String): String {
+        if (failDecrypt) throw java.security.GeneralSecurityException("복호화 실패(가짜)")
+        return stored.removePrefix(com.swpp.wakeup.data.local.TokenCipher.PREFIX).reversed()
+    }
+
+    override fun reset() {
+        resets++
+    }
 }
 
 open class FakeEventsApi : EventsApi {

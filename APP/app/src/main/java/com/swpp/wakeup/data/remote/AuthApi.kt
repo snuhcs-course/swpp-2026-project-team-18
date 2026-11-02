@@ -33,7 +33,20 @@ interface AuthApi {
 
     @GET("api/auth/me")
     suspend fun me(@Header("Authorization") bearer: String): Response<UserDto>
+
+    /**
+     * 이 기기 로그아웃. refresh 를 서버 취소 목록에 넣는다(docs/iter3/token-security-api.md §5).
+     * 인증 헤더 없이 부른다([AuthInterceptor] 공개 경로). 이미 취소된 토큰도 204.
+     */
+    @POST("api/auth/logout")
+    suspend fun logout(@Body body: RefreshRequest): Response<Unit>
+
+    /** 모든 기기 로그아웃. Bearer 가 필요하다. 응답 `{"revoked": n}` */
+    @POST("api/auth/me/logout-all")
+    suspend fun logoutAll(): Response<LogoutAllResponse>
 }
+
+data class LogoutAllResponse(val revoked: Int? = null)
 
 // --- 요청 -------------------------------------------------------------------
 
@@ -92,8 +105,13 @@ data class AuthResponse(
     val user: UserDto? = null,
 )
 
+/**
+ * 갱신 응답. 서버가 refresh 회전을 켜면(`JWT_ROTATE_REFRESH_TOKENS=1`) [refresh] 가 온다.
+ * 그때는 새 refresh 를 저장해야 한다 — 옛 것은 취소돼 다음 갱신에서 로그아웃된다.
+ */
 data class RefreshResponse(
-    val access: String,
+    val access: String? = null,
+    val refresh: String? = null,
 )
 
 // --- 에러 -------------------------------------------------------------------

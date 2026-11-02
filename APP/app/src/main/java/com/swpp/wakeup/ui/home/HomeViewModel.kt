@@ -23,11 +23,13 @@ import com.swpp.wakeup.data.remote.BlockObservationInput
 import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.remote.PlaceSearchResponse
+import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.ServerVersion
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.data.repository.ReportRepository
 import com.swpp.wakeup.data.repository.RoutineRepository
+import com.swpp.wakeup.data.repository.ServerLogout
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.CalibrationView
 import com.swpp.wakeup.domain.model.WeeklyReportView
@@ -160,6 +162,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val markableIds: Set<Long> = emptySet(),
         /** 한 번 띄우고 지우는 안내. 화면이 스낵바로 띄운다 */
         val notice: HomeNotice? = null,
+        /** 모든 기기 로그아웃을 서버에 요청하는 중 */
+        val logoutAllBusy: Boolean = false,
 
         /** 집 위치 미설정이면 알람을 계산할 수 없다. 안내를 띄운다 */
         val hasHome: Boolean = true,
@@ -994,11 +998,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 다루는 것은 기기에 남는 **보존 기간**이다.
      */
     fun logout() {
+        // 서버에 이 refresh 를 취소하게 한다(token-security-api.md §5). 기기 토큰은 결과와
+        // 상관없이 아래에서 지운다 — 서버 호출은 화면과 떼어 뒤에서 한다([ServerLogout]).
+        val refresh = runCatching { tokenStore.refreshToken }.getOrNull()
         // 순서가 있다. **토큰보다 먼저 지운다** — 지우기 판정이 "지금 로그인한
         // 계정" 을 보므로, 토큰이 먼저 사라지면 소유자를 모르는 상태가 되어
         // 아무것도 지울 수 없다.
         LocalStores.wipeAll(getApplication())
         tokenStore.clear()
+        ServerLogout.revoke(refresh)
         // 세션 종료 표시를 내린다. 남겨 두면 다음 로그인 직후 MainActivity 가
         // 그것을 보고 로그인 화면으로 되돌린다 — 로그인이 안 되는 것처럼 보인다.
         SessionState.clearExpired()
@@ -1011,6 +1019,34 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 홈 카드가 남은 블록 수를 보여 준다.
         _morning.value = null
         _state.update { it.copy(morningBlocksLeft = null) }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 모든 기기에서 로그아웃(`POST /api/auth/me/logout-all`). 서버가 이 계정의 refresh 를 전부
+     * 취소한 뒤에 이 기기도 로그아웃한다.
+     *
+     * 이 기기만 로그아웃과 달리 **서버가 받아야 의미가 있다.** 연결되지 않으면 기기에 그대로
+     * 머물고 알린다. 401(이미 세션이 끝남)이면 이 기기만 정리한다.
+     */
+    fun logoutAll(onLoggedOut: () -> Unit) {
+        if (_state.value.logoutAllBusy) return
+        _state.update { it.copy(logoutAllBusy = true) }
+        viewModelScope.launch {
+            val response = runCatching { withContext(Dispatchers.IO) { ApiClient.auth.logoutAll() } }
+            _state.update { it.copy(logoutAllBusy = false) }
+            val code = response.getOrNull()?.code()
+            when {
+                code != null && (code in 200..299 || code == 401) -> {
+                    Log.i(TAG, "모든 기기 로그아웃: 응답 $code, 취소 ${response.getOrNull()?.body()?.revoked}건")
+                    logout()
+                    onLoggedOut()
+                }
+                code == 404 -> notify("아직 서버에서 지원하지 않아요. 이 기기만 로그아웃할 수 있어요")
+                code != null -> notify("모든 기기를 로그아웃하지 못했습니다. 잠시 후 다시 시도해 주세요")
+                else -> notify("서버에 연결되지 않아 다른 기기를 로그아웃하지 못했습니다")
+            }
+        }
     }
 
     /** 아바타에 쓸 두 글자. */

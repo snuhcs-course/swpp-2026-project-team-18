@@ -43,6 +43,8 @@ class AuthInterceptor(private val tokenStore: TokenStore) : Interceptor {
             "/api/auth/password/check",
             "/api/auth/token",
             "/api/auth/token/refresh",
+            // 로그아웃은 본문의 refresh 로 판단한다. 만료된 access 를 붙이면 401 이 날 수 있다.
+            "/api/auth/logout",
         )
     }
 }
@@ -103,7 +105,15 @@ class TokenRefreshAuthenticator(
 
         return when (val outcome = tryRefresh(refresh)) {
             is RefreshOutcome.Renewed -> {
-                tokenStore.updateAccess(outcome.access)
+                // 서버가 refresh 를 회전시켰으면 새 것도 저장한다(token-security-api.md §5).
+                // 저장하지 못하면(보안 저장소 오류) 세션을 끝낸다 — 앱이 죽지 않고 다시 로그인한다.
+                val stored = runCatching { tokenStore.updateTokens(outcome.access, outcome.refresh) }
+                if (stored.isFailure) {
+                    Log.w(TAG, "갱신한 토큰을 저장하지 못했다. 다시 로그인해야 한다")
+                    tokenStore.clear()
+                    SessionState.markExpired("토큰 저장 실패")
+                    return null
+                }
                 response.request.newBuilder()
                     .header("Authorization", "Bearer ${outcome.access}")
                     .build()
@@ -131,13 +141,10 @@ class TokenRefreshAuthenticator(
     /**
      * refresh 를 한 번 시도하고 결과를 분류한다. 예외를 밖으로 던지지 않는다.
      *
-     * **새 refresh 토큰을 저장하지 않는다.** 서버 응답 본문에 `access` 만 있기
-     * 때문이다(배포 서버에서 확인: 본문 키가 `['access']` 하나다). SimpleJWT 의
-     * `ROTATE_REFRESH_TOKENS` 가 꺼져 있어 같은 refresh 를 14일간 재사용할 수 있다.
-     *
-     * 서버에서 회전을 켜면 **여기도 함께 고쳐야 한다.** 응답의 새 refresh 를
-     * 저장하지 않으면 앱이 구 토큰을 계속 보내고, `BLACKLIST_AFTER_ROTATION` 까지
-     * 켜면 그 순간 전원이 로그아웃된다.
+     * 응답에 새 refresh 가 있으면 함께 돌려준다. 서버는 회전을 기본으로 꺼 두었고(본문
+     * `access` 하나), 이 앱이 배포된 뒤 `JWT_ROTATE_REFRESH_TOKENS=1` 로 켠다
+     * (todo §1 토큰 보안). 켜진 뒤에 새 refresh 를 저장하지 않으면 옛 것이 취소돼
+     * 다음 갱신에서 전원이 로그아웃된다.
      */
     private fun tryRefresh(refresh: String): RefreshOutcome {
         return try {
@@ -147,6 +154,7 @@ class TokenRefreshAuthenticator(
             RefreshOutcome.of(
                 code = result.code(),
                 access = result.body()?.access,
+                refresh = result.body()?.refresh,
             )
         } catch (e: Throwable) {
             RefreshOutcome.of(code = null, access = null, error = e)

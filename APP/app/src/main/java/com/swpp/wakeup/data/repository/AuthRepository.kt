@@ -1,5 +1,6 @@
 package com.swpp.wakeup.data.repository
 
+import com.swpp.wakeup.data.local.TokenStorageException
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.remote.AuthApi
@@ -120,6 +121,10 @@ class AuthRepository(
         } catch (e: IOException) {
             // 서버가 꺼져 있거나 에뮬레이터가 호스트에 못 닿는 경우가 대부분이다.
             AuthResult.Failure(MESSAGE_NETWORK)
+        } catch (e: TokenStorageException) {
+            // 기기 보안 저장소(Keystore)가 토큰을 받지 못했다. 로그인한 상태로 두지 않는다.
+            tokenStore.clear()
+            AuthResult.Failure(MESSAGE_STORAGE)
         } catch (e: Exception) {
             AuthResult.Failure(MESSAGE_UNKNOWN)
         }
@@ -139,5 +144,8 @@ class AuthRepository(
 
         /** 2xx 인데 토큰이 비어 있을 때. 서버 배포 버전이 낮으면 이렇게 온다. */
         const val MESSAGE_NO_TOKEN = "서버가 토큰을 주지 않았다. 서버 버전을 확인한다."
+
+        /** 기기 보안 저장소에 토큰을 쓰지 못했을 때 */
+        const val MESSAGE_STORAGE = "이 기기에 로그인 정보를 안전하게 저장하지 못했다. 다시 시도한다."
     }
 }

@@ -696,6 +696,8 @@ private fun MainHost(
                         viewModel.logout()
                         onLoggedOut()
                     },
+                    onLogoutAll = { viewModel.logoutAll(onLoggedOut) },
+                    logoutAllBusy = state.logoutAllBusy,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                     calendarLink = calendarLinkState,
