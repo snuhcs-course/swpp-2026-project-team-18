@@ -29,6 +29,10 @@ import com.swpp.wakeup.data.remote.RouteArrivalDto
 import com.swpp.wakeup.data.remote.RouteCandidateDto
 import com.swpp.wakeup.data.remote.RouteCandidateResponse
 import com.swpp.wakeup.data.remote.RouteSegmentDto
+import com.swpp.wakeup.data.remote.RerouteRequest
+import com.swpp.wakeup.data.remote.SwitchSuggestionDto
+import com.swpp.wakeup.domain.model.RerouteAlert
+import com.swpp.wakeup.domain.model.SwitchSuggestion
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ConfidenceView
@@ -405,8 +409,34 @@ class EventRepository(
                 isAlternative = route.isAlternative,
                 fasterMinutes = route.fasterMinutes?.takeIf { it > 0 },
                 path = path,
+                lateMinutes = body.arrival?.lateMinutes?.takeIf { it >= 0 },
+                suggestion = body.switchSuggestion?.toSuggestion(),
             )
         )
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 이번 이동의 경로를 바꾼다(`POST /api/events/{id}/reroute`, reroute-api.md). 일정의 경로와
+     * 알람은 그대로다. 이미 그 경로면(409 `same_route`) 바뀐 것으로 본다 — 두 번 누른 경우다.
+     *
+     * @param fromSuggestion 바꾸자는 알림·카드를 보고 눌렀는가. 그러면 `reason=late_now`
+     */
+    suspend fun reroute(eventId: Long, routeKey: String, fromSuggestion: Boolean): Result<Unit> = guard {
+        val response = api.reroute(
+            eventId,
+            RerouteRequest(
+                routeKey = routeKey,
+                reason = RerouteAlert.REASON_LATE_NOW.takeIf { fromSuggestion },
+            ),
+        )
+        if (response.isSuccessful) return@guard Result.Success(Unit)
+        val raw = response.errorBody()?.string()
+        when (ApiClient.parseErrorCode(raw)) {
+            "same_route" -> Result.Success(Unit)
+            "outside_trip" -> Result.Failure("일정 시작 6시간 전후에만 경로를 바꿀 수 있음")
+            else -> failureFrom(response.code(), raw)
+        }
     }
 
     /**
@@ -1386,6 +1416,22 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         altFasterMinutes = plan.altFasterMinutes?.takeIf { it > 0 },
         skipped = skipped,
         routeBasis = routeBasis,
+    )
+}
+
+// Partly AI-generated (Claude)
+/** 바꾸자는 제안. 경로 key 가 없으면 바꿀 수 없으니 버린다. 도착 시각은 기기 시간대 "H:mm". */
+internal fun SwitchSuggestionDto.toSuggestion(zone: ZoneId = ZoneId.systemDefault()): SwitchSuggestion? {
+    val key = routeKey?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return SwitchSuggestion(
+        routeKey = key,
+        label = label?.trim()?.takeIf { it.isNotEmpty() },
+        arriveAtLabel = arriveAt
+            ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+            ?.atZoneSameInstant(zone)
+            ?.format(ALARM_FORMAT),
+        lateMinutes = (lateMinutes ?: 0).coerceAtLeast(0),
+        savesMinutes = (savesMinutes ?: 1).coerceAtLeast(1),
     )
 }
 

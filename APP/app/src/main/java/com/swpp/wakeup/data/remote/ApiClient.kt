@@ -158,6 +158,16 @@ object ApiClient {
         }
     }
 
+    /** 실패 응답의 `error.code`. 예 `same_route`. 없거나 읽지 못하면 null (Partly AI-generated (Claude)) */
+    fun parseErrorCode(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return try {
+            Gson().fromJson(raw, ApiErrorEnvelope::class.java)?.error?.code?.takeIf { it.isNotBlank() }
+        } catch (e: JsonSyntaxException) {
+            null
+        }
+    }
+
     /**
      * 실패 응답의 **필드별** 오류를 뽑는다. `details` 안의 것이다.
      *

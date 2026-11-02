@@ -200,6 +200,14 @@ interface EventsApi {
     @POST("api/routes/live")
     suspend fun liveRoute(@Body body: LiveRouteRequest): Response<LiveRouteResponse>
 
+    /**
+     * 이동 중 경로 바꾸기(docs/iter3/reroute-api.md, todo §2 "이동 중 늦으면 경로 바꾸기").
+     * **이번 이동만 바꾼다.** 일정의 `route_key` 와 알람 계획은 그대로다. 201 이 성공이다.
+     * 400 `invalid_route_key`·`invalid_reason`, 404 남의 일정, 409 `same_route`·`outside_trip`(시작 ±6시간 밖).
+     */
+    @POST("api/events/{id}/reroute")
+    suspend fun reroute(@Path("id") id: Long, @Body body: RerouteRequest): Response<RerouteResponse>
+
     companion object {
         /** 한 번에 받아올 일정 수. 서버 PAGE_SIZE(20)를 덮어쓴다. */
         const val DEFAULT_LIMIT = 200
@@ -222,6 +230,51 @@ data class LiveRouteRequest(
 data class LiveRouteResponse(
     val route: LiveRouteDto? = null,
     val degraded: Boolean = false,
+    /** 기준 경로(고른 경로, 바꿨으면 바꾼 경로)로 지금 가면 언제 닿는지. 구버전 서버면 null */
+    val arrival: LiveArrivalDto? = null,
+    /**
+     * 지금 경로로는 일정 시작에 늦고 같은 응답의 대안이 더 일찍 닿을 때만 온다(`planning/live_switch.py`).
+     * 안 늦으면 null 이다. 바꾸기는 `POST /api/events/{id}/reroute`.
+     */
+    @SerializedName("switch_suggestion") val switchSuggestion: SwitchSuggestionDto? = null,
+)
+
+// Partly AI-generated (Claude)
+data class LiveArrivalDto(
+    @SerializedName("route_key") val routeKey: String? = null,
+    @SerializedName("arrive_at") val arriveAt: String? = null,
+    /** 일정 시작보다 늦는 분(반올림). 안 늦으면 0 */
+    @SerializedName("late_minutes") val lateMinutes: Int? = null,
+    /** 첫 승차 대기를 실시간 도착으로 바꿨는지 */
+    val realtime: Boolean = false,
+)
+
+// Partly AI-generated (Claude)
+data class SwitchSuggestionDto(
+    /** 지금은 `late_now` 하나다 */
+    val reason: String? = null,
+    @SerializedName("route_key") val routeKey: String? = null,
+    /** "9호선 → 2호선" */
+    val label: String? = null,
+    @SerializedName("arrive_at") val arriveAt: String? = null,
+    /** 대안으로도 늦는 분. 0 이면 대안으로는 안 늦는다 */
+    @SerializedName("late_minutes") val lateMinutes: Int? = null,
+    /** 대안이 몇 분 일찍 닿는가(1 이상) */
+    @SerializedName("saves_minutes") val savesMinutes: Int? = null,
+    val realtime: Boolean = false,
+)
+
+/** `POST /api/events/{id}/reroute` 본문. [reason] 은 바꾸자는 알림을 보고 눌렀을 때만 */
+data class RerouteRequest(
+    @SerializedName("route_key") val routeKey: String,
+    val reason: String? = null,
+)
+
+data class RerouteResponse(
+    @SerializedName("from_route_key") val fromRouteKey: String? = null,
+    @SerializedName("to_route_key") val toRouteKey: String? = null,
+    val reason: String? = null,
+    @SerializedName("rerouted_at") val reroutedAt: String? = null,
 )
 
 data class LiveRouteDto(

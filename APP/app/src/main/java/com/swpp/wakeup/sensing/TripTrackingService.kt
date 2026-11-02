@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -30,13 +31,16 @@ import com.swpp.wakeup.data.remote.TripObservationInput
 import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ArrivalVerdict
+import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.LiveRouteRefreshGate
+import com.swpp.wakeup.domain.model.RerouteAlert
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
@@ -90,6 +94,12 @@ class TripTrackingService : Service() {
 
     /** "도착했어요" 를 누른 시각. 누르지 않았으면 null. 그 뒤에는 GPS 도착만 잠시 더 기다린다 */
     private var manualArrivedAtMillis: Long? = null
+
+    /** 이 이동에서 이미 알린 경로 바꾸기 제안의 경로 key. 같은 경로는 다시 알리지 않는다 */
+    private val rerouteNotifiedKeys = mutableSetOf<String>()
+
+    /** 버스·지하철에 타고 있다고 보는 마감(벽시계 ms). 그동안 바꾸자는 알림을 미룬다 */
+    private var ridingUntilMillis: Long? = null
 
     private val deadlineRunnable = Runnable {
         Log.i(TAG, "마감 시각이 지나 추적을 멈춘다")
@@ -159,6 +169,20 @@ class TripTrackingService : Service() {
             if (schedule == null) stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_REROUTE) {
+            handleReroute(
+                eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1L),
+                routeKey = intent.getStringExtra(EXTRA_ROUTE_KEY).orEmpty(),
+            )
+            return START_NOT_STICKY
+        }
+        if (intent?.action == ACTION_REFRESH_LIVE) {
+            // 화면에서 경로를 바꿨다. 다음 위치에서 바로 새 경로를 받는다.
+            liveRouteGate.reset()
+            runCatching { NotificationManagerCompat.from(this).cancel(AlarmNotifications.NOTIFICATION_REROUTE) }
+            if (schedule == null) stopSelf()
+            return START_NOT_STICKY
+        }
 
         val raw = intent?.getStringExtra(EXTRA_SCHEDULE)
         val parsed = raw?.let {
@@ -202,6 +226,8 @@ class TripTrackingService : Service() {
         movingSinceMillis = null
         manualArrivedAtMillis = null
         handler.removeCallbacks(manualGraceRunnable)
+        if (!redelivered) rerouteNotifiedKeys.clear()
+        ridingUntilMillis = null
 
         schedule = parsed
         // 화면이 "이 일정을 추적 중인가" 를 안다. 아침 기록 화면의 안내 문구와
@@ -282,10 +308,111 @@ class TripTrackingService : Service() {
         handler.postDelayed(manualGraceRunnable, MANUAL_GRACE_MILLIS)
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 알림의 [바꾸기]. 이번 이동만 바꾼다(reroute-api.md). 성공하면 제안을 치우고 다음 위치에서
+     * 바꾼 경로로 새 선을 받는다. 실패하면 같은 자리에 이유를 띄운다(버튼 없이).
+     */
+    private fun handleReroute(eventId: Long, routeKey: String) {
+        if (eventId <= 0L || routeKey.isBlank()) {
+            if (schedule == null) stopSelf()
+            return
+        }
+        scope.launch {
+            val result = repository.reroute(eventId, routeKey, fromSuggestion = true)
+            withContext(Dispatchers.Main) {
+                when (result) {
+                    is EventRepository.Result.Success -> {
+                        Log.i(TAG, "이동 중 경로를 바꿨다: 일정 $eventId → $routeKey")
+                        runCatching {
+                            NotificationManagerCompat.from(this@TripTrackingService)
+                                .cancel(AlarmNotifications.NOTIFICATION_REROUTE)
+                        }
+                        liveRouteGate.reset()
+                    }
+
+                    is EventRepository.Result.Failure -> {
+                        Log.w(TAG, "경로를 바꾸지 못했다: ${result.message}")
+                        postRerouteNotification(
+                            eventId = eventId,
+                            title = "경로를 바꾸지 못했어요",
+                            text = result.message,
+                            switchIntent = null,
+                        )
+                    }
+                }
+                if (schedule == null) stopSelf()
+            }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /** 새 현재-위치 경로를 받은 뒤. 늦고 더 일찍 닿는 경로가 있으면 한 번 알린다([RerouteAlert]). */
+    private fun maybeAlertReroute(current: AlarmSchedule, route: LiveRoute) {
+        val suggestion = route.suggestion ?: return
+        val notify = RerouteAlert.shouldNotify(
+            suggestion = suggestion,
+            notifiedKeys = rerouteNotifiedKeys,
+            nowMillis = System.currentTimeMillis(),
+            ridingUntilMillis = ridingUntilMillis,
+            remainingMinutes = route.minutes,
+            remainingMeters = geofence?.distanceToDestinationM,
+        )
+        if (!notify) return
+        rerouteNotifiedKeys += suggestion.routeKey
+        postRerouteNotification(
+            eventId = current.eventId,
+            title = RerouteAlert.headline(route.lateMinutes),
+            text = RerouteAlert.body(suggestion),
+            switchIntent = reroutePendingIntent(current.eventId, suggestion.routeKey),
+        )
+        Log.i(TAG, "경로 바꾸기 제안: 일정 ${current.eventId} → ${suggestion.routeKey}")
+    }
+
+    private fun postRerouteNotification(
+        eventId: Long,
+        title: String,
+        text: String,
+        switchIntent: PendingIntent?,
+    ) {
+        val canPost = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!canPost) return
+        runCatching {
+            NotificationManagerCompat.from(this).notify(
+                AlarmNotifications.NOTIFICATION_REROUTE,
+                AlarmNotifications.rerouteNotification(
+                    context = this,
+                    eventId = eventId,
+                    title = title,
+                    text = text,
+                    switchIntent = switchIntent,
+                    dismissIntent = TripArrivalReceiver.rerouteDismissIntent(this),
+                ),
+            )
+        }.onFailure { Log.e(TAG, "경로 제안 알림 실패", it) }
+    }
+
+    /** 알림의 [바꾸기]. 경로마다 다른 PendingIntent 가 되게 data 를 둔다 */
+    private fun reroutePendingIntent(eventId: Long, routeKey: String): PendingIntent = PendingIntent.getService(
+        this,
+        2,
+        Intent(this, TripTrackingService::class.java)
+            .setAction(ACTION_REROUTE)
+            .setData("jit://reroute/$eventId/${android.net.Uri.encode(routeKey)}".toUri())
+            .putExtra(EXTRA_EVENT_ID, eventId)
+            .putExtra(EXTRA_ROUTE_KEY, routeKey),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
     override fun onDestroy() {
         handler.removeCallbacks(deadlineRunnable)
         handler.removeCallbacks(blindRunnable)
         handler.removeCallbacks(manualGraceRunnable)
+        // 이동이 끝났다. 바꾸자는 제안도 더 이상 뜻이 없다.
+        runCatching { NotificationManagerCompat.from(this).cancel(AlarmNotifications.NOTIFICATION_REROUTE) }
         liveRouteSessionGeneration++
         runCatching { fused.removeLocationUpdates(callback) }
         // 남은 관측을 마지막으로 한 번 올려 본다. scope 를 바로 닫으면
@@ -326,6 +453,13 @@ class TripTrackingService : Service() {
             // accuracy 를 보고하지 않는 fix 는 신뢰할 수 없다. 최악으로 본다.
             accuracyM = if (location.hasAccuracy()) location.accuracy else Float.MAX_VALUE,
             atMillis = if (location.time > 0) location.time else System.currentTimeMillis(),
+        )
+
+        // 버스·지하철에 타고 있는지(속도로). 탄 동안은 경로를 바꾸자고 하지 않는다(todo §2 ③).
+        ridingUntilMillis = RerouteAlert.ridingUntil(
+            ridingUntilMillis,
+            speedMps = if (location.hasSpeed()) location.speed else null,
+            atMillis = fix.atMillis,
         )
 
         val phaseBefore = fence.phase
@@ -528,6 +662,7 @@ class TripTrackingService : Service() {
                 return@launch
             }
             Log.i(TAG, "현재 위치 경로 갱신: 일정 ${current.eventId}, ${route.minutes}분")
+            withContext(Dispatchers.Main) { maybeAlertReroute(current, route) }
         }
     }
 
@@ -809,7 +944,22 @@ class TripTrackingService : Service() {
         private const val MANUAL_GRACE_MILLIS = 3 * 60_000L
 
         const val ACTION_MANUAL_ARRIVE = "com.swpp.wakeup.action.TRIP_MANUAL_ARRIVE"
+        const val ACTION_REROUTE = "com.swpp.wakeup.action.TRIP_REROUTE"
+        const val ACTION_REFRESH_LIVE = "com.swpp.wakeup.action.TRIP_REFRESH_LIVE"
         const val EXTRA_EVENT_ID = "event_id"
+        const val EXTRA_ROUTE_KEY = "route_key"
+
+        // Partly AI-generated (Claude)
+        /**
+         * 화면에서 경로를 바꾼 뒤. 추적 중이면 다음 위치에서 바로 새 선을 받고 알림 제안을 치운다.
+         * 추적 중이 아니면 할 일이 없다(서비스를 새로 띄우지 않는다).
+         */
+        fun refreshLiveRoute(context: Context, eventId: Long) {
+            if (TripLiveState.trackingEventId.value != eventId) return
+            runCatching {
+                context.startService(Intent(context, TripTrackingService::class.java).setAction(ACTION_REFRESH_LIVE))
+            }.onFailure { Log.w(TAG, "추적 서비스에 경로 갱신을 넘기지 못했다", it) }
+        }
 
         const val ACTION_START = "com.swpp.wakeup.action.TRIP_START"
         const val ACTION_STOP = "com.swpp.wakeup.action.TRIP_STOP"

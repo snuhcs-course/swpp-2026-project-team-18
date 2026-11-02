@@ -29,6 +29,14 @@ import com.swpp.wakeup.alarm.AlarmNotifications
 class TripArrivalReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == ACTION_REROUTE_DISMISS) {
+            // 경로 바꾸기 제안의 [무시]. 같은 경로는 다시 띄우지 않으므로 닫기만 한다.
+            runCatching {
+                NotificationManagerCompat.from(context).cancel(AlarmNotifications.NOTIFICATION_REROUTE)
+            }.onFailure { Log.w(TAG, "경로 제안 알림을 치우지 못했다", it) }
+            Log.i(TAG, "경로 바꾸기 제안을 무시했다")
+            return
+        }
         val how = when (intent.action) {
             ACTION_CONFIRM -> "확인"
             ACTION_DISMISS -> "밀어서 지움"
@@ -52,6 +60,15 @@ class TripArrivalReceiver : BroadcastReceiver() {
 
         const val ACTION_CONFIRM = "com.swpp.wakeup.action.ARRIVAL_CONFIRM"
         const val ACTION_DISMISS = "com.swpp.wakeup.action.ARRIVAL_DISMISS"
+        const val ACTION_REROUTE_DISMISS = "com.swpp.wakeup.action.REROUTE_DISMISS"
+        private const val REQUEST_REROUTE_DISMISS = 2003
+
+        /** 경로 바꾸기 제안 알림의 [무시] */
+        fun rerouteDismissIntent(context: Context): PendingIntent = pending(
+            context,
+            ACTION_REROUTE_DISMISS,
+            REQUEST_REROUTE_DISMISS,
+        )
 
         /**
          * 요청 코드를 동작마다 다르게 준다.

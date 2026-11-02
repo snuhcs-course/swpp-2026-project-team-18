@@ -228,6 +228,10 @@ open class FakeEventsApi : EventsApi {
     override suspend fun delete(id: Long): Response<Unit> = unexpected("delete")
     override suspend fun recompute(id: Long): Response<EventDto> = unexpected("recompute")
     override suspend fun patch(id: Long, body: okhttp3.RequestBody): Response<EventDto> = unexpected("patch")
+    override suspend fun reroute(
+        id: Long,
+        body: com.swpp.wakeup.data.remote.RerouteRequest,
+    ): Response<com.swpp.wakeup.data.remote.RerouteResponse> = unexpected("reroute")
     override suspend fun skip(id: Long): Response<EventDto> = unexpected("skip")
     override suspend fun unskip(id: Long): Response<EventDto> = unexpected("unskip")
     override suspend fun importCalendar(body: CalendarImportRequest): Response<CalendarImportResponse> =

@@ -66,6 +66,13 @@ data class LiveRoute(
     /** [isAlternative] 일 때 선택 경로보다 몇 분 빠른가. */
     val fasterMinutes: Int?,
     val path: List<GeoPoint>,
+    /**
+     * 기준 경로로 지금 가면 일정 시작보다 몇 분 늦는가(서버 `arrival.late_minutes`). 안 늦으면 0,
+     * 구버전 서버·옛 디스크 사본이면 null. 디스크에 저장되므로 nullable 로 둔다(Gson 기본값 무시).
+     */
+    val lateMinutes: Int? = null,
+    /** 늦을 때 더 일찍 닿는 경로(서버 `switch_suggestion`). 없으면 null */
+    val suggestion: SwitchSuggestion? = null,
 ) {
     /**
      * 지도 아래에 적을 한 줄.

@@ -153,6 +153,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val alarmUpdatingId: Long? = null,
         /** "안 감" 표시·되돌리기를 저장하는 중인 일정. 그동안 다른 표시·알람 스위치를 막는다 */
         val skipUpdatingId: Long? = null,
+        /** 이동 중 경로를 바꾸는 중인 일정. 그동안 [이 경로로 바꾸기] 를 막는다 */
+        val rerouteUpdatingId: Long? = null,
+        /**
+         * 마지막으로 경로를 바꾼 일정과 그 시각. 그보다 먼저 받은 현재-위치 경로로는 카드를
+         * 내놓지 않는다 — 바꾸기 전 경로를 기준으로 계산한 제안이다([AppliedReroute.hides]).
+         */
+        val rerouteApplied: AppliedReroute? = null,
 
         /** 아래 목록 값은 지금 시각으로 다시 그린 것이다([HomeList]) */
         val sections: List<EventSection> = emptyList(),
@@ -240,6 +247,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * @property undoSkipEventId 있으면 "되돌리기" 를 단다. 누르면 그 일정의 "안 감" 표시를 되돌린다
      */
     data class HomeNotice(val id: Long, val message: String, val undoSkipEventId: Long? = null)
+
+    // Partly AI-generated (Claude)
+    /** 이동 중 경로를 바꾼 일정과 시각(벽시계 ms) */
+    data class AppliedReroute(val eventId: Long, val atMillis: Long) {
+        /** 이 현재-위치 경로가 바꾸기 전에 받은 것인가. 그러면 그 제안·지각 분은 옛 경로 기준이다 */
+        fun hides(snapshot: LiveRouteStore.Snapshot): Boolean =
+            snapshot.eventId == eventId && snapshot.fetchedAtMillis <= atMillis
+    }
 
     // Partly AI-generated (Claude)
     /**
@@ -542,6 +557,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val tripArrival: StateFlow<TripLiveState.Arrival?> = TripLiveState.arrival
 
     /**
+     * 서비스가 받은 최신 현재-위치 경로. 늦을 때의 경로 바꾸기 카드가 읽는다
+     * ([com.swpp.wakeup.domain.model.RerouteAlert.banner]). (Partly AI-generated (Claude))
+     */
+    val liveRoute: StateFlow<LiveRouteStore.Snapshot?> = TripLiveState.liveRoute
+
+    /**
      * 이번 실행에서 준비 시간 온보딩을 이미 띄웠는가.
      *
      * [refresh] 는 화면을 되돌아올 때마다 불린다. 이 플래그가 없으면 값을
@@ -818,6 +839,32 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(pendingObservations = pendingObservationCount()) }
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 이동 중 [이 경로로 바꾸기](todo §2 "이동 중 늦으면 경로 바꾸기", reroute-api.md). 이번 이동만
+     * 바꾼다. 성공하면 추적 서비스가 다음 위치에서 바꾼 경로로 새 선을 받는다.
+     */
+    fun reroute(eventId: Long, routeKey: String) {
+        if (_state.value.rerouteUpdatingId != null) return
+        _state.update { it.copy(rerouteUpdatingId = eventId) }
+        val app = getApplication<Application>()
+        viewModelScope.launch {
+            when (val result = repository.reroute(eventId, routeKey, fromSuggestion = true)) {
+                is EventRepository.Result.Success -> {
+                    _state.update {
+                        it.copy(rerouteApplied = AppliedReroute(eventId, System.currentTimeMillis()))
+                    }
+                    runCatching { TripTrackingService.refreshLiveRoute(app, eventId) }
+                        .onFailure { Log.w(TAG, "경로 바꾼 뒤 추적 갱신 요청 실패", it) }
+                    notify("경로를 바꿨습니다. 곧 바꾼 경로로 다시 그립니다")
+                }
+
+                is EventRepository.Result.Failure -> notify("경로를 바꾸지 못했습니다. ${result.message}")
+            }
+            _state.update { it.copy(rerouteUpdatingId = null) }
+        }
+    }
+
     /** 홈 행·알람 결정 화면·스낵바 "되돌리기" */
     fun setSkipped(eventId: Long, skipped: Boolean) = runSkip(eventId, skipped) {}
 
@@ -1062,6 +1109,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun openAlarmDecision(eventId: Long) {
         _nav.update { it.copy(stack = it.stack + AppRoute.AlarmDecision(eventId), forward = true) }
         loadPlan(eventId)
+    }
+
+    // Partly AI-generated (Claude)
+    /** 이동 중 알림에서 그 일정 화면으로. 이미 그 화면이면 다시 쌓지 않는다 */
+    fun openTrip(eventId: Long) {
+        if (_nav.value.current == AppRoute.AlarmDecision(eventId)) return
+        openAlarmDecision(eventId)
     }
 
     fun openRiskChoice(eventId: Long) {

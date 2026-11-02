@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.domain.model.ArrivalOutlook
+import com.swpp.wakeup.domain.model.RerouteBanner
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.home.HomeViewModel
@@ -100,6 +101,12 @@ fun AlarmDecisionScreen(
     onArrive: (() -> Unit)? = null,
     /** "일정 수정"(event-edit-api.md). null 이면 그리지 않는다 */
     onEdit: (() -> Unit)? = null,
+    /** 이동 중 늦을 때의 경로 바꾸기 카드([com.swpp.wakeup.domain.model.RerouteAlert.banner]). null 이면 없다 */
+    rerouteBanner: RerouteBanner? = null,
+    /** [이 경로로 바꾸기]. 경로 key 를 받는다 */
+    onReroute: (String) -> Unit = {},
+    /** 경로를 바꾸는 중 */
+    rerouteBusy: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -192,6 +199,8 @@ fun AlarmDecisionScreen(
                     freshness = freshness,
                     onArrive = onArrive,
                 )
+                // 늦는다는 전망 바로 아래에 바꿀 길을 둔다(Figma ⑦ 변형 `491:9`).
+                rerouteBanner?.let { RerouteCard(banner = it, onReroute = onReroute, busy = rerouteBusy) }
             }
 
             routeMap?.let { map ->

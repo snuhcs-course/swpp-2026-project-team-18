@@ -54,6 +54,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.domain.model.ArrivalOutlook
+import com.swpp.wakeup.domain.model.RerouteAlert
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripEta
 import com.swpp.wakeup.domain.model.TripStage
@@ -96,6 +97,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private var openMorning by mutableStateOf(false)
+    private var openEventId by mutableStateOf<Long?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,6 +116,8 @@ class MainActivity : ComponentActivity() {
         val welcomeNickname = intent.getStringExtra(EXTRA_WELCOME_NICKNAME)
         // 알람을 해제하고 넘어온 경우. 아침 기록 화면으로 바로 들어간다.
         openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
+        // 경로 바꾸기 제안 알림을 눌러 온 경우. 그 일정의 알람 결정 화면으로 간다.
+        openEventId = intent.openEventExtra()
 
         setContent {
             JitTheme {
@@ -123,6 +127,11 @@ class MainActivity : ComponentActivity() {
                     onMorningOpened = {
                         openMorning = false
                         intent.removeExtra(EXTRA_OPEN_MORNING)
+                    },
+                    openEventId = openEventId,
+                    onEventOpened = {
+                        openEventId = null
+                        intent.removeExtra(EXTRA_OPEN_EVENT)
                     },
                     onLoggedOut = ::backToLogin,
                 )
@@ -135,7 +144,10 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         // 알람 해제는 CLEAR_TOP + SINGLE_TOP으로 이미 열린 홈을 재사용한다.
         openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
+        openEventId = intent.openEventExtra()
     }
+
+    private fun Intent.openEventExtra(): Long? = getLongExtra(EXTRA_OPEN_EVENT, -1L).takeIf { it > 0L }
 
     private fun backToLogin() {
         startActivity(
@@ -167,6 +179,17 @@ class MainActivity : ComponentActivity() {
                 .putExtra("morning_event_id", eventId)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        /** 알림에서 한 일정의 알람 결정 화면으로 바로 들어갈 때의 일정 id */
+        const val EXTRA_OPEN_EVENT = "open_event_id"
+
+        // Partly AI-generated (Claude)
+        /** 이동 중 알림(경로 바꾸기 제안)에서 그 일정 화면으로. [morningIntent] 와 같은 이유로 홈을 재사용한다 */
+        fun eventIntent(context: android.content.Context, eventId: Long): Intent =
+            Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_OPEN_EVENT, eventId)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }
 
@@ -177,6 +200,8 @@ private fun MainHost(
     welcomeNickname: String?,
     openMorning: Boolean,
     onMorningOpened: () -> Unit,
+    openEventId: Long?,
+    onEventOpened: () -> Unit,
     onLoggedOut: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel()
@@ -188,6 +213,7 @@ private fun MainHost(
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
     val tripArrival by viewModel.tripArrival.collectAsStateWithLifecycle()
+    val liveRouteSnapshot by viewModel.liveRoute.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
@@ -388,6 +414,14 @@ private fun MainHost(
         }
     }
 
+    // 경로 바꾸기 제안 알림을 눌렀다. 아침 기록과 같은 이유로 한 번만 연다.
+    LaunchedEffect(openEventId) {
+        openEventId?.let {
+            viewModel.openTrip(it)
+            onEventOpened()
+        }
+    }
+
     // 캘린더 권한은 **사용자가 가져오기를 누를 때만** 요청한다. 앱을 처음 열
     // 때 함께 묶어 요청하면 무엇에 쓰는지 모르는 상태로 거절하게 된다.
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
@@ -541,6 +575,16 @@ private fun MainHost(
                             ArrivalOutlook.of(p.startAtMillis, remaining, now)
                         }
                     }
+                    // 이동 중 늦으면 바꿀 길(todo §2, Figma ⑦ 변형 `491:9`). 서비스가 받은 최신
+                    // 현재-위치 경로로 정한다. 낡았거나 경로를 바꾸기 전에 받은 것이면 내지 않는다.
+                    val rerouteBanner = liveRouteSnapshot
+                        ?.takeIf {
+                            stage == TripStage.IN_TRANSIT &&
+                                it.eventId == route.eventId &&
+                                it.isFresh(nowMillis) &&
+                                state.rerouteApplied?.hides(it) != true
+                        }
+                        ?.let { RerouteAlert.banner(it.route) }
                     AlarmDecisionScreen(
                         plan = plan,
                         onBack = viewModel::goBack,
@@ -565,6 +609,9 @@ private fun MainHost(
                         skipBusy = state.skipUpdatingId != null,
                         onArrive = { viewModel.markArrived(route.eventId) },
                         onEdit = { viewModel.openEditEvent(route.eventId) },
+                        rerouteBanner = rerouteBanner,
+                        onReroute = { key -> viewModel.reroute(route.eventId, key) },
+                        rerouteBusy = state.rerouteUpdatingId == route.eventId,
                     )
                 }
 

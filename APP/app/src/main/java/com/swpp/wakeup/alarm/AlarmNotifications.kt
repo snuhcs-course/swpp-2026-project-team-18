@@ -34,8 +34,20 @@ object AlarmNotifications {
      */
     const val CHANNEL_ARRIVAL = "jit.arrival"
 
+    /**
+     * 이동 중 경로 바꾸기 제안 채널. 늦을 때만, 경로마다 한 번 뜨는 **헤드업** 알림이라
+     * IMPORTANCE_HIGH 다. 추적 채널(LOW)에 두면 상태바에만 숨어 바꿀 때를 놓친다.
+     */
+    const val CHANNEL_REROUTE = "jit.reroute"
+
     /** 알람 알림 id. 한 번에 하나만 울리므로 고정값을 쓴다. */
     const val NOTIFICATION_ALARM = 1001
+
+    /** 경로 바꾸기 제안 알림 id. 한 번에 하나만 둔다(새 제안이 앞 것을 갈아 끼운다) */
+    const val NOTIFICATION_REROUTE = 1004
+
+    /** 경로 바꾸기 제안 본문을 눌러 여는 화면의 요청 코드. 다른 알림의 열기와 겹치지 않게 둔다 */
+    private const val REQUEST_REROUTE_OPEN = 3004
 
     /** 이동 추적 포그라운드 서비스 알림 id. */
     const val NOTIFICATION_TRIP = 1002
@@ -105,6 +117,54 @@ object AlarmNotifications {
                 vibrationPattern = longArrayOf(0, 200)
             }
         )
+
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_REROUTE,
+                "경로 바꾸기 제안",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "이동 중 지금 경로로 늦을 때 더 일찍 닿는 경로를 알려 준다"
+                // 소리 없이 진동과 헤드업만. 이동 중 큰 소리는 방해가 된다.
+                setSound(null, null)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 250, 150, 250)
+            }
+        )
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 경로 바꾸기 제안(헤드업). [바꾸기] 는 이번 이동만 바꾸고([com.swpp.wakeup.sensing.TripTrackingService]),
+     * [무시] 는 닫기만 한다. 같은 경로는 다시 띄우지 않는다([com.swpp.wakeup.domain.model.RerouteAlert]).
+     */
+    fun rerouteNotification(
+        context: Context,
+        eventId: Long,
+        title: String,
+        text: String,
+        switchIntent: PendingIntent?,
+        dismissIntent: PendingIntent,
+    ): Notification {
+        // 본문을 누르면 그 일정의 알람 결정 화면(진행률·경로 바꾸기 카드)으로 간다.
+        val open = PendingIntent.getActivity(
+            context,
+            REQUEST_REROUTE_OPEN,
+            com.swpp.wakeup.MainActivity.eventIntent(context, eventId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(context, CHANNEL_REROUTE)
+            .setSmallIcon(R.drawable.ic_notification_alarm)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_NAVIGATION)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .apply { if (switchIntent != null) addAction(0, "바꾸기", switchIntent) }
+            .addAction(0, "무시", dismissIntent)
+            .build()
     }
 
     /**
