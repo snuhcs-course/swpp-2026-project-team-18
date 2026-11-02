@@ -161,6 +161,8 @@ object AlarmNotifications {
          * 바뀌는데, 이미 집을 나선 사람에게는 틀린 표시다.
          */
         phase: TripPhaseLabel? = null,
+        /** "도착했어요". GPS 가 도착을 못 잡았을 때 사용자가 끝낸다. null 이면 달지 않는다 */
+        arriveIntent: PendingIntent? = null,
     ): Notification {
         val open = PendingIntent.getActivity(
             context,
@@ -182,6 +184,7 @@ object AlarmNotifications {
             .setSilent(true)
             .setContentIntent(open)
             .apply {
+                if (arriveIntent != null) addAction(0, "도착했어요", arriveIntent)
                 if (stopIntent != null) addAction(0, "추적 중지", stopIntent)
             }
             .build()

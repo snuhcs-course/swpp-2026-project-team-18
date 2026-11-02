@@ -55,12 +55,16 @@ data class TripObservationInput(
     val detector: String = DETECTOR_GPS,
     /** 판정 시각. ISO 8601 (오프셋 포함) */
     @SerializedName("observed_at") val observedAt: String,
-    val lat: Double,
-    val lng: Double,
-    /** 판정에 쓴 fix 의 오차 반경(m). 서버가 50m 초과를 거부한다 */
-    @SerializedName("accuracy_m") val accuracyM: Double,
-    /** 기준점까지 거리(m). 출발은 집, 도착은 목적지 기준 */
-    @SerializedName("distance_m") val distanceM: Double,
+    /**
+     * 위치. **수동 도착(`detector=manual`)은 없을 수 있다.** 그때는 lat·lng 를 둘 다
+     * 빼고 보낸다(서버 제약 `obs_lat_lng_together`). GPS 는 넷 다 필수다.
+     */
+    val lat: Double?,
+    val lng: Double?,
+    /** 판정에 쓴 fix 의 오차 반경(m). 서버가 GPS 의 50m 초과를 거부한다. 수동은 아무 값이나 받는다 */
+    @SerializedName("accuracy_m") val accuracyM: Double?,
+    /** 기준점까지 거리(m). 출발은 집, 도착은 목적지 기준. 모르면 null */
+    @SerializedName("distance_m") val distanceM: Double?,
     /**
      * 목적지 반경 안에서 머문 시간(초). 도착에만 있고 출발은 null.
      *
@@ -104,8 +108,9 @@ data class TripObservationDto(
     @SerializedName("kind_label") val kindLabel: String?,
     val detector: String?,
     @SerializedName("observed_at") val observedAt: String,
-    val lat: Double,
-    val lng: Double,
+    /** 수동 도착은 서버가 위치 없이 돌려줄 수 있다 */
+    val lat: Double?,
+    val lng: Double?,
     @SerializedName("accuracy_m") val accuracyM: Double?,
     @SerializedName("distance_m") val distanceM: Double?,
     /** 반경 안에서 머문 시간(초). 도착이 아니거나 옛 관측이면 null */

@@ -801,6 +801,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // --- "안 감" 표시 (skip-event-api.md §6) --------------------------------
 
+    // Partly AI-generated (Claude)
+    /**
+     * "도착했어요"(수동 도착, todo §2). 추적 중이면 서비스가 마지막 위치를 붙여 기록한다.
+     * 화면은 [TripLiveState.arrival] 이 바뀌면서 "도착" 으로 넘어가고 홈 행도 다시 그려진다.
+     */
+    fun markArrived(eventId: Long) {
+        runCatching { TripTrackingService.markArrived(getApplication(), eventId) }
+            .onFailure { Log.e(TAG, "수동 도착 기록 실패", it) }
+        _state.update { it.copy(pendingObservations = pendingObservationCount()) }
+    }
+
     /** 홈 행·알람 결정 화면·스낵바 "되돌리기" */
     fun setSkipped(eventId: Long, skipped: Boolean) = runSkip(eventId, skipped) {}
 

@@ -2,6 +2,7 @@ package com.swpp.wakeup.ui.alarm
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,6 +80,8 @@ fun TripProgressCard(
     arrivalAt: String?,
     /** "3분 전 갱신". 위치가 낡았으면 사용자가 그것을 알아야 한다 */
     freshness: String?,
+    /** "도착했어요". null 이면 그리지 않는다. 가는 중일 때만 보인다([TripStage.canMarkArrived]) */
+    onArrive: (() -> Unit)? = null,
 ) {
     JitCard(padding = 14.dp, gap = 8.dp) {
         Text("개인 진행률", color = JitColor.TextSecondary, fontSize = 11.sp)
@@ -102,6 +106,27 @@ fun TripProgressCard(
             else -> stageHint(stage) to JitColor.TextSecondary
         }
         Text(text = note.first, color = note.second, fontSize = 10.sp)
+
+        // GPS 가 도착을 못 잡았을 때의 보조(todo §2 "도착 판정 버튼", Figma ④-c `471:9`).
+        // 도착이 확인되면 단계가 ARRIVED 로 바뀌어 사라진다.
+        if (onArrive != null && stage.canMarkArrived) {
+            Text(
+                text = "도착했어요",
+                color = JitColor.Accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .testTag("trip_arrive")
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(role = Role.Button, onClick = onArrive)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+            Text(
+                text = "도착이 확인되면(자동·수동) 사라짐. 추적 알림에도 같은 버튼이 있음",
+                color = JitColor.TextSecondary,
+                fontSize = 9.sp,
+            )
+        }
     }
 }
 

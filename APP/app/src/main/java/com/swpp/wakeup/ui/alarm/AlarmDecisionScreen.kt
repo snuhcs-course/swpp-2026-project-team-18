@@ -103,6 +103,8 @@ fun AlarmDecisionScreen(
     onUnskip: () -> Unit = {},
     /** 표시를 저장하는 중. 두 버튼을 막는다 */
     skipBusy: Boolean = false,
+    /** "도착했어요"(수동 도착). null 이면 버튼을 그리지 않는다 */
+    onArrive: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -193,6 +195,7 @@ fun AlarmDecisionScreen(
                     // 전망이 있으면 예상 도착 시각을, 없으면 계획한 도착 예정을 쓴다.
                     arrivalAt = arrivalClock ?: plan.arrivalAt,
                     freshness = freshness,
+                    onArrive = onArrive,
                 )
             }
 

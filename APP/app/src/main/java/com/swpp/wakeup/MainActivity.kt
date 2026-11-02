@@ -562,6 +562,7 @@ private fun MainHost(
                         onSkip = { viewModel.setSkipped(route.eventId, true) },
                         onUnskip = { viewModel.setSkipped(route.eventId, false) },
                         skipBusy = state.skipUpdatingId != null,
+                        onArrive = { viewModel.markArrived(route.eventId) },
                     )
                 }
 

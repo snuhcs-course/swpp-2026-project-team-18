@@ -88,8 +88,16 @@ class TripTrackingService : Service() {
      */
     private var movingSinceMillis: Long? = null
 
+    /** "도착했어요" 를 누른 시각. 누르지 않았으면 null. 그 뒤에는 GPS 도착만 잠시 더 기다린다 */
+    private var manualArrivedAtMillis: Long? = null
+
     private val deadlineRunnable = Runnable {
         Log.i(TAG, "마감 시각이 지나 추적을 멈춘다")
+        stopSelf()
+    }
+
+    private val manualGraceRunnable = Runnable {
+        Log.i(TAG, "수동 도착 뒤 기다림이 끝나 추적을 멈춘다")
         stopSelf()
     }
 
@@ -145,6 +153,12 @@ class TripTrackingService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (intent?.action == ACTION_MANUAL_ARRIVE) {
+            handleManualArrival(intent.getLongExtra(EXTRA_EVENT_ID, -1L))
+            // 추적 중이 아니었으면 이 시작은 이것 하나로 끝난다.
+            if (schedule == null) stopSelf()
+            return START_NOT_STICKY
+        }
 
         val raw = intent?.getStringExtra(EXTRA_SCHEDULE)
         val parsed = raw?.let {
@@ -186,6 +200,8 @@ class TripTrackingService : Service() {
             TripLiveState.clear()
         }
         movingSinceMillis = null
+        manualArrivedAtMillis = null
+        handler.removeCallbacks(manualGraceRunnable)
 
         schedule = parsed
         // 화면이 "이 일정을 추적 중인가" 를 안다. 아침 기록 화면의 안내 문구와
@@ -231,9 +247,45 @@ class TripTrackingService : Service() {
         return START_REDELIVER_INTENT
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * "도착했어요"(화면 버튼·알림 버튼). GPS 가 도착을 못 잡았을 때의 보조다.
+     *
+     * 최근 위치를 붙여 기록하고 화면에 바로 "도착" 을 알린다. GPS 는 [MANUAL_GRACE_MILLIS]
+     * 동안만 더 본다 — 그 사이 GPS 도착이 나면 서버가 그쪽을 먼저 쓰고, 오래 켜 두면
+     * 배터리만 먹는다.
+     */
+    private fun handleManualArrival(eventId: Long) {
+        if (eventId <= 0L) return
+        val current = schedule
+        val now = System.currentTimeMillis()
+        if (current == null || current.eventId != eventId) {
+            // 다른 일정을 추적 중이거나 추적 중이 아니다. 위치 없이 기록만 한다.
+            ManualArrival.record(this, eventId, fix = null, destination = null, nowMillis = now)
+            return
+        }
+        val fence = geofence
+        if (fence?.phase == TripGeofence.Phase.ARRIVED || manualArrivedAtMillis != null) return
+
+        val destination = current.destLat?.let { lat -> current.destLng?.let { lng -> GeoPoint(lat, lng) } }
+        val recorded = ManualArrival.record(
+            context = this,
+            eventId = eventId,
+            fix = fence?.lastAcceptedFix,
+            destination = destination,
+            nowMillis = now,
+        )
+        if (!recorded) return
+        manualArrivedAtMillis = now
+        scope.launch { queue.flush() }
+        updateNotification(TITLE_ARRIVED, "${current.eventLine} · 도착을 기록했다")
+        handler.postDelayed(manualGraceRunnable, MANUAL_GRACE_MILLIS)
+    }
+
     override fun onDestroy() {
         handler.removeCallbacks(deadlineRunnable)
         handler.removeCallbacks(blindRunnable)
+        handler.removeCallbacks(manualGraceRunnable)
         liveRouteSessionGeneration++
         runCatching { fused.removeLocationUpdates(callback) }
         // 남은 관측을 마지막으로 한 번 올려 본다. scope 를 바로 닫으면
@@ -390,6 +442,8 @@ class TripTrackingService : Service() {
             TripGeofence.isUsable(fix) -> armBlindTimer()
         }
 
+        // 수동으로 도착을 기록했으면 알림은 "도착 기록함" 에 둔다. GPS 도착만 더 기다린다.
+        if (manualArrivedAtMillis != null) return
         refreshProgressNotification(current, fence, fix.atMillis)
     }
 
@@ -572,6 +626,15 @@ class TripTrackingService : Service() {
         ) == PackageManager.PERMISSION_GRANTED
         if (!canPost) return
 
+        // 이동 중이고 아직 도착이 없을 때만 "도착했어요" 를 단다. GPS 가 도착을 못 잡으면
+        // 사용자가 알림에서 바로 끝낼 수 있다(todo §2 "도착 판정 버튼").
+        val arriveIntent = schedule?.eventId
+            ?.takeIf {
+                phase == AlarmNotifications.TripPhaseLabel.IN_TRANSIT && manualArrivedAtMillis == null &&
+                    TripLiveState.arrivalFor(it) == null
+            }
+            ?.let(::arrivePendingIntent)
+
         runCatching {
             NotificationManagerCompat.from(this).notify(
                 AlarmNotifications.NOTIFICATION_TRIP,
@@ -581,6 +644,7 @@ class TripTrackingService : Service() {
                     text = text,
                     stopIntent = stopPendingIntent(),
                     phase = phase,
+                    arriveIntent = arriveIntent,
                 ),
             )
         }
@@ -722,11 +786,30 @@ class TripTrackingService : Service() {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
+    /** 알림의 "도착했어요". 이동 중일 때만 단다. */
+    private fun arrivePendingIntent(eventId: Long): PendingIntent = PendingIntent.getService(
+        this,
+        1,
+        Intent(this, TripTrackingService::class.java)
+            .setAction(ACTION_MANUAL_ARRIVE)
+            .putExtra(EXTRA_EVENT_ID, eventId),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
     companion object {
         private const val TAG = "TripTrackingService"
 
         /** 단계를 아직 모르거나 단정할 수 없을 때의 알림 제목 */
         private const val TITLE_TRACKING = "이동 기록 중"
+
+        /** 수동 도착 뒤의 알림 제목 */
+        private const val TITLE_ARRIVED = "도착 기록함"
+
+        /** 수동 도착 뒤 GPS 도착을 더 기다리는 시간 */
+        private const val MANUAL_GRACE_MILLIS = 3 * 60_000L
+
+        const val ACTION_MANUAL_ARRIVE = "com.swpp.wakeup.action.TRIP_MANUAL_ARRIVE"
+        const val EXTRA_EVENT_ID = "event_id"
 
         const val ACTION_START = "com.swpp.wakeup.action.TRIP_START"
         const val ACTION_STOP = "com.swpp.wakeup.action.TRIP_STOP"
@@ -754,6 +837,26 @@ class TripTrackingService : Service() {
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_SCHEDULE, Gson().toJson(schedule))
             context.startForegroundService(intent)
+        }
+
+        // Partly AI-generated (Claude)
+        /**
+         * "도착했어요". 이 일정을 추적 중이면 서비스가 마지막 위치를 붙여 기록하고,
+         * 아니면 위치 없이 바로 기록한다(서비스를 새로 띄우지 않는다).
+         */
+        fun markArrived(context: Context, eventId: Long) {
+            if (TripLiveState.trackingEventId.value != eventId) {
+                ManualArrival.record(context, eventId, fix = null, destination = null)
+                return
+            }
+            val intent = Intent(context, TripTrackingService::class.java)
+                .setAction(ACTION_MANUAL_ARRIVE)
+                .putExtra(EXTRA_EVENT_ID, eventId)
+            runCatching { context.startService(intent) }
+                .onFailure {
+                    Log.w(TAG, "추적 서비스에 수동 도착을 넘기지 못했다. 위치 없이 기록한다", it)
+                    ManualArrival.record(context, eventId, fix = null, destination = null)
+                }
         }
 
         fun stop(context: Context) {
