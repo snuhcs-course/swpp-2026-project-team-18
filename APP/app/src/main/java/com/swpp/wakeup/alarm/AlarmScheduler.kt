@@ -7,6 +7,7 @@ import android.content.Intent
 import android.util.Log
 import com.swpp.wakeup.data.remote.AlarmLogInput
 import com.swpp.wakeup.domain.model.AlarmSchedule
+import com.swpp.wakeup.sensing.DemoSession
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -36,9 +37,13 @@ class AlarmScheduler(private val context: Context) {
      * 병합하지 않고 갈아 끼운다.
      *
      * **이미 지난 알람은 등록하지 않는다.** 등록하면 즉시 울린다.
+     *
+     * HE 시연으로 당긴 일정은 당긴 시각으로 건다. 서버 일정은 그대로라서 여기서 더하지
+     * 않으면 다음 동기화가 시연 알람을 원래 시각으로 되돌린다([DemoSession]).
      */
-    fun sync(schedules: List<AlarmSchedule>) {
+    fun sync(serverSchedules: List<AlarmSchedule>) {
         val now = System.currentTimeMillis()
+        val schedules = DemoSession(context).applyTo(serverSchedules, now)
 
         // 이전에 등록한 것을 먼저 해제한다. eventId 가 PendingIntent 의
         // requestCode 라서 정확히 같은 알람만 지워진다.

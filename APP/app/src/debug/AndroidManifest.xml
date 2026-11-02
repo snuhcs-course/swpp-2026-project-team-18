@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Partly AI-generated (Claude) — API 37부터 앱이 로컬 백엔드(10.0.2.2·LAN IP)에 닿으려면
+         필요하다. 선언만으로는 부족하고 설치 뒤 한 번 허용해야 한다:
+         adb shell pm grant com.swpp.wakeup android.permission.ACCESS_LOCAL_NETWORK
+         debug 빌드에만 들어간다. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+</manifest>

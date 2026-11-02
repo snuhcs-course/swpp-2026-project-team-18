@@ -96,6 +96,10 @@ fun AlarmDecisionScreen(
     onRouteMapGestureEnd: (pan: Offset, zoom: Float, metersPerPixel: Double) -> Unit =
         { _, _, _ -> },
     onRouteMapRecenter: () -> Unit = {},
+    /** HE 시연 전용 시간 빨리감기. null 이면 버튼을 그리지 않는다(main 에 넣지 않는다) */
+    onDemoFastForward: (() -> Unit)? = null,
+    /** HE 시연 전용 이동하기. null 이면 버튼을 그리지 않는다 */
+    onDemoMove: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -160,6 +164,10 @@ fun AlarmDecisionScreen(
                 fontWeight = FontWeight.Bold,
             )
             Text(text = plan.eventPlace, color = JitColor.TextSecondary, fontSize = 11.sp)
+        }
+
+        if (plan.isComputed && (onDemoFastForward != null || onDemoMove != null)) {
+            DemoToolsCard(onFastForward = onDemoFastForward, onMove = onDemoMove)
         }
 
         if (plan.isComputed) {
@@ -247,6 +255,39 @@ fun AlarmDecisionScreen(
                     .clickable(onClick = onDelete)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
+        }
+    }
+}
+
+// Partly AI-generated (Claude)
+/** HE 시연 도구. 알람 10초 전으로 시간 감기, 출발·이동·도착 저절로 진행하기 */
+@Composable
+private fun DemoToolsCard(onFastForward: (() -> Unit)?, onMove: (() -> Unit)?) {
+    JitCard(padding = 14.dp, gap = 9.dp) {
+        Text(
+            text = "시연 도구",
+            color = JitColor.TextSecondary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            onFastForward?.let {
+                JitPrimaryButton(
+                    label = "시간 빨리감기",
+                    onClick = it,
+                    modifier = Modifier.weight(1f).testTag("demo_fast_forward"),
+                )
+            }
+            onMove?.let {
+                JitPrimaryButton(
+                    label = "이동하기",
+                    onClick = it,
+                    modifier = Modifier.weight(1f).testTag("demo_move"),
+                )
+            }
         }
     }
 }

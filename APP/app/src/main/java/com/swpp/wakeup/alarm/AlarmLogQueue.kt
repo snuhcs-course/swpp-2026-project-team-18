@@ -16,6 +16,7 @@ import com.swpp.wakeup.data.remote.AlarmLogInput
 import com.swpp.wakeup.data.remote.AlarmLogsApi
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.domain.model.AlarmSchedule
+import com.swpp.wakeup.sensing.DemoSession
 import com.swpp.wakeup.sensing.isoAt
 import java.io.IOException
 import java.util.UUID
@@ -71,10 +72,14 @@ class AlarmLogQueue(
     fun recordAll(logs: List<AlarmLogInput>) {
         if (logs.isEmpty()) return
         runCatching {
-            val keys = logs.map { it.clientUuid }.toSet()
-            val next = pending().filterNot { it.clientUuid in keys } + logs
+            // Partly AI-generated (Claude) — HE 시연 중인 일정은 학습에 넣지 않는다.
+            val demo = DemoSession(appContext)
+            val kept = logs.filterNot { demo.isDemo(it.event) }
+            if (kept.isEmpty()) return
+            val keys = kept.map { it.clientUuid }.toSet()
+            val next = pending().filterNot { it.clientUuid in keys } + kept
             write(next)
-            Log.i(TAG, "알람 기록 적재: ${logs.joinToString { it.kind }} (대기 ${next.size}건)")
+            Log.i(TAG, "알람 기록 적재: ${kept.joinToString { it.kind }} (대기 ${next.size}건)")
             JitWork.requestObservationUpload(appContext)
         }.onFailure { Log.w(TAG, "알람 기록을 적지 못했다. 알람은 그대로 동작한다", it) }
     }

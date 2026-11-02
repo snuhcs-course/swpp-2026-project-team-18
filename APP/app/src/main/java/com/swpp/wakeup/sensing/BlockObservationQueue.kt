@@ -73,6 +73,8 @@ class BlockObservationQueue(
      * 사라지지 않게 하려는 것이다.
      */
     fun enqueue(observation: BlockObservationInput) {
+        // Partly AI-generated (Claude) — HE 시연 중인 일정은 학습에 넣지 않는다.
+        if (DemoSession(appContext).isDemo(observation.event)) return
         val next = pending().filterNot { it.clientUuid == observation.clientUuid } +
             observation
         write(next)

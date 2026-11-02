@@ -9,6 +9,7 @@ import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.repository.EventRepository
+import com.swpp.wakeup.sensing.DemoSession
 import com.swpp.wakeup.sensing.TripLiveState
 
 /**
@@ -61,8 +62,12 @@ class RouteRefreshWorker(
                 Log.w(TAG, "등록된 알람을 읽지 못했다", it)
                 return Result.success()
             }
+        // Partly AI-generated (Claude) — HE 시연으로 당긴 알람은 재계산하지 않는다. 재계산은
+        // 서버에 계획 이력을 남긴다([DemoSession]).
+        val demo = DemoSession(applicationContext)
         val due = RouteRefreshDecision.dueEventIds(
-            alarms = registered.map { it.eventId to it.alarmAtMillis },
+            alarms = registered.filterNot { demo.isDemo(it.eventId) }
+                .map { it.eventId to it.alarmAtMillis },
             nowMillis = System.currentTimeMillis(),
             trackingEventId = TripLiveState.snapshot.value?.eventId,
         )

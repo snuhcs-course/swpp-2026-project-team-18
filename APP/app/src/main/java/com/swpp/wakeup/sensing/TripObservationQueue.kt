@@ -66,6 +66,8 @@ class TripObservationQueue(
      * 들어가지 않는다.
      */
     fun enqueue(observation: TripObservationInput) {
+        // Partly AI-generated (Claude) — HE 시연 중인 일정은 학습에 넣지 않는다.
+        if (DemoSession(appContext).isDemo(observation.event)) return
         val next = pending().filterNot { it.clientUuid == observation.clientUuid } +
             observation
         write(next)

@@ -88,6 +88,28 @@ class TripTrackingService : Service() {
      */
     private var movingSinceMillis: Long? = null
 
+    // Partly AI-generated (Claude) — HE 시연 전용([DemoTrip]). main 에 넣지 않는다.
+    /** 시연 이동 중이면 도착 결과 시각을 늘리는 시계. 실제 추적이면 null */
+    private var demoClock: DemoTrip.DemoClock? = null
+    private var demoPoints: List<GeoPoint> = emptyList()
+    private var demoIndex = 0
+    private val demoRunnable = object : Runnable {
+        override fun run() {
+            val point = demoPoints.getOrNull(demoIndex++) ?: return
+            handleFix(
+                LocationFix(
+                    lat = point.lat,
+                    lng = point.lng,
+                    accuracyM = DemoTrip.ACCURACY_M,
+                    atMillis = System.currentTimeMillis(),
+                )
+            )
+            if (schedule != null && geofence?.phase != TripGeofence.Phase.ARRIVED) {
+                handler.postDelayed(this, DemoTrip.STEP_MILLIS)
+            }
+        }
+    }
+
     private val deadlineRunnable = Runnable {
         Log.i(TAG, "마감 시각이 지나 추적을 멈춘다")
         stopSelf()
@@ -171,6 +193,7 @@ class TripTrackingService : Service() {
         }
 
         val redelivered = flags and START_FLAG_REDELIVERY != 0
+        val demo = intent?.action == ACTION_DEMO_MOVE
 
         // 정상 ACTION_START 는 새 추적 세션의 경계다. 같은 event id가 다음 날
         // 다시 쓰이더라도 어제 좌표의 경로를 잠깐 보여 주지 않는다. 반대로
@@ -186,6 +209,13 @@ class TripTrackingService : Service() {
             TripLiveState.clear()
         }
         movingSinceMillis = null
+        // 이전 세션(실제 추적이든 시연이든)의 위치 출처를 끊는다.
+        handler.removeCallbacks(demoRunnable)
+        demoClock = null
+        if (startedUpdates) {
+            runCatching { fused.removeLocationUpdates(callback) }
+            startedUpdates = false
+        }
 
         schedule = parsed
         geofence = TripGeofence(
@@ -206,7 +236,13 @@ class TripTrackingService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        handler.removeCallbacks(deadlineRunnable)
         handler.postDelayed(deadlineRunnable, remaining)
+
+        if (demo && intent != null) {
+            startDemo(parsed, intent)
+            return START_NOT_STICKY
+        }
 
         requestUpdates(highAccuracy = geofence?.phase != TripGeofence.Phase.BEFORE_DEPARTURE)
 
@@ -230,6 +266,7 @@ class TripTrackingService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(deadlineRunnable)
+        handler.removeCallbacks(demoRunnable)
         handler.removeCallbacks(blindRunnable)
         liveRouteSessionGeneration++
         runCatching { fused.removeLocationUpdates(callback) }
@@ -257,6 +294,20 @@ class TripTrackingService : Service() {
     // --- 위치 처리 ---------------------------------------------------------
 
     private fun handleLocation(location: Location) {
+        // 시연 이동 중에는 실제 위치를 섞지 않는다.
+        if (demoClock != null) return
+        handleFix(
+            LocationFix(
+                lat = location.latitude,
+                lng = location.longitude,
+                // accuracy 를 보고하지 않는 fix 는 신뢰할 수 없다. 최악으로 본다.
+                accuracyM = if (location.hasAccuracy()) location.accuracy else Float.MAX_VALUE,
+                atMillis = if (location.time > 0) location.time else System.currentTimeMillis(),
+            )
+        )
+    }
+
+    private fun handleFix(fix: LocationFix) {
         val current = schedule ?: return
         val fence = geofence ?: return
 
@@ -264,14 +315,6 @@ class TripTrackingService : Service() {
             stopSelf()
             return
         }
-
-        val fix = LocationFix(
-            lat = location.latitude,
-            lng = location.longitude,
-            // accuracy 를 보고하지 않는 fix 는 신뢰할 수 없다. 최악으로 본다.
-            accuracyM = if (location.hasAccuracy()) location.accuracy else Float.MAX_VALUE,
-            atMillis = if (location.time > 0) location.time else System.currentTimeMillis(),
-        )
 
         val phaseBefore = fence.phase
         val decision = fence.offer(fix)
@@ -372,12 +415,13 @@ class TripTrackingService : Service() {
 
                 fence.departureMissed -> Log.i(TAG, "첫 위치부터 집 밖이다. 출발 시각은 기록하지 않는다")
             }
-            requestUpdates(highAccuracy = true)
+            if (demoClock == null) requestUpdates(highAccuracy = true)
         }
 
         // 판정에 쓸 위치를 받았으면 "위치를 못 받는 중" 시계를 다시 잰다. 나간 뒤에는 필요 없다.
         when {
             fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE -> handler.removeCallbacks(blindRunnable)
+            demoClock != null -> Unit
             TripGeofence.isUsable(fix) -> armBlindTimer()
         }
 
@@ -396,6 +440,8 @@ class TripTrackingService : Service() {
         // Partly AI-generated (Claude) — 변환은 [tripObservationOf] 한곳에 둔다(JVM 테스트).
         // 도착이면 체류 시간과 반경 진입 시각(db-schema.md A1)이 함께 큐에 들어간다.
         // 멱등 키(client_uuid)는 여기서, 판정 시점에 만든다.
+        // 시연 이동은 서버로 보내지 않는다([DemoSession]).
+        if (demoClock != null) return
         val observation = tripObservationOf(
             eventId = current.eventId,
             kind = kind,
@@ -650,10 +696,14 @@ class TripTrackingService : Service() {
      * 시스템이 그 알림을 함께 치워서 **아무도 결과를 보지 못했다.**
      */
     private fun postArrivalResult(current: AlarmSchedule, fix: LocationFix) {
+        // 시연 이동이면 계획한 이동 시간만큼 걸려 도착한 시각이다([DemoTrip]).
+        val arrivedAt = demoClock?.map(fix.atMillis) ?: fix.atMillis
+        // 시연이 끝났다. 다음 동기화부터 이 일정의 원래 알람이 다시 걸린다.
+        if (demoClock != null) runCatching { DemoSession(this).finish(current.eventId) }
         // 알림 권한과 무관하게 결과를 보존한다. onDestroy는 현재 위치만 지운다.
-        TripLiveState.recordArrival(current.eventId, fix.atMillis)
+        TripLiveState.recordArrival(current.eventId, arrivedAt)
         val verdict = ArrivalVerdict(
-            arrivedAtMillis = fix.atMillis,
+            arrivedAtMillis = arrivedAt,
             // 약속 시각은 일정 시작 시각이다. 계획이 추정한 도착 예정
             // (arriveAtMillis) 이 아니다 — 근거는 [ArrivalVerdict] 에 있다.
             appointmentMillis = current.startAtMillis,
@@ -686,6 +736,35 @@ class TripTrackingService : Service() {
         }.onFailure { Log.e(TAG, "도착 결과 알림 실패", it) }
 
         Log.i(TAG, "도착 결과: ${verdict.headline} (${verdict.detail()})")
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * HE 시연 이동을 시작한다. 실제 위치를 받지 않고 [DemoTrip] 의 점을 1초마다 넣는다.
+     *
+     * 출발지·목적지·경로선은 이 일정에 세팅된 값이다. 판정·관측·알림·경로 갱신은 실제
+     * 추적과 같은 길([handleFix])을 지난다.
+     */
+    private fun startDemo(current: AlarmSchedule, intent: Intent) {
+        val path = intent.getStringExtra(EXTRA_DEMO_PATH)?.let { raw ->
+            runCatching { gson.fromJson(raw, Array<GeoPoint>::class.java)?.toList() }.getOrNull()
+        }.orEmpty()
+        val home = current.homeLat?.let { lat -> current.homeLng?.let { GeoPoint(lat, it) } }
+        val dest = current.destLat?.let { lat -> current.destLng?.let { GeoPoint(lat, it) } }
+
+        demoPoints = DemoTrip.points(home, dest, path)
+        demoIndex = 0
+        val homeSteps = if (home != null) DemoTrip.HOME_FIXES else 0
+        demoClock = DemoTrip.DemoClock.planned(
+            nowMillis = System.currentTimeMillis(),
+            departByMillis = current.departByMillis,
+            arriveAtMillis = current.arriveAtMillis,
+            walkSteps = demoPoints.size - 1 - homeSteps,
+            homeFixes = homeSteps,
+        )
+        handler.removeCallbacks(blindRunnable)
+        handler.post(demoRunnable)
+        Log.i(TAG, "시연 이동 시작: 일정 ${current.eventId}, 점 ${demoPoints.size}개 (경로선 ${path.size}점)")
     }
 
     private fun initialNotificationText(current: AlarmSchedule): String = buildString {
@@ -721,7 +800,10 @@ class TripTrackingService : Service() {
 
         const val ACTION_START = "com.swpp.wakeup.action.TRIP_START"
         const val ACTION_STOP = "com.swpp.wakeup.action.TRIP_STOP"
+        /** HE 시연 전용. 실제 위치 대신 경로를 따라 가짜 위치를 넣는다([DemoTrip]) */
+        const val ACTION_DEMO_MOVE = "com.swpp.wakeup.action.TRIP_DEMO_MOVE"
         private const val EXTRA_SCHEDULE = "schedule"
+        private const val EXTRA_DEMO_PATH = "demo_path"
 
         /** 출발을 기다리는 동안. 150m 를 구분하면 되므로 느슨하게 본다. */
         private const val IDLE_INTERVAL_MS = 30_000L
@@ -744,6 +826,20 @@ class TripTrackingService : Service() {
             val intent = Intent(context, TripTrackingService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_SCHEDULE, Gson().toJson(schedule))
+            context.startForegroundService(intent)
+        }
+
+        // Partly AI-generated (Claude)
+        /**
+         * HE 시연 이동. 추적 중이면 그 세션을 시연으로 갈아 끼운다.
+         *
+         * @param path 이 일정의 경로선(`AlarmPlanView.routePath`). 비면 직선으로 간다
+         */
+        fun startDemoMove(context: Context, schedule: AlarmSchedule, path: List<GeoPoint>) {
+            val intent = Intent(context, TripTrackingService::class.java)
+                .setAction(ACTION_DEMO_MOVE)
+                .putExtra(EXTRA_SCHEDULE, Gson().toJson(schedule))
+                .putExtra(EXTRA_DEMO_PATH, Gson().toJson(path))
             context.startForegroundService(intent)
         }
 

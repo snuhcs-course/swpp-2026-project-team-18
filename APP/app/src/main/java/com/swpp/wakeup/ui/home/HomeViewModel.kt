@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.alarm.AlarmLogQueue
 import com.swpp.wakeup.alarm.AlarmScheduler
+import com.swpp.wakeup.alarm.ScheduledAlarmStore
 import com.swpp.wakeup.BuildConfig
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.calendar.DeviceCalendar
@@ -50,6 +51,7 @@ import com.swpp.wakeup.domain.model.MapCameraMath
 import com.swpp.wakeup.domain.model.RouteMapProjection
 import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.domain.model.TripStage
+import com.swpp.wakeup.sensing.DemoSession
 import com.swpp.wakeup.sensing.GeoPoint
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.sensing.TripGeofence
@@ -632,6 +634,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         maybeAskOnboarding(data)
+        demoSchedules = data.schedules
         syncAlarms(data.schedules, fromCache = data.fromCache)
     }
 
@@ -1676,6 +1679,69 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update { it.copy(error = r.message) }
             }
         }
+    }
+
+    // --- HE 시연 도구 (main 에 넣지 않는다) -------------------------------
+
+    /** 마지막으로 받은 홈의 알람 계획(서버 값 그대로). 시연이 일정 값을 찾는 곳 */
+    private var demoSchedules: List<AlarmSchedule> = emptyList()
+
+    // Partly AI-generated (Claude)
+    /**
+     * 시간 빨리감기. 서버 일정은 그대로 두고 기기 알람만 10초 뒤로 건다([DemoSession]).
+     * 울리는 것은 진짜 알람 경로다. 화면의 일정 시각은 서버 값 그대로 보인다.
+     */
+    fun demoFastForward(eventId: Long) {
+        val app = getApplication<Application>()
+        val schedule = demoSchedules.firstOrNull { it.eventId == eventId }
+        if (schedule == null) {
+            _state.update { it.copy(error = "알람이 켜진 일정만 빨리감을 수 있어요.") }
+            return
+        }
+        runCatching {
+            DemoSession(app).fastForward(schedule)
+            AlarmScheduler(app).sync(demoSchedules)
+        }
+            .onSuccess { demoToast("10초 뒤 알람이 울려요") }
+            .onFailure { e -> _state.update { it.copy(error = "빨리감기 실패: ${e.message}") } }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 이동하기. 이 일정의 출발지 → 경로선 → 목적지를 따라 가짜 위치를 넣어 출발 판정과
+     * 도착 판정이 실제 추적 서비스에서 일어나게 한다([com.swpp.wakeup.sensing.DemoTrip]).
+     */
+    fun demoMove(eventId: Long) {
+        val app = getApplication<Application>()
+        // 알람이 울린 뒤 홈을 다시 받으면 지난 알람은 기기 사본에서 빠진다. 그때는 마지막
+        // 홈 목록에서 찾는다. 빨리감기로 당긴 시각을 더해 쓴다.
+        val session = DemoSession(app)
+        val schedule = runCatching { ScheduledAlarmStore(app).find(eventId) }.getOrNull()
+            ?: session.applyTo(demoSchedules).firstOrNull { it.eventId == eventId }
+        when {
+            schedule == null ->
+                _state.update { it.copy(error = "이 일정의 알람이 기기에 등록돼 있지 않아요. 빨리감기를 먼저 눌러 주세요.") }
+
+            !schedule.canTrack ->
+                _state.update { it.copy(error = "출발지·목적지 좌표가 없어 이동을 보여 줄 수 없어요.") }
+
+            !LocationPermissions.granted(app) ->
+                _state.update { it.copy(error = "위치 권한이 있어야 이동 기록을 시작할 수 있어요.") }
+
+            else -> {
+                val path = _plan.value?.takeIf { it.eventId == eventId }?.routePath.orEmpty()
+                runCatching {
+                    session.markMoving(eventId)
+                    TripTrackingService.startDemoMove(app, schedule, path)
+                }
+                    .onSuccess { demoToast("이동을 시작해요") }
+                    .onFailure { e -> _state.update { it.copy(error = "이동 시작 실패: ${e.message}") } }
+            }
+        }
+    }
+
+    private fun demoToast(text: String) {
+        android.widget.Toast.makeText(getApplication(), text, android.widget.Toast.LENGTH_SHORT).show()
     }
 
     // --- 경로 선택 (Figma ⑬) ---------------------------------------------

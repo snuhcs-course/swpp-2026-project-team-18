@@ -6,6 +6,7 @@ import com.swpp.wakeup.alarm.AlarmLogQueue
 import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.alarm.ScheduledAlarmStore
 import com.swpp.wakeup.sensing.BlockObservationQueue
+import com.swpp.wakeup.sensing.DemoSession
 import com.swpp.wakeup.sensing.TripObservationQueue
 import com.swpp.wakeup.sensing.TripLiveState
 import com.swpp.wakeup.sensing.TripTrackingService
@@ -77,6 +78,8 @@ object LocalStores {
         // Partly AI-generated (Claude) — 알람 기록 큐(db-schema.md A3). 앞 사용자의 기상 기록이다.
         runCatching { AlarmLogQueue(app).wipe() }
             .onFailure { Log.w(TAG, "알람 기록 큐 삭제 실패", it) }
+        runCatching { DemoSession(app).wipe() }
+            .onFailure { Log.w(TAG, "시연 표시 삭제 실패", it) }
 
         runCatching { MorningSessionStore(app).wipe() }
             .onFailure { Log.w(TAG, "아침 기록 삭제 실패", it) }

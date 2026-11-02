@@ -142,11 +142,14 @@ android {
             // ApiClient 가 런타임에 고른다.
             buildConfigField("String", "EMULATOR_BASE_URL", "\"$emulatorBaseUrl\"")
             buildConfigField("boolean", "DEV_TOOLS", "true")
+            // HE 시연 도구(알람 결정 화면의 시간 빨리감기·이동하기). he-demo 브랜치 전용.
+            buildConfigField("boolean", "HE_DEMO", "true")
         }
         release {
             buildConfigField("String", "BASE_URL", "\"$apiBaseUrl\"")
             buildConfigField("String", "EMULATOR_BASE_URL", "\"$apiBaseUrl\"")
             buildConfigField("boolean", "DEV_TOOLS", "false")
+            buildConfigField("boolean", "HE_DEMO", "false")
             optimization {
                 enable = false
             }
@@ -161,6 +164,8 @@ android {
             buildConfigField("String", "BASE_URL", "\"$qaUrl\"")
             buildConfigField("String", "EMULATOR_BASE_URL", "\"$qaUrl\"")
             manifestPlaceholders["usesCleartextTraffic"] = (!qaUrl.startsWith("https://")).toString()
+            // e2e 화면 테스트에는 시연 버튼을 띄우지 않는다.
+            buildConfigField("boolean", "HE_DEMO", "false")
         }
     }
 

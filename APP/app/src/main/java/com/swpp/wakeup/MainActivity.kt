@@ -532,6 +532,12 @@ private fun MainHost(
                         onRouteMapFit = viewModel::fitRouteMap,
                         onRouteMapGestureEnd = viewModel::onRouteMapGestureEnd,
                         onRouteMapRecenter = viewModel::onRouteMapRecenter,
+                        onDemoFastForward = if (BuildConfig.HE_DEMO) {
+                            { viewModel.demoFastForward(route.eventId) }
+                        } else null,
+                        onDemoMove = if (BuildConfig.HE_DEMO) {
+                            { viewModel.demoMove(route.eventId) }
+                        } else null,
                     )
                 }
 
