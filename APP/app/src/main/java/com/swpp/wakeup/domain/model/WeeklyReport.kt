@@ -74,6 +74,10 @@ data class WeeklyReportView(
     val learningLabel: String?,
     /** "안 감으로 표시한 일정 2건은 빼고 계산함". 없으면 null */
     val skippedNote: String? = null,
+    /** 이 주에 한 안전 버퍼 조정의 이유 문장(서버 `reason_text`). 조정이 없으면 빈 목록 */
+    val bufferNotes: List<String> = emptyList(),
+    /** "지금 안전 버퍼 8분 · 지각 기록으로 조정됨". [bufferNotes] 가 있을 때만 */
+    val bufferCurrentLabel: String? = null,
 ) {
     val hasArrivals: Boolean get() = arrivedCount > 0
 

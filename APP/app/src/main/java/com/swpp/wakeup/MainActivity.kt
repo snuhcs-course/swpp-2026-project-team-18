@@ -544,7 +544,6 @@ private fun MainHost(
                         onBack = viewModel::goBack,
                         onChangeRisk = { viewModel.openRiskChoice(route.eventId) },
                         onEditBlocks = { viewModel.openEventBlocks(route.eventId) },
-                        onRecompute = { viewModel.recomputePlan(route.eventId) },
                         onDelete = { viewModel.deleteEvent(route.eventId) },
                         modifier = Modifier.padding(innerPadding),
                         nickname = state.nickname,

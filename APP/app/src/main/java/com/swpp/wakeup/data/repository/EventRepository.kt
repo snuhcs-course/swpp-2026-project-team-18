@@ -45,6 +45,7 @@ import com.swpp.wakeup.domain.model.RouteMode
 import com.swpp.wakeup.domain.model.RouteOption
 import com.swpp.wakeup.domain.model.RouteSegment
 import com.swpp.wakeup.domain.model.RouteSegments
+import com.swpp.wakeup.domain.model.RouteBasis
 import com.swpp.wakeup.domain.model.StaticMapScale
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.sensing.GeoPoint
@@ -1240,6 +1241,10 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     // prep_source 로 알려 준다. 0분 줄을 그리면 "준비를 순식간에 한다" 로 읽힌다.
     val prepApplies = plan.prepSource != AlarmPlanDto.PREP_NOT_FROM_HOME
 
+    // 경로 기준은 "계산 방법" 맨 위 한 줄로 따로 보인다(todo §2 "적용 알람 정보 줄이기").
+    // 그 줄이 있으면 이동 줄에서 같은 노선을 되풀이하지 않는다.
+    val routeBasis = RouteBasis.label(plan.routeKey, plan.routeDetail, plan.routeSummary, plan.routeDistanceM)
+
     val rows = buildList {
         plan.prepMinutes?.takeIf { prepApplies }?.let {
             add(PlanRow("준비 시간", it, prepNote(plan, prepBlocks.size), PlanRow.Kind.PREP))
@@ -1253,13 +1258,15 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
                 // 집이 아닌 출발지면 **먼저** 밝힌다. 이동 시간이 그 좌표
                 // 기준으로 계산됐는데 화면이 감추면 알람 시각이 설명되지 않는다.
                 originLabel?.takeIf { l -> l.isNotBlank() }?.let { l -> add("${l}에서 출발") }
-                plan.routeDetail?.takeIf(String::isNotBlank)?.let(::add)
-                plan.routeSummary?.takeIf(String::isNotBlank)?.let(::add)
+                if (routeBasis == null) {
+                    plan.routeDetail?.takeIf(String::isNotBlank)?.let(::add)
+                    plan.routeSummary?.takeIf(String::isNotBlank)?.let(::add)
+                }
             }
             add(PlanRow(label, it, bits.joinToString(" · "), PlanRow.Kind.TRAVEL))
         }
         plan.bufferMinutes?.let {
-            add(PlanRow("안전 버퍼", it, "고정값 · 문 앞에서 실제 출발까지의 여유", PlanRow.Kind.BUFFER))
+            add(PlanRow("안전 버퍼", it, bufferNote(plan.bufferSource), PlanRow.Kind.BUFFER))
         }
     }
 
@@ -1329,7 +1336,18 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         altRouteLabel = plan.altRouteLabel?.takeIf { it.isNotBlank() },
         altFasterMinutes = plan.altFasterMinutes?.takeIf { it > 0 },
         skipped = skipped,
+        routeBasis = routeBasis,
     )
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 안전 버퍼 줄의 근거. 서버 `buffer_source` 는 `fixed`(기본 10분) 또는 `learned`(지각 이력으로
+ * 조정, todo §1 "안전 버퍼 10분 조정")다. 모르는 값은 고정값으로 본다.
+ */
+internal fun bufferNote(source: String?): String = when (source) {
+    AlarmPlanDto.BUFFER_LEARNED -> "지각 기록으로 조정됨 · 문 앞에서 실제 출발까지의 여유"
+    else -> "고정값 · 문 앞에서 실제 출발까지의 여유"
 }
 
 /**

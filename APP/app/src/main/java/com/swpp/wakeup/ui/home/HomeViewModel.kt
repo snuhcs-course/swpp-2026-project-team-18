@@ -1827,8 +1827,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * 기본 포함값을 바꾼다. 정의 모드 전용이고 **즉시 저장**한다.
      *
-     * 이건 재계산을 유발하지 않으므로(서버가 정의 변경에 자동 재계산을 걸지
-     * 않는다) 요청마다 보내도 쿼터 문제가 없다.
+     * 서버가 블록 수정 뒤 앞으로의 알람을 카카오 호출 없이 다시 계산한다. 그래서 저장되면
+     * 홈을 다시 받아 기기 알람까지 맞춘다([refresh]).
      */
     fun toggleIncludedByDefault(id: Long) {
         val block = _routine.value.blocks.firstOrNull { it.id == id } ?: return
@@ -1846,12 +1846,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             when (val r = routines.setIncludedByDefault(id, next)) {
-                is RoutineRepository.RoutineResult.Success -> _routine.update { state ->
-                    state.copy(
-                        blocks = state.blocks.map { if (it.id == id) r.data else it },
-                        original = state.original + (id to r.data.checked),
-                        notice = DEFINITION_NOTICE,
-                    )
+                is RoutineRepository.RoutineResult.Success -> {
+                    _routine.update { state ->
+                        state.copy(
+                            blocks = state.blocks.map { if (it.id == id) r.data else it },
+                            original = state.original + (id to r.data.checked),
+                            notice = DEFINITION_NOTICE,
+                        )
+                    }
+                    // 서버가 앞으로의 알람을 다시 계산했다. 홈과 기기 알람을 맞춘다.
+                    refresh()
                 }
 
                 is RoutineRepository.RoutineResult.Failure -> _routine.update { state ->
@@ -1984,6 +1988,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     // 응답 하나를 끼워 넣는 것보다 확실하다.
                     loadBlocks(_routine.value.eventId)
                     _routine.update { it.copy(notice = DEFINITION_NOTICE) }
+                    // 서버가 앞으로의 알람을 다시 계산했다. 안 하면 6시간 정기 동기화까지
+                    // 홈에 예전 시각이 보인다(todo §2 "다시 계산 버튼 정리" ②).
+                    refresh()
                 }
 
                 is RoutineRepository.RoutineResult.Failure -> {
@@ -2010,31 +2017,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     _routine.update { it.copy(saving = false, editing = null) }
                     loadBlocks(_routine.value.eventId)
                     _routine.update { it.copy(notice = DEFINITION_NOTICE) }
+                    refresh()
                 }
 
                 is RoutineRepository.RoutineResult.Failure -> _routine.update {
                     it.copy(saving = false, error = r.message)
                 }
-            }
-        }
-    }
-
-    /**
-     * 이 일정의 알람을 다시 계산한다.
-     *
-     * 블록 **정의**를 고친 뒤 지금 반영하고 싶을 때 쓴다. 서버가 카카오 경로
-     * API 를 부르므로 사용자가 명시적으로 눌렀을 때만 호출한다.
-     */
-    fun recomputePlan(eventId: Long) {
-        viewModelScope.launch {
-            when (val r = repository.recomputePlan(eventId)) {
-                is EventRepository.Result.Success -> {
-                    _plan.value = r.data
-                    refresh()
-                }
-
-                is EventRepository.Result.Failure ->
-                    _state.update { it.copy(error = r.message) }
             }
         }
     }
@@ -3703,11 +3691,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /**
          * 블록 **정의**를 고쳤을 때의 안내.
          *
-         * 서버가 정의 변경에 자동 재계산을 걸지 않는다(카카오 쿼터). 그 사실을
-         * 알리지 않으면 사용자는 알람 시각이 그대로인 것을 고장으로 여긴다.
+         * 서버가 블록 추가·수정·삭제 뒤 앞으로의 일정을 카카오 호출 없이 다시 계산한다
+         * (todo §1 "다시 계산 버튼 없애도 되게", `planning/refresh.py`). 저장 뒤 홈을 다시
+         * 받아 기기 알람도 맞춘다. (Partly AI-generated (Claude))
          */
-        const val DEFINITION_NOTICE =
-            "저장함 · 이미 계산된 알람은 그대로다. 알람 화면의 \"다시 계산\" 으로 반영한다"
+        const val DEFINITION_NOTICE = "저장함 · 앞으로의 알람에 반영했음"
 
         /**
          * 가져오기 화면에서 장소를 찾아 볼 최대 건수.

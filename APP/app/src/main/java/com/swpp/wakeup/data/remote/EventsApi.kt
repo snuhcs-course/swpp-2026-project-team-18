@@ -594,7 +594,8 @@ data class AlarmPlanDto(
      *
      * `travel_time_source` 는 `kakao_transit` 등 카카오 경로 추정이고, 이동 기록으로
      * 보정되면 `+observed_route`/`+observed_global` 이 붙는다(④ 이동 줄의 첫 마디),
-     * `prep_source` 는 `onboarding`/`default`, `buffer_source` 는 `fixed` 다.
+     * `prep_source` 는 `onboarding`/`default`, `buffer_source` 는 `fixed`(기본값) 또는
+     * `learned`(지각 이력으로 조정, [BUFFER_LEARNED]) 다.
      * 화면에서 "이건 학습된 값" 처럼 오해하지 않게 서버가 명시해 준다.
      */
     @SerializedName("prep_source") val prepSource: String?,
@@ -652,6 +653,10 @@ data class AlarmPlanDto(
         const val BASIS_TRAVEL_ONLY = "travel_only"
 
         /** [AlarmPlanDto.prepSource] 의 값. */
+        /** 안전 버퍼를 지각 이력으로 조정했다. 아니면 `fixed` */
+        const val BUFFER_LEARNED = "learned"
+        const val BUFFER_FIXED = "fixed"
+
         const val PREP_OBSERVED = "observed"
         const val PREP_DECLARED_RANGE = "declared_range"
         const val PREP_DECLARED_POINT = "declared_point"

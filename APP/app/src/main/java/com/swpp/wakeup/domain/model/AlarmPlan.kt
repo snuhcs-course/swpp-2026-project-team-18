@@ -198,6 +198,8 @@ data class AlarmPlanView(
     val altFasterMinutes: Int? = null,
     /** "안 감" 으로 표시한 일정. 알람이 울리지 않고 리포트·학습에서 빠진다 */
     val skipped: Boolean = false,
+    /** "계산 방법" 의 경로 기준 한 줄. 예 "9호선 → 2호선 · 6.0km 기준"([RouteBasis]) */
+    val routeBasis: String? = null,
 ) {
     val isComputed: Boolean get() = status == "ok" && alarmAt != null
 

@@ -68,13 +68,6 @@ fun AlarmDecisionScreen(
     onChangeRisk: () -> Unit,
     /** 이 아침에 할 블록 고르기. 저장하면 이 일정만 즉시 재계산된다 */
     onEditBlocks: () -> Unit,
-    /**
-     * 알람만 다시 계산.
-     *
-     * 루틴 블록 **정의**를 고친 뒤 지금 반영하고 싶을 때 쓴다. 서버가 카카오
-     * 경로 API 를 부르므로 사용자가 누를 때만 호출한다.
-     */
-    onRecompute: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     /** 진행 바에 쓸 이름과 아바타 두 글자 */
@@ -229,6 +222,8 @@ fun AlarmDecisionScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
             ) {
+                // "다시 계산" 은 없앴다. 서버가 블록 정의·밤 학습 뒤 알아서 다시 계산하고,
+                // 임박한 일정은 경로 갱신 워커가 15분마다 새로 받는다(todo §2 ③).
                 Text(
                     text = "지각 위험 바꾸기",
                     color = JitColor.TextSecondary,
@@ -238,16 +233,6 @@ fun AlarmDecisionScreen(
                         .clip(RoundedCornerShape(8.dp))
                         .testTag("risk_entry")
                         .clickable(onClick = onChangeRisk)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
-                Text(
-                    text = "다시 계산",
-                    color = JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onRecompute)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
@@ -352,48 +337,10 @@ private fun RecommendedAlarmCard(plan: AlarmPlanView) {
             )
         }
 
+        // 이 카드는 알람 시각과 정시 확률만 둔다(todo §2 "적용 알람 정보 줄이기", Figma ④ `1:18`).
+        // 경로 기준·계산 시각·경로 대체 경고는 "계산 방법" 으로 옮겼다. 도착 예정은 그 카드의
+        // 합계 줄에 이미 있다.
         ProbabilityRow(plan)
-
-        // 어느 경로를 기준으로 계산했는지. 알람 시각만 보면 "왜 이 시각인가" 의
-        // 절반(이동 시간)이 어디서 왔는지 알 수 없다.
-        val basis = listOfNotNull(
-            plan.routeDetail?.takeIf { it.isNotBlank() },
-            plan.routeDistanceM?.let { "%.1fkm".format(it / 1000.0) },
-        )
-        if (basis.isNotEmpty()) {
-            Text(
-                text = basis.joinToString(" · ") + " 기준",
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
-            )
-        }
-        plan.arrivalLine?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
-        }
-
-        // 이 시각을 **언제** 계산했는지. 백그라운드가 임박한 일정의 경로를
-        // 15분마다 다시 조회하므로 알람 시각과 이동 시간이 조용히 바뀐다.
-        // 표시하지 않으면 사용자는 화면의 숫자가 방금 받은 것인지 어제 계산한
-        // 것인지 모르고, 배차가 바뀌었는데도 낡은 값을 믿고 움직인다.
-        computedAgoLabel(plan.computedAtMillis)?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
-        }
-
-        // 고른 경로가 사라져 다른 경로로 계산했다.
-        //
-        // **조용히 넘기면 안 된다.** 사용자는 자기가 고른 노선대로 계산된
-        // 알람이라고 믿고 그 노선을 타러 간다. 서버는 이 사실을
-        // `route_choice_honored=false` 로 알려 주는데 화면이 읽지 않고 있었다.
-        if (plan.routeFellBack) {
-            JitDotLabel(
-                text = "고른 경로가 없어져 다른 경로로 계산함. 경로를 다시 고르는 것이 정확함",
-                dotColor = JitColor.Amber,
-                textColor = JitColor.Amber,
-                fontSize = 10,
-                bold = false,
-                dotSize = 6.dp,
-            )
-        }
     }
 }
 
@@ -454,6 +401,28 @@ private fun ProbabilityRow(plan: AlarmPlanView) {
 private fun BreakdownCard(plan: AlarmPlanView) {
     JitCard(padding = 14.dp, gap = 9.dp) {
         Text("계산 방법", color = JitColor.TextSecondary, fontSize = 11.sp)
+        // 어느 경로를 기준으로 계산했는지. 알람 시각만 보면 "왜 이 시각인가" 의
+        // 절반(이동 시간)이 어디서 왔는지 알 수 없다. 문장은 앱이 경로 key 로 만든다([RouteBasis]).
+        plan.routeBasis?.let {
+            Text(
+                text = it,
+                color = JitColor.TextPrimary,
+                fontSize = 11.sp,
+                modifier = Modifier.testTag("plan_route_basis"),
+            )
+        }
+        // 고른 경로가 사라져 다른 경로로 계산했다. **조용히 넘기면 안 된다.** 사용자는 자기가
+        // 고른 노선대로 계산된 알람이라고 믿고 그 노선을 타러 간다(`route_choice_honored=false`).
+        if (plan.routeFellBack) {
+            JitDotLabel(
+                text = "고른 경로가 없어져 다른 경로로 계산함. 경로를 다시 고르는 것이 정확함",
+                dotColor = JitColor.Amber,
+                textColor = JitColor.Amber,
+                fontSize = 10,
+                bold = false,
+                dotSize = 6.dp,
+            )
+        }
 
         // 항목별로 막대를 따로 그리면 길이가 **각자의 최대값 기준**이라 셋을
         // 서로 비교할 수 없다. 하나의 바를 비율대로 쪼개면 "이동이 준비의 1.5배"
@@ -496,6 +465,13 @@ private fun BreakdownCard(plan: AlarmPlanView) {
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
+        }
+        // 이 시각을 **언제** 계산했는지. 백그라운드가 임박한 일정의 경로를
+        // 15분마다 다시 조회하므로 알람 시각과 이동 시간이 조용히 바뀐다.
+        // 표시하지 않으면 사용자는 화면의 숫자가 방금 받은 것인지 어제 계산한
+        // 것인지 모르고, 배차가 바뀌었는데도 낡은 값을 믿고 움직인다.
+        computedAgoLabel(plan.computedAtMillis)?.let {
+            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
         }
     }
 }
@@ -767,7 +743,6 @@ private fun AlarmDecisionPreview() {
             onBack = {},
             onChangeRisk = {},
             onEditBlocks = {},
-            onRecompute = {},
             onDelete = {},
         )
     }
