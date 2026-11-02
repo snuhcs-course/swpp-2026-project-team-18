@@ -2,8 +2,8 @@
 브랜치 `front-iter3`, 기준 `origin/main` = `3d39fc8`(10-31). 11-03 에 `front-iter3`(`c527cea`)를 main 에 합쳤다. main 은 `dbe38da`(머지 커밋, 부모 `3d39fc8`·`c527cea`)이고 트리는 `c527cea` 와 같다. 그 뒤 11-03 밤 작업(아래 "11-03 노션 남은 프론트 항목")은 `front-iter3` 에서 이어 갔고 아직 main 에 없다. 백엔드가 `todo.md` §2 에 넘긴 일과 팀 회의 내용을 앱에 넣었다. 항목 번호는 [figma-changes.md](figma-changes.md) 의 번호와 같다(1~22 는 아래 절 제목, 5b·5c·19b 는 만들지 않음). 서버에 아직 없는 부분은 [backend-requests.md](backend-requests.md) 에 요청으로 적었다.
 
 ## 요약
-- 단위 테스트: main 기준 **739건 → 947건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml`, 최신 앱 커밋 `5adfeaa` 의 실행 결과). 877건은 `c527cea`(main 에 합친 시점)의 값이고, 11-03 밤에 70건이 늘었다(902 → 927 → 939 → 948 → 947).
-- 린트: 오류 0 / 경고 64 (기준선 62). 11-03 밤 커밋마다 `lintDebug` 를 돌렸고 `5adfeaa` 에서도 오류 0 이다. 늘어난 경고 2개는 어떤 것인지 확인하지 않았다(S1 커밋에서 생김).
+- 단위 테스트: main 기준 **739건 → 950건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml`, 최신 앱 커밋 `d79fb67` 의 실행 결과). 877건은 `c527cea`(main 에 합친 시점)의 값이고, 11-03 밤에 70건이 늘었다(902 → 927 → 939 → 948 → 947 → 950).
+- 린트: 오류 0 / 경고 62 (기준선과 같다). 11-03 밤 커밋마다 `lintDebug` 를 돌렸다. S1 커밋에서 늘었던 경고 2개는 `LastEmailStore` 의 UseKtx 였고 `d79fb67` 에서 고쳤다(64 → 62).
 - 기기 테스트(`androidTest`)는 컴파일(`compileDebugAndroidTestKotlin`, `assembleDebugAndroidTest`)만 확인했다. 기기에서 돌린 기록은 없다.
 - 기준선(11-01, 손대지 않은 브랜치): 단위 739건, 린트 오류 0 / 경고 62, 백엔드 pytest 1684건 통과.
 - 에뮬레이터 확인(11-02)과 main 대중교통 5개 확인(11-03)은 맨 아래에 적었다.
@@ -197,8 +197,9 @@
 | S3 ① 알람 전 더 빠른 경로 | `579ca42` | 939 | 0 / 64 |
 | S3 ② 알람 끌 때·출발 전 확인 | `c3235a7` | 948 | 0 / 64 |
 | S2 고침 | `5adfeaa` | 947 | 0 / 64 (오류 0) |
+| 리뷰 지적 m1~m4 고침 | `d79fb67` | 950 | 0 / 62 |
 
-기준은 `c527cea` 의 877건이다. 커밋마다 `testDebugUnitTest lintDebug assembleDebug compileDebugAndroidTestKotlin` 을 한 번 돌렸다. 코드 리뷰는 승인(막는 문제 없음)이고 사소한 지적 넷은 아래 "열린 것"에 적었다.
+기준은 `c527cea` 의 877건이다. 커밋마다 `testDebugUnitTest lintDebug assembleDebug compileDebugAndroidTestKotlin` 을 한 번 돌렸다. 코드 리뷰는 승인(막는 문제 없음)이고 사소한 지적 넷(m1~m4)은 `d79fb67` 에서 모두 고쳤다.
 
 ### S1. 이메일 계정 기능 — `1afd2ba` (Figma F-36 ~ F-41)
 - **바뀐 것**:
@@ -212,7 +213,7 @@
 - **확인**: 단위(서버는 가짜로 대체). 에뮬레이터에서 잘못된 이메일 안내, 보기/숨김 토글, 비밀번호 찾기에 입력한 이메일이 넘어가는 것, 설정의 비밀번호 변경 화면(칸 셋, 규칙 목록, 일치 확인), 로그아웃 뒤 이메일이 남는 것을 봤다.
 - **서버가 없을 때**: 세 엔드포인트가 아직 없어서(R3-9) 404·405 에는 "아직 서버에서 지원하지 않아요"를 보인다. 로컬 서버에서 이 문구가 나오는 것까지 확인했다. 코드를 보내고 바꾸는 성공 경로는 가짜 응답 단위 테스트로만 확인했다.
 - **정한 것**: 이메일 기억 파일 `jit_last_email.xml` 은 사용자별이 아니라 기기 단위다. 로그아웃·`wipeAll` 로 지우지 않고, 백업·기기 이전에서는 제외한다(`PrefsScopeAuditTest` 에 기록). 비밀번호 변경이 성공하면 서버가 모든 기기를 로그아웃시키므로 이 기기는 새 토큰을 저장한다. 저장에 실패하면 토큰을 지운다.
-- **열린 것**: R3-9 (서버). `AuthFlowTest`(기기 테스트)는 `login_email` 에 입력하는데 `@Before` 가 `LastEmailStore` 를 비우지 않아서, 이메일을 기억한 기기에서는 값이 이어 붙는다. 새 에뮬레이터를 쓰는 CI 에는 영향이 없다. 이메일 인증은 만들지 않았다(R3-10).
+- **열린 것**: R3-9 (서버). (고침 `d79fb67`, m2) `AuthFlowTest` 의 `launchLoggedOut()` 이 `LastEmailStore` 도 비운다. (m4) `LastEmailStore` 는 `prefs.edit {}` 를 쓴다. 이메일 인증은 만들지 않았다(R3-10).
 
 ### S2. 경로 정류장과 늦는 이유 — `d536853`, 고침 `5adfeaa` (Figma F-42)
 - **바뀐 것**: 이동 중 알람 결정 화면에 "경로 정류장" 카드(출발 → 승차 → 하차 → 도착)를 더했다. 시각은 실제 출발 시각에 카카오 구간 시간을 더한 예상이다. 출발 시각을 모르면 이름만 보이고 "출발 시각을 몰라 시각은 생략함"을 적는다. 늦을 때는 진행 카드에 이유 한 줄을 붙인다: "출발이 N분 늦었어요" 또는 "이동이 예상보다 N분 길어요". 둘 중 큰 쪽 하나만 적고, 차이가 2분 미만이거나 근거 숫자가 없으면 쓰지 않는다.
@@ -220,7 +221,7 @@
 - **테스트**: `LateCauseTest`(10), `CheckpointBasisTest`(5), `CheckpointRowsTest`(4), `BaseRouteSegmentsTest`(3), `TripLiveRouteBackgroundContractTest`(+1).
 - **확인**: 단위 + 에뮬레이터. 에뮬레이터에서 처음에는 정류장 카드가 안 나왔다. 원인은 정류장의 기준을 실시간 경로의 key 로 잡았는데, 실시간 경로는 현재 위치에서 다시 찾은 것이라 출발지 기준 후보 목록에 없었다. 후보 요청도 한 번 더 나갔다. `5adfeaa` 에서 적용한 경로 또는 계획한 경로의 정류장만 쓰게 고쳤다. 고친 뒤 카드에 출발 → 신림(2호선 승차) → 서울대입구(하차) → 서울대입구역3번출구(5513 승차) → 자연대.행정관입구(하차) → SNU(도착)가 보였다.
 - **보지 못한 것**: 늦는 이유 줄(에뮬레이터의 모의 이동이 정시였다), 시각이 붙은 정류장 목록(모의 GPS 가 집 반경 밖으로 튀어서 출발을 놓친 것으로 처리돼 시각이 빠졌다).
-- **열린 것**: 알림의 [바꾸기]로 경로를 바꾸면(`TripTrackingService.handleReroute`) 화면의 정류장 카드는 바꾼 경로가 아니라 계획한 경로의 정류장을 보인다. 앱 안 카드로 바꾸면 반영된다. 서비스에서 바꾼 key 를 `TripLiveState` 로 올리면 고칠 수 있다(리뷰 지적, 설계 3.2 가 허용한 동작).
+- **열린 것**: 알림의 [바꾸기]로 경로를 바꾸면(`TripTrackingService.handleReroute`) 화면의 정류장 카드는 바꾼 경로가 아니라 계획한 경로의 정류장을 보인다. 앱 안 카드로 바꾸면 반영된다. (고침 `d79fb67`, m1) 서비스가 바꾼 key 를 `TripLiveState.recordReroute` 로 올리고 `HomeViewModel` 이 이를 받아 `rerouteApplied` 에 채운다. 앱 안 카드도 같은 기록을 거친다. 기록이 null 이 되면(추적 종료) 화면 상태는 그대로 둔다.
 
 ### S3. 출발 전 재계획 — `579ca42`, `c3235a7` (Figma F-43 ~ F-45)
 - **바뀐 것**:
@@ -229,7 +230,7 @@
 - **파일**: `domain/model/{FasterRoute,PreDepartureCheck,UpcomingEvent,AlarmPlan}.kt`, `ui/alarm/{FasterRouteRow,AlarmDecisionScreen}.kt`, `ui/home/{HomeScreen,HomeViewModel}.kt`, `data/repository/EventRepository.kt`, `sensing/{TripLiveState,TripTrackingService}.kt`, `MainActivity.kt`.
 - **테스트**: `FasterRouteTest`(7), `FasterRouteMappingTest`(5), `PreDepartureCheckTest`(8), `RerouteRepositoryTest`(+1), `AppliedRerouteTest`(+2). 출발 전 확인 경로가 `liveRouteStore`·`publishLiveRoute`·`update` 를 건드리지 않는다는 소스 계약 테스트도 있다.
 - **확인**: 단위. 에뮬레이터에서는 알람을 울리고 끈 뒤 아침 기록 화면, 홈, 결정 화면이 죽지 않고 열리는 것까지만 봤다. 알람을 끌 때의 경로 확인은 화면으로 보이지 않았다. 더 빠른 경로 줄·카드, 출발 전 카드와 알림은 기기에서 보지 못했다.
-- **열린 것**: 서버가 이 동작을 알도록 하는 요청은 R3-11. 알림으로 한 번 알린 경로 key 는 출발 때 비워져서, 출발 전에 알린 같은 경로가 이동 중에 한 번 더 알림으로 올 수 있다(리뷰 지적, 설계는 한 번만).
+- **열린 것**: 서버가 이 동작을 알도록 하는 요청은 R3-11. (고침 `d79fb67`, m3) 알린 경로 key 를 출발 때 비우지 않아 같은 경로는 한 번의 이동에서 한 번만 알린다.
 
 ### S4. 지각 위험 바꾸기 확인
 - **확인**: 에뮬레이터에서 동작했다. 결정 화면의 τ 줄이 "적용 τ 0.90 · 수업 일정 기본값"이었고, 지각 위험 바꾸기에서 안전 3:45 / 보통 3:47 / 도박 3:51 이 보였다. "안전으로 계속하기" 뒤 알람이 3:45, τ 줄이 "적용 τ 0.97 · 직접 고른 값"이 됐고 서버는 `PATCH /api/events/4` 200, `dumpsys alarm` 으로 기기 알람이 03:47 → 03:45:01 로 옮겨진 것도 확인했다. 정시 도착 확률은 "아직 계산할 수 없음"으로 남는다(분산 데이터가 없어서, 예상된 동작).
