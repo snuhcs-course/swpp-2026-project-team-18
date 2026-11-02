@@ -57,6 +57,8 @@ class PrefsScopeAuditTest {
             "앞 사용자의 일정이 도착으로 보여 지금 계정의 홈에서 일정이 빠진다",
         "data/local/TripProgressStore.kt" to
             "앞 사용자의 이동 중 단계로 지금 계정의 추적이 출발을 건너뛴다",
+        "data/local/SavedHomesStore.kt" to
+            "앞 사용자의 집 좌표가 지금 계정의 출발지 목록에 보인다",
     )
 
     /**

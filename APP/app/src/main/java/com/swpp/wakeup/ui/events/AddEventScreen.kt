@@ -45,6 +45,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swpp.wakeup.domain.model.SavedHome
 import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.JitPickerValue
@@ -137,6 +138,9 @@ fun AddEventScreen(
     modifier: Modifier = Modifier,
     /** "여기서 자고 출발해요 (준비 시간 포함)". 출발지가 집이 아닐 때만 보인다 */
     onIncludePrepChange: (Boolean) -> Unit = {},
+    /** 기기에만 둔 다른 집. 출발지 검색을 열면 맨 위에 보인다(Figma ⑯ 변형 `498:9` ②) */
+    savedHomes: List<SavedHome> = emptyList(),
+    onOriginSavedHome: (SavedHome) -> Unit = {},
 ) {
     // 일정 수정이면 같은 화면을 수정 모드로 쓴다(Figma ⑫ 변형 `488:9`).
     val editing = state.isEditing
@@ -231,6 +235,26 @@ fun AddEventScreen(
             state.originError?.let { EndpointError(it, tag = "origin_error") }
             state.originNotice?.let { NoticeLine(it) }
             if (originSearching) {
+                // 다른 집(본가·기숙사)은 검색 맨 위에. 고르면 준비 시간을 넣은 채로 둔다.
+                savedHomes.forEach { home ->
+                    Text(
+                        text = "🏠 ${home.line}",
+                        color = JitColor.Accent,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .testTag("origin_saved_home")
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(JitRadius.Hint))
+                            .background(JitColor.Surface2)
+                            .clickable(enabled = enabled) {
+                                onOriginSavedHome(home)
+                                originSearching = false
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                }
                 // 현재 위치는 버튼을 늘리지 않고 검색 맨 위에 한 줄로 둔다.
                 Text(
                     text = "📍 현재 위치 사용",
@@ -414,7 +438,10 @@ fun HomeSetupScreen(
     onSkip: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 다른 집의 이름 칸(Figma ⑯ 변형 `498:9` ③). 기본 집에서는 그리지 않는다 */
+    onLabelChange: (String) -> Unit = {},
 ) {
+    val extra = state.target == HomeViewModel.HomeTarget.EXTRA
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -429,19 +456,29 @@ fun HomeSetupScreen(
             ),
         verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
     ) {
-        ScreenHeader(title = "집 주소", onBack = onBack, enabled = !state.submitting)
+        ScreenHeader(title = if (extra) "다른 집" else "집 주소", onBack = onBack, enabled = !state.submitting)
 
         Text(
-            text = "집이 어디인가요?",
+            text = if (extra) "다른 집은 어디인가요?" else "집이 어디인가요?",
             color = JitColor.TextPrimary,
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "출발지 설정",
+            text = if (extra) "이 기기에만 저장함 · 일정 출발지로 고를 수 있음" else "출발지 설정",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
+
+        if (extra) {
+            JitTextField(
+                label = "이름 (예: 본가·기숙사)",
+                inputTag = "home_setup_label",
+                value = state.label,
+                onValueChange = onLabelChange,
+                enabled = !state.submitting,
+            )
+        }
 
         PlacePicker(
             label = "주소 검색",
@@ -464,7 +501,7 @@ fun HomeSetupScreen(
         Spacer(Modifier.height(4.dp))
 
         JitPrimaryButton(
-            label = "이 주소로 저장",
+            label = if (extra) "이 집 저장" else "이 주소로 저장",
             modifier = Modifier.testTag("home_setup_submit"),
             onClick = onSubmit,
             enabled = state.canSubmit,

@@ -8,4 +8,6 @@
     <!-- 도착 기록과 이동 중 단계는 이 기기의 추적이 잠깐 쓰는 사본이다. 서버에 관측이 있다. -->
     <exclude domain="sharedpref" path="jit_arrivals.xml"/>
     <exclude domain="sharedpref" path="jit_trip_progress.xml"/>
+    <!-- 기기에만 둔 다른 집 좌표. 다른 기기의 계정과 섞이지 않게 옮기지 않는다. -->
+    <exclude domain="sharedpref" path="jit_saved_homes.xml"/>
 </full-backup-content>

@@ -345,9 +345,10 @@ private fun MainHost(
             // 건너뛴 경우에는 저장한 것이 없다. 준비 시간 온보딩과 같은 이유로
             // 확인 문구를 띄우지 않는다 — 저장되지 않은 것을 저장했다고 말한다.
             val saved = homeSetupState.saved
+            val extra = homeSetupState.target == HomeViewModel.HomeTarget.EXTRA
             viewModel.goBack()
             viewModel.resetHomeSetup()
-            if (saved) snackbarHostState.showSnackbar("집 주소를 저장했습니다")
+            if (saved) snackbarHostState.showSnackbar(if (extra) "다른 집을 저장했습니다" else "집 주소를 저장했습니다")
         }
     }
     LaunchedEffect(prepOnboardingState.done) {
@@ -670,6 +671,8 @@ private fun MainHost(
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                     onIncludePrepChange = viewModel::onAddIncludePrepChange,
+                    savedHomes = state.savedHomes,
+                    onOriginSavedHome = viewModel::onAddOriginSavedHome,
                 )
 
                 AppRoute.RouteChoice -> RouteChoiceScreen(
@@ -736,6 +739,7 @@ private fun MainHost(
                     onSkip = viewModel::skipHomeSetup,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
+                    onLabelChange = viewModel::onHomeLabelChange,
                 )
 
                 AppRoute.Settings -> SettingsScreen(
@@ -769,6 +773,10 @@ private fun MainHost(
                     },
                     onSocialUnlink = viewModel::unlinkSocial,
                     onRetryLoginMethods = viewModel::loadLoginMethods,
+                    // 기기에만 둔 다른 집(Figma ⑯ 변형 `498:9` ①)
+                    onAddExtraHome = viewModel::openExtraHomeSetup,
+                    onMakeHomeDefault = viewModel::makeSavedHomeDefault,
+                    onRemoveHome = viewModel::removeSavedHome,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                     calendarLink = calendarLinkState,

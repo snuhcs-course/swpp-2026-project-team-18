@@ -119,7 +119,6 @@ make the screen look finished while being untrue.
 
 - Replanning before departure ⑥
 - Group rooms ⑩⑪
-- More than one home (e.g. a family home)
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
 - User-defined tags (BE-21) and sleep-time calculation (BE-22)
 - Refresh-token rotation on the server stays off until this app version is deployed: the app now

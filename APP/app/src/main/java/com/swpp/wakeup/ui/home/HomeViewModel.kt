@@ -36,9 +36,12 @@ import com.swpp.wakeup.data.repository.RoutineRepository
 import com.swpp.wakeup.data.repository.ServerLogout
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.ArrivalLedger
+import com.swpp.wakeup.domain.model.SavedHome
+import com.swpp.wakeup.domain.model.SavedHomes
 import com.swpp.wakeup.domain.model.SocialLogin
 import com.swpp.wakeup.domain.model.SocialProvider
 import com.swpp.wakeup.ui.auth.SocialSignIn
+import com.swpp.wakeup.data.local.SavedHomesStore
 import com.swpp.wakeup.domain.model.CalibrationView
 import com.swpp.wakeup.domain.model.WeeklyReportView
 import com.swpp.wakeup.domain.model.AlarmSchedule
@@ -143,6 +146,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val liveRouteStore = LiveRouteStore(application)
 
     /**
+     * 기기에만 둔 다른 집(todo §2 "집 여러 개"). `init` 이 [reloadSavedHomes] 로 읽으므로 `init`
+     * 위에 둔다. (Partly AI-generated (Claude))
+     */
+    private val savedHomesStore = SavedHomesStore(application)
+
+    /**
      * 진행 중인 아침 기록. 없으면 null.
      *
      * 생성 시점에 디스크를 한 번 읽는다.
@@ -195,6 +204,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val loginMethodsFailed: Boolean = false,
         /** 연결·끊기 중인 제공자 */
         val socialLinkBusy: SocialProvider? = null,
+
+        /** 기기에만 둔 다른 집(최근 것이 앞). 설정과 일정 출발지에 보인다 */
+        val savedHomes: List<SavedHome> = emptyList(),
+        /** "기본으로" 를 서버에 저장하는 중인 다른 집 */
+        val savedHomeBusyId: String? = null,
 
         /** 집 위치 미설정이면 알람을 계산할 수 없다. 안내를 띄운다 */
         val hasHome: Boolean = true,
@@ -693,6 +707,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 알람 액티비티가 세션을 만들어 두었을 수 있다. 홈 카드가 보이려면
         // 여기서 한 번 읽어야 한다.
         reloadMorning()
+        reloadSavedHomes()
         // 서버 응답을 기다리지 않는다. 놓친 알람은 디스크 사본만으로 판별되고,
         // 오프라인이어도 출발 전에 알려야 한다.
         reloadMissedAlarm()
@@ -3533,6 +3548,93 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // Partly AI-generated (Claude)
     /**
+     * 출발지로 다른 집을 고른다(Figma ⑯ 변형 `498:9` ②). 그 집에서 자고 나서는 날이므로 준비 시간을
+     * 넣은 채로 둔다(`include_prep=true`). 사용자가 끌 수 있다.
+     */
+    fun onAddOriginSavedHome(home: SavedHome) {
+        onAddOriginSelected(home.toPlace())
+        _add.update { it.copy(includePrep = true) }
+    }
+
+    // --- 다른 집 (todo §2 "집 여러 개", 기기에만 저장) — Partly AI-generated (Claude) -------
+
+    private fun reloadSavedHomes() {
+        val homes = runCatching { savedHomesStore.all() }
+            .onFailure { Log.w(TAG, "다른 집 목록을 읽지 못했다", it) }
+            .getOrDefault(emptyList())
+        _state.update { it.copy(savedHomes = homes) }
+    }
+
+    /** "+ 다른 집 추가". 집 주소 화면(⑭)을 이름 칸과 함께 연다 */
+    fun openExtraHomeSetup() {
+        _homeSetup.value = HomeSetupState(target = HomeTarget.EXTRA)
+        openHomeSetup()
+    }
+
+    fun onHomeLabelChange(value: String) =
+        _homeSetup.update { it.copy(label = value.take(SavedHomes.LABEL_MAX), error = null) }
+
+    fun removeSavedHome(id: String) {
+        val next = SavedHomes.remove(_state.value.savedHomes, id)
+        if (!savedHomesStore.replace(next)) {
+            notify("다른 집을 지우지 못했습니다")
+            return
+        }
+        _state.update { it.copy(savedHomes = next) }
+        notify("다른 집을 지웠습니다")
+    }
+
+    /**
+     * "기본으로". 서버의 집을 이 집으로 바꾸고(알람이 다시 계산된다) 예전 집을 목록에 남긴다. 서버가
+     * 받지 못하면 아무것도 바꾸지 않는다.
+     */
+    fun makeSavedHomeDefault(id: String) {
+        val current = _state.value
+        if (current.savedHomeBusyId != null) return
+        val home = current.savedHomes.firstOrNull { it.id == id } ?: return
+        _state.update { it.copy(savedHomeBusyId = id) }
+        viewModelScope.launch {
+            when (val result = repository.setHome(label = home.name, lat = home.lat, lng = home.lng)) {
+                is EventRepository.Result.Success -> {
+                    val previous = current.homePlace?.let { place ->
+                        SavedHome(
+                            id = java.util.UUID.randomUUID().toString(),
+                            label = "이전 집",
+                            name = place.name,
+                            address = place.address,
+                            lat = place.lat,
+                            lng = place.lng,
+                        )
+                    }
+                    val next = SavedHomes.promote(_state.value.savedHomes, id, previous)
+                    savedHomesStore.replace(next)
+                    _state.update { it.copy(savedHomes = next, savedHomeBusyId = null) }
+                    notify(
+                        "기본 집을 ${home.label}${com.swpp.wakeup.domain.model.RerouteAlert.roParticle(home.label)} " +
+                            "바꿨습니다. 알람을 다시 계산합니다"
+                    )
+                    refresh()
+                }
+
+                is EventRepository.Result.Failure -> {
+                    _state.update { it.copy(savedHomeBusyId = null) }
+                    notify("기본 집을 바꾸지 못했습니다. ${result.message}")
+                }
+            }
+        }
+    }
+
+    private fun SavedHome.toPlace(): PlaceSearchItem = PlaceSearchItem(
+        kakaoPlaceId = null,
+        name = label.ifBlank { name },
+        address = address ?: name,
+        lat = lat,
+        lng = lng,
+        category = null,
+    )
+
+    // Partly AI-generated (Claude)
+    /**
      * 일정 수정 화면을 연다(todo §2 "알람 결정 후 수정 UI", event-edit-api.md). ⑫ 를 수정 모드로
      * 다시 쓴다. 서버의 지금 값을 채워 두고 저장할 때 바뀐 필드만 보낸다.
      */
@@ -3925,9 +4027,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * 않으면 건너뛴 사용자에게 "저장했습니다" 를 띄운다.
          */
         val saved: Boolean = false,
+        /** 기본 집(서버)인가, 기기에만 둘 다른 집인가(todo §2 "집 여러 개") */
+        val target: HomeTarget = HomeTarget.PRIMARY,
+        /** 다른 집의 이름("본가"). 비우면 장소 이름을 쓴다 */
+        val label: String = "",
     ) {
         val canSubmit: Boolean get() = !submitting && selected != null
     }
+
+    /** 집 주소 화면이 무엇을 저장하는가 */
+    enum class HomeTarget { PRIMARY, EXTRA }
 
     private val _homeSetup = MutableStateFlow(HomeSetupState())
     val homeSetup: StateFlow<HomeSetupState> = _homeSetup.asStateFlow()
@@ -3981,6 +4090,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun submitHomeSetup() {
         val current = _homeSetup.value
         val place = current.selected ?: return
+
+        // 다른 집은 기기에만 둔다. 서버의 집(알람 계산의 기본 출발지)은 그대로다.
+        if (current.target == HomeTarget.EXTRA) {
+            val home = SavedHome(
+                id = java.util.UUID.randomUUID().toString(),
+                label = SavedHomes.labelOf(current.label, place.name),
+                name = place.name,
+                address = place.address,
+                lat = place.lat,
+                lng = place.lng,
+            )
+            val next = SavedHomes.add(_state.value.savedHomes, home)
+            if (!savedHomesStore.replace(next)) {
+                _homeSetup.update { it.copy(error = "이 기기에 저장하지 못했습니다. 다시 로그인해 주세요") }
+                return
+            }
+            _state.update { it.copy(savedHomes = next) }
+            _homeSetup.update { it.copy(done = true, saved = true) }
+            return
+        }
 
         _homeSetup.update { it.copy(submitting = true, error = null) }
         viewModelScope.launch {

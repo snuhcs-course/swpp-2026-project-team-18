@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.CalendarLinkState
 import com.swpp.wakeup.domain.model.CalendarPermission
+import com.swpp.wakeup.domain.model.SavedHome
 import com.swpp.wakeup.domain.model.SocialProvider
 import com.swpp.wakeup.ui.calendar.CalendarHelpActions
 import com.swpp.wakeup.ui.calendar.CalendarHelpToggle
@@ -83,6 +84,10 @@ fun SettingsScreen(
     onSocialUnlink: (SocialProvider) -> Unit = {},
     /** 로그인 방법을 받지 못했을 때 다시 받기 */
     onRetryLoginMethods: () -> Unit = {},
+    /** "+ 다른 집 추가". null 이면 다른 집 칸을 그리지 않는다 */
+    onAddExtraHome: (() -> Unit)? = null,
+    onMakeHomeDefault: (String) -> Unit = {},
+    onRemoveHome: (String) -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -135,12 +140,42 @@ fun SettingsScreen(
         SectionLabel("기준")
 
         SettingRow(
-            label = "집 주소",
+            label = if (onAddExtraHome != null) "기본 집 · 알람을 계산하는 출발지" else "집 주소",
             // 집이 없을 때 빈 줄을 두지 않는다. 무엇을 고치는 것인지 모른다.
             value = state.homeLabel ?: "아직 설정하지 않음",
             action = if (state.hasHome) "변경" else "설정",
             onClick = onChangeHome,
         )
+
+        // 기기에만 둔 다른 집(todo §2 "집 여러 개", Figma ⑯ 변형 `498:9` ①).
+        onAddExtraHome?.let { add ->
+            state.savedHomes.forEach { home ->
+                SavedHomeRow(
+                    home = home,
+                    busy = state.savedHomeBusyId == home.id,
+                    enabled = state.savedHomeBusyId == null,
+                    onMakeDefault = { onMakeHomeDefault(home.id) },
+                    onRemove = { onRemoveHome(home.id) },
+                )
+            }
+            Text(
+                text = "+ 다른 집 추가",
+                color = JitColor.Accent,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .testTag("saved_home_add")
+                    .clip(RoundedCornerShape(JitRadius.Hint))
+                    .clickable(onClick = add)
+                    .padding(vertical = 4.dp),
+            )
+            Text(
+                text = "다른 집은 이 기기에만 저장됨(서버는 집을 하나만 알고 있음). \"기본으로\" 를 누르면 " +
+                    "서버의 집을 바꾸고 예전 집은 목록에 남음",
+                color = JitColor.TextSecondary,
+                fontSize = 9.sp,
+            )
+        }
 
         SettingRow(
             label = "평소 준비 시간",
@@ -236,6 +271,62 @@ private fun SectionLabel(text: String) {
         color = JitColor.TextSecondary,
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
+    )
+}
+
+// Partly AI-generated (Claude)
+/** 다른 집 한 줄(Figma ⑯ 변형 `498:9`). [기본으로]는 서버의 집을 바꾼다 */
+@Composable
+private fun SavedHomeRow(
+    home: SavedHome,
+    busy: Boolean,
+    enabled: Boolean,
+    onMakeDefault: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .testTag("saved_home_row")
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Card))
+            .background(JitColor.Surface)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(text = home.label, color = JitColor.TextSecondary, fontSize = 11.sp)
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = home.address?.takeIf { it.isNotBlank() } ?: home.name,
+                color = JitColor.TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        SmallPill(
+            label = if (busy) "바꾸는 중…" else "기본으로",
+            color = JitColor.Accent,
+            enabled = enabled,
+            onClick = onMakeDefault,
+        )
+        Spacer(Modifier.width(6.dp))
+        SmallPill(label = "삭제", color = JitColor.TextSecondary, enabled = enabled, onClick = onRemove)
+    }
+}
+
+@Composable
+private fun SmallPill(label: String, color: androidx.compose.ui.graphics.Color, enabled: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = color,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(JitColor.Surface2)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
     )
 }
 
