@@ -1,6 +1,7 @@
 package com.swpp.wakeup.sensing
 
 import com.swpp.wakeup.data.local.LiveRouteStore
+import com.swpp.wakeup.domain.model.LiveRoute
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -185,6 +186,29 @@ object TripLiveState {
         }
     }
 
+    /**
+     * 출발 전 "지금 나가도 늦나" 확인 결과 하나. 추적 서비스가 알람을 끈 뒤 집을 나서기 전까지
+     * 최대 두 번 받는다([com.swpp.wakeup.domain.model.PreDepartureCheck]).
+     *
+     * 이동 중 경로([liveRoute])와 **따로 둔다.** 이동 중 지도·카드는 그 값이 현재 위치 기준이라는
+     * 전제로 그려지는데, 이것은 출발지 기준이다. 디스크에도 쓰지 않는다. (Partly AI-generated (Claude))
+     */
+    data class PreDepartureSnapshot(
+        val eventId: Long,
+        val fetchedAtMillis: Long,
+        val route: LiveRoute,
+    )
+    private val _preDeparture = MutableStateFlow<PreDepartureSnapshot?>(null)
+    val preDeparture: StateFlow<PreDepartureSnapshot?> = _preDeparture.asStateFlow()
+    fun publishPreDeparture(snapshot: PreDepartureSnapshot) {
+        _preDeparture.value = snapshot
+    }
+    /** [eventId] 가 null 이면 무엇이든, 아니면 그 일정의 결과만 지운다. */
+    fun clearPreDeparture(eventId: Long? = null) {
+        _preDeparture.update { current ->
+            if (current != null && (eventId == null || current.eventId == eventId)) null else current
+        }
+    }
     fun liveRouteFor(eventId: Long): LiveRouteStore.Snapshot? =
         _liveRoute.value?.takeIf { it.eventId == eventId }
 
@@ -211,6 +235,7 @@ object TripLiveState {
     fun clearTracking() {
         _snapshot.value = null
         _liveRoute.value = null
+        _preDeparture.value = null
         _trackingEventId.value = null
     }
 

@@ -609,6 +609,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * ([com.swpp.wakeup.domain.model.RerouteAlert.banner]). (Partly AI-generated (Claude))
      */
     val liveRoute: StateFlow<LiveRouteStore.Snapshot?> = TripLiveState.liveRoute
+    /** 출발 전 "지금 나가도 늦나" 확인 결과(추적 서비스가 최대 두 번 채운다). 준비 중 카드의 재료 */
+    val preDeparture: StateFlow<TripLiveState.PreDepartureSnapshot?> = TripLiveState.preDeparture
 
     /**
      * 이번 실행에서 준비 시간 온보딩을 이미 띄웠는가.
