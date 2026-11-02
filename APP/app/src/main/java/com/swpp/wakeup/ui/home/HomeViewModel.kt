@@ -177,6 +177,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val skipUpdatingId: Long? = null,
         /** 이동 중 경로를 바꾸는 중인 일정. 그동안 [이 경로로 바꾸기] 를 막는다 */
         val rerouteUpdatingId: Long? = null,
+        /** 알람 전에 일정의 경로를 바꾸는 중인 일정. 그동안 [이 경로로 바꾸기] 를 막는다 */
+        val switchRouteBusyId: Long? = null,
         /**
          * 마지막으로 경로를 바꾼 일정과 그 시각. 그보다 먼저 받은 현재-위치 경로로는 카드를
          * 내놓지 않는다 — 바꾸기 전 경로를 기준으로 계산한 제안이다([AppliedReroute.hides]).
@@ -965,6 +967,45 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 알람 전 [이 경로로 바꾸기](홈 다음 알람 카드, 알람 결정 화면). 일정에 저장한 경로를 바꾸고 알람을
+     * 다시 맞춘다. **알람이 이미 울렸으면 바꾸지 않는다** — 울린 시점의 계획이 학습 기준이라서다.
+     * 화면을 그린 뒤에 알람이 울렸을 수 있으므로 누른 시점에 한 번 더 확인한다.
+     */
+    fun applyFasterRoute(eventId: Long, routeKey: String, alarmAtMillis: Long?) {
+        if (_state.value.switchRouteBusyId != null) return
+        if (alarmAtMillis == null || System.currentTimeMillis() >= alarmAtMillis) {
+            notify("알람이 이미 울려서 경로를 바꾸지 않았어요")
+            refresh(silent = true)
+            return
+        }
+        _state.update { it.copy(switchRouteBusyId = eventId) }
+        viewModelScope.launch {
+            when (val result = repository.switchRoute(eventId, routeKey)) {
+                is EventRepository.Result.Success -> {
+                    if (_nav.value.current == AppRoute.AlarmDecision(eventId)) {
+                        ++planLoadGeneration // 먼저 보낸 상세 요청이 늦게 와서 덮지 않게 한다
+                        _plan.value = result.data
+                    }
+                    val homeGen = ++homeLoadGeneration
+                    when (val home = repository.loadHome()) {
+                        is EventRepository.Result.Success ->
+                            if (!home.data.fromCache) {
+                                applyHome(home.data, homeGen) // 목록과 기기 알람을 함께 갱신한다
+                                notify("경로를 바꾸고 알람을 다시 맞췄어요")
+                            } else {
+                                notify("경로는 바꿨지만 알람 목록을 갱신하지 못했어요")
+                            }
+                        is EventRepository.Result.Failure ->
+                            notify("경로는 바꿨지만 알람 목록을 갱신하지 못했어요")
+                    }
+                }
+                is EventRepository.Result.Failure -> notify("경로를 바꾸지 못했어요. ${result.message}")
+            }
+            _state.update { it.copy(switchRouteBusyId = null) }
+        }
+    }
     /** 홈 행·알람 결정 화면·스낵바 "되돌리기" */
     fun setSkipped(eventId: Long, skipped: Boolean) = runSkip(eventId, skipped) {}
 

@@ -56,6 +56,7 @@ import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.domain.model.ArrivalOutlook
 import com.swpp.wakeup.domain.model.CheckpointBasis
+import com.swpp.wakeup.domain.model.FasterRoute
 import com.swpp.wakeup.domain.model.LateCause
 import com.swpp.wakeup.domain.model.RerouteAlert
 import com.swpp.wakeup.ui.alarm.checkpointRows
@@ -529,6 +530,9 @@ private fun MainHost(
                     onMissedTrackClick = viewModel::startMissedAlarmTracking,
                     onMissedDismiss = viewModel::dismissMissedAlarm,
                     onSkipToggle = viewModel::setSkipped,
+                    onSwitchRoute = { event ->
+                        event.fasterRoute?.let { viewModel.applyFasterRoute(event.id, it.routeKey, it.alarmAtMillis) }
+                    },
                 )
 
                 is AppRoute.AlarmDecision -> {
@@ -659,6 +663,23 @@ private fun MainHost(
                         lateCause = lateCause,
                         checkpoints = stopRows,
                         checkpointsTimed = departedAt != null,
+                        fasterRoute = plan?.let { p ->
+                            FasterRoute.offer(
+                                isComputed = p.isComputed,
+                                skipped = p.skipped,
+                                alarmOn = p.alarmOn,
+                                alarmAtMillis = p.alarmAtMillis,
+                                nowMillis = nowMillis,
+                                routeKey = p.routeKey,
+                                altRouteKey = p.altRouteKey,
+                                altLabel = p.altRouteLabel,
+                                altFasterMinutes = p.altFasterMinutes,
+                            )
+                        },
+                        fasterRouteBusy = state.switchRouteBusyId == route.eventId,
+                        onSwitchFasterRoute = {
+                            viewModel.applyFasterRoute(route.eventId, it.routeKey, it.alarmAtMillis)
+                        },
                     )
                 }
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.domain.model.ArrivalOutlook
+import com.swpp.wakeup.domain.model.FasterRouteOffer
 import com.swpp.wakeup.domain.model.RerouteBanner
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripStage
@@ -113,6 +114,12 @@ fun AlarmDecisionScreen(
     checkpoints: List<CheckpointRow>? = null,
     /** [checkpoints] 에 시각이 있는가. 없으면 카드 아래에 이유를 적는다 */
     checkpointsTimed: Boolean = true,
+    /** 알람 전 더 빠른 경로 제안([com.swpp.wakeup.domain.model.FasterRoute.offer]). null 이면 카드가 없다 */
+    fasterRoute: FasterRouteOffer? = null,
+    /** 알람 전에 일정의 경로를 바꾸는 중 */
+    fasterRouteBusy: Boolean = false,
+    /** [이 경로로 바꾸기] (알람 전) */
+    onSwitchFasterRoute: (FasterRouteOffer) -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -187,6 +194,10 @@ fun AlarmDecisionScreen(
                 Box(Modifier.alpha(SKIPPED_ALPHA)) { RecommendedAlarmCard(plan) }
             } else {
                 RecommendedAlarmCard(plan)
+            }
+            // 알람이 울리기 전에만 나온다(Figma ④ 변형 `512:30`). 그 뒤에는 일정에 저장한 경로를 바꾸지 않는다.
+            fasterRoute?.takeIf { !plan.skipped && it.isOpen(System.currentTimeMillis()) }?.let {
+                FasterRouteCard(offer = it, busy = fasterRouteBusy, onSwitch = { onSwitchFasterRoute(it) })
             }
             BreakdownCard(plan)
 

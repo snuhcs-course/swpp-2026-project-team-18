@@ -36,6 +36,7 @@ import com.swpp.wakeup.domain.model.SwitchSuggestion
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ConfidenceView
+import com.swpp.wakeup.domain.model.FasterRoute
 import com.swpp.wakeup.domain.model.HomeList
 import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.LiveRoute
@@ -716,6 +717,19 @@ class EventRepository(
         return if (cached != null) Result.Success(cached) else online
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 일정에 저장한 경로를 바꾼다(`PATCH /api/events/{id}` `route_key`). 서버가 카카오를 한 번 부르고
+     * 알람을 다시 계산한다. **알람이 울리기 전에만** 부른다 — 호출하는 쪽이 확인한다.
+     */
+    suspend fun switchRoute(eventId: Long, routeKey: String): Result<AlarmPlanView> = guard {
+        val response = api.update(eventId, EventUpdateRequest(routeKey = routeKey))
+        val dto = unwrap(response)
+            ?: return@guard failureFrom(response.code(), response.errorBody()?.string())
+        cache?.saveEvent(dto)
+        dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
+            ?: Result.Failure("경로는 바꿨지만 알람 계획을 계산하지 못했어요")
+    }
     suspend fun loadRiskOptions(eventId: Long): Result<RiskOptionsView> = guard {
         val response = api.riskOptions(eventId)
         val dto = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
@@ -1185,6 +1199,19 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
         alarmOn = alarmOn == true,
         alarmAtEpochSecond = alarmLocal?.toEpochSecond(),
         skipped = skipped,
+        fasterRoute = plan?.let {
+            FasterRoute.offer(
+                isComputed = it.status == AlarmPlanDto.STATUS_OK && alarmLocal != null,
+                skipped = skipped,
+                alarmOn = alarmOn == true,
+                alarmAtMillis = alarmLocal?.toInstant()?.toEpochMilli(),
+                nowMillis = System.currentTimeMillis(),
+                routeKey = it.routeKey,
+                altRouteKey = it.altRouteKey,
+                altLabel = it.altRouteLabel,
+                altFasterMinutes = it.altFasterMinutes,
+            )
+        },
     )
 }
 
@@ -1350,7 +1377,7 @@ internal fun tauSourceLabel(tauOverride: Double?, tagLabel: String?): String = w
 }
 
 // Partly AI-generated (Claude)
-private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
+internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     val plan = alarmPlan ?: return null
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
     val startLocal = start.atZoneSameInstant(zone)
