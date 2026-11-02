@@ -59,6 +59,11 @@ class ColdStartRetryInterceptor(
                 return response
             } catch (e: IOException) {
                 lastError = e
+                // Partly AI-generated (Claude)
+                // 호출한 쪽이 취소한 요청(예: 지도를 옮겨 이전 정적 지도 요청을 버림)은 잠든
+                // 서버가 아니다. 다시 보내면 버린 응답을 기다리느라 1·2초를 쓰고, 서버에 닿으면
+                // 카카오 호출만 한 번 더 쓴다. 원래 오류를 그대로 올린다.
+                if (chain.call().isCanceled()) throw e
                 if (attempt == maxAttempts - 1) {
                     Log.w(TAG, "재시도 ${maxAttempts}회 모두 실패: ${e.javaClass.simpleName}")
                     throw e
