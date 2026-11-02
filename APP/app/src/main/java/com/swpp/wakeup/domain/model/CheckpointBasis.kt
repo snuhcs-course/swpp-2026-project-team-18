@@ -8,21 +8,16 @@ package com.swpp.wakeup.domain.model
  */
 object CheckpointBasis {
     /**
-     * 우선순위: 이번 이동에서 바꾼 경로 → 서버가 기준 경로로 돌려준 현재-위치 경로(대안이 아닐 때만)
-     * → 일정에 저장된 경로. 대안 경로는 기준이 아니므로 쓰지 않는다.
+     * 우선순위: 이번 이동에서 바꾼 경로 → 일정에 저장된 경로.
      *
-     * @param liveFresh [live] 가 오래되지 않았고 바꾸기 전 것도 아닌가
+     * 실시간 응답의 경로(`live.routeKey`)는 현재 위치에서 다시 찾은 길이라 출발지에서 받는 경로 후보에
+     * 없다(에뮬레이터에서 5511>5516 으로 확인). 그래서 쓰지 않는다. 정류장은 처음 계획한 길 기준이다.
      */
     fun baseRouteKey(
         planRouteKey: String?,
         appliedRerouteKey: String?,
-        live: LiveRoute?,
-        liveFresh: Boolean = true,
     ): String? {
         appliedRerouteKey?.takeIf { it.isNotBlank() }?.let { return it }
-        if (live != null && liveFresh && !live.isAlternative) {
-            live.routeKey.takeIf { it.isNotBlank() }?.let { return it }
-        }
         return planRouteKey?.takeIf { it.isNotBlank() }
     }
 

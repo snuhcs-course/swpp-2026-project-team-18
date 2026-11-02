@@ -627,7 +627,6 @@ private fun MainHost(
                         planRouteKey = plan?.routeKey,
                         appliedRerouteKey = state.rerouteApplied
                             ?.takeIf { it.eventId == route.eventId }?.routeKey,
-                        live = freshLive?.route,
                     )
                     LaunchedEffect(route.eventId, baseKey, stage) {
                         if (stage == TripStage.IN_TRANSIT) {
