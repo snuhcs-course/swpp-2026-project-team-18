@@ -1,9 +1,9 @@
 # Iteration 3 프론트 작업 기록 — 팀 18 JustInTime
-브랜치 `front-iter3`, 기준 `origin/main` = `3d39fc8`(10-31). 백엔드가 `todo.md` §2 에 넘긴 일과 팀 회의 내용을 앱에 넣었다. 항목 번호는 [figma-changes.md](figma-changes.md) 의 번호와 같다(1~22 는 아래 절 제목, 5b·5c·19b 는 만들지 않음). 서버에 아직 없는 부분은 [backend-requests.md](backend-requests.md) 에 요청으로 적었다.
+브랜치 `front-iter3`, 기준 `origin/main` = `3d39fc8`(10-31). 11-03 에 `front-iter3`(`c527cea`)를 main 에 합쳤다. main 은 `dbe38da`(머지 커밋, 부모 `3d39fc8`·`c527cea`)이고 트리는 `c527cea` 와 같다. 그 뒤 11-03 밤 작업(아래 "11-03 노션 남은 프론트 항목")은 `front-iter3` 에서 이어 갔고 아직 main 에 없다. 백엔드가 `todo.md` §2 에 넘긴 일과 팀 회의 내용을 앱에 넣었다. 항목 번호는 [figma-changes.md](figma-changes.md) 의 번호와 같다(1~22 는 아래 절 제목, 5b·5c·19b 는 만들지 않음). 서버에 아직 없는 부분은 [backend-requests.md](backend-requests.md) 에 요청으로 적었다.
 
 ## 요약
-- 단위 테스트: main 기준 **739건 → 877건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml` 111개, 최신 커밋 `c907c6a` 의 실행 결과).
-- 린트: 오류 0 / 경고 62 (기준선과 같음). 마지막 린트 실행은 `44fd887` 시점(11-02 20:03)이다. 그 뒤 커밋 둘(`30284f3`, `c907c6a`)은 `ApiClient.kt`·`ColdStartRetryInterceptor.kt` 와 테스트만 바꿨고 린트는 다시 돌리지 않았다.
+- 단위 테스트: main 기준 **739건 → 947건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml`, 최신 앱 커밋 `5adfeaa` 의 실행 결과). 877건은 `c527cea`(main 에 합친 시점)의 값이고, 11-03 밤에 70건이 늘었다(902 → 927 → 939 → 948 → 947).
+- 린트: 오류 0 / 경고 64 (기준선 62). 11-03 밤 커밋마다 `lintDebug` 를 돌렸고 `5adfeaa` 에서도 오류 0 이다. 늘어난 경고 2개는 어떤 것인지 확인하지 않았다(S1 커밋에서 생김).
 - 기기 테스트(`androidTest`)는 컴파일(`compileDebugAndroidTestKotlin`, `assembleDebugAndroidTest`)만 확인했다. 기기에서 돌린 기록은 없다.
 - 기준선(11-01, 손대지 않은 브랜치): 단위 739건, 린트 오류 0 / 경고 62, 백엔드 pytest 1684건 통과.
 - 에뮬레이터 확인(11-02)과 main 대중교통 5개 확인(11-03)은 맨 아래에 적었다.
@@ -60,7 +60,7 @@
 - **테스트**: `RerouteAlertTest`, `RerouteRepositoryTest`, `AppliedRerouteTest`.
 - **확인**: 단위. 에뮬레이터 확인 7(알림 한 번, 배너, 201, 배너 사라짐).
 - **열린 것**: 서버 계약 문서가 main 에 없다([R3-1](backend-requests.md)). 헤드업 알림은 실기기에서 확인해야 한다.
-- **5b·5c**: 출발 전 재계획(5b), ⑦ 화면의 체크포인트(5c)는 범위 밖이라 만들지 않았다.
+- **5b·5c**: 출발 전 재계획(5b), ⑦ 화면의 체크포인트(5c)는 이때는 만들지 않았다. 11-03 밤에 만들었다(아래 S2·S3).
 
 ## 6. 앱 재시작 후 도착 판정 복원 — `2412ccf`
 - **바뀐 것**: 도착 결과를 기기에 저장하고, 앱을 다시 켜면 서버 `GET /api/observations?event=` 로 맞춘다. 저장한 도착은 3일이 지났거나 10분보다 먼 미래이면 버린다.
@@ -164,7 +164,7 @@
 - **테스트**: `AuthRepositorySocialTest`, `SocialLoginTest`, `AuthFlowTest`(기기 테스트, 컴파일만).
 - **확인**: 단위만. 실계정으로 로그인해 보지 못했다.
 - **열린 것**: 이 PC 의 디버그 키를 콘솔에 등록해야 한다([R3-4](backend-requests.md)). 실기기 확인 필요.
-- **19b**: 이메일 계정 기능(마지막 이메일 기억, 비밀번호 보기 토글 등)은 범위 밖이라 만들지 않았다.
+- **19b**: 이메일 계정 기능(마지막 이메일 기억, 비밀번호 보기 토글 등)은 이때는 만들지 않았다. 11-03 밤에 만들었다(아래 S1).
 
 ## 20. 지도 연속 이동 거리 두 배 — `5cad0a6`
 - **바뀐 것**: 응답을 기다리는 동안 이동이 연달아 일어나도 이동량이 두 번 반영되지 않는다. 손짓이 끝날 때 보이던 화면을 기준으로 확정한다.
@@ -187,6 +187,61 @@
 - **확인**: 빌드됨(이후 커밋의 APK 가 에뮬레이터에서 실행됨). 런처·테마 아이콘·스플래시 모양은 기기에서 따로 보지 않았다.
 - **열린 것**: 실기기에서 모양 확인.
 
+## 11-03 노션 남은 프론트 항목
+노션 목록에서 프론트 몫으로 남은 것을 `front-iter3` 에서 이어 했다. Figma 를 먼저 그리고(F-36 ~ F-45) 그 프레임대로 코드를 짰다. 코드는 `APP/app/src/main/java/com/swpp/wakeup/` 아래 경로다. 공용 서버는 부르지 않았고 에뮬레이터는 로컬 서버(일회용 SQLite)에 붙였다.
+
+| 항목 | 커밋 | 단위 테스트(누적) | 린트 오류 / 경고 |
+| --- | --- | --- | --- |
+| S1 이메일 계정 기능 | `1afd2ba` | 902 | 0 / 64 |
+| S2 정류장·늦는 이유 | `d536853` | 927 | 0 / 64 |
+| S3 ① 알람 전 더 빠른 경로 | `579ca42` | 939 | 0 / 64 |
+| S3 ② 알람 끌 때·출발 전 확인 | `c3235a7` | 948 | 0 / 64 |
+| S2 고침 | `5adfeaa` | 947 | 0 / 64 (오류 0) |
+
+기준은 `c527cea` 의 877건이다. 커밋마다 `testDebugUnitTest lintDebug assembleDebug compileDebugAndroidTestKotlin` 을 한 번 돌렸다. 코드 리뷰는 승인(막는 문제 없음)이고 사소한 지적 넷은 아래 "열린 것"에 적었다.
+
+### S1. 이메일 계정 기능 — `1afd2ba` (Figma F-36 ~ F-41)
+- **바뀐 것**:
+  - 이메일 형식 검사(`EmailRule`). 로그인은 안내만 하고, 가입과 비밀번호 찾기는 형식이 맞아야 버튼이 켜진다. 칸을 벗어난 뒤에 "이메일 형식이 아님"이 나온다.
+  - 비밀번호 칸마다 "보기/숨김" 토글. 비밀번호 칸에서 키보드 Done 을 누르면 로그인한다.
+  - 마지막으로 로그인한 이메일을 기기에 기억해 로그인 화면에 채운다. 로그아웃해도 남고, 이메일 로그인·가입·재설정에 성공했을 때만 저장한다(소셜은 저장하지 않음).
+  - 로그인 화면의 "비밀번호 찾기" → 확인 코드 받기 → 새 비밀번호 정하기 화면 두 개.
+  - 설정의 "비밀번호" 행 → 비밀번호 변경 화면. 비밀번호로 로그인하는 계정에만 보인다.
+- **파일**: `domain/model/EmailRule.kt`, `data/local/LastEmailStore.kt`, `ui/auth/{EmailField,LoginScreen,SignupScreen,PasswordResetScreens,AuthViewModel,LoginActivity}.kt`, `ui/common/JitTextField.kt`, `ui/settings/{ChangePasswordScreen,PasswordChangeState,SettingsScreen}.kt`, `ui/nav/AppRoute.kt`, `data/remote/{AuthApi,AuthInterceptor,ApiClient}.kt`, `data/repository/AuthRepository.kt`, `MainActivity.kt`, `main/res/xml/backup_rules.xml`·`data_extraction_rules.xml`.
+- **테스트**: `EmailRuleTest`(3), `AuthRepositoryPasswordTest`(14), `SignupContractTest`(+5), `ApiLogRedactionTest`(+1), `PrefsScopeAuditTest`(+2). 합쳐서 25건이 늘었다(877 → 902).
+- **확인**: 단위(서버는 가짜로 대체). 에뮬레이터에서 잘못된 이메일 안내, 보기/숨김 토글, 비밀번호 찾기에 입력한 이메일이 넘어가는 것, 설정의 비밀번호 변경 화면(칸 셋, 규칙 목록, 일치 확인), 로그아웃 뒤 이메일이 남는 것을 봤다.
+- **서버가 없을 때**: 세 엔드포인트가 아직 없어서(R3-9) 404·405 에는 "아직 서버에서 지원하지 않아요"를 보인다. 로컬 서버에서 이 문구가 나오는 것까지 확인했다. 코드를 보내고 바꾸는 성공 경로는 가짜 응답 단위 테스트로만 확인했다.
+- **정한 것**: 이메일 기억 파일 `jit_last_email.xml` 은 사용자별이 아니라 기기 단위다. 로그아웃·`wipeAll` 로 지우지 않고, 백업·기기 이전에서는 제외한다(`PrefsScopeAuditTest` 에 기록). 비밀번호 변경이 성공하면 서버가 모든 기기를 로그아웃시키므로 이 기기는 새 토큰을 저장한다. 저장에 실패하면 토큰을 지운다.
+- **열린 것**: R3-9 (서버). `AuthFlowTest`(기기 테스트)는 `login_email` 에 입력하는데 `@Before` 가 `LastEmailStore` 를 비우지 않아서, 이메일을 기억한 기기에서는 값이 이어 붙는다. 새 에뮬레이터를 쓰는 CI 에는 영향이 없다. 이메일 인증은 만들지 않았다(R3-10).
+
+### S2. 경로 정류장과 늦는 이유 — `d536853`, 고침 `5adfeaa` (Figma F-42)
+- **바뀐 것**: 이동 중 알람 결정 화면에 "경로 정류장" 카드(출발 → 승차 → 하차 → 도착)를 더했다. 시각은 실제 출발 시각에 카카오 구간 시간을 더한 예상이다. 출발 시각을 모르면 이름만 보이고 "출발 시각을 몰라 시각은 생략함"을 적는다. 늦을 때는 진행 카드에 이유 한 줄을 붙인다: "출발이 N분 늦었어요" 또는 "이동이 예상보다 N분 길어요". 둘 중 큰 쪽 하나만 적고, 차이가 2분 미만이거나 근거 숫자가 없으면 쓰지 않는다.
+- **파일**: `domain/model/{LateCause,CheckpointBasis,LiveRouteDecision,AlarmPlan}.kt`, `ui/alarm/{CheckpointCard,AlarmDecisionScreen}.kt`, `data/repository/EventRepository.kt`, `sensing/{TripLiveState,TripTrackingService}.kt`, `ui/home/HomeViewModel.kt`, `MainActivity.kt`.
+- **테스트**: `LateCauseTest`(10), `CheckpointBasisTest`(5), `CheckpointRowsTest`(4), `BaseRouteSegmentsTest`(3), `TripLiveRouteBackgroundContractTest`(+1).
+- **확인**: 단위 + 에뮬레이터. 에뮬레이터에서 처음에는 정류장 카드가 안 나왔다. 원인은 정류장의 기준을 실시간 경로의 key 로 잡았는데, 실시간 경로는 현재 위치에서 다시 찾은 것이라 출발지 기준 후보 목록에 없었다. 후보 요청도 한 번 더 나갔다. `5adfeaa` 에서 적용한 경로 또는 계획한 경로의 정류장만 쓰게 고쳤다. 고친 뒤 카드에 출발 → 신림(2호선 승차) → 서울대입구(하차) → 서울대입구역3번출구(5513 승차) → 자연대.행정관입구(하차) → SNU(도착)가 보였다.
+- **보지 못한 것**: 늦는 이유 줄(에뮬레이터의 모의 이동이 정시였다), 시각이 붙은 정류장 목록(모의 GPS 가 집 반경 밖으로 튀어서 출발을 놓친 것으로 처리돼 시각이 빠졌다).
+- **열린 것**: 알림의 [바꾸기]로 경로를 바꾸면(`TripTrackingService.handleReroute`) 화면의 정류장 카드는 바꾼 경로가 아니라 계획한 경로의 정류장을 보인다. 앱 안 카드로 바꾸면 반영된다. 서비스에서 바꾼 key 를 `TripLiveState` 로 올리면 고칠 수 있다(리뷰 지적, 설계 3.2 가 허용한 동작).
+
+### S3. 출발 전 재계획 — `579ca42`, `c3235a7` (Figma F-43 ~ F-45)
+- **바뀐 것**:
+  - ① 알람 전: 서버가 주는 대안 경로(`alt_*`)가 지금 경로보다 5분 이상 빠르면 홈 알람 카드와 알람 결정 화면에 "9호선 → 2호선으로 가면 6분 빨라요"와 [이 경로로 바꾸기]를 보인다. 누르면 일정에 저장한 경로를 PATCH 하고 알람을 다시 계산한다. 알람이 울린 뒤에는 보이지 않고, 누를 때도 한 번 더 확인한다.
+  - ② 알람을 끈 뒤: 추적 서비스가 알람을 끌 때 한 번, 계획한 출발 10분 전에 한 번, 최대 두 번 `routes/live` 를 불러 지금 나가도 늦는지 본다. 늦으면 헤드업 알림과 준비 중 화면의 카드 "지금 나가도 N분 늦어요"를 보이고, 더 일찍 닿는 경로가 있으면 [이 경로로 바꾸기](이번 이동만 `reroute`)를 붙인다. 없으면 "더 일찍 닿는 경로가 없음"만 보인다.
+- **파일**: `domain/model/{FasterRoute,PreDepartureCheck,UpcomingEvent,AlarmPlan}.kt`, `ui/alarm/{FasterRouteRow,AlarmDecisionScreen}.kt`, `ui/home/{HomeScreen,HomeViewModel}.kt`, `data/repository/EventRepository.kt`, `sensing/{TripLiveState,TripTrackingService}.kt`, `MainActivity.kt`.
+- **테스트**: `FasterRouteTest`(7), `FasterRouteMappingTest`(5), `PreDepartureCheckTest`(8), `RerouteRepositoryTest`(+1), `AppliedRerouteTest`(+2). 출발 전 확인 경로가 `liveRouteStore`·`publishLiveRoute`·`update` 를 건드리지 않는다는 소스 계약 테스트도 있다.
+- **확인**: 단위. 에뮬레이터에서는 알람을 울리고 끈 뒤 아침 기록 화면, 홈, 결정 화면이 죽지 않고 열리는 것까지만 봤다. 알람을 끌 때의 경로 확인은 화면으로 보이지 않았다. 더 빠른 경로 줄·카드, 출발 전 카드와 알림은 기기에서 보지 못했다.
+- **열린 것**: 서버가 이 동작을 알도록 하는 요청은 R3-11. 알림으로 한 번 알린 경로 key 는 출발 때 비워져서, 출발 전에 알린 같은 경로가 이동 중에 한 번 더 알림으로 올 수 있다(리뷰 지적, 설계는 한 번만).
+
+### S4. 지각 위험 바꾸기 확인
+- **확인**: 에뮬레이터에서 동작했다. 결정 화면의 τ 줄이 "적용 τ 0.90 · 수업 일정 기본값"이었고, 지각 위험 바꾸기에서 안전 3:45 / 보통 3:47 / 도박 3:51 이 보였다. "안전으로 계속하기" 뒤 알람이 3:45, τ 줄이 "적용 τ 0.97 · 직접 고른 값"이 됐고 서버는 `PATCH /api/events/4` 200, `dumpsys alarm` 으로 기기 알람이 03:47 → 03:45:01 로 옮겨진 것도 확인했다. 정시 도착 확률은 "아직 계산할 수 없음"으로 남는다(분산 데이터가 없어서, 예상된 동작).
+- **바뀐 것**: 없음. 앱도 서버도 고칠 것이 없었다.
+
+### FN. Figma 이름 고침
+- 로그인(①) 화면인데 "⑦ 변형"으로 불리던 프레임 `495:9`·`496:9` 와 그 캡션 `496:26`·`496:27` 의 이름과 글을 "① 변형"으로 고쳤다.
+- 다른 프레임에서 복사된 캡션 `488:66`(⑫ 일정 수정)의 레이어 이름과 `491:31`(⑦ 늦으면 경로 바꾸기)의 이름과 글을 각 프레임 내용에 맞게 다시 썼다. 자세한 것은 [figma-changes.md](figma-changes.md).
+
+### 이 밤에 지켜진 것
+- `backend/` 는 바꾸지 않았다. 필요한 서버 일은 [R3-9 ~ R3-11](backend-requests.md) 에 요청으로 적었다.
+- 에뮬레이터 확인은 로컬 서버에서만 했고 확인 뒤 에뮬레이터와 서버를 껐다.
 ## 정한 기본값
 코드로 확인한 값이다. 바꾸고 싶으면 괄호의 상수를 고친다.
 - 이동 중 경로 바꾸기 알림은 탑승 중이면 미룬다. 6 m/s(약 22 km/h) 이상으로 움직이면 2분 동안 탑승 중으로 본다(`RerouteAlert.RIDING_SPEED_MPS`, `RIDING_HOLD_MILLIS`). 남은 이동이 5분 이하이거나 목적지까지 400m 이하여도 알리지 않는다(`NEAR_ARRIVAL_MINUTES`, `NEAR_ARRIVAL_METERS`). 미룬 경로는 "알림 보냄"에 넣지 않아서 내린 뒤 다음 갱신에서 알린다.
@@ -200,17 +255,22 @@
 - 로고는 시안 A 로 정했다.
 - 일정 수정 화면은 일정 추가 화면을 수정 모드로 다시 쓴다.
 - 이동 중 추적 사본은 6시간 안의 같은 일정에만 쓴다(`TripProgress.MAX_AGE_MILLIS`).
+- 늦는 이유는 2분 이상 차이일 때만 쓴다(`LateCause.MIN_MINUTES`). 출발 지연과 이동 초과가 같으면 출발을 말한다.
+- 알람 전 더 빠른 경로는 5분 이상 빠를 때만 제안한다(`FasterRoute.MIN_FASTER_MINUTES`).
+- 출발 전 확인은 한 번의 추적에서 최대 2번이다(`PreDepartureCheck.MAX_CALLS`). 두 번째는 `max(출발 − 10분, 첫 확인 + 5분)` 에 하고(`LEAD_MILLIS`, `MIN_GAP_MILLIS`), 20분이 지난 결과는 카드로 보이지 않는다(`MAX_AGE_MILLIS`).
+- 마지막 로그인 이메일은 기기 단위로 저장하고 로그아웃으로 지우지 않는다(`LastEmailStore`). 확인 코드는 6자리다(`AuthViewModel.RESET_CODE_LENGTH`).
+- 서버가 비밀번호 엔드포인트에 404·405 로 답하면 "아직 서버에서 지원하지 않아요"를 보인다.
 
 ## 사용자나 팀이 해야 하는 것
 - 이 PC 의 디버그 키를 카카오·구글 콘솔에 등록한다. 지금은 김수연의 디버그 키만 있다. 값은 [R3-4](backend-requests.md) 에 있다.
 - 실기기에서 확인한다: 카카오·구글 로그인, 이동 중 경로 바꾸기 헤드업 알림, 추적 알림의 "도착했어요", GPS 출발·도착, 집을 나선 뒤 "기록 끝내기"가 안 나오는지, 로고와 스플래시, 핀치 줌 느낌.
 - `JWT_ROTATE_REFRESH_TOKENS=1` 은 팀원이 이 브랜치의 앱을 쓴 뒤에 켠다([R3-5](backend-requests.md)).
-- 서버 쪽 요청: [R3-1 ~ R3-8](backend-requests.md). 앞의 `SavedPlace`(R3-2)가 나오면 앱이 기기 목록을 한 번 올리는 일을 더해야 한다.
+- 서버 쪽 요청: [R3-1 ~ R3-11](backend-requests.md). 이메일 계정 기능(비밀번호 찾기·변경)은 R3-9 가 나와야 동작한다. 앞의 `SavedPlace`(R3-2)가 나오면 앱이 기기 목록을 한 번 올리는 일을 더해야 한다.
 - 공용 서버(Render)가 이 브랜치가 쓰는 필드(`preferred_key`, `switch_suggestion`, `skipped`, 패치 0034·0036·0038 등)를 이미 내는지는 보지 않았다. 공용 서버는 부르지 않았다.
 
 ## 하지 않은 것
 - **도착 감지 개선(활동 인식·기압계·Wi-Fi)**: 팀 회의에서 새 센서는 쓰지 않기로 했다("센서 필요 없을 듯").
-- **5b 출발 전 경로 재계획, 5c ⑦ 화면의 체크포인트, 19b 이메일 계정 기능**: 범위 밖으로 정했다.
+- **이메일 인증(R3-10)**: 계약만 적었고 화면은 없다. 5b·5c·19b 는 11-03 밤에 만들었다.
 - **리포트의 수면·미루기·요일별 조정 패널**: 기록하는 데이터를 읽을 API 가 없다([R3-6](backend-requests.md)).
 
 ## 에뮬레이터 확인 (11-02)

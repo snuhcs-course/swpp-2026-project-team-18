@@ -1,5 +1,5 @@
 # 백엔드 요청 — Iteration 3 프론트에서 나온 것
-`front-iter3` 은 서버 코드를 고치지 않는다. 앱이 보여 줄 수 없거나 서버에 없어서 기기에만 둔 것, 운영에서 할 일을 여기 모았다. 필드 이름은 제안이고, 모델에 필드를 더할 때는 이 코드베이스 규칙대로 `db_default` 를 함께 준다. 번호는 iter2 의 [R-1 ~ R-14](../iter2/backend-requests.md) 와 겹치지 않게 `R3-n` 으로 붙였다. 앱 쪽 내용은 [front-iter3.md](front-iter3.md), Figma 쪽은 [figma-changes.md](figma-changes.md) 에 있다.
+`front-iter3` 은 서버 코드를 고치지 않는다. 앱이 보여 줄 수 없거나 서버에 없어서 기기에만 둔 것, 운영에서 할 일을 여기 모았다. 필드 이름은 제안이고, 모델에 필드를 더할 때는 이 코드베이스 규칙대로 `db_default` 를 함께 준다. 번호는 iter2 의 [R-1 ~ R-14](../iter2/backend-requests.md) 와 겹치지 않게 `R3-n` 으로 붙였다(R3-9 ~ R3-11 은 11-03 밤에 더했다). 앱 쪽 내용은 [front-iter3.md](front-iter3.md), Figma 쪽은 [figma-changes.md](figma-changes.md) 에 있다.
 
 | ID | 요청 | 우선 | 앱 쪽 상태 |
 | --- | --- | --- | --- |
@@ -12,6 +12,9 @@
 | R3-7 | 리포트 요약 LLM 호출의 전체 시간 제한(약 15초) | 높음 | 영향 없음 (서버 템플릿으로 내려오면 그대로 표시) |
 | R3-8 | 리포트 요약 검사의 한글 수 처리 · 추천 모델 · Render 환경 변수 | 보통 | 영향 없음 |
 
+| R3-9 | 비밀번호 찾기·변경 엔드포인트 셋과 메일 발송 설정 | 보통 | 화면과 클라이언트 완료. 404·405 면 "아직 서버에서 지원하지 않아요" |
+| R3-10 | 이메일 인증(선택, 로그인을 막지 않음) | 낮음 | 계약만, 화면 없음 |
+| R3-11 | 출발 전 재계획: `routes/live` 의 출발 전 사용 확인과 학습 정책 | 보통 | 앱만으로 구현함 |
 ## R3-1. 계약 문서 두 개가 없다 (2026-11-03)
 - main 의 코드가 아래 위치에서 `docs/iter3/reroute-api.md` 를 인용하는데 파일이 없다: `backend/apps/events/views.py` 220행(`EventRerouteView` 독스트링), 1033행(`RouteLiveView` 독스트링). `docs/iter3/travel-factors.md` 는 `docs/learning-logic.md` 17행이 인용한다. `todo.md` 와 앱 주석(`EventsApi.kt`, `EventRepository.kt`, `TripTrackingService.kt`, `RerouteCard.kt`, `HomeViewModel.kt`, `RerouteRepositoryTest.kt`)도 같은 파일 이름을 적었다.
 - 앱은 문서 대신 `backend/apps/events/views.py` 의 `RouteLiveView`·`EventRerouteView`, `backend/apps/planning/live_switch.py`, `backend/apps/events/tests/test_live_switch.py` 를 읽고 맞췄다. 앱이 믿는 계약은 아래와 같다. 서버 쪽 문서를 쓸 때 어긋나는 곳이 있으면 알려 주면 앱을 고친다.
@@ -68,3 +71,38 @@
 - 한글 수 검사: `backend/apps/reports/summary.py` 181행 정규식(`(?<![가-힣])(?:한|두|세|…)\s*(?:번|건|회|차례|분|시간)`)이 "세분화" 의 "세분" 을 "세 분" 으로 읽어 문장을 버린다. "한 번" 같은 한글 수도 숫자 표기("1번")는 통과하는데 한글 표기는 떨어진다. 검사 전에 한글 수를 숫자로 바꾸거나, 낱말 일부(뒤에 한글이 이어지는 경우)는 건너뛰어 달라. 프롬프트(170행)는 이미 아라비아 숫자로 쓰라고 한다.
 - 추천 모델: `google/gemini-4-argon`. 42건이 서버 검사를 모두 통과했고, 중앙값 4.6초, 호출당 약 $0.0027 이다. 차선은 `openai/gpt-6-luna`.
 - Render 환경 변수: `OPENAI_API_KEY`, `OPENAI_BASE_URL=https://openrouter.ai/api/v1`, `OPENAI_MODEL`. 키 값은 이 문서에 적지 않는다. 설정 뒤 `manage.py probe_report_summary` 로 한 번 확인한다(`llm.py` 16행).
+
+## R3-9. 비밀번호 찾기 · 변경 (제안, 2026-11-03)
+- 지금: 서버에는 비밀번호를 잊었을 때 쓰는 길도, 로그인한 채 바꾸는 길도 없다. 앱은 화면과 호출을 만들어 두었다(로그인의 "비밀번호 찾기" 두 화면, 설정의 "비밀번호" 행). 이 엔드포인트가 404·405 로 답하면 "아직 서버에서 지원하지 않아요"를 보인다. 서버가 생기면 앱을 고치지 않아도 동작한다.
+- 모든 요청과 응답은 JSON, 오류는 공통 형식이다. `invalid` 는 `details.{필드}: [메시지]` 를 가진 필드 검사 오류다.
+1. `POST /api/auth/password/reset` (인증 없음, 스로틀 `password_reset` IP당 5/시간·이메일당 3/시간)
+   - 요청 `{"email": "a@b.co"}` (앞뒤 공백 제거·소문자, 로그인과 같음).
+   - **202** `{"sent": true, "expires_in": 600}`. 가입한 이메일이든 아니든, 소셜로만 가입한 계정이든 **같은 답**을 준다(계정 존재 여부를 알리지 않기 위해). 메일은 쓸 수 있는 비밀번호가 있는 계정에만 보낸다.
+   - 코드는 6자리, 10분 유효, 해시로 저장한다. 새로 요청하면 이전 코드는 무효다.
+   - 오류: 400 `invalid`(`details.email`), 429 `throttled`.
+2. `POST /api/auth/password/reset/confirm` (인증 없음, 스로틀 `password_reset_confirm` IP당 10/시간)
+   - 요청 `{"email": "...", "reset_code": "123456", "new_password": "...", "new_password_confirm": "..."}`.
+   - **200** `{"access": "...", "refresh": "...", "user": {UserSerializer}}` (로그인 응답과 같은 모양). 비밀번호를 바꾸고, **새 토큰을 내기 전에** `tokens.revoke_all(user)` 로 기존 refresh 를 모두 취소하고, 코드를 사용 처리한다.
+   - 오류: 400 `invalid_reset_code`(코드가 틀렸거나 없는 이메일, 같은 답), 400 `reset_code_expired`, 400 `too_many_attempts`(코드 하나당 5번 틀리면 그 코드는 죽음), 400 `invalid`(`details.new_password` 는 Django 검증 메시지, `details.new_password_confirm` 은 "비밀번호가 일치하지 않는다."), 429 `throttled`.
+3. `POST /api/auth/me/password` (로그인 필요, 스로틀 `password_change` 사용자당 10/시간)
+   - 요청 `{"current_password": "...", "new_password": "...", "new_password_confirm": "..."}`.
+   - **200** `{"access": "...", "refresh": "...", "revoked": 3}`. 현재 비밀번호를 확인하고 `validate_password(new, user)` 로 검사한 뒤 저장한다. `revoked = tokens.revoke_all(user)` 로 이 기기를 포함한 모든 기기의 refresh 를 취소하고, 이 기기에 새 쌍을 낸다. 앱은 새 쌍을 저장하고 다른 기기는 로그아웃된다고 안내한다.
+   - 오류: 400 `invalid_current_password`(**401 이 아니다**: 401 이면 앱이 토큰 갱신·세션 만료 경로를 탄다), 400 `password_unchanged`, 400 `invalid`, 409 `password_login_unavailable`(쓸 수 있는 비밀번호가 없는 계정), 401(access 토큰이 나쁠 때만), 429 `throttled`.
+- 메일 발송: `EMAIL_BACKEND` 가 필요하다. 로컬은 콘솔 백엔드, Render 는 SMTP 환경 변수를 둔다(값은 이 문서에 적지 않는다). 메일 문구 예: "JustInTime 비밀번호 재설정 코드: 123456 (10분 동안 유효)".
+- 앱 쪽: 두 재설정 URL 은 인증 헤더 없이 부르고(공개 경로), 401 이 와도 토큰 갱신을 시도하지 않는다. 비밀번호 변경은 인증을 붙인다.
+
+## R3-10. 이메일 인증 (선택, 제안)
+- 로그인을 막지 않는다. 앱 화면은 아직 없고 계약만 적는다.
+- `User.email_verified_at`(nullable, `db_default=None`). `UserSerializer` 에 `email_verified: bool` 을 더한다.
+- `POST /api/auth/me/email/verify` → 202 `{"sent": true, "expires_in": 600}`. 409 `email_already_verified`, 409 `email_not_deliverable`(소셜이 만든 가짜 이메일, `social.PLACEHOLDER_DOMAIN`). 스로틀 3/시간.
+- `POST /api/auth/me/email/verify/confirm` `{"code": "123456"}` → 200 `{"user": {...}}`. 오류: 400 `invalid_verify_code`·`verify_code_expired`·`too_many_attempts`.
+- 로그인과 다른 모든 API 는 이 값을 보지 않는다.
+
+## R3-11. 출발 전 재계획 신호
+- 앱이 한 일: 알람이 울리기 전에는 서버가 주는 `alt_*`(대안 경로)가 5분 이상 빠르면 일정에 저장한 경로를 PATCH 로 바꾼다. 알람을 끌 때와 계획한 출발 10분 전, 최대 두 번 `POST /api/routes/live` 로 지금 나가도 늦는지 보고, 늦으면 `POST /api/events/{id}/reroute` 를 제안한다(이번 이동만 바뀜).
+- 서버 코드에서 읽은 것: `routes/live` 는 단계나 시각을 검사하지 않는다(`events/views.py` 1044~1127행). 그래서 출발 전에도 부를 수 있고, 이때 `arrival` 은 "지금 나가면"의 도착이다(`live_switch.py` 102~120행). `reroute` 는 시작 ±6시간 안이면 받는다(`views.py` 244행).
+- 요청:
+  1. 위 두 동작을 지금처럼 두고 R3-1 의 계약 문서에 적어 달라.
+  2. `routes/live` 본문에 선택 항목 `"context": "pre_departure"` 를 받아 로그에 남기고, 스로틀 범위를 따로 달라. 앱은 서버가 모르는 키를 받는다고 알려 준 뒤에만 보낸다(지금 서버는 추가 키를 무시한다).
+  3. 학습 정책을 정해 달라: 출발 전 경로 바꾸기는 지금 이동 중 바꾸기와 같이 학습에서 빠진다(`TripReroute`). 그대로 둘지, 출발 전에 바꾼 이동은 새 경로 기준으로 학습할지.
+  4. 나중에: `RouteRefreshWorker` 의 `recompute` 가 기준 경로로 늦는 것을 보면 계획(`alarm_plan.depart_check`)에 `switch_suggestion` 을 넣어 달라. 그러면 앱이 따로 부르지 않아도 된다.
