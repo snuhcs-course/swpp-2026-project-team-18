@@ -201,6 +201,16 @@ open class FakeAuthApi : AuthApi {
     override suspend fun unlinkSocial(
         provider: String,
     ): Response<com.swpp.wakeup.data.remote.SocialUserResponse> = unexpected("unlinkSocial")
+    // 비밀번호 재설정·변경(제안 계약 R3-9). 서버가 아직 없는 것처럼 404 가 기본이다.
+    override suspend fun requestPasswordReset(
+        body: com.swpp.wakeup.data.remote.PasswordResetRequest,
+    ): Response<com.swpp.wakeup.data.remote.PasswordResetResponse> = httpError(404)
+    override suspend fun confirmPasswordReset(
+        body: com.swpp.wakeup.data.remote.PasswordResetConfirmRequest,
+    ): Response<AuthResponse> = httpError(404)
+    override suspend fun changePassword(
+        body: com.swpp.wakeup.data.remote.PasswordChangeRequest,
+    ): Response<com.swpp.wakeup.data.remote.PasswordChangeResponse> = httpError(404)
 }
 
 /**

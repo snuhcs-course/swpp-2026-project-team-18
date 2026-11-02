@@ -43,6 +43,20 @@ interface AuthApi {
     @POST("api/auth/logout")
     suspend fun logout(@Body body: RefreshRequest): Response<Unit>
 
+    // --- 비밀번호 재설정·변경 (제안 계약 R3-9) — Partly AI-generated (Claude) ---
+
+    /** 가입한 이메일로 6자리 코드를 보낸다. 인증 없이 부른다. 202. 서버가 아직 없으면 404/405 */
+    @POST("api/auth/password/reset")
+    suspend fun requestPasswordReset(@Body body: PasswordResetRequest): Response<PasswordResetResponse>
+
+    /** 코드와 새 비밀번호로 바꾸고 로그인 응답을 받는다. 인증 없이 부른다 */
+    @POST("api/auth/password/reset/confirm")
+    suspend fun confirmPasswordReset(@Body body: PasswordResetConfirmRequest): Response<AuthResponse>
+
+    /** 로그인한 사용자의 비밀번호 변경. 서버가 모든 기기를 로그아웃시키고 이 기기의 새 토큰을 준다 */
+    @POST("api/auth/me/password")
+    suspend fun changePassword(@Body body: PasswordChangeRequest): Response<PasswordChangeResponse>
+
     /** 모든 기기 로그아웃. Bearer 가 필요하다. 응답 `{"revoked": n}` */
     @POST("api/auth/me/logout-all")
     suspend fun logoutAll(): Response<LogoutAllResponse>
@@ -77,6 +91,34 @@ interface AuthApi {
 }
 
 data class LogoutAllResponse(val revoked: Int? = null)
+
+// Partly AI-generated (Claude)
+data class PasswordResetRequest(val email: String)
+
+/** 응답 필드는 모두 nullable. 구버전·다른 모양에도 죽지 않는다 */
+data class PasswordResetResponse(
+    val sent: Boolean? = null,
+    @SerializedName("expires_in") val expiresIn: Int? = null,
+)
+
+data class PasswordResetConfirmRequest(
+    val email: String,
+    @SerializedName("reset_code") val resetCode: String,
+    @SerializedName("new_password") val newPassword: String,
+    @SerializedName("new_password_confirm") val newPasswordConfirm: String,
+)
+
+data class PasswordChangeRequest(
+    @SerializedName("current_password") val currentPassword: String,
+    @SerializedName("new_password") val newPassword: String,
+    @SerializedName("new_password_confirm") val newPasswordConfirm: String,
+)
+
+data class PasswordChangeResponse(
+    val access: String? = null,
+    val refresh: String? = null,
+    val revoked: Int? = null,
+)
 
 /**
  * 소셜 로그인 본문. [termsAgreed] 는 새 계정일 때만 `true` 로 보낸다(null 이면 빠진다).

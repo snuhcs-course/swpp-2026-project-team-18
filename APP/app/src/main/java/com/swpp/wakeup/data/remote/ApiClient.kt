@@ -220,7 +220,7 @@ object ApiClient {
      * 비밀번호의 뒷부분이 로그에 남는다.
      */
     private val SECRET_FIELD = Regex(
-        "\"(password|password_confirm|old_password|new_password|access|refresh|id_token)\"" +
+        "\"(password|password_confirm|old_password|new_password|current_password|new_password_confirm|reset_code|access|refresh|id_token)\"" +
             "\\s*:\\s*\"(?:[^\"\\\\]|\\\\.)*\""
     )
 

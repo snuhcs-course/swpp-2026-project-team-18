@@ -82,6 +82,7 @@ import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.places.MapPickScreen
 import com.swpp.wakeup.ui.report.ReportDayScreen
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
+import com.swpp.wakeup.ui.settings.ChangePasswordScreen
 import com.swpp.wakeup.ui.settings.SettingsScreen
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
 import com.swpp.wakeup.data.local.SessionState
@@ -217,6 +218,7 @@ private fun MainHost(
     val tripArrivals by viewModel.tripArrivals.collectAsStateWithLifecycle()
     val liveRouteSnapshot by viewModel.liveRoute.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
+    val passwordChange by viewModel.passwordChange.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
@@ -742,6 +744,15 @@ private fun MainHost(
                     onLabelChange = viewModel::onHomeLabelChange,
                 )
 
+                AppRoute.ChangePassword -> ChangePasswordScreen(
+                    state = passwordChange,
+                    onCurrentChange = viewModel::onCurrentPasswordChange,
+                    onNewChange = viewModel::onNewPasswordChange,
+                    onConfirmChange = viewModel::onNewPasswordConfirmChange,
+                    onSubmit = viewModel::submitPasswordChange,
+                    onBack = viewModel::goBack,
+                    modifier = Modifier.padding(innerPadding),
+                )
                 AppRoute.Settings -> SettingsScreen(
                     state = state,
                     avatarInitials = viewModel.avatarInitials(),
@@ -773,6 +784,7 @@ private fun MainHost(
                     },
                     onSocialUnlink = viewModel::unlinkSocial,
                     onRetryLoginMethods = viewModel::loadLoginMethods,
+                    onChangePassword = viewModel::openChangePassword,
                     // 기기에만 둔 다른 집(Figma ⑯ 변형 `498:9` ①)
                     onAddExtraHome = viewModel::openExtraHomeSetup,
                     onMakeHomeDefault = viewModel::makeSavedHomeDefault,

@@ -2,12 +2,15 @@ package com.swpp.wakeup.ui.common
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.TextStyle
@@ -63,10 +68,26 @@ fun JitTextField(
     /** 입력칸 오른쪽에 붙는 표시(예: 비밀번호 확인 일치 ✓). null 이면 없음 */
     trailing: (@Composable () -> Unit)? = null,
     inputTag: String? = null,
+    /** 오른쪽 끝에 "보기"/"숨김" 글자 버튼을 붙인다([isPassword] 와 함께 쓴다). 기본은 가려 둔다 */
+    passwordToggle: Boolean = false,
+    /** 포커스를 얻거나 잃을 때 부른다. 이메일 형식 오류를 칸을 벗어난 뒤에 보이게 하는 데 쓴다 */
+    onFocusChange: ((Boolean) -> Unit)? = null,
+    /** 오류 상태. 테두리와 라벨이 빨개진다(Figma F-37 `505:14`). 오류 문구는 호출자가 칸 아래에 그린다 */
+    isError: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val borderColor = if (focused) JitColor.Accent else JitColor.Track
-    val labelColor = if (focused) JitColor.Accent else JitColor.TextSecondary
+    var revealed by remember { mutableStateOf(false) }
+    val masked = isPassword && !(passwordToggle && revealed)
+    val borderColor = when {
+        isError -> JitColor.Red
+        focused -> JitColor.Accent
+        else -> JitColor.Track
+    }
+    val labelColor = when {
+        isError -> JitColor.Red
+        focused -> JitColor.Accent
+        else -> JitColor.TextSecondary
+    }
 
     Column(
         modifier = modifier
@@ -97,7 +118,10 @@ fun JitTextField(
                 modifier = Modifier
                     .then(if (inputTag != null) Modifier.testTag(inputTag) else Modifier)
                     .weight(1f)
-                    .onFocusChanged { focused = it.isFocused },
+                    .onFocusChanged {
+                        focused = it.isFocused
+                        onFocusChange?.invoke(it.isFocused)
+                    },
                 textStyle = LocalTextStyle.current.merge(
                     TextStyle(
                         color = JitColor.TextPrimary,
@@ -107,7 +131,7 @@ fun JitTextField(
                 ),
                 cursorBrush = androidx.compose.ui.graphics.SolidColor(JitColor.Accent),
                 visualTransformation =
-                    if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+                    if (masked) PasswordVisualTransformation() else VisualTransformation.None,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = keyboardType,
                     imeAction = imeAction
@@ -125,6 +149,24 @@ fun JitTextField(
             if (trailing != null) {
                 Spacer(Modifier.width(8.dp))
                 trailing()
+            }
+            if (isPassword && passwordToggle) {
+                Spacer(Modifier.width(4.dp))
+                Box(
+                    modifier = Modifier
+                        .sizeIn(minWidth = 40.dp, minHeight = 40.dp)
+                        .then(if (inputTag != null) Modifier.testTag("${inputTag}_toggle") else Modifier)
+                        .semantics { contentDescription = if (revealed) "비밀번호 숨기기" else "비밀번호 보기" }
+                        .clickable(enabled = enabled) { revealed = !revealed },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (revealed) "숨김" else "보기",
+                        color = JitColor.TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
         }
     }

@@ -79,6 +79,7 @@ import com.swpp.wakeup.domain.model.RiskOptionsView
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.nav.NavState
+import com.swpp.wakeup.ui.settings.PasswordChangeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1189,6 +1190,64 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 code == 404 -> notify("아직 서버에서 지원하지 않아요. 이 기기만 로그아웃할 수 있어요")
                 code != null -> notify("모든 기기를 로그아웃하지 못했습니다. 잠시 후 다시 시도해 주세요")
                 else -> notify("서버에 연결되지 않아 다른 기기를 로그아웃하지 못했습니다")
+            }
+        }
+    }
+
+    // --- 비밀번호 변경 (제안 계약 R3-9, Figma F-41) — Partly AI-generated (Claude) -----
+
+    private val _passwordChange = MutableStateFlow(PasswordChangeState())
+    val passwordChange: StateFlow<PasswordChangeState> = _passwordChange.asStateFlow()
+    private var passwordChangeCheckJob: Job? = null
+
+    /** 설정의 "비밀번호" 줄. 입력을 비우고 화면을 연다 */
+    fun openChangePassword() {
+        passwordChangeCheckJob?.cancel()
+        _passwordChange.value = PasswordChangeState()
+        _nav.update { it.copy(stack = it.stack + AppRoute.ChangePassword, forward = true) }
+    }
+
+    fun onCurrentPasswordChange(value: String) =
+        _passwordChange.update { it.copy(current = value, error = null, currentWrong = false) }
+
+    fun onNewPasswordChange(value: String) {
+        passwordChangeCheckJob?.cancel()
+        _passwordChange.update {
+            it.copy(newPassword = value, error = null, passwordCheck = null, passwordCheckError = null)
+        }
+        if (value.isEmpty()) return
+        // 가입 화면과 같다: 입력마다 서버 규칙 검사를 하고, 앞 검사는 취소한다.
+        passwordChangeCheckJob = viewModelScope.launch {
+            val result = authRepository.checkPassword(value)
+            _passwordChange.update {
+                if (it.newPassword != value) it
+                else it.copy(passwordCheck = result.getOrNull(), passwordCheckError = result.exceptionOrNull()?.message)
+            }
+        }
+    }
+
+    fun onNewPasswordConfirmChange(value: String) =
+        _passwordChange.update { it.copy(confirm = value, error = null) }
+
+    fun submitPasswordChange() {
+        val form = _passwordChange.value
+        if (!form.canSubmit) return
+        _passwordChange.update { it.copy(busy = true, error = null, currentWrong = false) }
+        viewModelScope.launch {
+            when (val result = authRepository.changePassword(form.current, form.newPassword, form.confirm)) {
+                is AuthRepository.PasswordChangeResult.Success -> {
+                    _passwordChange.value = PasswordChangeState()
+                    notify(
+                        if (result.tokensRotated) "비밀번호를 바꿨어요. 다른 기기는 로그아웃됐어요"
+                        else "비밀번호를 바꿨어요. 다시 로그인해야 할 수 있어요"
+                    )
+                    // 열린 화면일 때만 닫는다. 기다리는 동안 뒤로 갔다면 그대로 둔다.
+                    if (_nav.value.current is AppRoute.ChangePassword) goBack()
+                }
+
+                is AuthRepository.PasswordChangeResult.Failure -> _passwordChange.update {
+                    it.copy(busy = false, error = result.message, currentWrong = result.currentPasswordWrong)
+                }
             }
         }
     }

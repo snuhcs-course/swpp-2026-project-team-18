@@ -10,4 +10,6 @@
     <exclude domain="sharedpref" path="jit_trip_progress.xml"/>
     <!-- 기기에만 둔 다른 집 좌표. 다른 기기의 계정과 섞이지 않게 옮기지 않는다. -->
     <exclude domain="sharedpref" path="jit_saved_homes.xml"/>
+    <!-- Device-level convenience value (last login email). A restore on another device must not pre-fill it. -->
+    <exclude domain="sharedpref" path="jit_last_email.xml"/>
 </full-backup-content>
