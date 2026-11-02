@@ -873,15 +873,27 @@ internal fun RouteCandidateResponse.toChoice(
     }
     val fallback = candidates.filter { candidate -> options.any { it.key == candidate.key } }
         .minWithOrNull(compareBy<RouteCandidateDto> { it.minutes }.thenBy { it.transfers })
+    // 기본 선택은 지난번에 고른 경로·자주 쓰는 수단이 먼저다(todo §2 "경로 기본 선택"). 차가 없는
+    // 사람에게 자동차가 가장 빠르다고 자동차 탭을 열지 않는다. 근거가 없으면 가장 빠른 후보.
+    val preferred = preferredKey?.takeIf { key -> options.any { it.key == key } }
     return RouteChoice(
         originLabel = this.origin?.label?.takeIf { it.isNotBlank() } ?: origin?.name ?: "집",
         destination = destination.name,
         options = options,
-        selectedKey = fastestKey?.takeIf { key -> options.any { it.key == key } }
+        selectedKey = preferred
+            ?: fastestKey?.takeIf { key -> options.any { it.key == key } }
             ?: fallback?.key,
         // 프로필 집은 null로 남겨 일정 생성 때 서버 기본 출발지를 사용한다.
         originLat = origin?.lat,
         originLng = origin?.lng,
+        preferredKey = preferred,
+        preferredCaption = preferred?.let {
+            when (preferredBasis) {
+                RouteCandidateResponse.BASIS_SAME_DESTINATION -> "지난번에 고른 경로"
+                RouteCandidateResponse.BASIS_RECENT_MODE -> "자주 쓰는 수단"
+                else -> null
+            }
+        },
     )
 }
 
@@ -911,7 +923,8 @@ internal fun RouteCandidateDto.toOption(fetchedAtElapsedMs: Long = 0L): RouteOpt
         key = key,
         mode = mode,
         minutes = minutes,
-        minutesLabel = "${minutes}분",
+        // 버스만 다른 후보를 합친 카드는 시간이 범위다. 정렬·출발 시각은 빠른 쪽(minutes)으로 한다.
+        minutesLabel = minutesMax?.takeIf { it > minutes }?.let { "${minutes}~${it}분" } ?: "${minutes}분",
         detailLine = detailLine.ifBlank { summary.orEmpty() },
         badge = reason?.takeIf { it.isNotBlank() },
         // 서버가 배지 목록을 주면 그걸, 아니면 reason 하나를 쓴다. 문구는 서버 값 그대로.

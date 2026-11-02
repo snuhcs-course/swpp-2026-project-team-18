@@ -116,20 +116,16 @@ make the screen look finished while being untrue.
 - Preparation time when leaving from somewhere other than home — the server takes
   `include_prep` per event ([docs/iter3/include-prep-api.md](docs/iter3/include-prep-api.md)),
   but the app has no switch for it yet
-- Marking an event as not attended — the server takes `POST/DELETE /api/events/{id}/skip`
-  and leaves those mornings out of reports, learning and alarms
-  ([docs/iter3/skip-event-api.md](docs/iter3/skip-event-api.md)), but the app has no button for it yet
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
 - User-defined tags (BE-21) and sleep-time calculation (BE-22)
-- Encrypted token storage — tokens sit in plain SharedPreferences; required before a
-  real release. The server can now revoke refresh tokens (`POST /api/auth/logout`,
-  `POST /api/auth/me/logout-all`, [docs/iter3/token-security-api.md](docs/iter3/token-security-api.md)),
-  but the app's logout does not call it yet and refresh-token rotation stays off
+- Refresh-token rotation on the server stays off until this app version is deployed: the app now
+  stores a rotated refresh token, so `JWT_ROTATE_REFRESH_TOKENS=1` can be set on Render after release
+  ([docs/iter3/token-security-api.md](docs/iter3/token-security-api.md))
 - Battery-optimization guidance
 
 **Runtime limitations** (route scope and previously identified recovery/map issues)
 
-1. Live/alternative routes compare within the selected mode. The candidate picker separately uses `fastest_key` across its available candidates
+1. Live/alternative routes compare within the selected mode. The candidate picker opens on the server's `preferred_key` (last choice for the same destination, else the most used mode) and falls back to `fastest_key`
 2. Arrival restoration after app process restart is not implemented
 3. When the tracking service restarts, the moving state and the live route are lost
 4. Map panning can jump twice as far during consecutive gestures while a response is slow

@@ -325,7 +325,21 @@ data class RouteCandidateResponse(
     val walk: List<RouteCandidateDto>? = null,
     val bicycle: List<RouteCandidateDto>? = null,
     @SerializedName("fastest_key") val fastestKey: String? = null,
-)
+    /**
+     * 기본으로 고를 후보(todo §1 "경로 선택 기본값을 이전 선택 이동수단으로"). 같은 목적지(100m 안)의
+     * 최근 선택, 없으면 최근 선택 10개에서 가장 많이 고른 수단의 후보. 고를 근거가 없거나 그 수단의
+     * 후보가 없으면 셋 다 null 이고 그때는 [fastestKey] 를 쓴다. 구버전 서버도 null 이다.
+     */
+    @SerializedName("preferred_key") val preferredKey: String? = null,
+    @SerializedName("preferred_mode") val preferredMode: String? = null,
+    /** `same_destination` / `recent_mode` */
+    @SerializedName("preferred_basis") val preferredBasis: String? = null,
+) {
+    companion object {
+        const val BASIS_SAME_DESTINATION = "same_destination"
+        const val BASIS_RECENT_MODE = "recent_mode"
+    }
+}
 
 data class RouteOriginDto(
     val label: String?,
@@ -341,6 +355,11 @@ data class RouteCandidateDto(
     /** "지하철+도보+버스" */
     val mode: String,
     val minutes: Int,
+    /**
+     * 버스 번호만 다른 후보를 한 카드로 합쳤을 때 가장 오래 걸리는 쪽의 분(transit-candidates.md §6).
+     * [minutes] 보다 크면 "34~36분" 처럼 범위로 쓴다. 합치지 않았거나 구버전 서버면 null.
+     */
+    @SerializedName("minutes_max") val minutesMax: Int? = null,
     @SerializedName("distance_m") val distanceM: Int?,
     val transfers: Int = 0,
     /**
