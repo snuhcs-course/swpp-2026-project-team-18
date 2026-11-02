@@ -107,6 +107,10 @@ make the screen look finished while being untrue.
   routing (BE-11) and optional bicycle-road ratio (BE-14) remain
 - Weekly and detailed reports ⑧⑨ — built; the Figma panels for sleep, alarm snoozes and
   per-weekday auto-adjustment are left out because nothing records that data yet
+- More than one home — other homes (a family home, a dorm) are kept on the device and offered
+  first in the origin search, with prep time included; "기본으로" makes one the server's home.
+  The server still stores a single home until `SavedPlace` exists
+  ([docs/iter3/backend-requests.md](docs/iter3/backend-requests.md))
 - Sign-in with Kakao and Google — the app gets an ID token from the Kakao SDK or Credential
   Manager and sends it to `POST /api/auth/social/{provider}`
   ([docs/iter3/social-login-api.md](docs/iter3/social-login-api.md)); first-time accounts see
