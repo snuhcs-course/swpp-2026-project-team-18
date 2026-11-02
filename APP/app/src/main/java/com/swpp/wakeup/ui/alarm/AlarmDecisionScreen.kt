@@ -107,6 +107,12 @@ fun AlarmDecisionScreen(
     onReroute: (String) -> Unit = {},
     /** 경로를 바꾸는 중 */
     rerouteBusy: Boolean = false,
+    /** 이동 중 늦는 이유 한 줄([com.swpp.wakeup.domain.model.LateCause]). null 이면 없다 */
+    lateCause: String? = null,
+    /** 이동 중 "경로 정류장" 행. null 이거나 비어 있으면 카드를 그리지 않는다 */
+    checkpoints: List<CheckpointRow>? = null,
+    /** [checkpoints] 에 시각이 있는가. 없으면 카드 아래에 이유를 적는다 */
+    checkpointsTimed: Boolean = true,
 ) {
     Column(
         modifier = modifier
@@ -199,8 +205,21 @@ fun AlarmDecisionScreen(
                     freshness = freshness,
                     onArrive = onArrive,
                 )
+                // 늦는 이유 한 줄(Figma ④-c 변형 `510:25`). 이동 중에만 의미가 있다.
+                if (stage == TripStage.IN_TRANSIT) lateCause?.let {
+                    Text(
+                        text = it,
+                        color = JitColor.Amber,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.testTag("trip_late_cause"),
+                    )
+                }
                 // 늦는다는 전망 바로 아래에 바꿀 길을 둔다(Figma ⑦ 변형 `491:9`).
                 rerouteBanner?.let { RerouteCard(banner = it, onReroute = onReroute, busy = rerouteBusy) }
+                if (stage == TripStage.IN_TRANSIT && !checkpoints.isNullOrEmpty()) {
+                    CheckpointCard(rows = checkpoints, timed = checkpointsTimed)
+                }
             }
 
             routeMap?.let { map ->

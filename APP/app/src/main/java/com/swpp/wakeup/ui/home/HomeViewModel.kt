@@ -55,7 +55,9 @@ import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.HomeList
 import com.swpp.wakeup.domain.model.HomeRefresh
 import com.swpp.wakeup.domain.model.ImportCandidate
+import com.swpp.wakeup.domain.model.CheckpointBasis
 import com.swpp.wakeup.domain.model.LiveRoute
+import com.swpp.wakeup.domain.model.RouteSegments
 import com.swpp.wakeup.domain.model.MorningSession
 import com.swpp.wakeup.domain.model.RoutineEditorState
 import com.swpp.wakeup.sensing.ArrivalRecords
@@ -287,10 +289,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // Partly AI-generated (Claude)
     /** 이동 중 경로를 바꾼 일정과 시각(벽시계 ms) */
-    data class AppliedReroute(val eventId: Long, val atMillis: Long) {
+    data class AppliedReroute(val eventId: Long, val atMillis: Long, val routeKey: String? = null) {
         /** 이 현재-위치 경로가 바꾸기 전에 받은 것인가. 그러면 그 제안·지각 분은 옛 경로 기준이다 */
-        fun hides(snapshot: LiveRouteStore.Snapshot): Boolean =
-            snapshot.eventId == eventId && snapshot.fetchedAtMillis <= atMillis
+        fun hides(snapshot: LiveRouteStore.Snapshot): Boolean = hidesFetchedAt(snapshot.eventId, snapshot.fetchedAtMillis)
+        /** [hides] 와 같은 규칙. 스냅샷 대신 일정 id 와 받은 시각만 있을 때 쓴다 */
+        fun hidesFetchedAt(eventId: Long, fetchedAtMillis: Long): Boolean =
+            this.eventId == eventId && fetchedAtMillis <= atMillis
     }
 
     // Partly AI-generated (Claude)
@@ -946,7 +950,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             when (val result = repository.reroute(eventId, routeKey, fromSuggestion = true)) {
                 is EventRepository.Result.Success -> {
                     _state.update {
-                        it.copy(rerouteApplied = AppliedReroute(eventId, System.currentTimeMillis()))
+                        it.copy(
+                            rerouteApplied = AppliedReroute(eventId, System.currentTimeMillis(), routeKey),
+                        )
                     }
                     runCatching { TripTrackingService.refreshLiveRoute(app, eventId) }
                         .onFailure { Log.w(TAG, "경로 바꾼 뒤 추적 갱신 요청 실패", it) }
@@ -1163,6 +1169,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 화면에 남은 아침 기록도 즉시 지운다. 지우지 않으면 로그아웃 뒤에도
         // 홈 카드가 남은 블록 수를 보여 준다.
         _morning.value = null
+        _checkpoints.value = null
         _state.update { it.copy(morningBlocksLeft = null) }
     }
 
@@ -1372,6 +1379,44 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val error: String? = null,
     )
 
+    // Partly AI-generated (Claude)
+    /**
+     * 이동 중 "경로 정류장" 카드의 구간. [routeKey] 경로의 정류장은 계획·실시간 응답에 없어서
+     * 경로 후보 API 로 한 번 받아 둔다(이 프로세스 동안 일정·기준 경로당 한 번).
+     */
+    data class CheckpointState(
+        val eventId: Long,
+        val routeKey: String,
+        val segments: RouteSegments? = null,
+        val loading: Boolean = true,
+    )
+    private val _checkpoints = MutableStateFlow<CheckpointState?>(null)
+    val checkpoints: StateFlow<CheckpointState?> = _checkpoints.asStateFlow()
+    private var checkpointJob: Job? = null
+    /**
+     * 같은 일정·경로를 이미 받았거나 받는 중이면 아무것도 하지 않는다. 실패해도 이 프로세스에서는
+     * 다시 부르지 않는다(카카오 호출 한도). 대중교통이 아닌 경로에는 정류장이 없어 부르지 않는다.
+     */
+    fun loadCheckpointsIfNeeded(eventId: Long, routeKey: String?) {
+        if (routeKey == null || !CheckpointBasis.hasStops(routeKey)) return
+        val current = _checkpoints.value
+        if (current != null && current.eventId == eventId && current.routeKey == routeKey) return
+        _checkpoints.value = CheckpointState(eventId, routeKey)
+        checkpointJob?.cancel()
+        checkpointJob = viewModelScope.launch {
+            val segments = when (val result = repository.baseRouteSegments(eventId, routeKey)) {
+                is EventRepository.Result.Success -> result.data
+                is EventRepository.Result.Failure -> null
+            }
+            _checkpoints.update {
+                if (it?.eventId == eventId && it.routeKey == routeKey) {
+                    it.copy(segments = segments, loading = false)
+                } else {
+                    it
+                }
+            }
+        }
+    }
     private val _risk = MutableStateFlow(RiskState())
     val risk: StateFlow<RiskState> = _risk.asStateFlow()
     private var riskJob: Job? = null

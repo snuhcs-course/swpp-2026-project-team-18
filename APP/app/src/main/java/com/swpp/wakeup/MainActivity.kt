@@ -55,7 +55,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.domain.model.ArrivalOutlook
+import com.swpp.wakeup.domain.model.CheckpointBasis
+import com.swpp.wakeup.domain.model.LateCause
 import com.swpp.wakeup.domain.model.RerouteAlert
+import com.swpp.wakeup.ui.alarm.checkpointRows
 import com.swpp.wakeup.ui.auth.SocialSignIn
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripEta
@@ -217,6 +220,7 @@ private fun MainHost(
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
     val tripArrivals by viewModel.tripArrivals.collectAsStateWithLifecycle()
     val liveRouteSnapshot by viewModel.liveRoute.collectAsStateWithLifecycle()
+    val checkpointState by viewModel.checkpoints.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val passwordChange by viewModel.passwordChange.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
@@ -592,6 +596,39 @@ private fun MainHost(
                                 state.rerouteApplied?.hides(it) != true
                         }
                         ?.let { RerouteAlert.banner(it.route) }
+                    // 이동 중 정류장과 늦는 이유(Figma ④-c 변형 `510:9`). 출발 시각은 서비스가 정한
+                    // 이동 시작 시각이다. 첫 위치부터 집 밖이었으면 실제 출발이 아니므로 쓰지 않는다.
+                    val tripOfEvent = tripLive?.takeIf { it.eventId == route.eventId }
+                    val departedAt = tripOfEvent?.takeIf { !it.departureMissed }?.movingSinceMillis
+                    val freshLive = liveRouteSnapshot?.takeIf {
+                        it.eventId == route.eventId &&
+                            it.isFresh(nowMillis) &&
+                            state.rerouteApplied?.hides(it) != true
+                    }
+                    val baseKey = CheckpointBasis.baseRouteKey(
+                        planRouteKey = plan?.routeKey,
+                        appliedRerouteKey = state.rerouteApplied
+                            ?.takeIf { it.eventId == route.eventId }?.routeKey,
+                        live = freshLive?.route,
+                    )
+                    LaunchedEffect(route.eventId, baseKey, stage) {
+                        if (stage == TripStage.IN_TRANSIT) {
+                            viewModel.loadCheckpointsIfNeeded(route.eventId, baseKey)
+                        }
+                    }
+                    val lateCause = freshLive?.takeIf { stage == TripStage.IN_TRANSIT }?.let {
+                        LateCause.line(
+                            lateMinutes = it.route.lateMinutes,
+                            departByMillis = plan?.departByMillis,
+                            departedAtMillis = departedAt,
+                            travelMinutes = plan?.travelMinutes,
+                            liveArriveAtMillis = it.route.arriveAtMillis,
+                        )
+                    }
+                    val stopRows = checkpointState
+                        ?.takeIf { it.eventId == route.eventId && it.routeKey == baseKey }
+                        ?.segments
+                        ?.let { checkpointRows(it, plan?.eventPlace.orEmpty().substringBefore(" · "), departedAt) }
                     AlarmDecisionScreen(
                         plan = plan,
                         onBack = viewModel::goBack,
@@ -619,6 +656,9 @@ private fun MainHost(
                         rerouteBanner = rerouteBanner,
                         onReroute = { key -> viewModel.reroute(route.eventId, key) },
                         rerouteBusy = state.rerouteUpdatingId == route.eventId,
+                        lateCause = lateCause,
+                        checkpoints = stopRows,
+                        checkpointsTimed = departedAt != null,
                     )
                 }
 

@@ -411,10 +411,61 @@ class EventRepository(
                 path = path,
                 lateMinutes = body.arrival?.lateMinutes?.takeIf { it >= 0 },
                 suggestion = body.switchSuggestion?.toSuggestion(),
+                arriveAtMillis = body.arrival?.arriveAt
+                    ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+                    ?.toInstant()?.toEpochMilli(),
             )
         )
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 이동 중 "경로 정류장" 카드용 구간. 일정의 출발지→도착지 후보를 한 번 받아 [routeKey] 와 같은
+     * 후보의 구간을 돌려준다. 계획·실시간 응답에는 정류장이 없어서 이것이 유일한 출처다.
+     *
+     * 위의 "명시적으로 요청할 때만" 원칙에서 **일부러 벗어난다.** 이동 중 화면이 열려 있는 동안 일정·
+     * 기준 경로당 한 번만 부르므로(호출하는 쪽이 보장) 15분마다 도는 경로 갱신보다 호출이 적다.
+     * 같은 key 가 없거나 정류장이 있는 대중교통 구간이 없으면 `Success(null)`.
+     */
+    suspend fun baseRouteSegments(eventId: Long, routeKey: String): Result<RouteSegments?> {
+        val dto = cache?.event(eventId)
+            ?: when (val loaded = loadEvent(eventId)) {
+                is Result.Success -> loaded.data
+                is Result.Failure -> return loaded
+            }
+        val place = dto.place ?: return Result.Success(null)
+        val destination = PlaceSearchItem(
+            kakaoPlaceId = place.kakaoPlaceId,
+            name = place.name,
+            address = place.address,
+            lat = place.lat,
+            lng = place.lng,
+            category = null,
+        )
+        val origin = if (dto.originLat != null && dto.originLng != null) {
+            PlaceSearchItem(
+                kakaoPlaceId = null,
+                name = dto.originLabel.orEmpty().ifBlank { "출발지" },
+                address = null,
+                lat = dto.originLat,
+                lng = dto.originLng,
+                category = null,
+            )
+        } else {
+            null
+        }
+        return when (val result = routeCandidates(destination, origin)) {
+            is Result.Success -> {
+                val segments = result.data.options.firstOrNull { it.key == routeKey }?.segments
+                Result.Success(
+                    segments?.takeIf { s ->
+                        s.items.any { it.stops.isNotEmpty() && it.kind != RouteSegment.Kind.WALK }
+                    }
+                )
+            }
+            is Result.Failure -> result
+        }
+    }
     // Partly AI-generated (Claude)
     /**
      * 이번 이동의 경로를 바꾼다(`POST /api/events/{id}/reroute`, reroute-api.md). 일정의 경로와
@@ -1395,6 +1446,10 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         routeKey = plan.routeKey?.takeIf { it.isNotBlank() },
         // false 일 때만 알린다. null(고른 적 없음)과 true(그대로 쓰임)는
         // 사용자가 알 필요가 없다.
+        alarmAtMillis = alarmLocal?.toInstant()?.toEpochMilli(),
+        departByMillis = departBy?.toInstant()?.toEpochMilli(),
+        arriveAtMillis = arriveAt?.toInstant()?.toEpochMilli(),
+        altRouteKey = plan.altRouteKey?.takeIf { it.isNotBlank() },
         routeFellBack = plan.routeChoiceHonored == false,
         // 알람 시각을 아는 곳은 여기뿐이다(화면에는 표시 문자열만 간다).
         // 시각이 없으면 아직 계산되지 않은 것이므로 "지나지 않았다" 로 둔다.

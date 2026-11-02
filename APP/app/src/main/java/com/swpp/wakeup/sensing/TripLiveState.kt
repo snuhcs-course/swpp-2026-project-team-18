@@ -136,6 +136,12 @@ object TripLiveState {
          * 뒤에 화면을 연 사용자가 "방금 출발했다" 로 계산된다.
          */
         val movingSinceMillis: Long? = null,
+        /**
+         * 추적을 시작했을 때 이미 집 밖이었는가. 그러면 [movingSinceMillis] 는 실제 출발 시각이
+         * 아니라 첫 위치를 받은 시각이다. 정류장 시각·늦은 이유를 계산할 때 출발 시각으로 쓰지 않는다.
+         * (Partly AI-generated (Claude))
+         */
+        val departureMissed: Boolean = false,
     )
 
     private val _snapshot = MutableStateFlow<Snapshot?>(null)

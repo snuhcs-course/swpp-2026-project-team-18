@@ -552,6 +552,7 @@ class TripTrackingService : Service() {
                 // 이 fix 가 흐리면 단계는 이전 fix 가 정한 것이다. 화면이 그 나이를 본다.
                 phaseCheckedAtMillis = fence.lastAcceptedFix?.atMillis,
                 movingSinceMillis = movingSinceMillis,
+                departureMissed = fence.departureMissed,
             )
         )
 
@@ -596,6 +597,7 @@ class TripTrackingService : Service() {
                         phase = TripGeofence.Phase.ARRIVED,
                         phaseCheckedAtMillis = decision.fix.atMillis,
                         movingSinceMillis = movingSinceMillis,
+                        departureMissed = fence.departureMissed,
                     )
                 )
                 // 결과 알림을 **멈추기 전에** 띄운다. 이건 포그라운드 서비스
