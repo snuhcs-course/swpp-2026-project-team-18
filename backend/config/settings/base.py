@@ -204,12 +204,42 @@ REST_FRAMEWORK = {
         "social": "60/hour",
         # 로그아웃. 인증 없이 받으므로 IP별로 센다. 정상 사용은 하루 몇 번이다.
         "logout": "60/hour",
+        # 비밀번호 찾기·변경, 이메일 인증(backend-requests R3-9·R3-10). 메일을 보내는 경로는
+        # IP 와 이메일(또는 사용자) 양쪽으로 센다 — 한 IP 가 여러 주소로, 여러 IP 가 한 주소로
+        # 메일을 퍼붓지 못하게 한다. (Partly AI-generated (Claude))
+        "password_reset": "5/hour",
+        "password_reset_email": "3/hour",
+        "password_reset_confirm": "10/hour",
+        "password_change": "10/hour",
+        "email_verify": "3/hour",
+        "email_verify_confirm": "10/hour",
     },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 20,
 }
+
+# ---------------------------------------------------------------------------
+# 메일 — 비밀번호 재설정·이메일 인증 코드(apps/accounts/codes.py)
+# ---------------------------------------------------------------------------
+# `EMAIL_HOST` 가 있으면 SMTP, 없으면 콘솔(로그에 찍힌다). Render 에는 SMTP 값을 환경 변수로
+# 둔다. 값은 저장소에 적지 않는다. `EMAIL_BACKEND` 로 직접 고를 수도 있다.
+# (Partly AI-generated (Claude))
+EMAIL_HOST = (os.getenv("EMAIL_HOST") or "").strip()
+EMAIL_PORT = int(os.getenv("EMAIL_PORT") or "587")
+EMAIL_HOST_USER = (os.getenv("EMAIL_HOST_USER") or "").strip()
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD") or ""
+EMAIL_USE_TLS = (os.getenv("EMAIL_USE_TLS") or "1").strip() == "1"
+EMAIL_TIMEOUT = 10
+EMAIL_BACKEND = (os.getenv("EMAIL_BACKEND") or "").strip() or (
+    "django.core.mail.backends.smtp.EmailBackend"
+    if EMAIL_HOST
+    else "django.core.mail.backends.console.EmailBackend"
+)
+DEFAULT_FROM_EMAIL = (os.getenv("DEFAULT_FROM_EMAIL") or "").strip() or (
+    EMAIL_HOST_USER or "JustInTime <no-reply@justintime.invalid>"
+)
 
 from datetime import timedelta  # noqa: E402
 

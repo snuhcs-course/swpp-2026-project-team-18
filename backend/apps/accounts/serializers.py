@@ -21,11 +21,16 @@ from .models import Profile, User
 class UserSerializer(serializers.ModelSerializer):
     # Partly AI-generated (Claude) — 설정 화면의 "카카오 연결됨" 과 연결 끊기 가능 여부에 쓴다.
     login_methods = serializers.SerializerMethodField()
+    # 이메일 인증(R3-10, 선택). 로그인과 다른 API 는 이 값을 보지 않는다.
+    email_verified = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ("id", "email", "nickname", "date_joined", "login_methods")
+        fields = ("id", "email", "nickname", "date_joined", "login_methods", "email_verified")
         read_only_fields = fields
+
+    def get_email_verified(self, obj) -> bool:
+        return obj.email_verified_at is not None
 
     def get_login_methods(self, obj) -> list[str]:
         from .social import login_methods

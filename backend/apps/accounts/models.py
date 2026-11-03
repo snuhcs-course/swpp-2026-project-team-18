@@ -59,6 +59,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     terms_agreed_at = models.DateTimeField(
         "약관 동의 시각", null=True, blank=True, default=None, db_default=None
     )
+    # 이메일 인증(선택, backend-requests R3-10). 로그인과 다른 API 는 이 값을 보지 않는다.
+    email_verified_at = models.DateTimeField(
+        "이메일 인증 시각", null=True, blank=True, default=None, db_default=None
+    )
 
     is_active = models.BooleanField("활성", default=True)
     is_staff = models.BooleanField("스태프", default=False)
@@ -208,3 +212,37 @@ class SocialAccount(models.Model):
 
     def __str__(self):
         return f"{self.get_provider_display()} {self.subject} → {self.user_id}"
+
+
+# Partly AI-generated (Claude)
+class EmailCode(models.Model):
+    """메일로 보낸 6자리 코드(`apps.accounts.codes`). 비밀번호 재설정과 이메일 인증이 쓴다.
+
+    코드는 해시로만 둔다. 사용자·용도마다 살아 있는 코드는 하나다 — 새로 요청하면 이전 행을
+    지운다. 틀린 횟수(`attempts`)가 한도에 닿으면 그 코드는 더 받지 않는다.
+    """
+
+    class Purpose(models.TextChoices):
+        PASSWORD_RESET = "password_reset", "비밀번호 재설정"
+        EMAIL_VERIFY = "email_verify", "이메일 인증"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="email_codes", verbose_name="사용자"
+    )
+    purpose = models.CharField("용도", max_length=20, choices=Purpose.choices)
+    code_hash = models.CharField("코드 해시", max_length=128)
+    created_at = models.DateTimeField("발급 시각", auto_now_add=True)
+    expires_at = models.DateTimeField("만료 시각")
+    attempts = models.PositiveSmallIntegerField("틀린 횟수", default=0, db_default=0)
+    used_at = models.DateTimeField(
+        "사용 시각", null=True, blank=True, default=None, db_default=None
+    )
+
+    class Meta:
+        db_table = "accounts_email_code"
+        verbose_name = "메일 코드"
+        verbose_name_plural = "메일 코드"
+        indexes = [models.Index(fields=["user", "purpose"], name="accounts_email_code_user")]
+
+    def __str__(self):
+        return f"{self.get_purpose_display()} → {self.user_id}"

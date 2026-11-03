@@ -90,6 +90,12 @@ REST_FRAMEWORK = {  # noqa: F405
         "register": None,
         "social": None,
         "logout": None,
+        "password_reset": None,
+        "password_reset_email": None,
+        "password_reset_confirm": None,
+        "password_change": None,
+        "email_verify": None,
+        "email_verify_confirm": None,
     },
 }
 
@@ -106,3 +112,6 @@ LOGGING = {
     "handlers": {"null": {"class": "logging.NullHandler"}},
     "root": {"handlers": ["null"], "level": "CRITICAL"},
 }
+
+# 메일은 보내지 않는다. pytest-django 가 locmem 으로 바꾸지만 명시해 둔다(`mailoutbox`).
+EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
