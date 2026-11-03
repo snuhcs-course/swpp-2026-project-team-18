@@ -31,10 +31,12 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from django.core.cache import cache
 from django.utils import timezone
 
 from apps.routing import realtime
@@ -197,3 +199,52 @@ def _arrival_json(event, current: Arrival) -> dict:
         "late_minutes": current.late_minutes,
         "realtime": current.realtime,
     }
+
+
+# ---------------------------------------------------------------------------
+# 바꾸기 직전의 경로 원값 (R3-11, 출발 전 바꾸기 학습)
+# ---------------------------------------------------------------------------
+# `routes/live` 가 푼 경로·대안의 카카오 원값을 잠깐 기억한다. 사용자가 그 응답을 보고
+# `events/{id}/reroute` 를 누르면 바꾼 경로의 원값을 `TripReroute` 에 남긴다. 그래야 출발 전에
+# 바꾼 이동을 새 경로 기준으로 학습할 수 있다. 카카오를 다시 부르지 않는다.
+SNAPSHOT_TTL_SECONDS = 30 * 60
+
+
+def _snapshot_key(event_id: int, route_key: str) -> str:
+    digest = hashlib.sha1(route_key.encode("utf-8")).hexdigest()[:16]
+    return f"route_live_raw:{event_id}:{digest}"
+
+
+def remember_routes(event_id: int, route: dict) -> None:
+    """다시 푼 기준 경로와 같은 응답의 대안을 기억한다. 실패해도 조용히 넘긴다."""
+    from .services import walk_raw_minutes
+
+    items = [route]
+    if route.get("alternative"):
+        items.append(route["alternative"])
+    for item in items:
+        key = (item.get("key") or "").strip()
+        minutes = item.get("minutes")
+        if not key or minutes is None:
+            continue
+        walk = walk_raw_minutes(item)
+        try:
+            cache.set(
+                _snapshot_key(event_id, key),
+                {
+                    "minutes": float(minutes),
+                    "walk_minutes": None if walk is None else float(walk),
+                    "mode": (item.get("mode") or "")[:20],
+                },
+                SNAPSHOT_TTL_SECONDS,
+            )
+        except Exception:  # 캐시 장애가 경로 응답을 막지 않는다
+            return
+
+
+def remembered(event_id: int, route_key: str) -> dict | None:
+    """`remember_routes` 가 남긴 `{minutes, walk_minutes, mode}`. 없으면 None."""
+    try:
+        return cache.get(_snapshot_key(event_id, route_key))
+    except Exception:
+        return None

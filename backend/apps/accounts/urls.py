@@ -11,6 +11,13 @@ from .views import (
     PasswordCheckView,
     RegisterView,
 )
+from .views_password import (
+    EmailVerifyConfirmView,
+    EmailVerifyView,
+    PasswordChangeView,
+    PasswordResetConfirmView,
+    PasswordResetView,
+)
 from .views_social import SocialLinkView, SocialLoginView
 
 app_name = "accounts"
@@ -18,6 +25,18 @@ app_name = "accounts"
 urlpatterns = [
     path("register", RegisterView.as_view(), name="register"),
     path("password/check", PasswordCheckView.as_view(), name="password_check"),
+    # 비밀번호 찾기(공개)·변경(로그인), 이메일 인증. 계약은 docs/iter3/password-api.md.
+    path("password/reset", PasswordResetView.as_view(), name="password_reset"),
+    path(
+        "password/reset/confirm",
+        PasswordResetConfirmView.as_view(),
+        name="password_reset_confirm",
+    ),
+    path("me/password", PasswordChangeView.as_view(), name="password_change"),
+    path("me/email/verify", EmailVerifyView.as_view(), name="email_verify"),
+    path(
+        "me/email/verify/confirm", EmailVerifyConfirmView.as_view(), name="email_verify_confirm"
+    ),
     path("token", LoginView.as_view(), name="token_obtain_pair"),
     path("token/refresh", TokenRefreshView.as_view(), name="token_refresh"),
     path("logout", LogoutView.as_view(), name="logout"),

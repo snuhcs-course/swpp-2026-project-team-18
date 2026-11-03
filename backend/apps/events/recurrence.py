@@ -39,6 +39,8 @@ def attach(event, weekdays):
     # 회차를 만들 수 있다(`Event.objects.create(**template)`).
     if event.include_prep is not None:
         template["include_prep"] = event.include_prep
+    if event.origin_place_id is not None:
+        template["origin_place_id"] = event.origin_place_id
     rule = EventRecurrence.objects.create(
         user=event.user, start_at=event.start_at, timezone=tz.key, weekdays=weekdays,
         template=template,
@@ -47,6 +49,18 @@ def attach(event, weekdays):
     event.recurrence = rule
     event.recurrence_date = event.start_at.astimezone(tz).date()
     event.save(update_fields=["recurrence", "recurrence_date"])
+
+
+def _live_template(rule):
+    """회차를 만들 값. 저장한 집을 지웠으면 그 id 는 빼고 좌표만 쓴다. (Partly AI-generated (Claude))"""
+    template = dict(rule.template)
+    place_id = template.get("origin_place_id")
+    if place_id is not None:
+        from apps.accounts.models import SavedPlace
+
+        if not SavedPlace.objects.filter(pk=place_id, user_id=rule.user_id).exists():
+            template.pop("origin_place_id")
+    return template
 
 
 def in_window(event):
@@ -71,10 +85,11 @@ def expand(rule_id, *, reset_choices=False):
         if day.weekday() in rule.weekdays and day.isoformat() not in rule.excluded_dates:
             event = existing.get(day)
             if event is None:
+                template = _live_template(rule)
                 existing[day] = Event.objects.create(
                     user=rule.user, recurrence=rule, recurrence_date=day,
                     start_at=datetime.combine(day, anchor.time(), tzinfo=start.tzinfo),
-                    place=rule.place, tag=rule.tag, **rule.template,
+                    place=rule.place, tag=rule.tag, **template,
                 )
         day += timedelta(days=1)
     # A moved occurrence keeps its original slot, but needs its plan by actual date.

@@ -106,3 +106,19 @@
   2. `routes/live` 본문에 선택 항목 `"context": "pre_departure"` 를 받아 로그에 남기고, 스로틀 범위를 따로 달라. 앱은 서버가 모르는 키를 받는다고 알려 준 뒤에만 보낸다(지금 서버는 추가 키를 무시한다).
   3. 학습 정책을 정해 달라: 출발 전 경로 바꾸기는 지금 이동 중 바꾸기와 같이 학습에서 빠진다(`TripReroute`). 그대로 둘지, 출발 전에 바꾼 이동은 새 경로 기준으로 학습할지.
   4. 나중에: `RouteRefreshWorker` 의 `recompute` 가 기준 경로로 늦는 것을 보면 계획(`alarm_plan.depart_check`)에 `switch_suggestion` 을 넣어 달라. 그러면 앱이 따로 부르지 않아도 된다.
+
+## 서버 처리 (2026-11-03, 서버 0.18.0)
+
+| ID | 처리 | 문서 |
+| --- | --- | --- |
+| R3-1 | 두 문서를 올렸다 | [reroute-api.md](reroute-api.md), [travel-factors.md](travel-factors.md) |
+| R3-2 | `SavedPlace` API 와 일정의 `origin_place_id`. 끝의 `/` 는 있어도 없어도 된다 | [saved-places-api.md](saved-places-api.md) |
+| R3-3 | `origin_place_id` 가 있으면 집 출발(준비 시간·준비 학습). **좌표로 기본 집 50m 안을 판정하지는 않는다** — 문서의 "제안과 다른 점" | [saved-places-api.md](saved-places-api.md) |
+| R3-4 | 운영(콘솔에 키 등록). 코드 변경 없음 | |
+| R3-5 | 운영(켜는 때). 코드 변경 없음 | |
+| R3-6 | 주간 응답에 `wake` 블록. 수면·`weekday_adjustments` 는 없다(재료 없음, 학습은 평일·주말 두 칸) | [../iter2/report-design.md](../iter2/report-design.md) §3 |
+| R3-7 | LLM 호출 전체 15초 마감 | `backend/apps/reports/llm.py` |
+| R3-8 | "세분화" 등은 한글 수로 보지 않는다. 모델·환경 변수는 운영 | `backend/apps/reports/summary.py` |
+| R3-9 | 세 엔드포인트와 SMTP 설정 | [password-api.md](password-api.md) |
+| R3-10 | 두 엔드포인트, `UserSerializer.email_verified` | [password-api.md](password-api.md) |
+| R3-11 | 1·2: 계약 문서에 적고 `context: pre_departure` 와 따로 센 스로틀. 3: **출발 전에 바꾼 이동은 새 경로 기준으로 학습**(사용자 11-03). 4: 아직 | [reroute-api.md](reroute-api.md) 4절 |

@@ -154,6 +154,7 @@ Figma ⑨ 의 "취침 알림 켜기" 버튼은 없다(§2-5).
 | `summary` | string | 요약 문장 |
 | `summary_source` | `"llm"` \| `"template"` | 요약 출처 |
 | `calibration` | 기존 | **그 주 일정만**으로 계산하게 고침(§1 결함) |
+| `wake` | object \| null | (iter3 R3-6, 0.18.0) 그 주 알람 기록. `{alarms_fired, snooze_count, snoozed_alarms, wake_seconds_median, by_weekday[{weekday, fired, snooze_count, wake_seconds_median}]}`. 알람 하나 = (일정, 등록된 알람 시각), 첫 울림이 그 주 안인 것만. `wake_seconds_median` 은 첫 울림 → 첫 끄기 초의 중앙값(끈 기록 없으면 null). 울린 알람이 없으면 `wake` 자체가 null. 수면 시간·요일별 자동 조정은 재료가 없어 내리지 않는다(학습은 평일·주말 두 칸뿐) |
 
 `outcomes[]` (예: 화요일 지각):
 

@@ -189,8 +189,9 @@ class AlarmLog(models.Model):
     **왜 필요한가.** 알람 → 끄기 → 출발 사이에서 "깨는 데 걸린 시간" 과 "실제 준비
     시간" 을 나누려면 울린 시각과 끈 시각이 있어야 한다. 지금까지는 기기에만 있었다.
 
-    **이동 학습은 첫 울림을 계획 선택의 기준 시각으로 쓴다.** 기상 반응 분석과 리포트 반영은
-    아직 하지 않는다. 조회 API도 두지 않는다(admin과 학습 배치용).
+    **이동 학습은 첫 울림을 계획 선택의 기준 시각으로 쓴다.** 리포트는 주간 `wake` 블록
+    (울림·미루기·깨는 시간)만 센다(`reports.services.wake_stats`, R3-6). 기상 반응 분석은 아직
+    하지 않고, 따로 조회하는 API 도 두지 않는다.
 
     **정합성 규칙**
 
@@ -289,9 +290,15 @@ class TripReroute(models.Model):
     반복 규칙은 원래 고른 경로를 쓴다. 이동 중 경로 갱신(`/api/routes/live`)은 마지막으로
     바꾼 경로를 기준으로 삼는다.
 
-    **바꾼 이동은 이동 학습에서 뺀다.** 결정 시점 계획의 카카오 원값은 원래 경로의 것이라
-    실측과 맞지 않는다(`prediction.learning`, 버린 이유 "이동 중 경로 변경"). 준비 시간과
-    안전 버퍼(지각 이력)에는 그대로 쓴다 — 도착 시각은 사실이다.
+    **이동 중에 바꾼 이동은 이동 학습에서 뺀다.** 결정 시점 계획의 카카오 원값은 원래 경로의
+    것이라 실측과 맞지 않는다(`prediction.learning`, 버린 이유 "이동 중 경로 변경"). 준비
+    시간과 안전 버퍼(지각 이력)에는 그대로 쓴다 — 도착 시각은 사실이다.
+
+    **출발 전에 바꾼 이동은 새 경로 기준으로 학습한다**(backend-requests R3-11, 사용자 11-03).
+    알람을 끌 때나 출발 10분 전에 바꾸면 집을 나설 때부터 새 경로로 간다. 바꿀 때 서버가 그
+    경로의 카카오 원값을 알고 있으면(`planning.live_switch.remembered` — 직전 `routes/live`
+    응답) 아래 세 칸에 남기고, 학습은 GPS 출발보다 앞서 바꾼 행만 그 값으로 쓴다. 원값이
+    없으면 학습에서 뺀다("출발 전 경로 변경, 원값 없음").
     """
 
     user = models.ForeignKey(
@@ -311,6 +318,16 @@ class TripReroute(models.Model):
     # 바꾸자고 알린 이유. 사용자가 알림 없이 바꿨으면 빈 값이다.
     reason = models.CharField("알린 이유", max_length=20, blank=True, default="", db_default="")
     rerouted_at = models.DateTimeField("바꾼 시각", auto_now_add=True)
+    # 바꾼 경로의 카카오 원값(바꾼 자리에서 출발할 때). 출발 전 바꾸기를 학습할 때 예측값이다.
+    route_minutes_raw = models.FloatField(
+        "바꾼 경로 원값(분)", null=True, blank=True, default=None, db_default=None
+    )
+    walk_minutes_raw = models.FloatField(
+        "바꾼 경로 걷는 분", null=True, blank=True, default=None, db_default=None
+    )
+    travel_mode = models.CharField(
+        "바꾼 경로 수단", max_length=20, blank=True, default="", db_default=""
+    )
 
     class Meta:
         db_table = "observations_trip_reroute"

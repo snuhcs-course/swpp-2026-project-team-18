@@ -384,3 +384,71 @@ class TestReroute:
             reverse("events:reroute", args=[theirs.pk]), {"route_key": ALT_KEY}, format="json"
         ).status_code in (401, 403)
         assert not TripReroute.objects.exists()
+
+
+# ---------------------------------------------------------------------------
+# 출발 전 확인 (R3-11) — Partly AI-generated (Claude)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+class TestPreDeparture:
+    @pytest.fixture(autouse=True)
+    def _clean_cache(self):
+        from django.core.cache import cache
+
+        cache.clear()
+        yield
+        cache.clear()
+
+    def test_reroute_keeps_the_raw_minutes_routes_live_saw(
+        self, client_auth, user, place, monkeypatch, realtime_calls
+    ):
+        event = make_event(user, place, monkeypatch, starts_in=30)
+        post_live(client_auth, event, live_route(40, 28), monkeypatch)
+
+        assert reroute(client_auth, event, reason="late_now").status_code == 201
+        row = TripReroute.objects.get(event=event)
+        assert row.route_minutes_raw == 28
+        assert row.walk_minutes_raw == 5  # 240 + 60초
+        assert row.travel_mode == "지하철"
+
+    def test_reroute_without_a_live_call_has_no_raw_minutes(
+        self, client_auth, user, place, monkeypatch
+    ):
+        event = make_event(user, place, monkeypatch, starts_in=30)
+        assert reroute(client_auth, event).status_code == 201
+        row = TripReroute.objects.get(event=event)
+        assert row.route_minutes_raw is None and row.travel_mode == ""
+
+    def test_context_is_accepted_and_the_answer_is_the_same(
+        self, client_auth, user, place, monkeypatch, realtime_calls
+    ):
+        event = make_event(user, place, monkeypatch, starts_in=30)
+        monkeypatch.setattr(views.clients, "resolve_route", lambda key, **kw: (live_route(40, 28, key=key), False))
+        body = {"event_id": event.pk, "lat": HERE[0], "lng": HERE[1]}
+        plain = client_auth.post(reverse("events:route_live"), body, format="json")
+        pre = client_auth.post(
+            reverse("events:route_live"), {**body, "context": "pre_departure"}, format="json"
+        )
+        assert plain.status_code == pre.status_code == 200
+        assert plain.json() == pre.json()
+
+    def test_pre_departure_has_its_own_throttle_bucket(
+        self, client_auth, user, place, monkeypatch, realtime_calls
+    ):
+        from rest_framework.throttling import SimpleRateThrottle
+
+        event = make_event(user, place, monkeypatch, starts_in=30)
+        monkeypatch.setattr(views.clients, "resolve_route", lambda key, **kw: (live_route(40, None, key=key), False))
+        monkeypatch.setattr(
+            SimpleRateThrottle, "THROTTLE_RATES",
+            {"route_live": "1/hour", "route_live_pre_departure": "1/hour"},
+        )
+        body = {"event_id": event.pk, "lat": HERE[0], "lng": HERE[1]}
+        url = reverse("events:route_live")
+        assert client_auth.post(url, body, format="json").status_code == 200
+        assert client_auth.post(url, body, format="json").status_code == 429
+        pre = {**body, "context": "pre_departure"}
+        assert client_auth.post(url, pre, format="json").status_code == 200
+        assert client_auth.post(url, pre, format="json").status_code == 429

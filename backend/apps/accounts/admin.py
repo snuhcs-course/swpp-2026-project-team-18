@@ -14,7 +14,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.db.models import Count
 
-from .models import Profile, SocialAccount, User
+from .models import EmailCode, Profile, SavedPlace, SocialAccount, User
 
 
 class ProfileForm(forms.ModelForm):
@@ -183,6 +183,46 @@ class SocialAccountAdmin(admin.ModelAdmin):
     list_filter = ("provider",)
     search_fields = ("user__email", "user__nickname", "email")
     readonly_fields = ("user", "provider", "subject", "email", "created_at", "last_login_at")
+    list_select_related = ("user",)
+    ordering = ("-created_at", "-id")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+# Partly AI-generated (Claude)
+@admin.register(EmailCode)
+class EmailCodeAdmin(admin.ModelAdmin):
+    """메일 코드(비밀번호 재설정·이메일 인증). 보기만 한다. 해시는 보이지 않는다."""
+
+    list_display = ("created_at", "user", "purpose", "expires_at", "attempts", "used_at")
+    list_filter = ("purpose",)
+    search_fields = ("user__email",)
+    fields = ("user", "purpose", "created_at", "expires_at", "attempts", "used_at")
+    readonly_fields = fields
+    list_select_related = ("user",)
+    ordering = ("-created_at", "-id")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+# Partly AI-generated (Claude)
+@admin.register(SavedPlace)
+class SavedPlaceAdmin(admin.ModelAdmin):
+    """저장한 집(R3-2). 앱 API 가 5개 한도·50m 중복 규칙을 지킨다. 여기서는 보고 지우기만 한다."""
+
+    list_display = ("created_at", "user", "label", "name", "lat", "lng")
+    search_fields = ("user__email", "label", "name")
+    readonly_fields = (
+        "user", "client_uuid", "label", "name", "address", "lat", "lng", "created_at",
+    )
     list_select_related = ("user",)
     ordering = ("-created_at", "-id")
 

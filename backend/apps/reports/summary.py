@@ -180,6 +180,10 @@ _HANGUL = re.compile(r"[가-힣]")
 _NUMBER_WORD = re.compile(
     r"(?<![가-힣])(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열|스무)\s*(?:번|건|회|차례|분|시간)"
 )
+# 낱말의 일부라 수가 아닌 것. "세분화" 의 "세분" 을 "세 분" 으로 읽어 문장을 버리던 것을
+# 막는다(backend-requests R3-8). 한글 수와 단위를 붙여 쓴 "두번은" 은 그대로 떨어진다 —
+# 아래 낱말에만 해당한다. (Partly AI-generated (Claude))
+_NOT_NUMBER_WORDS = re.compile(r"세분(?:화|류|하|해|된|돼|되)")
 # 날짜·시각. facts 에 우연히 있는 숫자(10·7·9)로 "10월 7일"·"9시" 를 만들 수 있다.
 _DATE_TIME = re.compile(r"\d+\s*(?:월|일|시)|\d{1,2}\s*:\s*\d{2}")
 
@@ -512,7 +516,7 @@ def check_text(text: str, facts: dict) -> str | None:
         return "learning_word"
     if "http" in text.lower():
         return "url"
-    if _NUMBER_WORD.search(text):
+    if _NUMBER_WORD.search(_NOT_NUMBER_WORDS.sub("", text)):
         return "number_word"
     if _DATE_TIME.search(text):
         return "date_or_time"

@@ -95,6 +95,21 @@ services:
       - key: OPENAI_BASE_URL
         sync: false
 
+      # 비밀번호 재설정·이메일 인증 코드 메일(SMTP). **대시보드에서 직접 넣는다.**
+      # EMAIL_HOST 를 비우면 메일 대신 서버 로그에 찍힌다(사용자는 코드를 못 받는다).
+      # EMAIL_PORT 기본 587, EMAIL_USE_TLS 기본 1. (Partly AI-generated (Claude))
+      - key: EMAIL_HOST
+        sync: false
+
+      - key: EMAIL_HOST_USER
+        sync: false
+
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+
 # databases 블록을 두지 않는다.
 #
 # 여기에 Render Postgres 를 정의하면 DATABASE_URL 이 그쪽으로 자동 연결되고,

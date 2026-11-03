@@ -33,9 +33,16 @@
 
 ## 시간 제한
 
-`TIMEOUT_SECONDS` 는 연결·TLS·읽기 **단계마다** 적용된다(DNS 조회에는 적용되지
-않는다). 그래서 전체 대기는 8초보다 길 수 있지만 gunicorn `--timeout 60` 과 앱의
-읽기 60초 안에 든다.
+호출 전체에 마감(`DEADLINE_SECONDS`, 15초)을 둔다(backend-requests R3-7). 소켓
+timeout 은 연결·TLS·읽기 **단계마다** 적용돼서, 응답을 조금씩 계속 보내는 서버면
+전체 시간이 끝없이 늘어난다(OpenRouter 실험에서 48초·65초 호출이 통과했다 — 65초는
+gunicorn `--timeout 60` 을 넘는다). 그래서
+
+- 연결에는 `min(TIMEOUT_SECONDS, 남은 시간)` 을 준다.
+- 본문은 조각으로 읽고, 조각마다 소켓 timeout 을 남은 시간으로 줄이고 마감을 넘었는지
+  본다. 넘으면 `TIMEOUT` 이고 부르는 쪽은 템플릿 문장을 쓴다.
+
+DNS 조회에는 timeout 이 걸리지 않는다(표준 라이브러리 한계).
 """
 
 from __future__ import annotations
@@ -43,6 +50,7 @@ from __future__ import annotations
 import json
 import logging
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,6 +62,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 CHAT_PATH = "/chat/completions"
 TIMEOUT_SECONDS = 8
+# 호출 전체의 마감(초). 연결부터 본문 끝까지. (Partly AI-generated (Claude))
+DEADLINE_SECONDS = 15
+READ_CHUNK = 8192
 
 # 평문 http 를 허용하는 호스트. 원격 평문 http 로는 키를 보내지 않는다.
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1"})
@@ -142,21 +153,24 @@ def chat(system: str, user: str) -> tuple[str | None, str | None]:
     request.add_unredirected_header("Authorization", f"Bearer {settings.OPENAI_API_KEY.strip()}")
     request.add_header("Content-Type", "application/json")
 
+    deadline = _clock() + DEADLINE_SECONDS
     try:
         with _urlopen(
-            request, timeout=TIMEOUT_SECONDS, context=ssl.create_default_context()
+            request,
+            timeout=min(TIMEOUT_SECONDS, DEADLINE_SECONDS),
+            context=ssl.create_default_context(),
         ) as response:
-            raw = response.read()
+            raw = _read_until(response, deadline)
     except urllib.error.HTTPError as error:
         return None, _http_failure(error)
     except urllib.error.URLError as error:
         if isinstance(error.reason, TimeoutError):
-            logger.warning("LLM 요청 시간 초과(%s초)", TIMEOUT_SECONDS)
+            logger.warning("LLM 요청 시간 초과(단계 %s초)", TIMEOUT_SECONDS)
             return None, TIMEOUT
         logger.warning("LLM 요청 실패(연결) %s", type(error.reason).__name__)
         return None, NETWORK
     except TimeoutError:
-        logger.warning("LLM 요청 시간 초과(%s초)", TIMEOUT_SECONDS)
+        logger.warning("LLM 요청 시간 초과(전체 %s초)", DEADLINE_SECONDS)
         return None, TIMEOUT
     except Exception as error:  # TLS·연결 끊김 등. 메시지에 주소가 섞일 수 있어 이름만 남긴다
         logger.warning("LLM 요청 실패 %s", type(error).__name__)
@@ -167,6 +181,39 @@ def chat(system: str, user: str) -> tuple[str | None, str | None]:
         logger.warning("LLM 응답 형식이 다르다(choices[0].message.content 없음)")
         return None, BAD_RESPONSE
     return text, None
+
+
+# 테스트가 바꿔 끼우는 시계.
+_clock = time.monotonic
+
+
+def _read_until(response, deadline: float) -> bytes:
+    """본문을 조각으로 읽는다. 마감을 넘으면 `TimeoutError`.
+
+    조각마다 소켓 timeout 을 남은 시간으로 줄여서, 한 조각을 기다리는 동안에도 마감을
+    크게 넘지 않는다. 소켓에 닿지 못하면(가짜 응답 등) 조각 사이에서만 마감을 본다.
+    """
+    chunks: list[bytes] = []
+    while True:
+        remaining = deadline - _clock()
+        if remaining <= 0:
+            raise TimeoutError("deadline")
+        _shrink_socket_timeout(response, remaining)
+        chunk = response.read(READ_CHUNK)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def _shrink_socket_timeout(response, remaining: float) -> None:
+    """`http.client.HTTPResponse` 밑의 소켓 timeout 을 남은 시간 이하로. 못 찾으면 그대로."""
+    sock = getattr(getattr(getattr(response, "fp", None), "raw", None), "_sock", None)
+    if sock is None:
+        return
+    try:
+        sock.settimeout(max(min(remaining, TIMEOUT_SECONDS), 0.05))
+    except OSError:
+        pass
 
 
 def _http_failure(error: urllib.error.HTTPError) -> str:

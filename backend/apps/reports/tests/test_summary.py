@@ -463,6 +463,15 @@ class TestCheckText:
         text = f"{EXAMPLE_TEXT} 충분한 시간을 두고 나서면 됨."
         assert summary.check_text(text, self.facts()) is None
 
+    @pytest.mark.parametrize("extra", ["원인을 세분화해 보면 됨.", "기록을 세분해 보면 됨."])
+    def test_subdivide_is_not_a_number_word(self, extra):
+        """"세분화" 의 "세분" 은 "세 분" 이 아니다(R3-8)."""
+        assert summary.check_text(f"{EXAMPLE_TEXT} {extra}", self.facts()) is None
+
+    def test_number_word_after_subdivide_is_still_caught(self):
+        text = f"{EXAMPLE_TEXT} 세분화하면 세 번임."
+        assert summary.check_text(text, self.facts()) == "number_word"
+
     # Partly AI-generated (Claude)
     def test_prompt_names_the_no_late_phrase_the_check_accepts(self):
         """"한 번도 늦지 않았음" 은 number_word 로 떨어진다(지각이 있던 주에 쓰면 거짓이라
@@ -577,7 +586,7 @@ class TestSummaryFor:
         assert request.full_url == "https://api.openai.com/v1/chat/completions"
         assert request.get_method() == "POST"
         assert request.get_header("Authorization") == "Bearer sk-test-not-a-real-key"
-        assert timeout == llm.TIMEOUT_SECONDS
+        assert timeout == min(llm.TIMEOUT_SECONDS, llm.DEADLINE_SECONDS)
 
         body = fake_llm.sent()
         assert set(body) == {"model", "messages"}  # temperature·max_tokens 없음

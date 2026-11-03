@@ -21,7 +21,7 @@ from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
 from rest_framework.views import APIView
 
 from apps.observations import alarm_logs
@@ -216,8 +216,8 @@ class EventRerouteView(_UserScopedMixin, APIView):
     알림(`/api/routes/live` 의 `switch_suggestion.reason`)을 보고 눌렀을 때 그 값, 아니면 생략.
 
     **이번 이동만 바꾼다.** `Event.route_key` 와 알람 계획은 그대로다. 이후 `routes/live` 는 바꾼
-    경로를 기준으로 비교한다. 바꾼 이동은 이동 학습에서 빠진다(`TripReroute`). 계약은
-    docs/iter3/reroute-api.md.
+    경로를 기준으로 비교한다. 이동 중에 바꾼 이동은 이동 학습에서 빠지고, 출발 전에 바꾼 이동은
+    새 경로 기준으로 학습한다(`TripReroute`). 계약은 docs/iter3/reroute-api.md.
     """
 
     def post(self, request, pk: int):
@@ -253,12 +253,18 @@ class EventRerouteView(_UserScopedMixin, APIView):
                 "same_route", "지금 경로와 같다.", status.HTTP_409_CONFLICT,
             )
 
+        # 직전 `routes/live` 가 이 경로의 원값을 알았으면 남긴다. 출발 전에 바꾼 이동은 그 값으로
+        # 학습한다(R3-11, `prediction.learning`).
+        raw = live_switch.remembered(event.pk, route_key) or {}
         reroute = TripReroute.objects.create(
             user=request.user,
             event=event,
             from_route_key=current[:120],
             to_route_key=route_key,
             reason=reason,
+            route_minutes_raw=raw.get("minutes"),
+            walk_minutes_raw=raw.get("walk_minutes"),
+            travel_mode=(raw.get("mode") or "")[:20],
         )
         return Response(
             {
@@ -983,6 +989,28 @@ class RouteCandidateView(APIView):
         )
 
 
+# `routes/live` 본문의 선택 항목 `context`. 이 값이면 출발 전 확인이다(R3-11).
+CONTEXT_PRE_DEPARTURE = "pre_departure"
+
+
+class RouteLiveThrottle(ScopedRateThrottle):
+    """`routes/live` 스로틀. 출발 전 확인(`context: pre_departure`)은 따로 센다.
+
+    출발 전 확인은 일정 하나에 많아야 두 번이다. 이동 중 1분 갱신과 같은 통을 쓰면 두 쪽이 서로의
+    한도를 먹는다. (Partly AI-generated (Claude))
+    """
+
+    def allow_request(self, request, view):
+        data = getattr(request, "data", None)
+        context = data.get("context") if hasattr(data, "get") else None
+        if context == CONTEXT_PRE_DEPARTURE:
+            self.scope = "route_live_pre_departure"
+            self.rate = self.get_rate()
+            self.num_requests, self.duration = self.parse_rate(self.rate)
+            return SimpleRateThrottle.allow_request(self, request, view)
+        return super().allow_request(request, view)
+
+
 class RouteLiveView(_UserScopedMixin, APIView):
     """POST /api/routes/live — **지금 있는 곳**부터 목적지까지 가장 빠른 길.
 
@@ -1038,10 +1066,14 @@ class RouteLiveView(_UserScopedMixin, APIView):
     그대로 남는다. 읽기 요청이지만 본문으로 받는다.
     """
 
-    throttle_classes = [ScopedRateThrottle]
+    throttle_classes = [RouteLiveThrottle]
     throttle_scope = "route_live"
 
     def post(self, request):
+        context = request.data.get("context")
+        if context == CONTEXT_PRE_DEPARTURE:
+            # 출발 전 확인(알람을 끌 때·계획 출발 10분 전, R3-11). 응답은 같다. 로그만 남긴다.
+            logger.info("routes/live context=%s event=%s", context, request.data.get("event_id"))
         event_id = request.data.get("event_id")
         try:
             event_id = int(event_id)
@@ -1117,6 +1149,7 @@ class RouteLiveView(_UserScopedMixin, APIView):
                 "faster_minutes": 0,
             }
 
+        live_switch.remember_routes(event.pk, route)
         return Response(
             {
                 "route": live_route,

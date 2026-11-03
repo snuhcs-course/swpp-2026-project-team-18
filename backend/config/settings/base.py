@@ -194,6 +194,9 @@ REST_FRAMEWORK = {
         # 중복 서비스나 변조 클라이언트가 그보다 빠르게 몰아치는 것을 막는 계정별
         # burst 보호 장치이며, 정상적인 시간당 60회에는 여유를 둔다.
         "route_live": "80/hour",
+        # 출발 전 확인(`routes/live` 의 `context: pre_departure`, R3-11). 일정 하나에 많아야
+        # 두 번이라 넉넉하다. 이동 중 1분 갱신과 통을 나눈다. (Partly AI-generated (Claude))
+        "route_live_pre_departure": "30/hour",
         "nlp": "30/hour",
         "observation": "600/hour",
         # 글자마다 호출하는 비로그인 검사. 빠른 입력을 허용하되 IP별로 제한한다.
@@ -204,12 +207,42 @@ REST_FRAMEWORK = {
         "social": "60/hour",
         # 로그아웃. 인증 없이 받으므로 IP별로 센다. 정상 사용은 하루 몇 번이다.
         "logout": "60/hour",
+        # 비밀번호 찾기·변경, 이메일 인증(backend-requests R3-9·R3-10). 메일을 보내는 경로는
+        # IP 와 이메일(또는 사용자) 양쪽으로 센다 — 한 IP 가 여러 주소로, 여러 IP 가 한 주소로
+        # 메일을 퍼붓지 못하게 한다. (Partly AI-generated (Claude))
+        "password_reset": "5/hour",
+        "password_reset_email": "3/hour",
+        "password_reset_confirm": "10/hour",
+        "password_change": "10/hour",
+        "email_verify": "3/hour",
+        "email_verify_confirm": "10/hour",
     },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 20,
 }
+
+# ---------------------------------------------------------------------------
+# 메일 — 비밀번호 재설정·이메일 인증 코드(apps/accounts/codes.py)
+# ---------------------------------------------------------------------------
+# `EMAIL_HOST` 가 있으면 SMTP, 없으면 콘솔(로그에 찍힌다). Render 에는 SMTP 값을 환경 변수로
+# 둔다. 값은 저장소에 적지 않는다. `EMAIL_BACKEND` 로 직접 고를 수도 있다.
+# (Partly AI-generated (Claude))
+EMAIL_HOST = (os.getenv("EMAIL_HOST") or "").strip()
+EMAIL_PORT = int(os.getenv("EMAIL_PORT") or "587")
+EMAIL_HOST_USER = (os.getenv("EMAIL_HOST_USER") or "").strip()
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD") or ""
+EMAIL_USE_TLS = (os.getenv("EMAIL_USE_TLS") or "1").strip() == "1"
+EMAIL_TIMEOUT = 10
+EMAIL_BACKEND = (os.getenv("EMAIL_BACKEND") or "").strip() or (
+    "django.core.mail.backends.smtp.EmailBackend"
+    if EMAIL_HOST
+    else "django.core.mail.backends.console.EmailBackend"
+)
+DEFAULT_FROM_EMAIL = (os.getenv("DEFAULT_FROM_EMAIL") or "").strip() or (
+    EMAIL_HOST_USER or "JustInTime <no-reply@justintime.invalid>"
+)
 
 from datetime import timedelta  # noqa: E402
 
@@ -395,8 +428,10 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 #          `POST /api/events/{id}/reroute`(이번 이동만, 바꾼 이동은 이동 학습에서 뺌)
 #   0.17.0 대중교통 후보 5 → 7개. 느린 경로는 환승 최소 말고는 기준 대표로도 넣지 않고, 남는 칸은
 #          첫 차가 아직 없는 경로부터. 배지는 보이는 후보끼리 비교(앱 `RouteMode.TRANSIT` 7)
+#   0.18.0 비밀번호 찾기·변경, 이메일 인증(선택), 리포트 요약 LLM 전체 15초 마감, 출발 전 확인
+#          (`routes/live` context·스로틀)과 출발 전 바꾸기를 새 경로 기준으로 학습(backend-requests R3)
 #
 # 버전만으로 판별하지 않는 것이 더 확실하다. `scripts/check_deployed.py` 와
 # 같은 방식으로 **새 엔드포인트의 404 여부**를 보면 버전을 올리는 것을
 # 잊었더라도 드러난다 — 인증이 필요한 경로는 배포됐으면 401, 미배포면 404 다.
-APP_VERSION = "0.17.0"
+APP_VERSION = "0.18.0"

@@ -99,7 +99,7 @@ class TestChat:
         assert request.get_method() == "POST"
         assert request.get_header("Authorization") == "Bearer sk-test-not-a-real-key"
         assert request.get_header("Content-type") == "application/json"
-        assert timeout == llm.TIMEOUT_SECONDS
+        assert timeout == min(llm.TIMEOUT_SECONDS, llm.DEADLINE_SECONDS)
         assert fake_llm.sent() == {
             "model": "gpt-test-mini",
             "messages": [
@@ -181,6 +181,44 @@ class TestChat:
     def test_transport_errors_are_named(self, fake_llm, error, failure):
         fake_llm.error = error
         assert llm.chat("s", "u") == (None, failure)
+
+    # Partly AI-generated (Claude)
+    def test_trickling_body_hits_the_overall_deadline(self, fake_llm, monkeypatch):
+        """조각이 계속 와도 전체 마감(R3-7)을 넘으면 TIMEOUT 이다."""
+        now = [0.0]
+        monkeypatch.setattr(llm, "_clock", lambda: now[0])
+
+        class Trickle:
+            def read(self, size=-1):
+                now[0] += 4.0  # 조각 하나에 4초씩
+                return b" "
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(llm, "_urlopen", lambda *a, **k: Trickle())
+        assert llm.chat("s", "u") == (None, llm.TIMEOUT)
+        assert now[0] <= llm.DEADLINE_SECONDS + 4.0
+
+    def test_socket_timeout_shrinks_to_remaining(self):
+        class Sock:
+            value = None
+
+            def settimeout(self, value):
+                self.value = value
+
+        sock = Sock()
+        response = type("R", (), {})()
+        response.fp = type("F", (), {})()
+        response.fp.raw = type("W", (), {})()
+        response.fp.raw._sock = sock
+        llm._shrink_socket_timeout(response, 3.0)
+        assert sock.value == 3.0
+        llm._shrink_socket_timeout(response, 100.0)
+        assert sock.value == llm.TIMEOUT_SECONDS
 
     @pytest.mark.parametrize(
         "body",

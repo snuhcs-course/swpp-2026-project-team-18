@@ -222,6 +222,17 @@ class Event(models.Model):
     origin_label = models.CharField(
         "출발지 표시명", max_length=80, blank=True, default="", db_default=""
     )
+    # 출발지가 저장한 집(`accounts.SavedPlace`)이면 그 행. 좌표는 위 `origin_*` 에 함께 남긴다 —
+    # 구버전 앱이 그대로 읽고, 집을 지워도(`SET_NULL`) 출발지는 그대로다. 저장한 집에서
+    # 출발하는 일정은 집 출발로 센다(`departs_from_home`, R3-3). (Partly AI-generated (Claude))
+    origin_place = models.ForeignKey(
+        "accounts.SavedPlace",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="events",
+        verbose_name="출발한 저장 집",
+    )
     # 알람에 준비 시간을 넣을지. null 이면 출발지로 정한다(`prep_applies`).
     #
     # 출발지를 따로 고른 일정은 "이미 밖에 있다" 로 보고 준비 시간을 뺀다. 그런데
@@ -320,7 +331,8 @@ class Event(models.Model):
         """알람에 준비 시간을 넣는가.
 
         사용자가 고른 값(`include_prep`)이 우선이다. 고르지 않았으면 집에서 출발할 때만
-        넣는다. 출발지를 따로 골랐다는 것은 보통 이미 밖에 있다는 뜻이다. 좌표를 집과
+        넣는다(`departs_from_home` — 저장한 집 출발도 집이다, R3-3). 출발지를 따로 골랐다는
+        것은 보통 이미 밖에 있다는 뜻이다. 좌표를 집과
         비교하지 않는 이유는, 집 근처 카페를 골랐어도 그건 집이 아니고 준비 단계도
         아니기 때문이다.
 
@@ -329,7 +341,20 @@ class Event(models.Model):
         """
         if self.include_prep is not None:
             return self.include_prep
-        return self.origin_lat is None
+        return self.departs_from_home
+
+    # Partly AI-generated (Claude)
+    @property
+    def departs_from_home(self) -> bool:
+        """집에서 출발하는가(backend-requests R3-3).
+
+        출발지를 고르지 않았거나 저장한 집(`origin_place`)에서 출발하면 집이다. 본가에서 자고
+        나서는 아침도 준비 시간이 들어가고 준비 학습 표본이 된다.
+
+        **좌표로 기본 집 근처를 판정하지 않는다.** 집 앞 카페를 출발지로 골랐으면 그건 집이
+        아니다(위 `prep_applies`). 저장한 집인지는 사용자가 고른 `origin_place` 로만 안다.
+        """
+        return self.origin_lat is None or self.origin_place_id is not None
 
     # Partly AI-generated (Claude)
     @property
@@ -359,3 +384,4 @@ class Event(models.Model):
         if self.tag_id and self.tag and self.tag.default_tau:
             return self.tag.default_tau
         return self.user.profile.default_tau
+

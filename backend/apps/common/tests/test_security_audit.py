@@ -67,6 +67,14 @@ PUBLIC_PATHS = {
         "(test_logout.py). 모든 기기 로그아웃(/api/auth/me/logout-all)은 인증이 필요하다"
     ),
     # Partly AI-generated (Claude)
+    "/api/auth/password/reset": (
+        "비밀번호 찾기 코드 요청. 비밀번호를 잊어 로그인할 수 없는 사람이 부른다. 계정이 있든 "
+        "없든 같은 202 를 내서 계정 여부를 알리지 않고, IP·이메일 두 스로틀로 메일 폭주를 막는다"
+    ),
+    "/api/auth/password/reset/confirm": (
+        "메일로 받은 6자리 코드로 비밀번호 재설정. 코드는 10분 유효, 하나당 5번 틀리면 죽고 "
+        "IP 스로틀이 붙는다(test_password_reset.py). 변경(/api/auth/me/password)은 인증이 필요하다"
+    ),
     "/api/auth/social/": (
         "카카오·구글 로그인. 토큰을 받기 전이라 인증할 수단이 없다. 제공자 ID 토큰의 "
         "서명·iss·aud·만료를 검증한 뒤에만 토큰을 준다(test_social_login.py). "
@@ -97,6 +105,11 @@ THROTTLED_PATHS = {
     "/api/auth/social/kakao": "제공자 공개키 조회·서명 검증 (Partly AI-generated (Claude))",
     "/api/auth/me/social/kakao": "제공자 공개키 조회·서명 검증",
     "/api/auth/logout": "인증 없는 쓰기(취소 기록)",
+    "/api/auth/password/reset": "메일 발송 (IP·이메일별)",
+    "/api/auth/password/reset/confirm": "6자리 코드 추측 방지",
+    "/api/auth/me/password": "현재 비밀번호 추측 방지",
+    "/api/auth/me/email/verify": "메일 발송",
+    "/api/auth/me/email/verify/confirm": "6자리 코드 추측 방지",
     "/api/observations/batch": "쓰기 폭주 방지",
     "/api/routines/observations/batch": "쓰기 폭주 방지",
 }
@@ -117,11 +130,15 @@ def _concrete(pattern: str) -> str:
     """URL 패턴의 변환자를 더미 값으로 바꿔 실제 요청 가능한 경로를 만든다."""
     import re
 
-    path = re.sub(r"<int:[^>]+>", "999999", pattern)
+    path = re.sub(r"\(\?P<[^>]+>\[0-9\]\+\)", "999999", pattern)
+    path = re.sub(r"<int:[^>]+>", "999999", path)
     path = re.sub(r"<str:[^>]+>", "x", path)
     path = re.sub(r"<slug:[^>]+>", "x", path)
     path = re.sub(r"<uuid:[^>]+>", "00000000-0000-4000-8000-000000000000", path)
     path = re.sub(r"<[^>]+>", "x", path)
+    # `re_path` 정규식(저장한 집 `^api/saved-places/?$`). 빠뜨리면 감사에서 조용히 빠진다.
+    # (Partly AI-generated (Claude))
+    path = path.replace("^", "").replace("$", "").replace("/?", "")
     return "/" + path.lstrip("/")
 
 

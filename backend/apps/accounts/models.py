@@ -59,6 +59,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     terms_agreed_at = models.DateTimeField(
         "약관 동의 시각", null=True, blank=True, default=None, db_default=None
     )
+    # 이메일 인증(선택, backend-requests R3-10). 로그인과 다른 API 는 이 값을 보지 않는다.
+    email_verified_at = models.DateTimeField(
+        "이메일 인증 시각", null=True, blank=True, default=None, db_default=None
+    )
 
     is_active = models.BooleanField("활성", default=True)
     is_staff = models.BooleanField("스태프", default=False)
@@ -208,3 +212,84 @@ class SocialAccount(models.Model):
 
     def __str__(self):
         return f"{self.get_provider_display()} {self.subject} → {self.user_id}"
+
+
+# Partly AI-generated (Claude)
+class EmailCode(models.Model):
+    """메일로 보낸 6자리 코드(`apps.accounts.codes`). 비밀번호 재설정과 이메일 인증이 쓴다.
+
+    코드는 해시로만 둔다. 사용자·용도마다 살아 있는 코드는 하나다 — 새로 요청하면 이전 행을
+    지운다. 틀린 횟수(`attempts`)가 한도에 닿으면 그 코드는 더 받지 않는다.
+    """
+
+    class Purpose(models.TextChoices):
+        PASSWORD_RESET = "password_reset", "비밀번호 재설정"
+        EMAIL_VERIFY = "email_verify", "이메일 인증"
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="email_codes", verbose_name="사용자"
+    )
+    purpose = models.CharField("용도", max_length=20, choices=Purpose.choices)
+    code_hash = models.CharField("코드 해시", max_length=128)
+    created_at = models.DateTimeField("발급 시각", auto_now_add=True)
+    expires_at = models.DateTimeField("만료 시각")
+    attempts = models.PositiveSmallIntegerField("틀린 횟수", default=0, db_default=0)
+    used_at = models.DateTimeField(
+        "사용 시각", null=True, blank=True, default=None, db_default=None
+    )
+
+    class Meta:
+        db_table = "accounts_email_code"
+        verbose_name = "메일 코드"
+        verbose_name_plural = "메일 코드"
+        indexes = [models.Index(fields=["user", "purpose"], name="accounts_email_code_user")]
+
+    def __str__(self):
+        return f"{self.get_purpose_display()} → {self.user_id}"
+
+
+# Partly AI-generated (Claude)
+class SavedPlace(models.Model):
+    """기본 집(프로필 `home_*`) 말고 저장한 집(본가·자취방). backend-requests R3-2.
+
+    - 사용자당 [MAX_PER_USER] 개까지. 50m 안의 자리는 같은 집으로 본다(`apps.accounts.saved_places`).
+    - `client_uuid` 는 앱의 `SavedHome.id`. 앱이 기기 목록을 한 번 올릴 때(`bulk`) 같은 행을 두 번
+      만들지 않게 한다. 서버가 만든 행(기본 집 바꾸기)은 빈 값이다.
+    - 기본 집은 여기 복사하지 않는다. 목록 응답의 `default` 로만 보인다.
+    - 지워도 일정의 출발지 좌표(`Event.origin_*`)는 남는다(`Event.origin_place` 는 `SET_NULL`).
+    """
+
+    MAX_PER_USER = 5
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="saved_places", verbose_name="사용자"
+    )
+    client_uuid = models.CharField(
+        "클라이언트 UUID", max_length=40, blank=True, default="", db_default=""
+    )
+    label = models.CharField("이름", max_length=40)
+    name = models.CharField("장소 이름", max_length=120, blank=True, default="", db_default="")
+    address = models.CharField("주소", max_length=200, blank=True, default="", db_default="")
+    lat = models.FloatField("위도", validators=[MinValueValidator(-90), MaxValueValidator(90)])
+    lng = models.FloatField("경도", validators=[MinValueValidator(-180), MaxValueValidator(180)])
+    created_at = models.DateTimeField("저장 시각", auto_now_add=True)
+
+    class Meta:
+        db_table = "accounts_saved_place"
+        verbose_name = "저장한 집"
+        verbose_name_plural = "저장한 집"
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "client_uuid"],
+                condition=~Q(client_uuid=""),
+                name="accounts_saved_place_user_client_uuid",
+            ),
+            models.CheckConstraint(
+                condition=Q(lat__gte=-90) & Q(lat__lte=90) & Q(lng__gte=-180) & Q(lng__lte=180),
+                name="accounts_saved_place_coord_range",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.label} ({self.user_id})"
