@@ -46,8 +46,12 @@ class FakeResponse:
     def __init__(self, body: bytes):
         self._body = body
 
-    def read(self, *args):
-        return self._body
+    def read(self, size: int = -1):
+        """`HTTPResponse.read` 처럼 앞에서부터 잘라 주고 끝나면 b"" 다."""
+        if size is None or size < 0:
+            size = len(self._body)
+        chunk, self._body = self._body[:size], self._body[size:]
+        return chunk
 
     def __enter__(self):
         return self
