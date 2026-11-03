@@ -9,8 +9,11 @@ import com.swpp.wakeup.data.remote.ApiErrorEnvelope
 import com.swpp.wakeup.data.remote.AuthApi
 import com.swpp.wakeup.data.remote.AuthResponse
 import com.swpp.wakeup.data.remote.LoginRequest
+import com.swpp.wakeup.data.remote.PasswordChangeRequest
 import com.swpp.wakeup.data.remote.PasswordCheckRequest
 import com.swpp.wakeup.data.remote.PasswordCheckResponse
+import com.swpp.wakeup.data.remote.PasswordResetConfirmRequest
+import com.swpp.wakeup.data.remote.PasswordResetRequest
 import com.swpp.wakeup.data.remote.RegisterRequest
 import com.swpp.wakeup.data.remote.SocialLinkRequest
 import com.swpp.wakeup.data.remote.SocialLoginRequest
@@ -70,6 +73,20 @@ class AuthRepository(
         data class Failure(val message: String) : AccountResult
     }
 
+    // Partly AI-generated (Claude)
+    /** 비밀번호 재설정 코드 요청 결과(제안 계약 R3-9) */
+    sealed interface ResetRequestResult {
+        data class Sent(val expiresInSeconds: Int?) : ResetRequestResult
+        data class Failure(val message: String) : ResetRequestResult
+    }
+
+    // Partly AI-generated (Claude)
+    /** 비밀번호 변경 결과. 성공이면 서버가 준 새 토큰을 이미 저장했다 */
+    sealed interface PasswordChangeResult {
+        data class Success(val tokensRotated: Boolean) : PasswordChangeResult
+        data class Failure(val message: String, val currentPasswordWrong: Boolean = false) : PasswordChangeResult
+    }
+
     suspend fun register(
         email: String,
         nickname: String,
@@ -106,6 +123,80 @@ class AuthRepository(
     }
 
     fun logout() = tokenStore.clear()
+
+    // Partly AI-generated (Claude)
+    /** 가입한 이메일로 확인 코드를 보낸다(`POST /api/auth/password/reset`). 없는 이메일도 같은 202 라고 한다 */
+    suspend fun requestPasswordReset(email: String): ResetRequestResult = try {
+        val response = api.requestPasswordReset(PasswordResetRequest(email = email.trim()))
+        if (response.isSuccessful) {
+            ResetRequestResult.Sent(response.body()?.expiresIn)
+        } else {
+            ResetRequestResult.Failure(passwordFlowMessage(response.code(), errorBodyOf(response.errorBody()?.string())))
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: IOException) {
+        ResetRequestResult.Failure(MESSAGE_NETWORK)
+    } catch (e: Exception) {
+        ResetRequestResult.Failure(MESSAGE_UNKNOWN)
+    }
+
+    // Partly AI-generated (Claude)
+    /** 코드와 새 비밀번호로 바꾸고 로그인한다(`POST /api/auth/password/reset/confirm`). 응답은 로그인과 같다 */
+    suspend fun confirmPasswordReset(
+        email: String,
+        code: String,
+        newPassword: String,
+        newPasswordConfirm: String,
+    ): AuthResult = call(errorMessage = ::passwordFlowMessage) {
+        api.confirmPasswordReset(
+            PasswordResetConfirmRequest(
+                email = email.trim(),
+                resetCode = code.trim(),
+                newPassword = newPassword,
+                newPasswordConfirm = newPasswordConfirm,
+            )
+        )
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 로그인한 사용자의 비밀번호 변경(`POST /api/auth/me/password`). 서버가 모든 기기의 토큰을 취소하고
+     * 이 기기의 새 토큰을 준다. 받으면 바로 저장해서 이 기기는 로그인된 채로 남는다.
+     */
+    suspend fun changePassword(
+        current: String,
+        newPassword: String,
+        newPasswordConfirm: String,
+    ): PasswordChangeResult = try {
+        val response = api.changePassword(PasswordChangeRequest(current, newPassword, newPasswordConfirm))
+        if (response.isSuccessful) {
+            val access = response.body()?.access?.trim().orEmpty()
+            val refresh = response.body()?.refresh?.trim().orEmpty()
+            if (access.isNotEmpty() && refresh.isNotEmpty()) {
+                tokenStore.updateTokens(access, refresh)
+                PasswordChangeResult.Success(tokensRotated = true)
+            } else {
+                PasswordChangeResult.Success(tokensRotated = false)
+            }
+        } else {
+            val error = errorBodyOf(response.errorBody()?.string())
+            PasswordChangeResult.Failure(
+                message = passwordFlowMessage(response.code(), error),
+                currentPasswordWrong = error?.code == "invalid_current_password",
+            )
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: IOException) {
+        PasswordChangeResult.Failure(MESSAGE_NETWORK)
+    } catch (e: TokenStorageException) {
+        // 비밀번호는 바뀌었지만 새 토큰을 못 저장했다. 옛 토큰은 서버가 취소했으니 다시 로그인해야 한다.
+        tokenStore.clear()
+        PasswordChangeResult.Failure(MESSAGE_STORAGE)
+    } catch (e: Exception) {
+        PasswordChangeResult.Failure(MESSAGE_UNKNOWN)
+    }
 
     // Partly AI-generated (Claude)
     /**
@@ -207,12 +298,15 @@ class AuthRepository(
      * 성공하면 토큰을 저장하는 것까지가 이 함수의 책임이다.
      */
     private suspend fun call(
+        errorMessage: ((Int, ApiErrorBody?) -> String)? = null,
         block: suspend () -> retrofit2.Response<com.swpp.wakeup.data.remote.AuthResponse>,
     ): AuthResult {
         return try {
             val response = block()
             val body = response.body()
-            if (!response.isSuccessful || body == null) {
+            if (!response.isSuccessful && errorMessage != null) {
+                AuthResult.Failure(errorMessage(response.code(), errorBodyOf(response.errorBody()?.string())))
+            } else if (!response.isSuccessful || body == null) {
                 val serverMessage = ApiClient.parseErrorMessage(response.errorBody()?.string())
                 AuthResult.Failure(serverMessage ?: defaultMessage(response.code()))
             } else {
@@ -254,6 +348,22 @@ class AuthRepository(
         return AuthResult.Success(user)
     }
 
+    // Partly AI-generated (Claude)
+    /** 재설정·변경 호출의 실패를 사용자 문구로. 서버가 아직 없으면(404/405) 그렇게 알린다 */
+    private fun passwordFlowMessage(status: Int, error: ApiErrorBody?): String = when {
+        status == 404 || status == 405 -> MESSAGE_UNSUPPORTED
+        status == 429 || error?.code == "throttled" -> "요청이 많음. 잠시 뒤 다시 시도"
+        else -> when (error?.code) {
+            "invalid_reset_code" -> "코드가 맞지 않음"
+            "reset_code_expired" -> "코드가 만료됨. 다시 받아야 함"
+            "too_many_attempts" -> "시도가 너무 많음. 코드를 다시 받아야 함"
+            "invalid_current_password" -> "지금 비밀번호가 맞지 않음"
+            "password_unchanged" -> "지금 비밀번호와 같음"
+            "password_login_unavailable" -> "이 계정은 비밀번호로 로그인하지 않음"
+            else -> error?.message?.takeIf { it.isNotBlank() } ?: defaultMessage(status)
+        }
+    }
+
     private fun defaultMessage(code: Int): String = when (code) {
         400 -> "입력값을 확인해야 한다."
         401 -> "이메일 또는 비밀번호가 올바르지 않다."
@@ -265,6 +375,9 @@ class AuthRepository(
     internal companion object {
         const val MESSAGE_NETWORK = "서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."
         const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
+
+        /** 재설정·변경 API 가 서버에 아직 없을 때(404/405). 계약은 backend-requests.md R3-9 */
+        const val MESSAGE_UNSUPPORTED = "아직 서버에서 지원하지 않아요"
 
         /** 2xx 인데 토큰이 비어 있을 때. 서버 배포 버전이 낮으면 이렇게 온다. */
         const val MESSAGE_NO_TOKEN = "서버가 토큰을 주지 않았다. 서버 버전을 확인한다."

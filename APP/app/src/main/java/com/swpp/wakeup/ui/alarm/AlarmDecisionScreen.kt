@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.domain.model.ArrivalOutlook
+import com.swpp.wakeup.domain.model.FasterRouteOffer
 import com.swpp.wakeup.domain.model.RerouteBanner
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripStage
@@ -107,6 +108,18 @@ fun AlarmDecisionScreen(
     onReroute: (String) -> Unit = {},
     /** 경로를 바꾸는 중 */
     rerouteBusy: Boolean = false,
+    /** 이동 중 늦는 이유 한 줄([com.swpp.wakeup.domain.model.LateCause]). null 이면 없다 */
+    lateCause: String? = null,
+    /** 이동 중 "경로 정류장" 행. null 이거나 비어 있으면 카드를 그리지 않는다 */
+    checkpoints: List<CheckpointRow>? = null,
+    /** [checkpoints] 에 시각이 있는가. 없으면 카드 아래에 이유를 적는다 */
+    checkpointsTimed: Boolean = true,
+    /** 알람 전 더 빠른 경로 제안([com.swpp.wakeup.domain.model.FasterRoute.offer]). null 이면 카드가 없다 */
+    fasterRoute: FasterRouteOffer? = null,
+    /** 알람 전에 일정의 경로를 바꾸는 중 */
+    fasterRouteBusy: Boolean = false,
+    /** [이 경로로 바꾸기] (알람 전) */
+    onSwitchFasterRoute: (FasterRouteOffer) -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -182,6 +195,10 @@ fun AlarmDecisionScreen(
             } else {
                 RecommendedAlarmCard(plan)
             }
+            // 알람이 울리기 전에만 나온다(Figma ④ 변형 `512:30`). 그 뒤에는 일정에 저장한 경로를 바꾸지 않는다.
+            fasterRoute?.takeIf { !plan.skipped && it.isOpen(System.currentTimeMillis()) }?.let {
+                FasterRouteCard(offer = it, busy = fasterRouteBusy, onSwitch = { onSwitchFasterRoute(it) })
+            }
             BreakdownCard(plan)
 
             // 계산 근거 바로 아래에 "지금 어디쯤" 을 둔다. 같은 여정을 계획과
@@ -199,8 +216,21 @@ fun AlarmDecisionScreen(
                     freshness = freshness,
                     onArrive = onArrive,
                 )
+                // 늦는 이유 한 줄(Figma ④-c 변형 `510:25`). 이동 중에만 의미가 있다.
+                if (stage == TripStage.IN_TRANSIT) lateCause?.let {
+                    Text(
+                        text = it,
+                        color = JitColor.Amber,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.testTag("trip_late_cause"),
+                    )
+                }
                 // 늦는다는 전망 바로 아래에 바꿀 길을 둔다(Figma ⑦ 변형 `491:9`).
                 rerouteBanner?.let { RerouteCard(banner = it, onReroute = onReroute, busy = rerouteBusy) }
+                if (stage == TripStage.IN_TRANSIT && !checkpoints.isNullOrEmpty()) {
+                    CheckpointCard(rows = checkpoints, timed = checkpointsTimed)
+                }
             }
 
             routeMap?.let { map ->

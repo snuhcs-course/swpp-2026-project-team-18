@@ -61,6 +61,16 @@ class ApiLogRedactionTest {
     }
 
     @Test
+    fun `재설정 코드와 현재·새 비밀번호 확인 칸도 가린다`() {
+        val line = """{"email":"me@snu.ac.kr","reset_code":"123456","current_password":"old-pw-1","new_password":"n1","new_password_confirm":"n1"}"""
+
+        assertEquals(
+            """{"email":"me@snu.ac.kr","reset_code":"***","current_password":"***","new_password":"***","new_password_confirm":"***"}""",
+            ApiClient.redactSecrets(line),
+        )
+    }
+
+    @Test
     fun `비밀번호는 전처럼 가리고 다른 값은 그대로 둔다`() {
         val line = """{"email":"me@snu.ac.kr","password":"swpp2026!","password_confirm":"swpp2026!"}"""
 

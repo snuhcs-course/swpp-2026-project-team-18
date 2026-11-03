@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.UpcomingEvent
+import com.swpp.wakeup.ui.alarm.FasterRouteRow
 import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.common.JitChip
 import com.swpp.wakeup.ui.common.JitDotLabel
@@ -83,6 +84,8 @@ fun HomeScreen(
     onMissedDismiss: () -> Unit = {},
     /** "안 감으로 표시"(true) · "되돌리기"(false) */
     onSkipToggle: (Long, Boolean) -> Unit = { _, _ -> },
+    /** 알람 전 "이 경로로 바꾸기"(다음 알람 카드) */
+    onSwitchRoute: (UpcomingEvent) -> Unit = {},
 ) {
     LazyColumn(
         modifier = modifier
@@ -145,7 +148,14 @@ fun HomeScreen(
         }
 
         state.nextAlarm?.let { next ->
-            item(key = "next-alarm") { NextAlarmCard(next, onClick = { onEventClick(next) }) }
+            item(key = "next-alarm") {
+                NextAlarmCard(
+                    next,
+                    onClick = { onEventClick(next) },
+                    switchBusy = state.switchRouteBusyId == next.id,
+                    onSwitchRoute = { onSwitchRoute(next) },
+                )
+            }
         }
 
         // 날짜마다 헤더 아래 둥근 패널 하나에 행들을 담는다(Figma).
@@ -603,7 +613,12 @@ private fun EmptyState(onAddEventClick: () -> Unit) {
  * 화면(④)이 설명한다.
  */
 @Composable
-private fun NextAlarmCard(event: UpcomingEvent, onClick: () -> Unit) {
+private fun NextAlarmCard(
+    event: UpcomingEvent,
+    onClick: () -> Unit,
+    switchBusy: Boolean = false,
+    onSwitchRoute: () -> Unit = {},
+) {
     JitCard(modifier = Modifier.testTag("next_alarm").clickable(onClick = onClick), accented = true, gap = 8.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -629,6 +644,10 @@ private fun NextAlarmCard(event: UpcomingEvent, onClick: () -> Unit) {
 
         Text(text = event.title, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         Text(text = event.placeAndRoute, color = JitColor.TextSecondary, fontSize = 11.sp)
+        // 알람 전에 더 빠른 경로가 있으면 바꿀 수 있게 한다(Figma ③ 변형 `512:10`). 알람이 울린 뒤에는 없다.
+        event.fasterRoute?.takeIf { it.isOpen(System.currentTimeMillis()) }?.let {
+            FasterRouteRow(offer = it, busy = switchBusy, onSwitch = onSwitchRoute)
+        }
 
         HorizontalDivider(color = JitColor.Track)
 

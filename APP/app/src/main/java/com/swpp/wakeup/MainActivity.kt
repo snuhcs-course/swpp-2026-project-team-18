@@ -55,7 +55,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.domain.model.ArrivalOutlook
+import com.swpp.wakeup.domain.model.CheckpointBasis
+import com.swpp.wakeup.domain.model.FasterRoute
+import com.swpp.wakeup.domain.model.LateCause
+import com.swpp.wakeup.domain.model.PreDepartureCheck
 import com.swpp.wakeup.domain.model.RerouteAlert
+import com.swpp.wakeup.ui.alarm.checkpointRows
 import com.swpp.wakeup.ui.auth.SocialSignIn
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripEta
@@ -82,6 +87,7 @@ import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.places.MapPickScreen
 import com.swpp.wakeup.ui.report.ReportDayScreen
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
+import com.swpp.wakeup.ui.settings.ChangePasswordScreen
 import com.swpp.wakeup.ui.settings.SettingsScreen
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
 import com.swpp.wakeup.data.local.SessionState
@@ -216,7 +222,10 @@ private fun MainHost(
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
     val tripArrivals by viewModel.tripArrivals.collectAsStateWithLifecycle()
     val liveRouteSnapshot by viewModel.liveRoute.collectAsStateWithLifecycle()
+    val checkpointState by viewModel.checkpoints.collectAsStateWithLifecycle()
+    val preDepartureState by viewModel.preDeparture.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
+    val passwordChange by viewModel.passwordChange.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
@@ -523,6 +532,9 @@ private fun MainHost(
                     onMissedTrackClick = viewModel::startMissedAlarmTracking,
                     onMissedDismiss = viewModel::dismissMissedAlarm,
                     onSkipToggle = viewModel::setSkipped,
+                    onSwitchRoute = { event ->
+                        event.fasterRoute?.let { viewModel.applyFasterRoute(event.id, it.routeKey, it.alarmAtMillis) }
+                    },
                 )
 
                 is AppRoute.AlarmDecision -> {
@@ -582,14 +594,58 @@ private fun MainHost(
                     }
                     // 이동 중 늦으면 바꿀 길(todo §2, Figma ⑦ 변형 `491:9`). 서비스가 받은 최신
                     // 현재-위치 경로로 정한다. 낡았거나 경로를 바꾸기 전에 받은 것이면 내지 않는다.
-                    val rerouteBanner = liveRouteSnapshot
-                        ?.takeIf {
-                            stage == TripStage.IN_TRANSIT &&
+                    val rerouteBanner = if (stage == TripStage.PREPARING) {
+                        // 출발 전: 알람을 끈 직후와 출발 10분 전에 서비스가 확인한 "지금 나가도 늦나"
+                        // (Figma ④-c 변형 `513:9`). 출발지 기준이라 이동 중 경로와 따로 둔다.
+                        preDepartureState
+                            ?.takeIf {
                                 it.eventId == route.eventId &&
-                                it.isFresh(nowMillis) &&
-                                state.rerouteApplied?.hides(it) != true
+                                    PreDepartureCheck.isFresh(it.fetchedAtMillis, nowMillis) &&
+                                    state.rerouteApplied?.hidesFetchedAt(it.eventId, it.fetchedAtMillis) != true
+                            }
+                            ?.let { PreDepartureCheck.banner(it.route) }
+                    } else {
+                        liveRouteSnapshot
+                            ?.takeIf {
+                                stage == TripStage.IN_TRANSIT &&
+                                    it.eventId == route.eventId &&
+                                    it.isFresh(nowMillis) &&
+                                    state.rerouteApplied?.hides(it) != true
+                            }
+                            ?.let { RerouteAlert.banner(it.route) }
+                    }
+                    // 이동 중 정류장과 늦는 이유(Figma ④-c 변형 `510:9`). 출발 시각은 서비스가 정한
+                    // 이동 시작 시각이다. 첫 위치부터 집 밖이었으면 실제 출발이 아니므로 쓰지 않는다.
+                    val tripOfEvent = tripLive?.takeIf { it.eventId == route.eventId }
+                    val departedAt = tripOfEvent?.takeIf { !it.departureMissed }?.movingSinceMillis
+                    val freshLive = liveRouteSnapshot?.takeIf {
+                        it.eventId == route.eventId &&
+                            it.isFresh(nowMillis) &&
+                            state.rerouteApplied?.hides(it) != true
+                    }
+                    val baseKey = CheckpointBasis.baseRouteKey(
+                        planRouteKey = plan?.routeKey,
+                        appliedRerouteKey = state.rerouteApplied
+                            ?.takeIf { it.eventId == route.eventId }?.routeKey,
+                    )
+                    LaunchedEffect(route.eventId, baseKey, stage) {
+                        if (stage == TripStage.IN_TRANSIT) {
+                            viewModel.loadCheckpointsIfNeeded(route.eventId, baseKey)
                         }
-                        ?.let { RerouteAlert.banner(it.route) }
+                    }
+                    val lateCause = freshLive?.takeIf { stage == TripStage.IN_TRANSIT }?.let {
+                        LateCause.line(
+                            lateMinutes = it.route.lateMinutes,
+                            departByMillis = plan?.departByMillis,
+                            departedAtMillis = departedAt,
+                            travelMinutes = plan?.travelMinutes,
+                            liveArriveAtMillis = it.route.arriveAtMillis,
+                        )
+                    }
+                    val stopRows = checkpointState
+                        ?.takeIf { it.eventId == route.eventId && it.routeKey == baseKey }
+                        ?.segments
+                        ?.let { checkpointRows(it, plan?.eventPlace.orEmpty().substringBefore(" · "), departedAt) }
                     AlarmDecisionScreen(
                         plan = plan,
                         onBack = viewModel::goBack,
@@ -617,6 +673,26 @@ private fun MainHost(
                         rerouteBanner = rerouteBanner,
                         onReroute = { key -> viewModel.reroute(route.eventId, key) },
                         rerouteBusy = state.rerouteUpdatingId == route.eventId,
+                        lateCause = lateCause,
+                        checkpoints = stopRows,
+                        checkpointsTimed = departedAt != null,
+                        fasterRoute = plan?.let { p ->
+                            FasterRoute.offer(
+                                isComputed = p.isComputed,
+                                skipped = p.skipped,
+                                alarmOn = p.alarmOn,
+                                alarmAtMillis = p.alarmAtMillis,
+                                nowMillis = nowMillis,
+                                routeKey = p.routeKey,
+                                altRouteKey = p.altRouteKey,
+                                altLabel = p.altRouteLabel,
+                                altFasterMinutes = p.altFasterMinutes,
+                            )
+                        },
+                        fasterRouteBusy = state.switchRouteBusyId == route.eventId,
+                        onSwitchFasterRoute = {
+                            viewModel.applyFasterRoute(route.eventId, it.routeKey, it.alarmAtMillis)
+                        },
                     )
                 }
 
@@ -742,6 +818,15 @@ private fun MainHost(
                     onLabelChange = viewModel::onHomeLabelChange,
                 )
 
+                AppRoute.ChangePassword -> ChangePasswordScreen(
+                    state = passwordChange,
+                    onCurrentChange = viewModel::onCurrentPasswordChange,
+                    onNewChange = viewModel::onNewPasswordChange,
+                    onConfirmChange = viewModel::onNewPasswordConfirmChange,
+                    onSubmit = viewModel::submitPasswordChange,
+                    onBack = viewModel::goBack,
+                    modifier = Modifier.padding(innerPadding),
+                )
                 AppRoute.Settings -> SettingsScreen(
                     state = state,
                     avatarInitials = viewModel.avatarInitials(),
@@ -773,6 +858,7 @@ private fun MainHost(
                     },
                     onSocialUnlink = viewModel::unlinkSocial,
                     onRetryLoginMethods = viewModel::loadLoginMethods,
+                    onChangePassword = viewModel::openChangePassword,
                     // 기기에만 둔 다른 집(Figma ⑯ 변형 `498:9` ①)
                     onAddExtraHome = viewModel::openExtraHomeSetup,
                     onMakeHomeDefault = viewModel::makeSavedHomeDefault,

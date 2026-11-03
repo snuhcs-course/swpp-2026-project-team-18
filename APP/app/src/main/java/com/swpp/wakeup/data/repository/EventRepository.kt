@@ -36,6 +36,7 @@ import com.swpp.wakeup.domain.model.SwitchSuggestion
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ConfidenceView
+import com.swpp.wakeup.domain.model.FasterRoute
 import com.swpp.wakeup.domain.model.HomeList
 import com.swpp.wakeup.domain.model.ImportCandidate
 import com.swpp.wakeup.domain.model.LiveRoute
@@ -411,10 +412,61 @@ class EventRepository(
                 path = path,
                 lateMinutes = body.arrival?.lateMinutes?.takeIf { it >= 0 },
                 suggestion = body.switchSuggestion?.toSuggestion(),
+                arriveAtMillis = body.arrival?.arriveAt
+                    ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+                    ?.toInstant()?.toEpochMilli(),
             )
         )
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 이동 중 "경로 정류장" 카드용 구간. 일정의 출발지→도착지 후보를 한 번 받아 [routeKey] 와 같은
+     * 후보의 구간을 돌려준다. 계획·실시간 응답에는 정류장이 없어서 이것이 유일한 출처다.
+     *
+     * 위의 "명시적으로 요청할 때만" 원칙에서 **일부러 벗어난다.** 이동 중 화면이 열려 있는 동안 일정·
+     * 기준 경로당 한 번만 부르므로(호출하는 쪽이 보장) 15분마다 도는 경로 갱신보다 호출이 적다.
+     * 같은 key 가 없거나 정류장이 있는 대중교통 구간이 없으면 `Success(null)`.
+     */
+    suspend fun baseRouteSegments(eventId: Long, routeKey: String): Result<RouteSegments?> {
+        val dto = cache?.event(eventId)
+            ?: when (val loaded = loadEvent(eventId)) {
+                is Result.Success -> loaded.data
+                is Result.Failure -> return loaded
+            }
+        val place = dto.place ?: return Result.Success(null)
+        val destination = PlaceSearchItem(
+            kakaoPlaceId = place.kakaoPlaceId,
+            name = place.name,
+            address = place.address,
+            lat = place.lat,
+            lng = place.lng,
+            category = null,
+        )
+        val origin = if (dto.originLat != null && dto.originLng != null) {
+            PlaceSearchItem(
+                kakaoPlaceId = null,
+                name = dto.originLabel.orEmpty().ifBlank { "출발지" },
+                address = null,
+                lat = dto.originLat,
+                lng = dto.originLng,
+                category = null,
+            )
+        } else {
+            null
+        }
+        return when (val result = routeCandidates(destination, origin)) {
+            is Result.Success -> {
+                val segments = result.data.options.firstOrNull { it.key == routeKey }?.segments
+                Result.Success(
+                    segments?.takeIf { s ->
+                        s.items.any { it.stops.isNotEmpty() && it.kind != RouteSegment.Kind.WALK }
+                    }
+                )
+            }
+            is Result.Failure -> result
+        }
+    }
     // Partly AI-generated (Claude)
     /**
      * 이번 이동의 경로를 바꾼다(`POST /api/events/{id}/reroute`, reroute-api.md). 일정의 경로와
@@ -665,6 +717,19 @@ class EventRepository(
         return if (cached != null) Result.Success(cached) else online
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 일정에 저장한 경로를 바꾼다(`PATCH /api/events/{id}` `route_key`). 서버가 카카오를 한 번 부르고
+     * 알람을 다시 계산한다. **알람이 울리기 전에만** 부른다 — 호출하는 쪽이 확인한다.
+     */
+    suspend fun switchRoute(eventId: Long, routeKey: String): Result<AlarmPlanView> = guard {
+        val response = api.update(eventId, EventUpdateRequest(routeKey = routeKey))
+        val dto = unwrap(response)
+            ?: return@guard failureFrom(response.code(), response.errorBody()?.string())
+        cache?.saveEvent(dto)
+        dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
+            ?: Result.Failure("경로는 바꿨지만 알람 계획을 계산하지 못했어요")
+    }
     suspend fun loadRiskOptions(eventId: Long): Result<RiskOptionsView> = guard {
         val response = api.riskOptions(eventId)
         val dto = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
@@ -1134,6 +1199,19 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
         alarmOn = alarmOn == true,
         alarmAtEpochSecond = alarmLocal?.toEpochSecond(),
         skipped = skipped,
+        fasterRoute = plan?.let {
+            FasterRoute.offer(
+                isComputed = it.status == AlarmPlanDto.STATUS_OK && alarmLocal != null,
+                skipped = skipped,
+                alarmOn = alarmOn == true,
+                alarmAtMillis = alarmLocal?.toInstant()?.toEpochMilli(),
+                nowMillis = System.currentTimeMillis(),
+                routeKey = it.routeKey,
+                altRouteKey = it.altRouteKey,
+                altLabel = it.altRouteLabel,
+                altFasterMinutes = it.altFasterMinutes,
+            )
+        },
     )
 }
 
@@ -1299,7 +1377,7 @@ internal fun tauSourceLabel(tauOverride: Double?, tagLabel: String?): String = w
 }
 
 // Partly AI-generated (Claude)
-private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
+internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     val plan = alarmPlan ?: return null
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
     val startLocal = start.atZoneSameInstant(zone)
@@ -1395,6 +1473,10 @@ private fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         routeKey = plan.routeKey?.takeIf { it.isNotBlank() },
         // false 일 때만 알린다. null(고른 적 없음)과 true(그대로 쓰임)는
         // 사용자가 알 필요가 없다.
+        alarmAtMillis = alarmLocal?.toInstant()?.toEpochMilli(),
+        departByMillis = departBy?.toInstant()?.toEpochMilli(),
+        arriveAtMillis = arriveAt?.toInstant()?.toEpochMilli(),
+        altRouteKey = plan.altRouteKey?.takeIf { it.isNotBlank() },
         routeFellBack = plan.routeChoiceHonored == false,
         // 알람 시각을 아는 곳은 여기뿐이다(화면에는 표시 문자열만 간다).
         // 시각이 없으면 아직 계산되지 않은 것이므로 "지나지 않았다" 로 둔다.

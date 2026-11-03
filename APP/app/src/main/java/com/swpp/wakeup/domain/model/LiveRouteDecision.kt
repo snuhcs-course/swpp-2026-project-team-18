@@ -73,6 +73,8 @@ data class LiveRoute(
     val lateMinutes: Int? = null,
     /** 늦을 때 더 일찍 닿는 경로(서버 `switch_suggestion`). 없으면 null */
     val suggestion: SwitchSuggestion? = null,
+    /** 기준 경로로 지금 가면 닿는 시각(서버 `arrival.arrive_at`, epoch ms). 구버전 서버·옛 사본이면 null */
+    val arriveAtMillis: Long? = null,
 ) {
     /**
      * 지도 아래에 적을 한 줄.

@@ -51,6 +51,8 @@ data class UpcomingEvent(
     val alarmAtEpochSecond: Long? = null,
     /** "안 감" 으로 표시한 일정. 서버 `skipped`. 흐리게 그리고 알람·리포트에서 빠진다 */
     val skipped: Boolean = false,
+    /** 알람 전 더 빠른 경로 제안([FasterRoute.offer]). 없으면 null. 화면을 그릴 때 [FasterRouteOffer.isOpen] 으로 다시 거른다 */
+    val fasterRoute: FasterRouteOffer? = null,
 ) {
     val hasAlarm: Boolean get() = alarmAt != null
 

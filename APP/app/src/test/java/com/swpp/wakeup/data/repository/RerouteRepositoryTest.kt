@@ -106,6 +106,17 @@ class RerouteRepositoryTest {
         assertEquals(6, route.lateMinutes)
         assertEquals("transit:2호선", route.suggestion?.routeKey)
         assertEquals(9, route.suggestion?.savesMinutes)
+        assertEquals(
+            java.time.OffsetDateTime.parse("2026-11-02T09:06:00+09:00").toInstant().toEpochMilli(),
+            route.arriveAtMillis,
+        )
+    }
+    @Test
+    fun `도착 시각이 없거나 깨졌으면 null`() {
+        assertNull(liveRoute(liveJson()).arriveAtMillis)
+        assertNull(
+            liveRoute(liveJson(""","arrival":{"arrive_at":"내일","late_minutes":2}""")).arriveAtMillis
+        )
     }
 
     @Test

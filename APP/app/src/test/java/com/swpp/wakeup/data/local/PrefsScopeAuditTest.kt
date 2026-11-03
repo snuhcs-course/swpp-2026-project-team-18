@@ -67,7 +67,31 @@ class PrefsScopeAuditTest {
     private val allowedUnscoped = mapOf(
         "data/local/TokenStore.kt" to
             "소유자를 정하는 곳 자체다. 여기에 소유자 판정을 넣으면 순환이 된다",
+        "data/local/LastEmailStore.kt" to
+            "기기 단위 편의 값(마지막 이메일). 로그아웃해도 다음 로그인 칸을 채우려고 남긴다. 비밀이 아니고 계정 데이터가 아니다",
     )
+
+    @Test
+    fun `마지막 이메일은 로그아웃해도 남는다`() {
+        val source = readSource("data/local/LocalStores.kt")
+        assertTrue(
+            "LastEmailStore 는 기기 단위 값이라 LocalStores.wipeAll 이 지우면 안 된다",
+            !source.contains("LastEmailStore"),
+        )
+    }
+
+    @Test
+    fun `마지막 이메일은 백업에서 빠진다`() {
+        listOf("backup_rules.xml", "data_extraction_rules.xml").forEach { name ->
+            val file = listOf(
+                File("src/main/res/xml/$name"),
+                File("app/src/main/res/xml/$name"),
+                File("APP/app/src/main/res/xml/$name"),
+            ).firstOrNull { it.exists() }
+            assertTrue("$name 을 찾지 못했다", file != null)
+            assertTrue("$name 에 jit_last_email.xml 제외가 없다", file!!.readText().contains("jit_last_email.xml"))
+        }
+    }
 
     @Test
     fun `소유자가 필요한 저장소는 전부 판정을 지난다`() {

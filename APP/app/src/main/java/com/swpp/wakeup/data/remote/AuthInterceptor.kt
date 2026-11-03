@@ -41,6 +41,9 @@ class AuthInterceptor(private val tokenStore: TokenStore) : Interceptor {
             "/api/health",
             "/api/auth/register",
             "/api/auth/password/check",
+            // 비밀번호 재설정은 로그인 전에 쓴다(docs/iter3/backend-requests.md R3-9)
+            "/api/auth/password/reset",
+            "/api/auth/password/reset/confirm",
             "/api/auth/token",
             "/api/auth/token/refresh",
             // 로그아웃은 본문의 refresh 로 판단한다. 만료된 access 를 붙이면 401 이 날 수 있다.
@@ -184,6 +187,8 @@ class TokenRefreshAuthenticator(
             "/api/auth/token/refresh",
             "/api/auth/social/kakao",
             "/api/auth/social/google",
+            "/api/auth/password/reset",
+            "/api/auth/password/reset/confirm",
         )
     }
 }

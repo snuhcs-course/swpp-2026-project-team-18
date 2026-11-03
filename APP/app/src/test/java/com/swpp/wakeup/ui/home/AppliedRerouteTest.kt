@@ -34,6 +34,18 @@ class AppliedRerouteTest {
     }
 
     @Test
+    fun `받은 시각만으로도 같은 규칙으로 가린다`() {
+        assertTrue(applied.hidesFetchedAt(7L, 9_000L))
+        assertTrue(applied.hidesFetchedAt(7L, 10_000L))
+        assertFalse(applied.hidesFetchedAt(7L, 10_001L))
+        assertFalse(applied.hidesFetchedAt(8L, 9_000L))
+    }
+    @Test
+    fun `바꾼 경로 key 를 들고 있다`() {
+        assertTrue(HomeViewModel.AppliedReroute(7L, 1L, "transit:2호선").routeKey == "transit:2호선")
+        assertTrue(applied.routeKey == null)
+    }
+    @Test
     fun `바꾼 뒤에 받은 경로와 다른 일정은 가리지 않는다`() {
         assertFalse(applied.hides(snapshot(7L, fetchedAt = 10_001L)))
         assertFalse(applied.hides(snapshot(8L, fetchedAt = 9_000L)))

@@ -3,6 +3,7 @@ package com.swpp.wakeup.ui.auth
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.swpp.wakeup.data.local.LastEmailStore
 import com.swpp.wakeup.data.local.LocalStores
 import com.swpp.wakeup.data.local.OfflineCache
 import com.swpp.wakeup.data.local.SessionState
@@ -10,6 +11,7 @@ import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.remote.PasswordCheckResponse
 import com.swpp.wakeup.data.repository.AuthRepository
+import com.swpp.wakeup.domain.model.EmailRule
 import com.swpp.wakeup.domain.model.SocialLogin
 import com.swpp.wakeup.domain.model.SocialNotice
 import com.swpp.wakeup.domain.model.SocialProvider
@@ -30,6 +32,9 @@ import kotlinx.coroutines.launch
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val tokenStore = TokenStore(application)
+
+    /** 마지막으로 이메일 로그인한 주소(기기 단위, 로그아웃해도 남는다). 다음 로그인 칸을 채운다 */
+    private val lastEmailStore = LastEmailStore(application)
 
     /**
      * 로그인 성공 직전에 앞 사용자의 캐시를 지운다.
@@ -60,7 +65,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
      * 어떤 화면을 보여줄지. 네비게이션 라이브러리 없이 몇 화면만 오간다. [SOCIAL_TERMS] 는 소셜로
      * 처음 가입할 때의 약관 동의(Figma ⑦ 변형 `495:9`)다.
      */
-    enum class Screen { LOGIN, SIGNUP, SOCIAL_TERMS }
+    enum class Screen { LOGIN, SIGNUP, SOCIAL_TERMS, RESET_REQUEST, RESET_CONFIRM }
 
     // Partly AI-generated (Claude)
     /**
@@ -108,7 +113,17 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val socialNotice: SocialNotice? = null,
         /** 소셜로 처음 가입하는 중이면 그 내용 */
         val socialTerms: SocialTermsDraft? = null,
+
+        /** 비밀번호 재설정 확인 코드(6자리 숫자) */
+        val resetCode: String = "",
+        /** 코드를 보낸 이메일. 코드 확인 화면의 안내에 쓴다 */
+        val resetSentTo: String? = null,
+        /** 코드 확인 화면의 안내 한 줄(예: "코드를 다시 보냄") */
+        val resetInfo: String? = null,
     ) {
+        /** 이메일 칸이 형식에 맞는가. 비어 있으면 true(오류를 보이지 않는다) */
+        val emailFormatOk: Boolean get() = email.isBlank() || EmailRule.isValid(email)
+
         /** 무언가 서버를 기다리는 중. 이메일·소셜 버튼을 함께 막는다 */
         val busy: Boolean get() = loading || socialBusy != null
 
@@ -127,11 +142,20 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 서버 비밀번호 검사·확인 일치·약관 동의가 모두 필요하다. */
         val canSubmitSignup: Boolean
-            get() = !loading && email.isNotBlank() && nickname.isNotBlank() &&
+            get() = !loading && EmailRule.isValid(email) && nickname.isNotBlank() &&
                 password.isNotBlank() && passwordsMatch && termsAgreed && passwordCheck?.valid == true
+
+        /** 재설정 코드 받기: 이메일 형식이 맞아야 켜진다 */
+        val canRequestReset: Boolean
+            get() = !loading && EmailRule.isValid(email)
+
+        /** 재설정 확인: 6자리 코드, 일치하는 새 비밀번호, 서버 비밀번호 검사 통과 */
+        val canSubmitResetConfirm: Boolean
+            get() = !loading && resetCode.length == RESET_CODE_LENGTH && passwordsMatch &&
+                passwordCheck?.valid == true
     }
 
-    private val _state = MutableStateFlow(UiState())
+    private val _state = MutableStateFlow(UiState(email = lastEmailStore.email.orEmpty()))
     val state: StateFlow<UiState> = _state.asStateFlow()
     private var passwordCheckJob: Job? = null
 
@@ -142,11 +166,11 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun onPasswordChange(value: String) {
         passwordCheckJob?.cancel()
         _state.update { it.copy(password = value, error = null, passwordCheck = null, passwordCheckError = null) }
-        if (_state.value.screen != Screen.SIGNUP || value.isEmpty()) return
+        if (!_state.value.screen.checksPassword || value.isEmpty()) return
         passwordCheckJob = viewModelScope.launch {
             val result = repository.checkPassword(value)
             _state.update {
-                if (it.screen != Screen.SIGNUP || it.password != value) it
+                if (!it.screen.checksPassword || it.password != value) it
                 else it.copy(passwordCheck = result.getOrNull(), passwordCheckError = result.exceptionOrNull()?.message)
             }
         }
@@ -170,6 +194,91 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun consumeAuthenticated() = _state.update { it.copy(authenticatedNickname = null) }
+
+    // --- 비밀번호 재설정 (제안 계약 R3-9) — Partly AI-generated (Claude) -------------------
+
+    /** 로그인 화면의 "비밀번호 찾기". 입력한 이메일은 그대로 가져간다 */
+    fun goToResetRequest() {
+        passwordCheckJob?.cancel()
+        _state.update { UiState(screen = Screen.RESET_REQUEST, email = it.email) }
+    }
+
+    /** 뒤로. 코드 확인 → 코드 요청 → 로그인. 서버를 기다리는 중에는 움직이지 않는다 */
+    fun goBackFromReset() {
+        passwordCheckJob?.cancel()
+        val current = _state.value
+        if (current.loading) return
+        _state.update {
+            when (it.screen) {
+                Screen.RESET_CONFIRM -> UiState(screen = Screen.RESET_REQUEST, email = it.email)
+                else -> UiState(screen = Screen.LOGIN, email = it.email)
+            }
+        }
+    }
+
+    fun onResetCodeChange(value: String) =
+        _state.update { it.copy(resetCode = value.filter(Char::isDigit).take(RESET_CODE_LENGTH), error = null) }
+
+    /** "확인 코드 받기". 성공하면 코드 확인 화면으로 */
+    fun requestReset() {
+        val current = _state.value
+        if (!current.canRequestReset) return
+        sendResetCode(current.email.trim(), resend = false)
+    }
+
+    /** "코드 다시 받기". 화면은 그대로 두고 안내 한 줄만 바꾼다 */
+    fun resendReset() {
+        val current = _state.value
+        val target = current.resetSentTo ?: return
+        if (current.loading) return
+        sendResetCode(target, resend = true)
+    }
+
+    private fun sendResetCode(email: String, resend: Boolean) {
+        _state.update { it.copy(loading = true, error = null, resetInfo = null, waking = false) }
+        viewModelScope.launch {
+            val hint = launch {
+                delay(WAKE_HINT_DELAY_MILLIS)
+                _state.update { it.copy(waking = true) }
+            }
+            ServerWarmup.ensureAwake()
+            hint.cancel()
+            _state.update { it.copy(waking = false) }
+
+            when (val result = repository.requestPasswordReset(email)) {
+                is AuthRepository.ResetRequestResult.Sent -> _state.update {
+                    it.copy(
+                        screen = Screen.RESET_CONFIRM,
+                        loading = false,
+                        error = null,
+                        resetSentTo = email,
+                        resetInfo = if (resend) "코드를 다시 보냄" else null,
+                        resetCode = if (resend) "" else it.resetCode,
+                    )
+                }
+
+                is AuthRepository.ResetRequestResult.Failure -> {
+                    ServerWarmup.invalidate()
+                    _state.update { it.copy(loading = false, error = result.message) }
+                }
+            }
+        }
+    }
+
+    /** "비밀번호 바꾸고 로그인". 성공하면 로그인과 같이 토큰을 저장하고 다음 화면으로 */
+    fun confirmReset() {
+        val current = _state.value
+        if (!current.canSubmitResetConfirm) return
+        val target = current.resetSentTo ?: current.email
+        submit {
+            repository.confirmPasswordReset(
+                email = target,
+                code = current.resetCode,
+                newPassword = current.password,
+                newPasswordConfirm = current.passwordConfirm,
+            )
+        }
+    }
 
     // --- 소셜 로그인 (docs/iter3/social-login-api.md) — Partly AI-generated (Claude) -------
 
@@ -300,6 +409,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
      */
     private val WAKE_HINT_DELAY_MILLIS = 2_000L
 
+    private val Screen.checksPassword: Boolean
+        get() = this == Screen.SIGNUP || this == Screen.RESET_CONFIRM
+
+    private companion object {
+        /** 재설정 확인 코드 자릿수 */
+        const val RESET_CODE_LENGTH = 6
+    }
+
     private fun submit(block: suspend () -> AuthRepository.AuthResult) {
         _state.update { it.copy(loading = true, error = null, waking = false, socialNotice = null) }
         viewModelScope.launch {
@@ -316,7 +433,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(waking = false) }
 
             when (val result = block()) {
-                is AuthRepository.AuthResult.Success ->
+                is AuthRepository.AuthResult.Success -> {
+                    // 이메일 로그인·가입·재설정 성공만 기억한다(서버가 정리한 주소). 소셜은 submit 을 타지 않는다.
+                    lastEmailStore.save(result.user.email)
                     _state.update {
                         it.copy(
                             loading = false,
@@ -325,6 +444,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                             authenticatedNickname = result.user.nickname,
                         )
                     }
+                }
 
                 is AuthRepository.AuthResult.Failure -> {
                     // 타임아웃으로 실패했으면 "깨어 있다" 는 기록을 지운다.

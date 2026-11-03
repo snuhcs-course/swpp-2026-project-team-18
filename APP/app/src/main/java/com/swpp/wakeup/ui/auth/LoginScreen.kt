@@ -95,6 +95,8 @@ fun LoginScreen(
     socialBusy: SocialProvider? = null,
     /** 이메일 칸 위의 안내 카드(이미 가입한 이메일·쓸 수 없음). Figma ⑦ 변형 `496:9` */
     socialNotice: SocialNotice? = null,
+    /** "비밀번호 찾기" 링크. null 이면 링크를 그리지 않는다 */
+    onForgotClick: (() -> Unit)? = null,
 ) {
     val busy = loading || socialBusy != null
     Column(
@@ -134,12 +136,13 @@ fun LoginScreen(
 
         socialNotice?.let { SocialNoticeCard(it) }
 
-        JitTextField(
+        // 형식 안내만 한다. 서버 로그인에는 형식 규칙이 없어 막지 않는다(관리자가 만든 계정도 로그인해야 함).
+        EmailField(
             label = stringResource(R.string.auth_email),
             value = email,
             onValueChange = onEmailChange,
-            keyboardType = KeyboardType.Email,
             inputTag = "login_email",
+            errorTag = "login_email_error",
             enabled = !busy
         )
 
@@ -151,8 +154,28 @@ fun LoginScreen(
             keyboardType = KeyboardType.Password,
             inputTag = "login_password",
             imeAction = ImeAction.Done,
+            // 키보드의 완료 키 = 로그인. 버튼이 켜져 있을 때만 제출한다.
+            onImeAction = { if (canSubmit) onLoginClick() },
+            passwordToggle = true,
             enabled = !busy
         )
+
+        if (onForgotClick != null) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(
+                    onClick = onForgotClick,
+                    enabled = !busy,
+                    modifier = Modifier.testTag("login_forgot"),
+                ) {
+                    Text(
+                        text = "비밀번호 찾기",
+                        color = JitColor.TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
 
         if (error != null) {
             ErrorText(error)

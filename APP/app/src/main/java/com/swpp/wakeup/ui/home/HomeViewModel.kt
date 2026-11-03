@@ -55,7 +55,9 @@ import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.HomeList
 import com.swpp.wakeup.domain.model.HomeRefresh
 import com.swpp.wakeup.domain.model.ImportCandidate
+import com.swpp.wakeup.domain.model.CheckpointBasis
 import com.swpp.wakeup.domain.model.LiveRoute
+import com.swpp.wakeup.domain.model.RouteSegments
 import com.swpp.wakeup.domain.model.MorningSession
 import com.swpp.wakeup.domain.model.RoutineEditorState
 import com.swpp.wakeup.sensing.ArrivalRecords
@@ -79,6 +81,7 @@ import com.swpp.wakeup.domain.model.RiskOptionsView
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.nav.NavState
+import com.swpp.wakeup.ui.settings.PasswordChangeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -174,6 +177,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val skipUpdatingId: Long? = null,
         /** 이동 중 경로를 바꾸는 중인 일정. 그동안 [이 경로로 바꾸기] 를 막는다 */
         val rerouteUpdatingId: Long? = null,
+        /** 알람 전에 일정의 경로를 바꾸는 중인 일정. 그동안 [이 경로로 바꾸기] 를 막는다 */
+        val switchRouteBusyId: Long? = null,
         /**
          * 마지막으로 경로를 바꾼 일정과 그 시각. 그보다 먼저 받은 현재-위치 경로로는 카드를
          * 내놓지 않는다 — 바꾸기 전 경로를 기준으로 계산한 제안이다([AppliedReroute.hides]).
@@ -286,10 +291,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // Partly AI-generated (Claude)
     /** 이동 중 경로를 바꾼 일정과 시각(벽시계 ms) */
-    data class AppliedReroute(val eventId: Long, val atMillis: Long) {
+    data class AppliedReroute(val eventId: Long, val atMillis: Long, val routeKey: String? = null) {
         /** 이 현재-위치 경로가 바꾸기 전에 받은 것인가. 그러면 그 제안·지각 분은 옛 경로 기준이다 */
-        fun hides(snapshot: LiveRouteStore.Snapshot): Boolean =
-            snapshot.eventId == eventId && snapshot.fetchedAtMillis <= atMillis
+        fun hides(snapshot: LiveRouteStore.Snapshot): Boolean = hidesFetchedAt(snapshot.eventId, snapshot.fetchedAtMillis)
+        /** [hides] 와 같은 규칙. 스냅샷 대신 일정 id 와 받은 시각만 있을 때 쓴다 */
+        fun hidesFetchedAt(eventId: Long, fetchedAtMillis: Long): Boolean =
+            this.eventId == eventId && fetchedAtMillis <= atMillis
     }
 
     // Partly AI-generated (Claude)
@@ -602,6 +609,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * ([com.swpp.wakeup.domain.model.RerouteAlert.banner]). (Partly AI-generated (Claude))
      */
     val liveRoute: StateFlow<LiveRouteStore.Snapshot?> = TripLiveState.liveRoute
+    /** 출발 전 "지금 나가도 늦나" 확인 결과(추적 서비스가 최대 두 번 채운다). 준비 중 카드의 재료 */
+    val preDeparture: StateFlow<TripLiveState.PreDepartureSnapshot?> = TripLiveState.preDeparture
 
     /**
      * 이번 실행에서 준비 시간 온보딩을 이미 띄웠는가.
@@ -682,6 +691,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         TripLiveState.restoreLiveRoute(liveRouteStore.current())
         // 앱 프로세스가 다시 시작돼도 이미 도착한 일정은 도착으로 남긴다(todo §2).
         ArrivalRecords.restore(application)
+        // Partly AI-generated (Claude)
+        // 알림에서 바꾼 경로도 화면에 반영한다. null(추적 종료·로그아웃)이면 지금처럼 그대로 둔다.
+        viewModelScope.launch {
+            TripLiveState.rerouted.collect { r ->
+                if (r != null) {
+                    _state.update { it.copy(rerouteApplied = AppliedReroute(r.eventId, r.atMillis, r.routeKey)) }
+                }
+            }
+        }
         viewModelScope.launch {
             TripLiveState.snapshot.collect { snapshot ->
                 if (snapshot == null) clearLiveRoutePath()
@@ -944,9 +962,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = repository.reroute(eventId, routeKey, fromSuggestion = true)) {
                 is EventRepository.Result.Success -> {
-                    _state.update {
-                        it.copy(rerouteApplied = AppliedReroute(eventId, System.currentTimeMillis()))
-                    }
+                    // 화면 상태는 init 의 수집기가 TripLiveState.rerouted 에서 채운다(알림 경로와 같은 원천).
+                    TripLiveState.recordReroute(eventId, routeKey)
                     runCatching { TripTrackingService.refreshLiveRoute(app, eventId) }
                         .onFailure { Log.w(TAG, "경로 바꾼 뒤 추적 갱신 요청 실패", it) }
                     notify("경로를 바꿨습니다. 곧 바꾼 경로로 다시 그립니다")
@@ -958,6 +975,45 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 알람 전 [이 경로로 바꾸기](홈 다음 알람 카드, 알람 결정 화면). 일정에 저장한 경로를 바꾸고 알람을
+     * 다시 맞춘다. **알람이 이미 울렸으면 바꾸지 않는다** — 울린 시점의 계획이 학습 기준이라서다.
+     * 화면을 그린 뒤에 알람이 울렸을 수 있으므로 누른 시점에 한 번 더 확인한다.
+     */
+    fun applyFasterRoute(eventId: Long, routeKey: String, alarmAtMillis: Long?) {
+        if (_state.value.switchRouteBusyId != null) return
+        if (alarmAtMillis == null || System.currentTimeMillis() >= alarmAtMillis) {
+            notify("알람이 이미 울려서 경로를 바꾸지 않았어요")
+            refresh(silent = true)
+            return
+        }
+        _state.update { it.copy(switchRouteBusyId = eventId) }
+        viewModelScope.launch {
+            when (val result = repository.switchRoute(eventId, routeKey)) {
+                is EventRepository.Result.Success -> {
+                    if (_nav.value.current == AppRoute.AlarmDecision(eventId)) {
+                        ++planLoadGeneration // 먼저 보낸 상세 요청이 늦게 와서 덮지 않게 한다
+                        _plan.value = result.data
+                    }
+                    val homeGen = ++homeLoadGeneration
+                    when (val home = repository.loadHome()) {
+                        is EventRepository.Result.Success ->
+                            if (!home.data.fromCache) {
+                                applyHome(home.data, homeGen) // 목록과 기기 알람을 함께 갱신한다
+                                notify("경로를 바꾸고 알람을 다시 맞췄어요")
+                            } else {
+                                notify("경로는 바꿨지만 알람 목록을 갱신하지 못했어요")
+                            }
+                        is EventRepository.Result.Failure ->
+                            notify("경로는 바꿨지만 알람 목록을 갱신하지 못했어요")
+                    }
+                }
+                is EventRepository.Result.Failure -> notify("경로를 바꾸지 못했어요. ${result.message}")
+            }
+            _state.update { it.copy(switchRouteBusyId = null) }
+        }
+    }
     /** 홈 행·알람 결정 화면·스낵바 "되돌리기" */
     fun setSkipped(eventId: Long, skipped: Boolean) = runSkip(eventId, skipped) {}
 
@@ -1162,6 +1218,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 화면에 남은 아침 기록도 즉시 지운다. 지우지 않으면 로그아웃 뒤에도
         // 홈 카드가 남은 블록 수를 보여 준다.
         _morning.value = null
+        _checkpoints.value = null
         _state.update { it.copy(morningBlocksLeft = null) }
     }
 
@@ -1189,6 +1246,64 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 code == 404 -> notify("아직 서버에서 지원하지 않아요. 이 기기만 로그아웃할 수 있어요")
                 code != null -> notify("모든 기기를 로그아웃하지 못했습니다. 잠시 후 다시 시도해 주세요")
                 else -> notify("서버에 연결되지 않아 다른 기기를 로그아웃하지 못했습니다")
+            }
+        }
+    }
+
+    // --- 비밀번호 변경 (제안 계약 R3-9, Figma F-41) — Partly AI-generated (Claude) -----
+
+    private val _passwordChange = MutableStateFlow(PasswordChangeState())
+    val passwordChange: StateFlow<PasswordChangeState> = _passwordChange.asStateFlow()
+    private var passwordChangeCheckJob: Job? = null
+
+    /** 설정의 "비밀번호" 줄. 입력을 비우고 화면을 연다 */
+    fun openChangePassword() {
+        passwordChangeCheckJob?.cancel()
+        _passwordChange.value = PasswordChangeState()
+        _nav.update { it.copy(stack = it.stack + AppRoute.ChangePassword, forward = true) }
+    }
+
+    fun onCurrentPasswordChange(value: String) =
+        _passwordChange.update { it.copy(current = value, error = null, currentWrong = false) }
+
+    fun onNewPasswordChange(value: String) {
+        passwordChangeCheckJob?.cancel()
+        _passwordChange.update {
+            it.copy(newPassword = value, error = null, passwordCheck = null, passwordCheckError = null)
+        }
+        if (value.isEmpty()) return
+        // 가입 화면과 같다: 입력마다 서버 규칙 검사를 하고, 앞 검사는 취소한다.
+        passwordChangeCheckJob = viewModelScope.launch {
+            val result = authRepository.checkPassword(value)
+            _passwordChange.update {
+                if (it.newPassword != value) it
+                else it.copy(passwordCheck = result.getOrNull(), passwordCheckError = result.exceptionOrNull()?.message)
+            }
+        }
+    }
+
+    fun onNewPasswordConfirmChange(value: String) =
+        _passwordChange.update { it.copy(confirm = value, error = null) }
+
+    fun submitPasswordChange() {
+        val form = _passwordChange.value
+        if (!form.canSubmit) return
+        _passwordChange.update { it.copy(busy = true, error = null, currentWrong = false) }
+        viewModelScope.launch {
+            when (val result = authRepository.changePassword(form.current, form.newPassword, form.confirm)) {
+                is AuthRepository.PasswordChangeResult.Success -> {
+                    _passwordChange.value = PasswordChangeState()
+                    notify(
+                        if (result.tokensRotated) "비밀번호를 바꿨어요. 다른 기기는 로그아웃됐어요"
+                        else "비밀번호를 바꿨어요. 다시 로그인해야 할 수 있어요"
+                    )
+                    // 열린 화면일 때만 닫는다. 기다리는 동안 뒤로 갔다면 그대로 둔다.
+                    if (_nav.value.current is AppRoute.ChangePassword) goBack()
+                }
+
+                is AuthRepository.PasswordChangeResult.Failure -> _passwordChange.update {
+                    it.copy(busy = false, error = result.message, currentWrong = result.currentPasswordWrong)
+                }
             }
         }
     }
@@ -1313,6 +1428,44 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val error: String? = null,
     )
 
+    // Partly AI-generated (Claude)
+    /**
+     * 이동 중 "경로 정류장" 카드의 구간. [routeKey] 경로의 정류장은 계획·실시간 응답에 없어서
+     * 경로 후보 API 로 한 번 받아 둔다(이 프로세스 동안 일정·기준 경로당 한 번).
+     */
+    data class CheckpointState(
+        val eventId: Long,
+        val routeKey: String,
+        val segments: RouteSegments? = null,
+        val loading: Boolean = true,
+    )
+    private val _checkpoints = MutableStateFlow<CheckpointState?>(null)
+    val checkpoints: StateFlow<CheckpointState?> = _checkpoints.asStateFlow()
+    private var checkpointJob: Job? = null
+    /**
+     * 같은 일정·경로를 이미 받았거나 받는 중이면 아무것도 하지 않는다. 실패해도 이 프로세스에서는
+     * 다시 부르지 않는다(카카오 호출 한도). 대중교통이 아닌 경로에는 정류장이 없어 부르지 않는다.
+     */
+    fun loadCheckpointsIfNeeded(eventId: Long, routeKey: String?) {
+        if (routeKey == null || !CheckpointBasis.hasStops(routeKey)) return
+        val current = _checkpoints.value
+        if (current != null && current.eventId == eventId && current.routeKey == routeKey) return
+        _checkpoints.value = CheckpointState(eventId, routeKey)
+        checkpointJob?.cancel()
+        checkpointJob = viewModelScope.launch {
+            val segments = when (val result = repository.baseRouteSegments(eventId, routeKey)) {
+                is EventRepository.Result.Success -> result.data
+                is EventRepository.Result.Failure -> null
+            }
+            _checkpoints.update {
+                if (it?.eventId == eventId && it.routeKey == routeKey) {
+                    it.copy(segments = segments, loading = false)
+                } else {
+                    it
+                }
+            }
+        }
+    }
     private val _risk = MutableStateFlow(RiskState())
     val risk: StateFlow<RiskState> = _risk.asStateFlow()
     private var riskJob: Job? = null

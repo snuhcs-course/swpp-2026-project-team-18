@@ -159,6 +159,14 @@ private fun AuthHost(
         viewModel.cancelSocialTerms()
     }
 
+    // 비밀번호 찾기에서 뒤로 가면 한 단계씩 돌아간다(코드 확인 → 코드 요청 → 로그인).
+    BackHandler(
+        enabled = (state.screen == AuthViewModel.Screen.RESET_REQUEST ||
+            state.screen == AuthViewModel.Screen.RESET_CONFIRM) && !state.loading
+    ) {
+        viewModel.goBackFromReset()
+    }
+
     // 인증 성공을 한 번만 소비한다. 재구성마다 화면이 뛰지 않게 한다.
     // 환영 문구는 MainActivity 가 띄운다. 여기서 스낵바를 await 하면
     // 그 시간 동안 화면이 그대로 멈춰 있어 반응이 느리게 느껴진다.
@@ -210,6 +218,41 @@ private fun AuthHost(
                     waking = state.waking,
                     socialBusy = state.socialBusy,
                     socialNotice = state.socialNotice,
+                    onForgotClick = viewModel::goToResetRequest,
+                )
+
+                AuthViewModel.Screen.RESET_REQUEST -> PasswordResetRequestScreen(
+                    email = state.email,
+                    loading = state.loading,
+                    error = state.error,
+                    canSubmit = state.canRequestReset,
+                    onEmailChange = viewModel::onEmailChange,
+                    onSubmitClick = viewModel::requestReset,
+                    onBackClick = viewModel::goBackFromReset,
+                    modifier = Modifier.padding(innerPadding),
+                    waking = state.waking,
+                )
+
+                AuthViewModel.Screen.RESET_CONFIRM -> PasswordResetConfirmScreen(
+                    sentTo = state.resetSentTo ?: state.email,
+                    code = state.resetCode,
+                    password = state.password,
+                    passwordConfirm = state.passwordConfirm,
+                    passwordsMatch = state.passwordsMatch,
+                    passwordCheck = state.passwordCheck,
+                    passwordCheckError = state.passwordCheckError,
+                    loading = state.loading,
+                    error = state.error,
+                    info = state.resetInfo,
+                    canSubmit = state.canSubmitResetConfirm,
+                    onCodeChange = viewModel::onResetCodeChange,
+                    onPasswordChange = viewModel::onPasswordChange,
+                    onPasswordConfirmChange = viewModel::onPasswordConfirmChange,
+                    onSubmitClick = viewModel::confirmReset,
+                    onResendClick = viewModel::resendReset,
+                    onBackClick = viewModel::goBackFromReset,
+                    modifier = Modifier.padding(innerPadding),
+                    waking = state.waking,
                 )
 
                 AuthViewModel.Screen.SOCIAL_TERMS -> state.socialTerms?.let { draft ->

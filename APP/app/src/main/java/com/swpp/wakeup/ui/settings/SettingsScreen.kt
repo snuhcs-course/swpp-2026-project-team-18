@@ -84,6 +84,8 @@ fun SettingsScreen(
     onSocialUnlink: (SocialProvider) -> Unit = {},
     /** 로그인 방법을 받지 못했을 때 다시 받기 */
     onRetryLoginMethods: () -> Unit = {},
+    /** "비밀번호" 줄의 [변경]. null 이면 줄을 그리지 않는다. 비밀번호 로그인이 있는 계정에서만 그린다 */
+    onChangePassword: (() -> Unit)? = null,
     /** "+ 다른 집 추가". null 이면 다른 집 칸을 그리지 않는다 */
     onAddExtraHome: (() -> Unit)? = null,
     onMakeHomeDefault: (String) -> Unit = {},
@@ -118,6 +120,17 @@ fun SettingsScreen(
         )
 
         AccountCard(nickname = state.nickname, initials = avatarInitials, email = state.accountEmail)
+        // Figma F-40 `507:57`. 방법을 아직 모르거나(null) 소셜만 있는 계정에는 그리지 않는다.
+        if (onChangePassword != null && state.loginMethods?.contains("password") == true) {
+            Box(Modifier.testTag("settings_password")) {
+                SettingRow(
+                    label = "비밀번호",
+                    value = "이메일 로그인에 쓰는 비밀번호",
+                    action = "변경",
+                    onClick = onChangePassword,
+                )
+            }
+        }
 
         // 카카오·Google 연결·끊기(Figma ⑯ `496:29`).
         onSocialLink?.let { link ->

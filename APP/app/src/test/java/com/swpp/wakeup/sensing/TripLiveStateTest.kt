@@ -146,6 +146,25 @@ class TripLiveStateTest {
         ),
     )
 
+    // Partly AI-generated (Claude)
+    @Test
+    fun `바꾼 경로는 기록되고 같은 일정을 새로 추적하면 지워진다`() {
+        TripLiveState.recordReroute(EVENT_ID, "R1", atMillis = 5L)
+        assertEquals(TripLiveState.Rerouted(EVENT_ID, "R1", 5L), TripLiveState.rerouted.value)
+        TripLiveState.resetForNewTrip(EVENT_ID + 1)
+        assertEquals(TripLiveState.Rerouted(EVENT_ID, "R1", 5L), TripLiveState.rerouted.value)
+        TripLiveState.resetForNewTrip(EVENT_ID)
+        assertNull(TripLiveState.rerouted.value)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `전체 초기화는 바꾼 경로 기록도 지운다`() {
+        TripLiveState.recordReroute(EVENT_ID, "R1", atMillis = 5L)
+        TripLiveState.clear()
+        assertNull(TripLiveState.rerouted.value)
+    }
+
     private companion object {
         const val EVENT_ID = 42L
     }

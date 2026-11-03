@@ -100,8 +100,9 @@ make the screen look finished while being untrue.
 
 - On-time probability *value* — the pipeline is complete; the value waits for travel
   variance evidence (above)
-- Replanning while moving ⑦ — colors, ETA, the live route and a switch suggestion when late;
-  no checkpoints or causes
+- Replanning while moving ⑦ — colors, ETA, the live route, a switch suggestion when late,
+  the stops of the planned route and a one-line cause when late (a late start or a longer trip).
+  A reroute made from the notification does not update the stops card
 - Route choice — grouped candidates, a default from your past choice (`preferred_key`, else
   the fastest) and guidance work. Four car variants (BE-8), arrival-time/operating-hour
   routing (BE-11) and optional bicycle-road ratio (BE-14) remain
@@ -119,9 +120,17 @@ make the screen look finished while being untrue.
   consoles (Kakao key hash, Google Android client SHA-1) and the server has both keys
   ([app guide](APP/README.md#소셜-로그인))
 
+- Replanning before departure ⑥ — before the alarm, a faster route is offered from the server's
+  alternative; once the alarm is off and 10 minutes before leaving, at most two checks offer a
+  reroute for this trip. The server side is still open (R3-11)
+- Email account features — the screens and calls are built (forgot password, change password,
+  email format check, show/hide password, remembered email) but the server has no endpoint yet;
+  the app shows a notice until R3-9 exists ([docs/iter3/backend-requests.md](docs/iter3/backend-requests.md)).
+  Email verification (R3-10) has a contract only
+
 **Not started**
 
-- Replanning before departure ⑥
+
 - Group rooms ⑩⑪
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
 - User-defined tags (BE-21) and sleep-time calculation (BE-22)
