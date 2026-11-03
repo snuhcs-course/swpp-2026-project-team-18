@@ -246,3 +246,50 @@ class EmailCode(models.Model):
 
     def __str__(self):
         return f"{self.get_purpose_display()} → {self.user_id}"
+
+
+# Partly AI-generated (Claude)
+class SavedPlace(models.Model):
+    """기본 집(프로필 `home_*`) 말고 저장한 집(본가·자취방). backend-requests R3-2.
+
+    - 사용자당 [MAX_PER_USER] 개까지. 50m 안의 자리는 같은 집으로 본다(`apps.accounts.saved_places`).
+    - `client_uuid` 는 앱의 `SavedHome.id`. 앱이 기기 목록을 한 번 올릴 때(`bulk`) 같은 행을 두 번
+      만들지 않게 한다. 서버가 만든 행(기본 집 바꾸기)은 빈 값이다.
+    - 기본 집은 여기 복사하지 않는다. 목록 응답의 `default` 로만 보인다.
+    - 지워도 일정의 출발지 좌표(`Event.origin_*`)는 남는다(`Event.origin_place` 는 `SET_NULL`).
+    """
+
+    MAX_PER_USER = 5
+
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="saved_places", verbose_name="사용자"
+    )
+    client_uuid = models.CharField(
+        "클라이언트 UUID", max_length=40, blank=True, default="", db_default=""
+    )
+    label = models.CharField("이름", max_length=40)
+    name = models.CharField("장소 이름", max_length=120, blank=True, default="", db_default="")
+    address = models.CharField("주소", max_length=200, blank=True, default="", db_default="")
+    lat = models.FloatField("위도", validators=[MinValueValidator(-90), MaxValueValidator(90)])
+    lng = models.FloatField("경도", validators=[MinValueValidator(-180), MaxValueValidator(180)])
+    created_at = models.DateTimeField("저장 시각", auto_now_add=True)
+
+    class Meta:
+        db_table = "accounts_saved_place"
+        verbose_name = "저장한 집"
+        verbose_name_plural = "저장한 집"
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "client_uuid"],
+                condition=~Q(client_uuid=""),
+                name="accounts_saved_place_user_client_uuid",
+            ),
+            models.CheckConstraint(
+                condition=Q(lat__gte=-90) & Q(lat__lte=90) & Q(lng__gte=-180) & Q(lng__lte=180),
+                name="accounts_saved_place_coord_range",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.label} ({self.user_id})"

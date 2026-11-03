@@ -14,7 +14,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.db.models import Count
 
-from .models import EmailCode, Profile, SocialAccount, User
+from .models import EmailCode, Profile, SavedPlace, SocialAccount, User
 
 
 class ProfileForm(forms.ModelForm):
@@ -203,6 +203,26 @@ class EmailCodeAdmin(admin.ModelAdmin):
     search_fields = ("user__email",)
     fields = ("user", "purpose", "created_at", "expires_at", "attempts", "used_at")
     readonly_fields = fields
+    list_select_related = ("user",)
+    ordering = ("-created_at", "-id")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+# Partly AI-generated (Claude)
+@admin.register(SavedPlace)
+class SavedPlaceAdmin(admin.ModelAdmin):
+    """저장한 집(R3-2). 앱 API 가 5개 한도·50m 중복 규칙을 지킨다. 여기서는 보고 지우기만 한다."""
+
+    list_display = ("created_at", "user", "label", "name", "lat", "lng")
+    search_fields = ("user__email", "label", "name")
+    readonly_fields = (
+        "user", "client_uuid", "label", "name", "address", "lat", "lng", "created_at",
+    )
     list_select_related = ("user",)
     ordering = ("-created_at", "-id")
 

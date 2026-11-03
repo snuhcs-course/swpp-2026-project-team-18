@@ -58,7 +58,7 @@ GPS 출발(`TripObservation`, kind=depart, detector=gps)은 사용자가 아무�
 
 from __future__ import annotations
 
-from django.db.models import Exists, ExpressionWrapper, F, FloatField, OuterRef, Value
+from django.db.models import Exists, ExpressionWrapper, F, FloatField, OuterRef, Q, Value
 from django.db.models.functions import Greatest
 
 # 사용자가 정한 준비 시간(블록 신고 범위·온보딩 값) 대비 이 비율 밖이면 학습에서 뺀다.
@@ -166,8 +166,9 @@ def gps_prep_by_event(user_id: int, *, include_marked: bool = False) -> list[tup
     미루기 뒤 다시 울려 끈 경우 마지막 끄기부터 준비를 시작한 것으로 본다.
 
     버리는 것:
-      - 출발지를 따로 고른 일정. 집에서 준비하고 나간 아침이 아니다(친구 집에서
-        자고 준비를 넣은 아침도. 남의 집 준비는 평소 준비와 다르다)
+      - 집이 아닌 출발지를 고른 일정. 집에서 준비하고 나간 아침이 아니다(친구 집에서
+        자고 준비를 넣은 아침도. 남의 집 준비는 평소 준비와 다르다). 저장한 집
+        (`origin_place`)에서 나선 아침은 집 출발로 넣는다(`Event.departs_from_home`, R3-3)
       - 사용자가 준비를 뺀 일정(`include_prep` false). 준비하지 않고 나간 아침이다
       - "안 감" 으로 표시한 일정. 나갔다 돌아왔거나 다른 데 간 아침이다
       - 사용자가 준비 학습에서 뺀 아침(`include_marked` 가 아닐 때)
@@ -183,8 +184,9 @@ def gps_prep_by_event(user_id: int, *, include_marked: bool = False) -> list[tup
             kind=TripObservation.Kind.DEPART,
             detector=TripObservation.Detector.GPS,
             accuracy_m__lte=GPS_PREP_MAX_ACCURACY_M,
-            event__origin_lat__isnull=True,
         )
+        # 집 출발만(`Event.departs_from_home`): 출발지를 고르지 않았거나 저장한 집에서 나섰다.
+        .filter(Q(event__origin_lat__isnull=True) | Q(event__origin_place__isnull=False))
         .exclude(event__include_prep=False)
         .exclude(event__skipped_at__isnull=False)
     )

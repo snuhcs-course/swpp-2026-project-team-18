@@ -130,11 +130,15 @@ def _concrete(pattern: str) -> str:
     """URL 패턴의 변환자를 더미 값으로 바꿔 실제 요청 가능한 경로를 만든다."""
     import re
 
-    path = re.sub(r"<int:[^>]+>", "999999", pattern)
+    path = re.sub(r"\(\?P<[^>]+>\[0-9\]\+\)", "999999", pattern)
+    path = re.sub(r"<int:[^>]+>", "999999", path)
     path = re.sub(r"<str:[^>]+>", "x", path)
     path = re.sub(r"<slug:[^>]+>", "x", path)
     path = re.sub(r"<uuid:[^>]+>", "00000000-0000-4000-8000-000000000000", path)
     path = re.sub(r"<[^>]+>", "x", path)
+    # `re_path` 정규식(저장한 집 `^api/saved-places/?$`). 빠뜨리면 감사에서 조용히 빠진다.
+    # (Partly AI-generated (Claude))
+    path = path.replace("^", "").replace("$", "").replace("/?", "")
     return "/" + path.lstrip("/")
 
 

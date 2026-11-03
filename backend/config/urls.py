@@ -5,8 +5,14 @@ back-spec.md 5절의 경로 규칙을 따른다. 앱이 추가되면 여기에 i
 """
 
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 
+from apps.accounts.saved_places import (
+    SavedPlaceBulkView,
+    SavedPlaceDetailView,
+    SavedPlaceListView,
+    SavedPlaceMakeDefaultView,
+)
 from apps.accounts.views_profile import ProfileView
 from apps.common.health import health
 
@@ -27,6 +33,20 @@ urlpatterns = [
     path("api/auth/", include("apps.accounts.urls")),
     # back-spec.md 5.2 프로필
     path("api/profile", ProfileView.as_view(), name="profile"),
+    # 저장한 집(iter3 R3-2). 앱이 제안한 계약이 끝에 `/` 를 붙여서 있어도 없어도 받는다.
+    # (Partly AI-generated (Claude))
+    re_path(r"^api/saved-places/?$", SavedPlaceListView.as_view(), name="saved_places"),
+    re_path(r"^api/saved-places/bulk/?$", SavedPlaceBulkView.as_view(), name="saved_places_bulk"),
+    re_path(
+        r"^api/saved-places/(?P<pk>[0-9]+)/?$",
+        SavedPlaceDetailView.as_view(),
+        name="saved_place_detail",
+    ),
+    re_path(
+        r"^api/saved-places/(?P<pk>[0-9]+)/make-default/?$",
+        SavedPlaceMakeDefaultView.as_view(),
+        name="saved_place_make_default",
+    ),
     # back-spec.md 5.3 일정·장소
     path("api/", include("apps.events.urls")),
     # 이동 관측 — 앱이 GPS 로 판별한 실제 출발·도착 시각

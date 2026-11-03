@@ -213,6 +213,8 @@ class EventSerializer(serializers.ModelSerializer):
             "origin_lat",
             "origin_lng",
             "origin_label",
+            # 출발지가 저장한 집이면 그 id(R3-2). 좌표는 위 `origin_*` 에도 있다.
+            "origin_place_id",
             # 사용자가 고른 값(null 은 출발지로 정함)과 그 결과.
             "include_prep",
             "prep_applies",
@@ -226,7 +228,8 @@ class EventSerializer(serializers.ModelSerializer):
             "created_at",
         )
         read_only_fields = (
-            "id", "source", "external_id", "prep_applies", "skipped", "skipped_at", "created_at",
+            "id", "source", "external_id", "origin_place_id", "prep_applies", "skipped",
+            "skipped_at", "created_at",
         )
 
     def get_place(self, obj):
@@ -342,6 +345,9 @@ class EventWriteSerializer(serializers.ModelSerializer):
         child=serializers.IntegerField(min_value=0, max_value=6), required=False,
         max_length=7, default=list,
     )
+    # 저장한 집에서 출발(R3-2). 주면 서버가 `origin_*` 를 그 집 좌표로 채운다. null 이면 뗀다.
+    # 좌표만 바꾸고 이 값을 보내지 않으면 뗀다(다른 곳에서 출발). (Partly AI-generated (Claude))
+    origin_place_id = serializers.IntegerField(required=False, allow_null=True)
 
     class Meta:
         model = Event
@@ -359,9 +365,21 @@ class EventWriteSerializer(serializers.ModelSerializer):
             "origin_lat",
             "origin_lng",
             "origin_label",
+            "origin_place_id",
             "include_prep",
         )
         read_only_fields = ("id",)
+
+    def validate_origin_place_id(self, value):
+        """내 저장한 집만 받는다. 남의 id 는 없는 것과 같은 답이다."""
+        if value is None:
+            return None
+        from apps.accounts.models import SavedPlace
+
+        place = SavedPlace.objects.filter(user=self.context["request"].user, pk=value).first()
+        if place is None:
+            raise serializers.ValidationError("저장한 집이 없다.")
+        return place
 
     def validate_place(self, value):
         # PATCH의 partial=True가 중첩 serializer에도 적용되지만 장소는 좌표를
@@ -388,6 +406,15 @@ class EventWriteSerializer(serializers.ModelSerializer):
             if attrs["start_at"] < timezone.now():
                 raise serializers.ValidationError({"start_at": "반복 시작은 현재 이후로 설정해야 한다."})
             attrs["repeat_weekdays"] = sorted(set(days))
+        # 저장한 집을 고르면 좌표를 그 집으로 맞춘다. 좌표만 바꾸면 저장한 집을 뗀다.
+        if "origin_place_id" in attrs:
+            saved = attrs.pop("origin_place_id")
+            attrs["origin_place"] = saved
+            if saved is not None:
+                attrs["origin_lat"], attrs["origin_lng"] = saved.lat, saved.lng
+                attrs["origin_label"] = saved.label[:80]
+        elif {"origin_lat", "origin_lng"} & self.initial_data.keys():
+            attrs["origin_place"] = None
         lat = attrs.get("origin_lat", getattr(self.instance, "origin_lat", None))
         lng = attrs.get("origin_lng", getattr(self.instance, "origin_lng", None))
         if (lat is None) != (lng is None):

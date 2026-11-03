@@ -180,7 +180,7 @@ class TestEveryAdminOpens:
         closed = {
             "alarmplan", "tripobservation", "weeklysummary",
             "planrevision", "alarmlog", "llmcall", "apirequestlog",
-            "eventrecurrence", "bufferadjustment", "socialaccount", "emailcode",
+            "eventrecurrence", "bufferadjustment", "socialaccount", "emailcode", "savedplace",
             "usertravelprofile", "tripreroute",
         }
         broken = []
