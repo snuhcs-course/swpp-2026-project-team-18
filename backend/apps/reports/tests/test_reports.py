@@ -1038,3 +1038,62 @@ class TestWeeklyApiPhaseB:
         body = json.dumps(res.data, ensure_ascii=False)
         assert "관악로 1" not in body
         assert "서울대" not in body
+
+
+# ---------------------------------------------------------------------------
+# 깨는 모습(R3-6) — Partly AI-generated (Claude)
+# ---------------------------------------------------------------------------
+
+
+class TestWakeStats:
+    def log(self, user, kind, at, *, alarm_at, event=None, n=[0]):
+        from apps.observations.models import AlarmLog
+
+        n[0] += 1
+        return AlarmLog.objects.create(
+            user=user, event=event, kind=kind, occurred_at=at, alarm_at=alarm_at,
+            client_uuid=f"w-{n[0]}",
+        )
+
+    def test_null_without_alarms(self, user):
+        start, end = services.week_bounds()
+        assert services.wake_stats(user, start, end) is None
+
+    def test_counts_snoozes_and_wake_time(self, user, other):
+        from apps.observations.models import AlarmLog
+
+        start, end = services.week_bounds()
+        monday = start + timedelta(hours=7)  # 월 07:00
+        tuesday = monday + timedelta(days=1)
+
+        # 월: 울림 → 미루기 → 다시 울림 → 끄기(10분 뒤). 같은 알람이다.
+        self.log(user, AlarmLog.Kind.FIRED, monday, alarm_at=monday)
+        self.log(user, AlarmLog.Kind.SNOOZED, monday + timedelta(minutes=1), alarm_at=monday)
+        self.log(user, AlarmLog.Kind.FIRED, monday + timedelta(minutes=6), alarm_at=monday)
+        self.log(user, AlarmLog.Kind.DISMISSED, monday + timedelta(minutes=10), alarm_at=monday)
+        # 화: 울림 → 2분 뒤 끄기.
+        self.log(user, AlarmLog.Kind.FIRED, tuesday, alarm_at=tuesday)
+        self.log(user, AlarmLog.Kind.DISMISSED, tuesday + timedelta(minutes=2), alarm_at=tuesday)
+        # 울림 없는 끄기, 지난주 울림, 남의 기록은 세지 않는다.
+        self.log(user, AlarmLog.Kind.DISMISSED, tuesday + timedelta(hours=3), alarm_at=None)
+        self.log(user, AlarmLog.Kind.FIRED, start - timedelta(days=1), alarm_at=start - timedelta(days=1))
+        self.log(other, AlarmLog.Kind.FIRED, monday, alarm_at=monday)
+
+        wake = services.wake_stats(user, start, end)
+
+        assert wake["alarms_fired"] == 2
+        assert wake["snooze_count"] == 1
+        assert wake["snoozed_alarms"] == 1
+        assert wake["wake_seconds_median"] == 360  # (600 + 120) / 2
+        assert len(wake["by_weekday"]) == 7
+        assert wake["by_weekday"][0] == {
+            "weekday": 0, "fired": 1, "snooze_count": 1, "wake_seconds_median": 600,
+        }
+        assert wake["by_weekday"][1]["wake_seconds_median"] == 120
+        assert wake["by_weekday"][2] == {
+            "weekday": 2, "fired": 0, "snooze_count": 0, "wake_seconds_median": None,
+        }
+
+    def test_weekly_carries_the_block(self, user):
+        report = services.weekly(user)
+        assert "wake" in report and report["wake"] is None

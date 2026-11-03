@@ -60,7 +60,7 @@ from django.utils import timezone
 from apps.events.alarms import alarm_states
 from apps.events.models import Event
 from apps.observations import selection
-from apps.observations.models import TripObservation
+from apps.observations.models import AlarmLog, TripObservation
 from apps.planning import buffers
 from apps.planning.estimators import PREP_SOURCE_NOT_FROM_HOME
 from apps.planning.models import AlarmPlan, BufferAdjustment
@@ -706,6 +706,8 @@ def weekly(user, *, anchor: date | None = None) -> dict:
         "deviation": _deviation_stats(list(measured.values())),
         "learning": _learning(outcomes),
         "buffer": _buffer(user, start, end),
+        # 알람 울림·미루기·끄기(R3-6). 그 주 울린 알람이 없으면 null.
+        "wake": wake_stats(user, start, end),
         "outcomes": [
             _outcome_row(o, measured[o.event.pk], causes.get(o.event.pk), alarms, blocks)
             for o in outcomes
@@ -714,6 +716,74 @@ def weekly(user, *, anchor: date | None = None) -> dict:
 
 
 # Partly AI-generated (Claude)
+# Partly AI-generated (Claude)
+def wake_stats(user, start: datetime, end: datetime) -> dict | None:
+    """그 주 알람 기록(`AlarmLog`)으로 깨는 모습을 센다(backend-requests R3-6, Figma ⑧⑨).
+
+    알람 하나는 `(일정, 등록된 알람 시각)` 이다. 미룬 뒤 다시 울린 것은 같은 알람이다. 첫
+    울림이 그 주 안인 알람만 센다(요일도 첫 울림으로 정한다).
+
+    - `alarms_fired`: 울린 알람 수
+    - `snooze_count`: 미룬 횟수, `snoozed_alarms`: 한 번 이상 미룬 알람 수
+    - `wake_seconds_median`: 첫 울림부터 그 뒤 첫 끄기까지 걸린 초의 중앙값. 끈 기록이 없으면 null
+    - `by_weekday[]`: 월=0. `{weekday, fired, snooze_count, wake_seconds_median}`
+
+    수면 시간은 앱이 기록하지 않아 없다. 요일별 자동 조정(`weekday_adjustments`)도 없다 — 학습은
+    평일·주말 두 칸만 나눈다(`RouteCorrection.WeekdayType`).
+    """
+    rows = AlarmLog.objects.filter(
+        user=user,
+        kind__in=(AlarmLog.Kind.FIRED, AlarmLog.Kind.SNOOZED, AlarmLog.Kind.DISMISSED),
+        # 첫 울림이 일요일 밤이면 끄기는 다음 주일 수 있다. 하루 더 읽는다.
+        occurred_at__gte=start,
+        occurred_at__lt=end + timedelta(days=1),
+    ).order_by("occurred_at", "id")
+
+    alarms: dict[tuple, dict] = {}
+    for row in rows:
+        key = (row.event_id, row.alarm_at) if row.alarm_at is not None else ("row", row.pk)
+        if row.kind == AlarmLog.Kind.FIRED:
+            if key not in alarms:
+                alarms[key] = {"fired_at": row.occurred_at, "snoozes": 0, "dismissed_at": None}
+            continue
+        alarm = alarms.get(key)
+        if alarm is None:
+            continue  # 울림 기록이 없는 끄기·미루기(미리 끄기 등)는 세지 않는다
+        if row.kind == AlarmLog.Kind.SNOOZED:
+            alarm["snoozes"] += 1
+        elif alarm["dismissed_at"] is None:
+            alarm["dismissed_at"] = row.occurred_at
+
+    week = [a for a in alarms.values() if start <= a["fired_at"] < end]
+    if not week:
+        return None
+
+    def summarize(items: list[dict]) -> dict:
+        waits = [
+            (a["dismissed_at"] - a["fired_at"]).total_seconds()
+            for a in items
+            if a["dismissed_at"] is not None
+        ]
+        return {
+            "fired": len(items),
+            "snooze_count": sum(a["snoozes"] for a in items),
+            "wake_seconds_median": round(statistics.median(waits)) if waits else None,
+        }
+
+    total = summarize(week)
+    by_weekday = []
+    for index in range(7):
+        day = [a for a in week if timezone.localtime(a["fired_at"]).weekday() == index]
+        by_weekday.append({"weekday": index, **summarize(day)})
+    return {
+        "alarms_fired": total["fired"],
+        "snooze_count": total["snooze_count"],
+        "snoozed_alarms": sum(1 for a in week if a["snoozes"]),
+        "wake_seconds_median": total["wake_seconds_median"],
+        "by_weekday": by_weekday,
+    }
+
+
 def _skipped_count(user, start: datetime, end: datetime) -> int:
     """`[start, end)` 의 지난 일정 중 "안 감" 으로 표시한 수. 기준은 `collect_outcomes` 와 같다."""
     return Event.objects.filter(
