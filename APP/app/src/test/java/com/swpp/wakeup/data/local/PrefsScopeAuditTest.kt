@@ -52,6 +52,13 @@ class PrefsScopeAuditTest {
             "앞 사용자가 고른 캘린더를 지금 계정이 그대로 읽게 된다",
         "data/local/LiveRouteStore.kt" to
             "현재 위치에서 시작하는 앞 사용자의 이동 경로가 들어 있다",
+        // Partly AI-generated (Claude) — todo §2 도착 복원·추적 재시작 복원
+        "data/local/ArrivalStore.kt" to
+            "앞 사용자의 일정이 도착으로 보여 지금 계정의 홈에서 일정이 빠진다",
+        "data/local/TripProgressStore.kt" to
+            "앞 사용자의 이동 중 단계로 지금 계정의 추적이 출발을 건너뛴다",
+        "data/local/SavedHomesStore.kt" to
+            "앞 사용자의 집 좌표가 지금 계정의 출발지 목록에 보인다",
     )
 
     /**
@@ -60,7 +67,31 @@ class PrefsScopeAuditTest {
     private val allowedUnscoped = mapOf(
         "data/local/TokenStore.kt" to
             "소유자를 정하는 곳 자체다. 여기에 소유자 판정을 넣으면 순환이 된다",
+        "data/local/LastEmailStore.kt" to
+            "기기 단위 편의 값(마지막 이메일). 로그아웃해도 다음 로그인 칸을 채우려고 남긴다. 비밀이 아니고 계정 데이터가 아니다",
     )
+
+    @Test
+    fun `마지막 이메일은 로그아웃해도 남는다`() {
+        val source = readSource("data/local/LocalStores.kt")
+        assertTrue(
+            "LastEmailStore 는 기기 단위 값이라 LocalStores.wipeAll 이 지우면 안 된다",
+            !source.contains("LastEmailStore"),
+        )
+    }
+
+    @Test
+    fun `마지막 이메일은 백업에서 빠진다`() {
+        listOf("backup_rules.xml", "data_extraction_rules.xml").forEach { name ->
+            val file = listOf(
+                File("src/main/res/xml/$name"),
+                File("app/src/main/res/xml/$name"),
+                File("APP/app/src/main/res/xml/$name"),
+            ).firstOrNull { it.exists() }
+            assertTrue("$name 을 찾지 못했다", file != null)
+            assertTrue("$name 에 jit_last_email.xml 제외가 없다", file!!.readText().contains("jit_last_email.xml"))
+        }
+    }
 
     @Test
     fun `소유자가 필요한 저장소는 전부 판정을 지난다`() {

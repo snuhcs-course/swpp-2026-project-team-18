@@ -108,6 +108,26 @@
             android:windowSoftInputMode="adjustResize" />
 
         <!--
+          카카오 계정 로그인(카카오톡이 없을 때 브라우저로)이 돌아오는 곳. 카카오 SDK 가 이
+          주소(kakao{네이티브 앱 키}://oauth)로 인가 코드를 받는다. 앱 키는 빌드가 넣는다
+          (app/build.gradle.kts, docs/iter3/social-login-api.md).
+        -->
+        <activity
+            android:name="com.kakao.sdk.auth.AuthCodeHandlerActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data
+                    android:host="oauth"
+                    android:scheme="${kakaoScheme}" />
+            </intent-filter>
+        </activity>
+
+        <!--
           알람 화면.
 
           singleInstance + 별도 taskAffinity: 알람은 앱 화면 스택과 섞이면 안

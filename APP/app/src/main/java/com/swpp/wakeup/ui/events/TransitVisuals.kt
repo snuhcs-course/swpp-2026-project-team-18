@@ -2,6 +2,7 @@
 package com.swpp.wakeup.ui.events
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,10 +16,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -165,21 +172,36 @@ internal fun TransitLineChip(segment: RouteSegment) {
 @Composable
 internal fun TransitLineChips(primary: RouteSegment, max: Int = MAX_LINE_CHIPS) {
     val chips = listOf(primary) + primary.alternatives
-    val shown = chips.take(max)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        shown.forEach { chip ->
-            Spacer(Modifier.width(4.dp))
-            TransitLineChip(chip)
-        }
-        if (chips.size > shown.size) {
-            Spacer(Modifier.width(4.dp))
-            Text(
-                text = "+${chips.size - shown.size}",
-                color = JitColor.TextSecondary,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                style = JitTextStyle.TightCentered,
-            )
+    // "+N" 을 누르면 다른 버스를 모두 펼친다(todo §2 "버스 번호만 다른 경로 한 카드" ①). 서버가
+    // 버스만 다른 경로를 한 카드로 합치면서 칩이 4개를 넘는 일이 늘었다.
+    var expanded by rememberSaveable(primary.label, chips.size) { mutableStateOf(false) }
+    val shown = if (expanded) chips else chips.take(max)
+    // 펼치면 [max] 개씩 줄을 바꾼다. 한 줄에 다 넣으면 행 밖으로 넘친다.
+    val lines = shown.chunked(max.coerceAtLeast(1))
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        lines.forEachIndexed { index, line ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                line.forEach { chip ->
+                    Spacer(Modifier.width(4.dp))
+                    TransitLineChip(chip)
+                }
+                if (index == lines.lastIndex && chips.size > shown.size) {
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "+${chips.size - shown.size}",
+                        color = JitColor.TextSecondary,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        style = JitTextStyle.TightCentered,
+                        modifier = Modifier
+                            .testTag("line_chips_more")
+                            .clickable(role = Role.Button, onClickLabel = "다른 버스 모두 보기") {
+                                expanded = true
+                            }
+                            .padding(horizontal = 2.dp),
+                    )
+                }
+            }
         }
     }
 }

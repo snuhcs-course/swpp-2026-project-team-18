@@ -2,6 +2,7 @@ package com.swpp.wakeup
 
 import android.app.Application
 import android.util.Log
+import com.kakao.sdk.common.KakaoSdk
 import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.data.local.TokenStore
@@ -26,6 +27,13 @@ class JitApplication : Application() {
         super.onCreate()
         tokenStore = TokenStore(this)
         ApiClient.init(tokenStore)
+
+        // 카카오 로그인 SDK. 앱 키가 없는 빌드는 초기화하지 않고, 그 버튼이 "쓸 수 없음" 을
+        // 보인다(ui/auth/SocialSignIn). (Partly AI-generated (Claude))
+        if (BuildConfig.KAKAO_NATIVE_APP_KEY.isNotBlank()) {
+            runCatching { KakaoSdk.init(this, BuildConfig.KAKAO_NATIVE_APP_KEY) }
+                .onFailure { Log.e("JitApplication", "카카오 SDK 초기화 실패", it) }
+        }
 
         // 정기 동기화를 예약한다. KEEP 정책이라 프로세스가 몇 번 깨어나도
         // 주기가 초기화되지 않는다 — UPDATE 면 앱을 자주 여는 사용자에게

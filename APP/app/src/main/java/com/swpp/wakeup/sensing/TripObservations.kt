@@ -47,6 +47,42 @@ internal fun tripObservationOf(
     )
 }
 
+/**
+ * "도착했어요" 를 누른 것. `detector=manual` 도착 관측이다(백엔드 P0 수동 도착).
+ *
+ * GPS 가 도착을 못 잡았을 때의 보조다. 서버는 GPS 도착이 있으면 그쪽을 먼저 쓰고, 시작 + 1시간
+ * 뒤에 누른 것은 읽을 때 거른다. 최근 위치가 있으면 같이 보낸다(오차는 따지지 않는다).
+ * 위치가 없으면 lat·lng 를 둘 다 뺀다. 목적지를 모르면 거리도 뺀다.
+ *
+ * @param fix [FIX_MAX_AGE_MILLIS] 안의 최근 위치. 없으면 null
+ */
+internal fun manualArrivalOf(
+    eventId: Long,
+    atMillis: Long,
+    fix: LocationFix?,
+    destination: GeoPoint?,
+    zone: ZoneId = ZoneId.systemDefault(),
+    clientUuid: String = UUID.randomUUID().toString(),
+): TripObservationInput {
+    val usable = fix?.takeIf {
+        it.lat.isFinite() && it.lng.isFinite() && atMillis - it.atMillis in 0..FIX_MAX_AGE_MILLIS
+    }
+    return TripObservationInput(
+        event = eventId,
+        kind = TripObservationInput.KIND_ARRIVE,
+        detector = TripObservationInput.DETECTOR_MANUAL,
+        observedAt = isoAt(atMillis, zone),
+        lat = usable?.lat,
+        lng = usable?.lng,
+        accuracyM = usable?.accuracyM?.takeIf { it.isFinite() && it >= 0f }?.toDouble(),
+        distanceM = usable?.let { f -> destination?.let { TripGeofence.distanceMeters(f.point, it) } },
+        clientUuid = clientUuid,
+    )
+}
+
+/** 수동 도착에 같이 보낼 위치의 최대 나이. 이보다 오래된 위치는 지금 있는 곳을 말하지 않는다 */
+internal const val FIX_MAX_AGE_MILLIS = 2 * 60_000L
+
 /** 서버가 읽는 시각 문자열. 오프셋을 붙인다(ISO 8601). */
 internal fun isoAt(millis: Long, zone: ZoneId = ZoneId.systemDefault()): String =
     OffsetDateTime.ofInstant(Instant.ofEpochMilli(millis), zone).toString()

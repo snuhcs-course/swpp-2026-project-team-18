@@ -27,7 +27,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
@@ -80,6 +82,15 @@ fun MorningProgressScreen(
     onUndo: () -> Unit,
     onFinish: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 이 일정을 추적 중이라 집을 나서거나 도착하면 기록이 저절로 끝나는가.
+     * 추적하지 않으면 저절로 끝나지 않으므로 그렇게 말하지 않는다.
+     */
+    closesOnDeparture: Boolean = false,
+    /** "오늘 안 가요". 이 일정을 "안 감" 으로 표시한다 */
+    onSkipToday: () -> Unit = {},
+    /** 표시를 저장하는 중 */
+    skipping: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -142,7 +153,11 @@ fun MorningProgressScreen(
                 onClick = { session.current?.let { onMarkDone(it.blockId) } ?: onFinish() },
             )
             Text(
-                text = "남은 항목을 하지 않았으면 그냥 두고 나가도 됨. 안 한 것은 기록되지 않음",
+                text = if (closesOnDeparture) {
+                    "남은 항목을 하지 않았으면 그냥 두고 나가도 됨. 집을 나서거나 도착하면 기록이 저절로 끝남"
+                } else {
+                    "남은 항목을 하지 않았으면 그냥 두고 나가도 됨. 안 한 것은 기록되지 않음"
+                },
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
@@ -190,6 +205,31 @@ fun MorningProgressScreen(
                 )
             }
         }
+
+        // 일정에 안 가는 날. 리포트·학습에서 빼고 알람도 끈다(skip-event-api.md §6, Figma S7).
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                text = "오늘 안 가요",
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .testTag("morning_skip")
+                    .alpha(if (skipping) 0.5f else 1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = !skipping, role = Role.Button, onClick = onSkipToday)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+        Text(
+            text = "이 일정은 리포트와 학습에서 빠지고, 지금까지 누른 기록도 쓰지 않음",
+            color = JitColor.TextSecondary,
+            fontSize = 9.sp,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

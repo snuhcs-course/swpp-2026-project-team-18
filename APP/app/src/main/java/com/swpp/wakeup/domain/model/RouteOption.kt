@@ -118,6 +118,10 @@ data class RouteChoice(
     val selectedKey: String?,
     val originLat: Double? = null,
     val originLng: Double? = null,
+    /** 서버가 기본으로 고른 후보(지난번 선택·자주 쓰는 수단). 없으면 null */
+    val preferredKey: String? = null,
+    /** "지난번에 고른 경로" / "자주 쓰는 수단". [preferredKey] 카드에만 단다 */
+    val preferredCaption: String? = null,
 ) {
     /** 사용자가 집 대신 다른 출발지를 고른 상태인지. */
     val hasCustomOrigin: Boolean get() = originLat != null && originLng != null

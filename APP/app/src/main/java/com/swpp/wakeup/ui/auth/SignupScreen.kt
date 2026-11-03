@@ -132,12 +132,12 @@ fun SignupScreen(
             enabled = !loading
         )
 
-        JitTextField(
+        EmailField(
             label = stringResource(R.string.auth_email),
             inputTag = "signup_email",
+            errorTag = "signup_email_error",
             value = email,
             onValueChange = onEmailChange,
-            keyboardType = KeyboardType.Email,
             enabled = !loading
         )
 
@@ -147,6 +147,7 @@ fun SignupScreen(
             value = password,
             onValueChange = onPasswordChange,
             isPassword = true,
+            passwordToggle = true,
             keyboardType = KeyboardType.Password,
             enabled = !loading
         )
@@ -166,7 +167,10 @@ fun SignupScreen(
             isPassword = true,
             keyboardType = KeyboardType.Password,
             imeAction = ImeAction.Done,
+            // 키보드의 완료 키 = 가입 버튼. 버튼이 켜져 있을 때만 제출한다.
+            onImeAction = { if (canSubmit) onSubmitClick() },
             enabled = !loading,
+            passwordToggle = true,
             trailing = if (passwordsMatch) {
                 {
                     Text(
@@ -241,7 +245,7 @@ fun SignupScreen(
  * 앱에서 규칙을 따로 판정하지 않으며, 결과가 없으면(null) 회색으로 둔다.
  */
 @Composable
-private fun PasswordRuleCard(
+internal fun PasswordRuleCard(
     modifier: Modifier = Modifier,
     lengthPassed: Boolean? = null,
     mixPassed: Boolean? = null,
@@ -255,7 +259,8 @@ private fun PasswordRuleCard(
         verticalArrangement = Arrangement.spacedBy(JitSpace.CardGap)
     ) {
         RuleRow(stringResource(R.string.signup_rule_length), lengthPassed)
-        RuleRow(stringResource(R.string.signup_rule_mix), mixPassed)    }
+        RuleRow(stringResource(R.string.signup_rule_mix), mixPassed)
+    }
 }
 
 // Partly AI-generated (Claude)
@@ -284,15 +289,17 @@ private fun RuleRow(text: String, passed: Boolean?) {
  * 이용약관 및 개인정보처리방침 동의. 체크하지 않으면 가입 버튼이 꺼진다.
  */
 @Composable
-private fun TermsAgreementRow(
+internal fun TermsAgreementRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean,
     modifier: Modifier = Modifier,
+    /** 소셜 처음 가입 화면도 같은 줄을 쓴다(Figma ⑦ 변형 `495:9`) */
+    tag: String = "signup_terms",
 ) {
     Row(
         modifier = modifier
-            .testTag("signup_terms")
+            .testTag(tag)
             .fillMaxWidth()
             .toggleable(
                 value = checked,

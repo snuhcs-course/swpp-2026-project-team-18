@@ -28,6 +28,12 @@ sealed interface AppRoute {
     data object AddEvent : AppRoute
 
     /**
+     * Figma ⑫ 변형 · 일정 수정(`488:9`). ④ 의 "일정 수정" 에서 들어온다. 화면은 ⑫ 을 수정
+     * 모드로 다시 쓴다(`AddState.editingEventId`). 팀이 다른 구성을 고르면 이 경로만 바꾼다.
+     */
+    data class EditEvent(val eventId: Long) : AppRoute
+
+    /**
      * Figma ⑬ 경로 선택. ⑫ 에서 장소를 고른 뒤 진입한다.
      *
      * 일정이 아직 저장되지 않은 상태라 `eventId` 가 없다. 선택 결과는
@@ -63,6 +69,9 @@ sealed interface AppRoute {
      * 저장한 뒤에는 바꿀 길이 없었다.
      */
     data object Settings : AppRoute
+
+    /** Figma ⑯ 변형 "비밀번호 변경"(F-41). [Settings] 의 "비밀번호" 줄에서 들어온다 */
+    data object ChangePassword : AppRoute
 
     /**
      * Figma ⑮ 준비 시간. 가입 직후 평소 외출 준비 시간을 받는다.

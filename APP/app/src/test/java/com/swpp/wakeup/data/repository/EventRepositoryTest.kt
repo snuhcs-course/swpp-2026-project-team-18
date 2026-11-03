@@ -100,11 +100,27 @@ class EventRepositoryTest {
         val gone = event(3, past)
 
         val home = EventRepository(listApi(later, gone, sooner), profileApi()).loadHome().data()
+        val view = home.viewAt(System.currentTimeMillis())
 
-        assertEquals(2, home.totalCount)
-        assertEquals(listOf(2L, 1L), home.sections.flatMap { it.events }.map { it.id })
+        assertEquals("저장소는 거르지 않는다", 3, home.events.size)
+        assertEquals(2, view.totalCount)
+        assertEquals(listOf(2L, 1L), view.sections.flatMap { it.events }.map { it.id })
         assertFalse(home.fromCache)
         assertNull(home.ageLabel)
+    }
+
+    @Test
+    fun `홈 일정은 지금보다 5시간 전부터만 요청한다`() = runTest {
+        var sentFrom: String? = null
+        val now = OffsetDateTime.parse("2026-11-02T00:30:00Z").toInstant().toEpochMilli()
+        val api = object : FakeEventsApi() {
+            override suspend fun list(from: String?, to: String?, limit: Int) =
+                ok(Paged(results = emptyList<EventDto>())).also { sentFrom = from }
+        }
+
+        EventRepository(api, profileApi(), nowMillis = { now }).loadHome().data()
+
+        assertEquals("2026-11-01T19:30:00Z", sentFrom)
     }
 
     @Test
@@ -115,7 +131,7 @@ class EventRepositoryTest {
 
         val home = EventRepository(listApi(off, onLater, on), profileApi()).loadHome().data()
 
-        assertEquals(2L, home.nextAlarm?.id)
+        assertEquals(2L, home.viewAt(System.currentTimeMillis()).nextAlarm?.id)
         assertEquals(
             "등록 목록도 서버가 켠 일정만 담는다",
             setOf(2L, 3L),
@@ -130,7 +146,7 @@ class EventRepositoryTest {
 
         val home = EventRepository(listApi(planned, noPlan), profileApi()).loadHome().data()
 
-        assertEquals(1, home.unplannedCount)
+        assertEquals(1, home.viewAt(System.currentTimeMillis()).unplannedCount)
         assertEquals(1, home.schedules.size)
     }
 
@@ -142,8 +158,9 @@ class EventRepositoryTest {
         assertEquals("우리 집", home.homeLabel)
         assertEquals(37.48, home.homeLat!!, 1e-9)
         assertEquals(25, home.onboardingPrepMin)
-        assertTrue(home.sections.isEmpty())
-        assertNull(home.nextAlarm)
+        val view = home.viewAt(System.currentTimeMillis())
+        assertTrue(view.sections.isEmpty())
+        assertNull(view.nextAlarm)
     }
 
     @Test
@@ -163,15 +180,27 @@ class EventRepositoryTest {
     }
 
     @Test
-    fun `프로필 조회가 실패하면 일정 목록을 부르지 않고 실패한다`() = runTest {
-        // FakeEventsApi 의 list 는 부르면 테스트가 실패한다.
+    fun `프로필 조회가 실패하면 일정 목록이 와도 프로필 문구로 실패한다`() = runTest {
+        // 두 요청은 동시에 나간다. 둘 중 하나라도 실패하면 홈을 만들지 않는다.
         val profileDown = object : FakeProfileApi() {
             override suspend fun get() = httpError<ProfileDto>(401)
         }
 
-        val result = EventRepository(FakeEventsApi(), profileDown).loadHome()
+        val result = EventRepository(listApi(event(1, future(days = 1))), profileDown).loadHome()
 
         assertEquals(Result.Failure("다시 로그인해야 한다."), result)
+    }
+
+    @Test
+    fun `일정 목록이 실패하면 프로필이 와도 실패한다`() = runTest {
+        val listDown = object : FakeEventsApi() {
+            override suspend fun list(from: String?, to: String?, limit: Int) =
+                httpError<Paged<EventDto>>(404)
+        }
+
+        val result = EventRepository(listDown, profileApi()).loadHome()
+
+        assertEquals(Result.Failure("대상을 찾을 수 없다."), result)
     }
 
     @Test
@@ -180,7 +209,7 @@ class EventRepositoryTest {
             override suspend fun get(): Response<ProfileDto> = throw IOException("offline")
         }
 
-        val result = EventRepository(FakeEventsApi(), offline).loadHome()
+        val result = EventRepository(listApi(), offline).loadHome()
 
         assertTrue((result as Result.Failure).message.startsWith("서버에 연결할 수 없다"))
     }
@@ -202,7 +231,10 @@ class EventRepositoryTest {
         val home = EventRepository(api, profileApi()).setAlarmEnabled(1, enabled = false).data()
 
         assertEquals(EventUpdateRequest(alarmEnabled = false), sent)
-        assertNull("다시 읽은 목록에서 꺼진 일정은 다음 알람이 아니다", home.nextAlarm)
+        assertNull(
+            "다시 읽은 목록에서 꺼진 일정은 다음 알람이 아니다",
+            home.viewAt(System.currentTimeMillis()).nextAlarm,
+        )
     }
 
     @Test

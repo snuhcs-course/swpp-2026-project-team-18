@@ -57,6 +57,10 @@ data class WeeklyReportDto(
     @SerializedName("unobserved_count") val unobservedCount: Int = 0,
     @SerializedName("on_time_count") val onTimeCount: Int = 0,
     @SerializedName("late_count") val lateCount: Int = 0,
+    /** "안 감" 으로 표시해 이 주 계산에서 뺀 일정 수(skip-event-api.md). 구버전 서버면 0 */
+    @SerializedName("skipped_count") val skippedCount: Int = 0,
+    /** 지금 안전 버퍼와 이 주의 버퍼 조정(todo §2 "안전 버퍼 표시"). 구버전 서버면 null */
+    val buffer: WeeklyBufferDto? = null,
     /** 0.0~1.0. 도착 관측이 없으면 null */
     @SerializedName("on_time_rate") val onTimeRate: Double? = null,
     @SerializedName("median_slack_minutes") val medianSlackMinutes: Double? = null,
@@ -146,6 +150,28 @@ data class LearningDto(
  *
  * 앱은 요일 칸 위치를 [date] 로만 정한다. [weekday] 는 서버 집계용이라 읽지 않는다.
  */
+// Partly AI-generated (Claude)
+/**
+ * 주간 리포트의 `buffer` 블록(`reports/services._buffer`). `current_*` 는 이 주가 아니라 **지금**
+ * 값이다. 조정은 그 주에 한 것만 온다.
+ */
+data class WeeklyBufferDto(
+    @SerializedName("current_minutes") val currentMinutes: Int? = null,
+    /** `fixed` / `learned` */
+    @SerializedName("current_source") val currentSource: String? = null,
+    val adjustments: List<BufferAdjustmentDto>? = null,
+)
+
+data class BufferAdjustmentDto(
+    @SerializedName("adjusted_at") val adjustedAt: String? = null,
+    @SerializedName("previous_minutes") val previousMinutes: Int? = null,
+    val minutes: Int? = null,
+    /** `late_more` / `unused` */
+    val reason: String? = null,
+    /** 서버가 만든 이유 문장. 리포트 요약과 같은 "~음" 체다 */
+    @SerializedName("reason_text") val reasonText: String? = null,
+)
+
 data class OutcomeDto(
     val event: Long? = null,
     val title: String? = null,

@@ -63,10 +63,8 @@ fun JitPrimaryButton(
 }
 
 /**
- * Figma ⑦ 의 소셜 버튼.
- *
- * 아직 연동이 없다. back-spec 5.1 이 이메일·비밀번호로 확정됐으므로 소셜은
- * 후속 과제이며, 지금은 눌렀을 때 미구현임을 알리는 역할만 한다.
+ * Figma ⑦ 의 소셜 버튼(카카오·Google). 누르면 SDK 로 ID 토큰을 받아 서버로 보낸다
+ * (docs/iter3/social-login-api.md, `ui/auth/SocialSignIn`).
  */
 @Composable
 fun JitSocialButton(
@@ -75,14 +73,19 @@ fun JitSocialButton(
     symbol: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 다른 버튼이 확인 중이면 막는다. 막힌 버튼은 흐리게 그린다(Figma ⑦ 변형 `496:9`) */
+    enabled: Boolean = true,
 ) {
     Button(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(JitRadius.Button),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
-            contentColor = JitColor.Bg
+            contentColor = JitColor.Bg,
+            disabledContainerColor = container.copy(alpha = 0.45f),
+            disabledContentColor = JitColor.Bg.copy(alpha = 0.6f),
         ),
         contentPadding = PaddingValues(vertical = 15.dp)
     ) {

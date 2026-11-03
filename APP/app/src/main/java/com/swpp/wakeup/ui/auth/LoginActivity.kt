@@ -3,6 +3,8 @@ package com.swpp.wakeup.ui.auth
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
@@ -37,6 +39,7 @@ import com.swpp.wakeup.MainActivity
 import com.swpp.wakeup.R
 import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.data.local.TokenStore
+import com.swpp.wakeup.domain.model.SocialProvider
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitTheme
 import kotlinx.coroutines.launch
@@ -133,7 +136,36 @@ private fun AuthHost(
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val socialNotWired = stringResource(R.string.login_social_not_wired)
+    val activity = LocalActivity.current
+
+    // 카카오·Google SDK 는 화면이 있어야 한다(카카오톡·브라우저·계정 선택 창). 받은 토큰만
+    // ViewModel 로 넘긴다. (Partly AI-generated (Claude))
+    val startSocial: (SocialProvider) -> Unit = { provider ->
+        if (activity != null && viewModel.beginSocial(provider)) {
+            scope.launch {
+                // 화면이 사라져 취소돼도 "확인 중…" 에 멈추지 않게 결과를 꼭 넘긴다.
+                var outcome: SocialSignIn.Outcome = SocialSignIn.Outcome.Cancelled
+                try {
+                    outcome = SocialSignIn.idToken(activity, provider)
+                } finally {
+                    viewModel.onSocialOutcome(provider, outcome)
+                }
+            }
+        }
+    }
+
+    // 처음 가입 화면에서 뒤로 가면 로그인으로 돌아온다.
+    BackHandler(enabled = state.screen == AuthViewModel.Screen.SOCIAL_TERMS && !state.busy) {
+        viewModel.cancelSocialTerms()
+    }
+
+    // 비밀번호 찾기에서 뒤로 가면 한 단계씩 돌아간다(코드 확인 → 코드 요청 → 로그인).
+    BackHandler(
+        enabled = (state.screen == AuthViewModel.Screen.RESET_REQUEST ||
+            state.screen == AuthViewModel.Screen.RESET_CONFIRM) && !state.loading
+    ) {
+        viewModel.goBackFromReset()
+    }
 
     // 인증 성공을 한 번만 소비한다. 재구성마다 화면이 뛰지 않게 한다.
     // 환영 문구는 MainActivity 가 띄운다. 여기서 스낵바를 await 하면
@@ -154,15 +186,11 @@ private fun AuthHost(
         contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
-        val showSocialNotice: () -> Unit = {
-            scope.launch { snackbarHostState.showSnackbar(socialNotWired) }
-        }
-
         AnimatedContent(
             targetState = state.screen,
             transitionSpec = {
-                // 가입으로 갈 때는 오른쪽에서, 로그인으로 돌아올 때는 왼쪽에서.
-                val direction = if (targetState == AuthViewModel.Screen.SIGNUP) 1 else -1
+                // 가입·약관으로 갈 때는 오른쪽에서, 로그인으로 돌아올 때는 왼쪽에서.
+                val direction = if (targetState != AuthViewModel.Screen.LOGIN) 1 else -1
                 val enter = slideInHorizontally(
                     animationSpec = tween(280, easing = FastOutSlowInEasing),
                 ) { full -> direction * full / 5 } + fadeIn(tween(200))
@@ -184,11 +212,65 @@ private fun AuthHost(
                     onPasswordChange = viewModel::onPasswordChange,
                     onLoginClick = viewModel::login,
                     onSignupClick = viewModel::goToSignup,
-                    onGoogleClick = showSocialNotice,
-                    onKakaoClick = showSocialNotice,
+                    onGoogleClick = { startSocial(SocialProvider.GOOGLE) },
+                    onKakaoClick = { startSocial(SocialProvider.KAKAO) },
                     modifier = Modifier.padding(innerPadding),
-                    waking = state.waking
+                    waking = state.waking,
+                    socialBusy = state.socialBusy,
+                    socialNotice = state.socialNotice,
+                    onForgotClick = viewModel::goToResetRequest,
                 )
+
+                AuthViewModel.Screen.RESET_REQUEST -> PasswordResetRequestScreen(
+                    email = state.email,
+                    loading = state.loading,
+                    error = state.error,
+                    canSubmit = state.canRequestReset,
+                    onEmailChange = viewModel::onEmailChange,
+                    onSubmitClick = viewModel::requestReset,
+                    onBackClick = viewModel::goBackFromReset,
+                    modifier = Modifier.padding(innerPadding),
+                    waking = state.waking,
+                )
+
+                AuthViewModel.Screen.RESET_CONFIRM -> PasswordResetConfirmScreen(
+                    sentTo = state.resetSentTo ?: state.email,
+                    code = state.resetCode,
+                    password = state.password,
+                    passwordConfirm = state.passwordConfirm,
+                    passwordsMatch = state.passwordsMatch,
+                    passwordCheck = state.passwordCheck,
+                    passwordCheckError = state.passwordCheckError,
+                    loading = state.loading,
+                    error = state.error,
+                    info = state.resetInfo,
+                    canSubmit = state.canSubmitResetConfirm,
+                    onCodeChange = viewModel::onResetCodeChange,
+                    onPasswordChange = viewModel::onPasswordChange,
+                    onPasswordConfirmChange = viewModel::onPasswordConfirmChange,
+                    onSubmitClick = viewModel::confirmReset,
+                    onResendClick = viewModel::resendReset,
+                    onBackClick = viewModel::goBackFromReset,
+                    modifier = Modifier.padding(innerPadding),
+                    waking = state.waking,
+                )
+
+                AuthViewModel.Screen.SOCIAL_TERMS -> state.socialTerms?.let { draft ->
+                    SocialTermsScreen(
+                        provider = draft.provider,
+                        nickname = draft.nickname,
+                        agreed = draft.agreed,
+                        loading = state.socialBusy != null,
+                        error = state.error,
+                        canSubmit = state.canAgreeSocialTerms,
+                        onNicknameChange = viewModel::onSocialNicknameChange,
+                        onAgreedChange = viewModel::onSocialTermsAgreedChange,
+                        onSubmitClick = viewModel::agreeSocialTerms,
+                        onBackClick = viewModel::cancelSocialTerms,
+                        modifier = Modifier.padding(innerPadding),
+                        waking = state.waking,
+                    )
+                }
 
                 AuthViewModel.Screen.SIGNUP -> SignupScreen(
                     email = state.email,

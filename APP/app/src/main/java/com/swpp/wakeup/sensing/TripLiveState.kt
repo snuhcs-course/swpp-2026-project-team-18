@@ -1,6 +1,7 @@
 package com.swpp.wakeup.sensing
 
 import com.swpp.wakeup.data.local.LiveRouteStore
+import com.swpp.wakeup.domain.model.LiveRoute
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,14 +35,83 @@ object TripLiveState {
     /** 도착 결과는 추적 종료 뒤에도 필요하다. 현재 위치와 달리 좌표는 남기지 않는다. */
     data class Arrival(val eventId: Long, val atMillis: Long)
 
+    /** 마지막으로 기록한 도착 하나 */
     private val _arrival = MutableStateFlow<Arrival?>(null)
     val arrival: StateFlow<Arrival?> = _arrival.asStateFlow()
 
+    /**
+     * 이 기기가 아는 도착 전부(일정 id → 도착). 하루에 일정이 여럿이면 앞 일정의 도착도 남아야
+     * 홈에서 빠진다. 디스크 사본([com.swpp.wakeup.data.local.ArrivalStore])에서 되살린다
+     * ([restoreArrivals]). 기록·복원은 [ArrivalRecords] 가 맡는다. (Partly AI-generated (Claude))
+     */
+    private val _arrivals = MutableStateFlow<Map<Long, Arrival>>(emptyMap())
+    val arrivals: StateFlow<Map<Long, Arrival>> = _arrivals.asStateFlow()
+
+    /**
+     * 새 판정이 앞 것을 덮는다. "도착했어요" 는 도착이 없을 때만 기록되므로([ManualArrival]) 덮는
+     * 경우는 수동 뒤 GPS 도착뿐이고, 서버도 GPS 를 먼저 쓴다.
+     */
     fun recordArrival(eventId: Long, atMillis: Long) {
-        _arrival.value = Arrival(eventId, atMillis)
+        val arrival = Arrival(eventId, atMillis)
+        _arrivals.update { it + (eventId to arrival) }
+        _arrival.value = arrival
     }
 
-    fun arrivalFor(eventId: Long): Arrival? = _arrival.value?.takeIf { it.eventId == eventId }
+    /** 디스크·서버에서 읽은 도착을 더한다. 메모리에 이미 있는 일정은 그대로 둔다 */
+    fun restoreArrivals(restored: Map<Long, Long>) {
+        if (restored.isEmpty()) return
+        _arrivals.update { current ->
+            current + restored.filterKeys { it !in current }.mapValues { (id, at) -> Arrival(id, at) }
+        }
+    }
+
+    /** 한 일정의 도착을 잊는다. 같은 일정을 새로 추적하기 시작할 때 */
+    fun forgetArrival(eventId: Long) {
+        _arrivals.update { it - eventId }
+        _arrival.update { if (it?.eventId == eventId) null else it }
+    }
+
+    fun arrivalFor(eventId: Long): Arrival? = _arrivals.value[eventId]
+
+    // Partly AI-generated (Claude)
+    /**
+     * 출발·도착으로 아침 기록을 닫았다는 한 번짜리 신호. 화면이 받아 처리하고 지운다.
+     *
+     * 추적이 끝나도([clearTracking]) 남긴다 — 도착하면 서비스가 곧바로 멈추는데 그 뒤에
+     * 화면이 안내를 띄워야 한다.
+     */
+    data class MorningClosed(val eventId: Long, val reason: MorningClose.Reason, val atMillis: Long)
+
+    private val _morningClosed = MutableStateFlow<MorningClosed?>(null)
+    val morningClosed: StateFlow<MorningClosed?> = _morningClosed.asStateFlow()
+
+    fun recordMorningClosed(eventId: Long, reason: MorningClose.Reason, atMillis: Long) {
+        _morningClosed.value = MorningClosed(eventId, reason, atMillis)
+    }
+
+    /** 받은 신호만 지운다. 그 사이 새 신호가 왔으면 그대로 둔다. */
+    fun consumeMorningClosed(closed: MorningClosed) {
+        _morningClosed.compareAndSet(closed, null)
+    }
+
+    // Partly AI-generated (Claude)
+    /** 마지막으로 경로를 바꾼 기록. 알림의 [바꾸기]와 화면 버튼이 같은 곳에 남겨 화면이 따라가게 한다. */
+    data class Rerouted(val eventId: Long, val routeKey: String, val atMillis: Long)
+
+    private val _rerouted = MutableStateFlow<Rerouted?>(null)
+    val rerouted: StateFlow<Rerouted?> = _rerouted.asStateFlow()
+
+    fun recordReroute(eventId: Long, routeKey: String, atMillis: Long = System.currentTimeMillis()) {
+        _rerouted.value = Rerouted(eventId, routeKey, atMillis)
+    }
+
+    /** 지금 추적 중인 일정. 추적 중이 아니면 null */
+    private val _trackingEventId = MutableStateFlow<Long?>(null)
+    val trackingEventId: StateFlow<Long?> = _trackingEventId.asStateFlow()
+
+    fun beginTracking(eventId: Long) {
+        _trackingEventId.value = eventId
+    }
 
     /**
      * 추적 중인 여정 하나의 상태.
@@ -78,6 +148,12 @@ object TripLiveState {
          * 뒤에 화면을 연 사용자가 "방금 출발했다" 로 계산된다.
          */
         val movingSinceMillis: Long? = null,
+        /**
+         * 추적을 시작했을 때 이미 집 밖이었는가. 그러면 [movingSinceMillis] 는 실제 출발 시각이
+         * 아니라 첫 위치를 받은 시각이다. 정류장 시각·늦은 이유를 계산할 때 출발 시각으로 쓰지 않는다.
+         * (Partly AI-generated (Claude))
+         */
+        val departureMissed: Boolean = false,
     )
 
     private val _snapshot = MutableStateFlow<Snapshot?>(null)
@@ -121,6 +197,29 @@ object TripLiveState {
         }
     }
 
+    /**
+     * 출발 전 "지금 나가도 늦나" 확인 결과 하나. 추적 서비스가 알람을 끈 뒤 집을 나서기 전까지
+     * 최대 두 번 받는다([com.swpp.wakeup.domain.model.PreDepartureCheck]).
+     *
+     * 이동 중 경로([liveRoute])와 **따로 둔다.** 이동 중 지도·카드는 그 값이 현재 위치 기준이라는
+     * 전제로 그려지는데, 이것은 출발지 기준이다. 디스크에도 쓰지 않는다. (Partly AI-generated (Claude))
+     */
+    data class PreDepartureSnapshot(
+        val eventId: Long,
+        val fetchedAtMillis: Long,
+        val route: LiveRoute,
+    )
+    private val _preDeparture = MutableStateFlow<PreDepartureSnapshot?>(null)
+    val preDeparture: StateFlow<PreDepartureSnapshot?> = _preDeparture.asStateFlow()
+    fun publishPreDeparture(snapshot: PreDepartureSnapshot) {
+        _preDeparture.value = snapshot
+    }
+    /** [eventId] 가 null 이면 무엇이든, 아니면 그 일정의 결과만 지운다. */
+    fun clearPreDeparture(eventId: Long? = null) {
+        _preDeparture.update { current ->
+            if (current != null && (eventId == null || current.eventId == eventId)) null else current
+        }
+    }
     fun liveRouteFor(eventId: Long): LiveRouteStore.Snapshot? =
         _liveRoute.value?.takeIf { it.eventId == eventId }
 
@@ -147,12 +246,28 @@ object TripLiveState {
     fun clearTracking() {
         _snapshot.value = null
         _liveRoute.value = null
+        _preDeparture.value = null
+        _trackingEventId.value = null
     }
 
-    /** 로그아웃·새 추적에서는 이전 도착 결과도 지운다. */
+    /** 로그아웃에서는 이전 도착 결과도 전부 지운다. */
     fun clear() {
         clearTracking()
         _arrival.value = null
+        _arrivals.value = emptyMap()
+        _morningClosed.value = null
+        _rerouted.value = null
+    }
+
+    /**
+     * 새 추적을 시작한다. 위치·경로와 **그 일정의** 도착만 지운다. 같은 날 앞 일정의 도착은
+     * 남긴다 — 지우면 이미 도착한 일정이 홈에 다시 나타난다. (Partly AI-generated (Claude))
+     */
+    fun resetForNewTrip(eventId: Long) {
+        clearTracking()
+        forgetArrival(eventId)
+        _morningClosed.value = null
+        _rerouted.update { if (it?.eventId == eventId) null else it }
     }
 
     /** 이 일정을 추적하는 중인 경우에만 위치를 준다. */

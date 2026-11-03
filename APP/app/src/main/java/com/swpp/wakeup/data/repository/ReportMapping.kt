@@ -156,7 +156,24 @@ internal fun WeeklyReportDto.toView(zone: ZoneId = ZoneId.systemDefault()): Week
             )
         }.orEmpty(),
         learningLabel = learningLabel(),
+        // 안 간 일정은 서버가 이미 칸·지각 줄에서 뺐다. 몇 건 뺐는지만 밝힌다.
+        skippedNote = skippedCount.takeIf { it > 0 }?.let { "안 감으로 표시한 일정 ${it}건은 빼고 계산함" },
+        bufferNotes = bufferNotes,
+        bufferCurrentLabel = bufferCurrentLabel(bufferNotes),
     )
+}
+
+// Partly AI-generated (Claude)
+/** 그 주에 한 버퍼 조정의 이유 문장. 빈 문장은 뺀다. */
+private val WeeklyReportDto.bufferNotes: List<String>
+    get() = buffer?.adjustments.orEmpty().mapNotNull { it.reasonText?.trim()?.takeIf(String::isNotEmpty) }
+
+/** "지금 안전 버퍼 8분 · 지각 기록으로 조정됨". 조정이 없던 주에는 쓰지 않는다. */
+private fun WeeklyReportDto.bufferCurrentLabel(notes: List<String>): String? {
+    if (notes.isEmpty()) return null
+    val minutes = buffer?.currentMinutes ?: return null
+    val learned = buffer.currentSource == "learned"
+    return "지금 안전 버퍼 ${minutes}분" + if (learned) " · 지각 기록으로 조정됨" else ""
 }
 
 private class Placed(val date: LocalDate, val dto: OutcomeDto, val morning: MorningOutcome)
@@ -387,6 +404,8 @@ internal fun OutcomeDto.toMorning(zone: ZoneId, weekLateCount: Int): MorningOutc
         tauBucketLower = tauBucketLower,
         slackMinutes = slackMinutes,
         isOnlyLateOfWeek = outcome == OutcomeResult.LATE && weekLateCount == 1,
+        // 서버 값 그대로 본다. OutcomeResult.UNOBSERVED 는 모르는 값까지 받아 주므로 쓰지 않는다.
+        skippable = result == OutcomeDto.RESULT_UNOBSERVED && event != null,
     )
 }
 

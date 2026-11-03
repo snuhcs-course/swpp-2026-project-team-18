@@ -49,8 +49,18 @@ data class UpcomingEvent(
     /** 서버가 판정한 최종 켬/끔. 계산된 시각이 있어도 OFF일 수 있다. */
     val alarmOn: Boolean = false,
     val alarmAtEpochSecond: Long? = null,
+    /** "안 감" 으로 표시한 일정. 서버 `skipped`. 흐리게 그리고 알람·리포트에서 빠진다 */
+    val skipped: Boolean = false,
+    /** 알람 전 더 빠른 경로 제안([FasterRoute.offer]). 없으면 null. 화면을 그릴 때 [FasterRouteOffer.isOpen] 으로 다시 거른다 */
+    val fasterRoute: FasterRouteOffer? = null,
 ) {
     val hasAlarm: Boolean get() = alarmAt != null
+
+    /** 시작 시각(epoch ms). 시각 비교는 이 값으로 한다 */
+    val startAtMillis: Long get() = startAtEpochSecond * 1000
+
+    /** 알람 시각(epoch ms). 시각 비교는 이 값으로 하고 표시 문자열 [alarmAt] 과 비교하지 않는다 */
+    val alarmAtMillis: Long? get() = alarmAtEpochSecond?.times(1000)
 
     /**
      * 확률을 위험 등급으로 바꾼다. 색은 화면이 정하고 경계값만 여기서 관리한다.

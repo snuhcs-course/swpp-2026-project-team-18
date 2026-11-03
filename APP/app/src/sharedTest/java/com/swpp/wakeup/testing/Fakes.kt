@@ -186,6 +186,56 @@ open class FakeAuthApi : AuthApi {
         unexpected("refresh")
 
     override suspend fun me(bearer: String): Response<UserDto> = unexpected("me")
+    override suspend fun logout(body: RefreshRequest): Response<Unit> = unexpected("logout")
+    override suspend fun logoutAll(): Response<com.swpp.wakeup.data.remote.LogoutAllResponse> =
+        unexpected("logoutAll")
+    override suspend fun socialLogin(
+        provider: String,
+        body: com.swpp.wakeup.data.remote.SocialLoginRequest,
+    ): Response<AuthResponse> = unexpected("socialLogin")
+    override suspend fun currentUser(): Response<UserDto> = unexpected("currentUser")
+    override suspend fun linkSocial(
+        provider: String,
+        body: com.swpp.wakeup.data.remote.SocialLinkRequest,
+    ): Response<com.swpp.wakeup.data.remote.SocialUserResponse> = unexpected("linkSocial")
+    override suspend fun unlinkSocial(
+        provider: String,
+    ): Response<com.swpp.wakeup.data.remote.SocialUserResponse> = unexpected("unlinkSocial")
+    // 비밀번호 재설정·변경(제안 계약 R3-9). 서버가 아직 없는 것처럼 404 가 기본이다.
+    override suspend fun requestPasswordReset(
+        body: com.swpp.wakeup.data.remote.PasswordResetRequest,
+    ): Response<com.swpp.wakeup.data.remote.PasswordResetResponse> = httpError(404)
+    override suspend fun confirmPasswordReset(
+        body: com.swpp.wakeup.data.remote.PasswordResetConfirmRequest,
+    ): Response<AuthResponse> = httpError(404)
+    override suspend fun changePassword(
+        body: com.swpp.wakeup.data.remote.PasswordChangeRequest,
+    ): Response<com.swpp.wakeup.data.remote.PasswordChangeResponse> = httpError(404)
+}
+
+/**
+ * JVM 에는 Android Keystore 가 없다. 값을 뒤집어 접두어만 붙이는 가짜 암호화.
+ * [failEncrypt]/[failDecrypt] 로 보안 저장소 오류를 흉내 낸다.
+ */
+class FakeTokenCipher(
+    var failEncrypt: Boolean = false,
+    var failDecrypt: Boolean = false,
+) : com.swpp.wakeup.data.local.TokenCipher {
+    var resets = 0
+
+    override fun encrypt(plain: String): String {
+        if (failEncrypt) throw java.security.GeneralSecurityException("암호화 실패(가짜)")
+        return com.swpp.wakeup.data.local.TokenCipher.PREFIX + plain.reversed()
+    }
+
+    override fun decrypt(stored: String): String {
+        if (failDecrypt) throw java.security.GeneralSecurityException("복호화 실패(가짜)")
+        return stored.removePrefix(com.swpp.wakeup.data.local.TokenCipher.PREFIX).reversed()
+    }
+
+    override fun reset() {
+        resets++
+    }
 }
 
 open class FakeEventsApi : EventsApi {
@@ -199,6 +249,13 @@ open class FakeEventsApi : EventsApi {
 
     override suspend fun delete(id: Long): Response<Unit> = unexpected("delete")
     override suspend fun recompute(id: Long): Response<EventDto> = unexpected("recompute")
+    override suspend fun patch(id: Long, body: okhttp3.RequestBody): Response<EventDto> = unexpected("patch")
+    override suspend fun reroute(
+        id: Long,
+        body: com.swpp.wakeup.data.remote.RerouteRequest,
+    ): Response<com.swpp.wakeup.data.remote.RerouteResponse> = unexpected("reroute")
+    override suspend fun skip(id: Long): Response<EventDto> = unexpected("skip")
+    override suspend fun unskip(id: Long): Response<EventDto> = unexpected("unskip")
     override suspend fun importCalendar(body: CalendarImportRequest): Response<CalendarImportResponse> =
         unexpected("importCalendar")
 

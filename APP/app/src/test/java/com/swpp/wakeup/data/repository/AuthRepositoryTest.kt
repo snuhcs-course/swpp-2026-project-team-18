@@ -35,7 +35,7 @@ import org.junit.Test
  */
 class AuthRepositoryTest {
 
-    private val tokenStore = TokenStore(prefsContext())
+    private val tokenStore = TokenStore(prefsContext(), com.swpp.wakeup.testing.FakeTokenCipher())
 
     private val authBody = fromJson<AuthResponse>(
         """{"access":"a-token","refresh":"r-token",

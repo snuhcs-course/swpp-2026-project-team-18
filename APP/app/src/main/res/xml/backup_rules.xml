@@ -5,4 +5,11 @@
     <exclude domain="sharedpref" path="jit_live_route.xml"/>
     <!-- 연동한 캘린더 id 는 이 기기에서만 뜻이 있다. -->
     <exclude domain="sharedpref" path="jit_calendar_link.xml"/>
+    <!-- 도착 기록과 이동 중 단계는 이 기기의 추적이 잠깐 쓰는 사본이다. 서버에 관측이 있다. -->
+    <exclude domain="sharedpref" path="jit_arrivals.xml"/>
+    <exclude domain="sharedpref" path="jit_trip_progress.xml"/>
+    <!-- 기기에만 둔 다른 집 좌표. 다른 기기의 계정과 섞이지 않게 옮기지 않는다. -->
+    <exclude domain="sharedpref" path="jit_saved_homes.xml"/>
+    <!-- Device-level convenience value (last login email). A restore on another device must not pre-fill it. -->
+    <exclude domain="sharedpref" path="jit_last_email.xml"/>
 </full-backup-content>

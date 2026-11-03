@@ -110,6 +110,14 @@ data class AlarmPlanView(
      */
     val computedAtMillis: Long? = null,
 
+    /** 알람 시각(epoch ms). 계산 못 했으면 null. 알람이 울렸는지 클릭 시점에 다시 확인하는 데 쓴다 */
+    val alarmAtMillis: Long? = null,
+    /** 계획한 출발 시각(`depart_by`, epoch ms). 모르면 null */
+    val departByMillis: Long? = null,
+    /** 계획한 도착 시각(`arrive_at`, epoch ms). 모르면 null */
+    val arriveAtMillis: Long? = null,
+    /** 더 빠른 대안의 경로 key(`alt_route_key`). 없으면 null */
+    val altRouteKey: String? = null,
     /** `ok` / `no_home` / `no_place` / `route_failed` */
     val status: String,
     val statusLabel: String?,
@@ -196,6 +204,10 @@ data class AlarmPlanView(
      * 않는다 — 그쪽은 학습 보정과 τ 분위수를 거친 값이라 기준이 다르다.
      */
     val altFasterMinutes: Int? = null,
+    /** "안 감" 으로 표시한 일정. 알람이 울리지 않고 리포트·학습에서 빠진다 */
+    val skipped: Boolean = false,
+    /** "계산 방법" 의 경로 기준 한 줄. 예 "9호선 → 2호선 · 6.0km 기준"([RouteBasis]) */
+    val routeBasis: String? = null,
 ) {
     val isComputed: Boolean get() = status == "ok" && alarmAt != null
 

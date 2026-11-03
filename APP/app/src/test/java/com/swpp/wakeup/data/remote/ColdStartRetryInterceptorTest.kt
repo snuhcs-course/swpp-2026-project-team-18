@@ -151,6 +151,24 @@ class ColdStartRetryInterceptorTest {
         response.close()
     }
 
+    // Partly AI-generated (Claude)
+    @Test
+    fun `취소된 GET 은 재시도하지 않는다`() {
+        // 지도를 옮기면 앱이 이전 정적 지도 요청을 취소한다. 그 IOException 을
+        // 잠든 서버로 읽고 다시 보내면 카카오 호출을 한 번 더 쓴다.
+        val calls = AtomicInteger()
+        val c = client { chain ->
+            calls.incrementAndGet()
+            chain.call().cancel()
+            throw IOException("Canceled")
+        }
+
+        val thrown = runCatching { c.newCall(get()).execute() }.exceptionOrNull()
+
+        assertTrue("취소 오류가 그대로 올라와야 한다", thrown is IOException)
+        assertEquals("취소된 요청을 다시 보내면 안 된다", 1, calls.get())
+    }
+
     // -----------------------------------------------------------------
     // 4xx 는 우리 잘못이므로 재시도하지 않는다
     // -----------------------------------------------------------------

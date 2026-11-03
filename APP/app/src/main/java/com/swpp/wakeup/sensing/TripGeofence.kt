@@ -119,6 +119,18 @@ class TripGeofence(
         private set
 
     /**
+     * 이 추적에서 판정에 쓸 위치가 한 번이라도 출발지 반경 안에 들어왔는가. 되돌리지 않는다.
+     *
+     * [atHomeConfirmed] 와 달리 시간이 지나도 꺼지지 않는다. "추적이 사용자를 출발지에서
+     * 본 적이 있는가" 에 답하고, 나중의 출발이 아침 기록을 닫아도 되는지를 정한다
+     * ([MorningClose]). 첫 위치부터 반경 밖이었으면(규칙 3) false 로 남는다 — 알람을
+     * 출발지가 아닌 곳에서 끈 아침이라 그때 누른 블록 기록은 진짜 준비 시간이다.
+     * (Partly AI-generated (Claude))
+     */
+    var sawOriginFix: Boolean = false
+        private set
+
+    /**
      * 판정에 쓴 마지막 fix. 알림에 남은 거리를 표시할 때 쓴다.
      *
      * 흐린 fix 로 나간 것을 알았으면(규칙 4) 비운다. 그 전의 정확한 fix 는 집이라
@@ -150,6 +162,22 @@ class TripGeofence(
         if (phase != Phase.BEFORE_DEPARTURE) return false
         val last = lastAcceptedFix ?: return false
         return nowMillis - last.atMillis <= EVIDENCE_MAX_AGE_MS
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 프로세스가 죽었다 되살아난 추적이 이미 집을 나선 상태에서 이어 간다(todo §2 "추적 서비스
+     * 재시작 복원"). 출발을 다시 기다리지 않는다 — 기다리면 밖에 있는 첫 위치를 "처음부터 집
+     * 밖" 으로 읽어 출발 시각을 놓친 것으로 남기고, 이동 시작 시각도 지금으로 다시 잡는다.
+     *
+     * 출발 판정 전에만 부른다. 이미 판정을 시작했으면 아무것도 하지 않는다.
+     */
+    fun resumeInTransit(sawOriginFix: Boolean, departureMissed: Boolean) {
+        if (phase == Phase.ARRIVED || sawFirstFix || lastAcceptedFix != null) return
+        phase = Phase.IN_TRANSIT
+        sawFirstFix = true
+        this.sawOriginFix = sawOriginFix
+        this.departureMissed = departureMissed
     }
 
     private var sawFirstFix = false
@@ -219,6 +247,7 @@ class TripGeofence(
             departureStreak = 0
             // 집 반경 안의 정확한 위치는 흐린 fix 가 쌓은 "멀다" 도 뒤집는다.
             coarseDepartureStreak = 0
+            sawOriginFix = true
         }
 
         // 5. 반경 안이라도 지속적으로 이동하고 있으면 나간 것이다.
