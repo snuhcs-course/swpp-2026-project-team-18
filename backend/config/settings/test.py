@@ -84,6 +84,7 @@ REST_FRAMEWORK = {  # noqa: F405
         "route": None,
         "static_map": None,
         "route_live": None,
+        "route_live_pre_departure": None,
         "nlp": None,
         "observation": None,
         "password_check": None,

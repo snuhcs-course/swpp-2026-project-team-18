@@ -148,6 +148,62 @@ class TestCollectTravelSamples:
         assert dropped["이동 중 경로 변경"] == 1
         assert kept.pk != switched.pk
 
+    # Partly AI-generated (Claude)
+    def test_switched_before_departure_learns_on_the_new_route(self, user, place):
+        """출발 전에 바꾼 이동은 바꾼 경로의 원값으로 학습한다(R3-11, 사용자 11-03)."""
+        from apps.observations.models import TripReroute
+
+        depart = datetime(2026, 9, 22, 8, 0, tzinfo=KST)
+        event = make_trip(user, place, predicted=20, actual_minutes=33, depart_at=depart)
+        row = TripReroute.objects.create(
+            user=user, event=event, from_route_key="transit:2호선", to_route_key="transit:5513",
+            route_minutes_raw=30, walk_minutes_raw=6, travel_mode="버스",
+        )
+        TripReroute.objects.filter(pk=row.pk).update(rerouted_at=depart - timedelta(minutes=12))
+
+        samples, dropped = learning.collect_travel_samples()
+
+        assert len(samples) == 1
+        s = samples[0]
+        assert s.signature == "transit:5513"
+        assert s.predicted_minutes == 30
+        assert s.walk_minutes == 6
+        assert s.mode == "버스"
+        assert s.ratio == pytest.approx(1.1)
+        assert "이동 중 경로 변경" not in dropped
+
+    def test_switched_before_departure_without_raw_minutes_is_left_out(self, user, place):
+        from apps.observations.models import TripReroute
+
+        depart = datetime(2026, 9, 22, 8, 0, tzinfo=KST)
+        event = make_trip(user, place, predicted=20, actual_minutes=33, depart_at=depart)
+        row = TripReroute.objects.create(
+            user=user, event=event, from_route_key="transit:2호선", to_route_key="transit:5513",
+        )
+        TripReroute.objects.filter(pk=row.pk).update(rerouted_at=depart - timedelta(minutes=12))
+
+        samples, dropped = learning.collect_travel_samples()
+        assert samples == []
+        assert dropped["출발 전 경로 변경, 원값 없음"] == 1
+
+    def test_switched_again_after_departure_is_left_out(self, user, place):
+        from apps.observations.models import TripReroute
+
+        depart = datetime(2026, 9, 22, 8, 0, tzinfo=KST)
+        event = make_trip(user, place, predicted=20, actual_minutes=33, depart_at=depart)
+        for minutes, key in ((-12, "transit:5513"), (10, "transit:2호선")):
+            row = TripReroute.objects.create(
+                user=user, event=event, from_route_key="x", to_route_key=key,
+                route_minutes_raw=30, travel_mode="버스",
+            )
+            TripReroute.objects.filter(pk=row.pk).update(
+                rerouted_at=depart + timedelta(minutes=minutes)
+            )
+
+        samples, dropped = learning.collect_travel_samples()
+        assert samples == []
+        assert dropped["이동 중 경로 변경"] == 1
+
     def test_pairs_become_samples(self, user, place):
         make_trip(user, place, predicted=20, actual_minutes=24,
                   depart_at=datetime(2026, 9, 21, 8, 0, tzinfo=KST))

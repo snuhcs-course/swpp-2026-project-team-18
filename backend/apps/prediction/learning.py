@@ -35,6 +35,7 @@ SQLite 에는 `STDDEV` 집계가 없다. `django.db.models.StdDev` 는 Postgres 
 | 일정을 "안 감" 으로 표시했다(`Event.skipped_at`) | 그날은 등굣길·등교 준비가 아니다 |
 | 출발·도착을 직접 눌렀다(`manual`) | 누른 시각이 실제보다 늦기 쉽다. 리포트에만 쓴다 |
 | 이동 중에 경로를 바꿨다(`TripReroute`) | 결정 시점 원값은 원래 경로의 것이다. 이동 학습만 뺀다 |
+| 출발 전에 바꿨는데 바꾼 경로의 원값이 없다 | 비교할 예측이 없다. 원값이 있으면 **새 경로 기준으로 학습한다**(R3-11) |
 
 ## 이동 보정을 세 단계로 푼다 (P2 A-1·A-2, 10-30)
 
@@ -173,20 +174,26 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
             slot[obs.kind] = obs
 
     revisions = history.decision_revisions(by_event)
-    # 이동 중에 경로를 바꾼 일정. 결정 시점 원값은 원래 경로의 것이라 실측과 맞지 않는다.
-    rerouted = set(
-        TripReroute.objects.filter(event_id__in=list(by_event)).values_list("event_id", flat=True)
-    )
+    # 경로를 바꾼 일정. 시각 순으로 모은다. GPS 출발보다 늦게 바꾼 것이 하나라도 있으면 이동 중
+    # 바꾸기라 뺀다. 모두 출발 전이면 마지막으로 바꾼 경로의 원값으로 학습한다(R3-11).
+    rerouted: dict[int, list] = defaultdict(list)
+    for row in TripReroute.objects.filter(event_id__in=list(by_event)).order_by(
+        "rerouted_at", "id"
+    ):
+        rerouted[row.event_id].append(row)
     obs_users = {
         event_id: next(iter(pair.values())).user_id for event_id, pair in by_event.items() if pair
     }
     samples: list[TravelSample] = []
     for event_id, pair in by_event.items():
-        if event_id in rerouted:
-            dropped["이동 중 경로 변경"] += 1
-            continue
         depart = pair.get(TripObservation.Kind.DEPART)
         arrive = pair.get(TripObservation.Kind.ARRIVE)
+        switches = rerouted.get(event_id) or []
+        if switches and (
+            depart is None or any(r.rerouted_at > depart.observed_at for r in switches)
+        ):
+            dropped["이동 중 경로 변경"] += 1
+            continue
         if depart is None or arrive is None:
             dropped["쌍 미완성"] += 1
             continue
@@ -197,6 +204,28 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
             continue
 
         revision = revisions.get(event_id)
+        if switches:
+            switched = switches[-1]
+            if not switched.route_minutes_raw:
+                dropped["출발 전 경로 변경, 원값 없음"] += 1
+                continue
+            sample = _sample(
+                event_id=event_id,
+                route_key=switched.to_route_key,
+                mode=switched.travel_mode,
+                predicted=switched.route_minutes_raw,
+                walk_minutes_raw=switched.walk_minutes_raw,
+                planned_at=(revision.depart_by if revision is not None else None)
+                or depart.observed_at,
+                actual=actual,
+                user_id=obs_users.get(event_id),
+            )
+            if sample is None:
+                dropped["비율 범위 밖"] += 1
+            else:
+                samples.append(sample)
+            continue
+
         predicted = revision.route_minutes_raw if revision is not None else None
         if revision is None or revision.status != AlarmPlan.Status.OK or not predicted:
             dropped["경로 원값 없음"] += 1
@@ -232,6 +261,29 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
         )
 
     return samples, dict(dropped)
+
+
+def _sample(*, event_id, route_key, mode, predicted, walk_minutes_raw, planned_at, actual,
+            user_id) -> TravelSample | None:
+    """출발 전에 바꾼 경로로 표본 하나. 비율이 범위 밖이면 None. (Partly AI-generated (Claude))"""
+    ratio = actual / predicted
+    if not (MIN_FACTOR <= ratio <= MAX_FACTOR):
+        return None
+    mode = (mode or "")[:20]
+    kind = travel_kind(route_key, mode)
+    planned = dj_tz.localtime(planned_at)
+    walk = float(predicted) if kind == WALK else float(min(walk_minutes_raw or 0, predicted))
+    return TravelSample(
+        signature=(route_key or "")[:120],
+        mode=mode,
+        hour=planned.hour,
+        weekday_type=_weekday_type(planned),
+        predicted_minutes=float(predicted),
+        actual_minutes=float(actual),
+        user_id=user_id,
+        walk_minutes=walk,
+        kind=kind,
+    )
 
 
 def _summarize(samples: list[TravelSample]) -> tuple[float, float, int]:

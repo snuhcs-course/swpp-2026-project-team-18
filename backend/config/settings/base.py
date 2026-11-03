@@ -194,6 +194,9 @@ REST_FRAMEWORK = {
         # 중복 서비스나 변조 클라이언트가 그보다 빠르게 몰아치는 것을 막는 계정별
         # burst 보호 장치이며, 정상적인 시간당 60회에는 여유를 둔다.
         "route_live": "80/hour",
+        # 출발 전 확인(`routes/live` 의 `context: pre_departure`, R3-11). 일정 하나에 많아야
+        # 두 번이라 넉넉하다. 이동 중 1분 갱신과 통을 나눈다. (Partly AI-generated (Claude))
+        "route_live_pre_departure": "30/hour",
         "nlp": "30/hour",
         "observation": "600/hour",
         # 글자마다 호출하는 비로그인 검사. 빠른 입력을 허용하되 IP별로 제한한다.
@@ -425,8 +428,10 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 #          `POST /api/events/{id}/reroute`(이번 이동만, 바꾼 이동은 이동 학습에서 뺌)
 #   0.17.0 대중교통 후보 5 → 7개. 느린 경로는 환승 최소 말고는 기준 대표로도 넣지 않고, 남는 칸은
 #          첫 차가 아직 없는 경로부터. 배지는 보이는 후보끼리 비교(앱 `RouteMode.TRANSIT` 7)
+#   0.18.0 비밀번호 찾기·변경, 이메일 인증(선택), 리포트 요약 LLM 전체 15초 마감, 출발 전 확인
+#          (`routes/live` context·스로틀)과 출발 전 바꾸기를 새 경로 기준으로 학습(backend-requests R3)
 #
 # 버전만으로 판별하지 않는 것이 더 확실하다. `scripts/check_deployed.py` 와
 # 같은 방식으로 **새 엔드포인트의 404 여부**를 보면 버전을 올리는 것을
 # 잊었더라도 드러난다 — 인증이 필요한 경로는 배포됐으면 401, 미배포면 404 다.
-APP_VERSION = "0.17.0"
+APP_VERSION = "0.18.0"
