@@ -58,7 +58,7 @@ curl http://127.0.0.1:8000/api/health
 | --- | --- |
 | 일정 수정 · 준비 시간 포함 · 안 감 | [event-edit](../docs/iter3/event-edit-api.md) · [include-prep](../docs/iter3/include-prep-api.md) · [skip-event](../docs/iter3/skip-event-api.md) |
 | 소셜 로그인 · 토큰 폐기 | [social-login](../docs/iter3/social-login-api.md) · [token-security](../docs/iter3/token-security-api.md) |
-| 대중교통 후보 5개 · 버스만 다른 경로 합치기 | [transit-candidates](../docs/iter3/transit-candidates.md) |
+| 대중교통 후보 7개 · 버스만 다른 경로 합치기 | [transit-candidates](../docs/iter3/transit-candidates.md) |
 | 알람 초기화 · 100m 도착 | [alarm-arrival-policy](../docs/iter2/alarm-arrival-policy.md) |
 | 경로 그룹 · 리스크 · 집 목적지 | [route-risk-home](../docs/iter2/route-risk-home.md) |
 | 준비 시간 범위 · 가입 제한 · 이동 표본 수 | [account-ranges](../docs/iter2/account-ranges-and-travel-counts.md) |
@@ -84,7 +84,7 @@ python -m pytest
 python scripts/run_local_suite.py   # HTTP 8종, 8000 포트가 비어 있어야 한다
 ```
 
-- 준비 관측은 다음 계산에 바로 반영된다. 설정한 준비 시간의 0.5~1.5배 안의 아침만 쓴다.
+- 준비 관측은 다음 계산에 바로 반영된다. 설정한 준비 시간의 0.5~1.5배 안의 아침만 쓴다. 특정 아침은 `manage.py exclude_prep_mornings`로 지우지 않고 뺄 수 있다. [5-1절](../docs/iter3/skip-event-api.md)
 - 이동 보정과 안전 버퍼(4~15분)는 GitHub Actions가 매일 23:17(KST)에 학습하고, 다음 7일 알람을 경로 재조회 없이 다시 계산한다.
 - 학습은 운영 DB에 마이그레이션이 다 적용됐는지 먼저 확인하고, 아니면 멈춘다. 배포가 `main`보다 뒤처지면 학습도 멈춘다.
 - `train_models`·`check_deployed.py`·`check_same_db.py`는 공용 DB에 쓴다. 팀과 시점을 맞춘다. [학습 운영](../docs/iter2/daily-training.md)

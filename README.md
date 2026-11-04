@@ -75,7 +75,9 @@ What the MVP supports:
 8. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
    offline. Prep observations feed the next calculation directly, using only mornings within
    0.5–1.5× of the prep time you set; GitHub Actions schedules
-   travel correction and safety buffer training daily at 23:17 KST, then recalculates the next
+   travel correction (your walking speed, time of day, then the route itself —
+   [docs/iter3/travel-factors.md](docs/iter3/travel-factors.md)) and safety buffer training
+   daily at 23:17 KST, then recalculates the next
    7 days of alarms without a new route lookup ([status and guide](docs/iter2/daily-training.md))
 9. **Review** — a weekly report with a short written summary, a per-day detail (plan
    vs actual, cause of lateness) and calibration: did you arrive as often as τ promised?
