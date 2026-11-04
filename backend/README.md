@@ -58,6 +58,7 @@ curl http://127.0.0.1:8000/api/health
 | --- | --- |
 | 일정 수정 · 준비 시간 포함 · 안 감 | [event-edit](../docs/iter3/event-edit-api.md) · [include-prep](../docs/iter3/include-prep-api.md) · [skip-event](../docs/iter3/skip-event-api.md) |
 | 일정 종류 직접 추가 | [event-tags](../docs/iter3/event-tags-api.md) |
+| 일정 추가 실패·재시도(`client_request_id`)·500 형식 | [event-create-errors](../docs/iter3/event-create-errors.md) |
 | 소셜 로그인 · 토큰 폐기 | [social-login](../docs/iter3/social-login-api.md) · [token-security](../docs/iter3/token-security-api.md) |
 | 대중교통 후보 7개 · 버스만 다른 경로 합치기 | [transit-candidates](../docs/iter3/transit-candidates.md) |
 | 알람 초기화 · 100m 도착 | [alarm-arrival-policy](../docs/iter2/alarm-arrival-policy.md) |

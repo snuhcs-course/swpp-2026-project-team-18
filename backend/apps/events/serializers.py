@@ -356,11 +356,20 @@ class EventWriteSerializer(serializers.ModelSerializer):
     # 저장한 집에서 출발(R3-2). 주면 서버가 `origin_*` 를 그 집 좌표로 채운다. null 이면 뗀다.
     # 좌표만 바꾸고 이 값을 보내지 않으면 뗀다(다른 곳에서 출발). (Partly AI-generated (Claude))
     origin_place_id = serializers.IntegerField(required=False, allow_null=True)
+    # 일정 추가 화면이 연 순간 만든 id(UUID 권장). 생성에만 쓰고 수정에서는 무시한다.
+    # 같은 값으로 다시 보내면 뷰가 처음 만든 일정을 200 으로 돌려준다. (Partly AI-generated (Claude))
+    client_request_id = serializers.RegexField(
+        r"^[A-Za-z0-9_-]{8,64}$",
+        required=False,
+        allow_blank=True,
+        error_messages={"invalid": "client_request_id 는 영문·숫자·-·_ 8~64자여야 한다."},
+    )
 
     class Meta:
         model = Event
         fields = (
             "id",
+            "client_request_id",
             "title",
             "start_at",
             "place",
@@ -533,6 +542,8 @@ class EventWriteSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        # 요청 id 는 만들 때 한 번만 정한다. 수정 요청에 실려 와도 바꾸지 않는다.
+        validated_data.pop("client_request_id", None)
         if "place" in validated_data:
             instance.place = self._resolve_place(validated_data.pop("place"))
         if "tag_key" in validated_data:

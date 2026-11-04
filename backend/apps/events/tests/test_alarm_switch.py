@@ -252,20 +252,32 @@ def test_be25_creation_resets_only_owners_same_local_day(
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("failure", ["validation", "planning"])
-def test_be25_failed_creation_preserves_existing_choices(client, event, monkeypatch, failure):
+def test_be25_failed_creation_preserves_existing_choices(client, event, monkeypatch):
     original = event(enabled=False)
     monkeypatch.setattr(services, "compute_and_store", Mock(side_effect=RuntimeError("plan failure")))
-    body = {"title": "" if failure == "validation" else "새 일정", "start_at": original.start_at.isoformat()}
-    if failure == "validation":
-        assert client.post("/api/events", body, format="json").status_code == 400
-    else:
-        with pytest.raises(RuntimeError, match="plan failure"):
-            client.post("/api/events", body, format="json")
+    body = {"title": "", "start_at": original.start_at.isoformat()}
+    assert client.post("/api/events", body, format="json").status_code == 400
     original.refresh_from_db()
     assert original.alarm_enabled is False
     assert Event.objects.count() == 1
     assert not AlarmLog.objects.filter(kind=AlarmLog.Kind.AUTO).exists()
+
+
+# Partly AI-generated (Claude)
+@pytest.mark.integration
+def test_planning_crash_keeps_the_new_event_like_a_route_failure(client, event, monkeypatch):
+    """11-04: 알람 계산이 터져도 일정은 남는다. 계획은 `route_failed`, 그날 선택은 생성처럼 돌린다."""
+    original = event(enabled=False)
+    monkeypatch.setattr(services, "compute_and_store", Mock(side_effect=RuntimeError("plan failure")))
+    body = {"title": "새 일정", "start_at": original.start_at.isoformat()}
+
+    response = client.post("/api/events", body, format="json")
+
+    assert response.status_code == 201
+    assert response.data["alarm_plan"]["status"] == "route_failed"
+    assert Event.objects.count() == 2
+    original.refresh_from_db()
+    assert original.alarm_enabled is None
 
 
 @pytest.mark.integration

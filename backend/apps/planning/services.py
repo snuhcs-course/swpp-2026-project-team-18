@@ -99,20 +99,9 @@ def _block_observation_stats(user_id: int) -> dict[int, tuple[float, float, int]
     }
 
 
-@transaction.atomic
-def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
-    """일정 하나의 알람 계획을 계산해 저장한다.
-
-    이미 계획이 있으면 갱신한다. 일정 1건 = 계획 1건이다.
-    카카오 경로 API 를 부르므로 목록 조회마다 호출하지 않는다. 일정 생성·수정
-    시점과 명시적 재계산 요청에서만 부른다.
-
-    `trigger` 는 부른 곳(`PlanRevision.Trigger`)이다. 계획 이력에 "왜 다시 계산했나" 로
-    남는다. 비워도 된다(관리 명령·테스트). (Partly AI-generated (Claude))
-    """
-    profile = event.user.profile
-
-    defaults: dict = {
+def _blank_fields(event: Event) -> dict:
+    """계산 결과가 없는 계획의 필드. 계산 실패·계산 불가 상태가 이것에서 시작한다."""
+    return {
         "user": event.user,
         "alarm_at": None,
         "depart_by": None,
@@ -144,6 +133,34 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         "alt_faster_minutes": None,
         "alt_route_path": [],
     }
+
+
+# Partly AI-generated (Claude)
+def mark_failed(event: Event, *, trigger: str = "") -> AlarmPlan:
+    """계산 도중 예상하지 못한 오류가 났을 때. 일정은 두고 계획만 `route_failed` 로 남긴다.
+
+    일정 추가가 알람 계산 오류 때문에 통째로 실패하면 사용자가 입력한 일정이 사라진다(11-04
+    피드백). 계획이 실패 상태면 앱은 일정을 보여 주고 "다시 계산" 을 받을 수 있다.
+    """
+    defaults = _blank_fields(event)
+    defaults["status"] = AlarmPlan.Status.ROUTE_FAILED
+    return _upsert(event, defaults, trigger=trigger)
+
+
+@transaction.atomic
+def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
+    """일정 하나의 알람 계획을 계산해 저장한다.
+
+    이미 계획이 있으면 갱신한다. 일정 1건 = 계획 1건이다.
+    카카오 경로 API 를 부르므로 목록 조회마다 호출하지 않는다. 일정 생성·수정
+    시점과 명시적 재계산 요청에서만 부른다.
+
+    `trigger` 는 부른 곳(`PlanRevision.Trigger`)이다. 계획 이력에 "왜 다시 계산했나" 로
+    남는다. 비워도 된다(관리 명령·테스트). (Partly AI-generated (Claude))
+    """
+    profile = event.user.profile
+
+    defaults = _blank_fields(event)
 
     # 1) 집 목적지는 계산할 때마다 현재 프로필에서 해석한다.
     destination = event.resolve_destination(profile)

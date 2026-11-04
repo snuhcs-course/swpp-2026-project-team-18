@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core.cache import cache, caches
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -78,24 +78,69 @@ class EventListCreateView(_UserScopedMixin, ListCreateAPIView):
         return qs
 
     def create(self, request, *args, **kwargs):
+        # 같은 추가 요청을 다시 보냈으면(응답을 못 받은 앱의 재시도) 처음 만든 일정을 돌려준다.
+        # 검증·경로 조회를 다시 하지 않는다. (Partly AI-generated (Claude), 11-04)
+        if (repeated := self._already_created(request)) is not None:
+            return self._created(repeated, status.HTTP_200_OK)
+
         write = self.get_serializer(data=request.data)
         write.is_valid(raise_exception=True)
-        with transaction.atomic():
-            event = write.save()
-            # 새 일정만 계산한다. 기존 일정은 선택값만 자동으로 돌린다.
-            if event.recurrence_id is None:
+        try:
+            with transaction.atomic():
+                event = write.save()
+                self._plan_new(event)
+        except IntegrityError:
+            # 같은 요청 둘이 동시에 왔다. 먼저 저장된 쪽을 돌려준다.
+            if (repeated := self._already_created(request)) is not None:
+                return self._created(repeated, status.HTTP_200_OK)
+            raise
+
+        event.refresh_from_db()
+        return self._created(event, status.HTTP_201_CREATED)
+
+    def _created(self, event, code):
+        return Response(EventSerializer(event, context=self.get_serializer_context()).data, status=code)
+
+    def _already_created(self, request):
+        request_id = request.data.get("client_request_id") if hasattr(request.data, "get") else None
+        if not isinstance(request_id, str) or not request_id.strip():
+            return None
+        return (
+            Event.objects.filter(user=request.user, client_request_id=request_id.strip())
+            .select_related("place", "tag", "alarm_plan", "user__profile", "recurrence")
+            .first()
+        )
+
+    def _plan_new(self, event):
+        """새 일정의 알람을 계산한다. 기존 일정은 선택값만 자동으로 돌린다.
+
+        **한 번 일정은 계산이 예상하지 못한 오류로 터져도 남긴다**(11-04 피드백 "일정 추가 안될 때
+        서버에서 처리"). 계산만 되돌리고 계획을 `route_failed` 로 둔다. 사용자는 입력을 다시 하지
+        않고 "다시 계산" 을 누르면 된다. 오류는 로그에 스택과 함께 남긴다.
+
+        반복 일정은 전처럼 통째로 되돌린다(500 `server_error`). 회차를 펼치다 터진 규칙을 남기면
+        목록 조회(`expand_for_user`)가 같은 규칙을 다시 펼치다 매번 터진다.
+        """
+        if event.recurrence_id is not None:
+            recurrence.expand(event.recurrence_id, reset_choices=True)
+            if not recurrence.in_window(event):
+                reset_alarm_overrides(event)
+            return
+        try:
+            with transaction.atomic():
                 planning_services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
                 reset_alarm_overrides(event)
-            else:
-                recurrence.expand(event.recurrence_id, reset_choices=True)
-                if not recurrence.in_window(event):
+        except Exception:
+            logger.exception("일정 %s 알람 계산 실패. 일정은 저장하고 계획을 실패로 둔다", event.pk)
+            with transaction.atomic():
+                planning_services.mark_failed(event, trigger=PlanRevision.Trigger.CREATE)
+            # 계산이 경로 조회 실패로 끝났을 때(`route_failed`)와 같이 그날의 수동 켬/끔을 돌린다.
+            # 이것까지 실패하면 선택값은 그대로 두고 일정만 남긴다.
+            try:
+                with transaction.atomic():
                     reset_alarm_overrides(event)
-            event.refresh_from_db()
-
-        return Response(
-            EventSerializer(event, context=self.get_serializer_context()).data,
-            status=status.HTTP_201_CREATED,
-        )
+            except Exception:
+                logger.exception("일정 %s 그날 알람 선택 초기화 실패", event.pk)
 
 
 class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):

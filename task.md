@@ -18,6 +18,30 @@
 
 ---
 
+## 🟢 프론트 할 일 (11-04 정리)
+
+서버는 끝났고 앱만 남은 것. 서버 버전이 배포돼 있어야 한다(`/api/health` 의 `version`).
+
+### A. 일정 추가가 실패할 때 (11-04 피드백, 서버 0.20.0) — [event-create-errors.md](docs/iter3/event-create-errors.md) 4절
+피드백: "일정 추가 안될 때 에러 났을 때 서버에서 처리 / User에게 저장이 안되는 걸 오류 정보 보여주기 / 오류 났을 때 기존 정보 남아있으면 좋을 듯". 서버는 모든 오류를 `{"error": {code, message, details}}` 로 주고(500 은 `server_error`), 알람 계산이 터져도 일정을 남기며, 같은 요청을 다시 보내도 한 번만 만든다.
+- [ ] 저장 실패를 눈에 띄게: 스낵바나 대화상자 "일정을 저장하지 못했어요. 입력한 내용은 그대로 있어요" + [다시 시도]. 지금은 버튼 위 빨간 글자 한 줄이다(`AddEventScreen` `state.error`).
+- [ ] 400 `invalid` 는 `error.details` 의 필드별 문구를 그 칸 아래에(제목·시각·종류·경로·출발지·도착지). 지금은 출발지·도착지만 칸 아래에 나온다(`endpointErrorsOf`).
+- [ ] 500 `server_error`·네트워크 오류·시간 초과: 서버 문구나 "잠시 뒤 다시 시도" + [다시 시도].
+- [ ] 입력 남기기: 실패하면 지우지 않는다(지금도 그렇다). 홈에서 "일정 추가" 를 다시 누르면 `resetAdd()` 가 지우는데(`MainActivity` `onAddEventClick`), 저장 못 한 초안이 있으면 이어서 쓰게 한다. 성공했을 때와 사용자가 버렸을 때만 지운다. (선택) 앱이 꺼져도 남게 초안 저장.
+- [ ] 중복 방지: 일정 추가 화면을 새로 열 때 UUID 를 `AddState` 에 두고 `POST /api/events` 에 `client_request_id` 로 싣는다. 다시 시도는 같은 값, 성공·버림 뒤에는 새 값. **200 도 성공**(처음 만든 일정이 온다).
+- [ ] 201 인데 `alarm_plan.status == "route_failed"` 면 "일정은 저장했어요. 알람을 계산하지 못해 다시 계산이 필요해요" 로 안내하고 알람 결정 화면의 다시 계산으로 이끈다.
+- [ ] 일정 수정(`submitEdit`)도 오류 표시·입력 남기기를 같게.
+
+### B. 서버가 준비해 둔 것 연결
+- [ ] **종류 직접 추가** (BE-21, 서버 0.19.0): "+ 추가" 를 누르면 이름 입력 → `POST /api/events/tags {label}` → 돌려받은 종류를 목록에 넣고 고른다. `default_tau` 가 null 이면 τ 칸에 "프로필 기본". [event-tags-api.md](docs/iter3/event-tags-api.md) 5절, 12-a 항목.
+- [ ] **저장한 집 서버 동기화** (R3-2·R3-3, 서버 0.18.0): 기기의 집 목록(`SavedHomesStore`)을 `POST /api/saved-places/bulk/` 로 한 번 올리고, 이후 추가·수정·삭제·기본 집 바꾸기는 API 로. 일정 출발지가 저장한 집이면 `origin_place_id` 를 보낸다. [saved-places-api.md](docs/iter3/saved-places-api.md)
+- [ ] **출발 전 확인 표시** (R3-11 2번, 서버 0.18.0): 알람 끌 때·출발 10분 전 `POST /api/routes/live` 본문에 `"context": "pre_departure"` 를 싣는다. [reroute-api.md](docs/iter3/reroute-api.md) 4-1절
+- [ ] **주간 리포트 기상 패널** (R3-6, 서버 0.18.0): 주간 응답의 `wake` 블록(울린 알람 수, 미루기 수, 기상까지 걸린 시간 중앙값, 요일별)을 ⑧⑨ 패널에 그린다. `wake` 가 null 이면 숨긴다. [report-design.md](docs/iter2/report-design.md) 3절
+- [ ] (선택) **이메일 인증** (R3-10, 서버 0.18.0): 설정에 인증 코드 받기·입력 화면. 로그인은 막지 않는다. [password-api.md](docs/iter3/password-api.md)
+- 앱 변경 없음: 비밀번호 찾기·변경(앱 화면 있음, 서버 0.18.0 배포 뒤 동작), 자전거도로 칸(BE-14, 서버 0.18.1 배포 뒤 보임), 도보 탭(서버 0.18.2 부터 늘 후보가 온다).
+
+---
+
 ## 1. 로그인 (Figma node 23:2) — `ui/auth/LoginScreen.kt`
 
 Figma는 "카카오로 계속하기" 버튼에서 화면이 끝난다.

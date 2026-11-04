@@ -183,6 +183,12 @@ class Event(models.Model):
     external_id = models.CharField(
         "외부 ID", max_length=120, null=True, blank=True
     )
+    # 앱이 일정 추가 화면마다 만드는 요청 id(UUID). 응답을 못 받고 다시 보내도 일정이 두 번
+    # 생기지 않는다(같은 사용자·같은 값이면 처음 만든 일정을 돌려준다). 비우면 검사하지 않는다.
+    # (Partly AI-generated (Claude), 11-04)
+    client_request_id = models.CharField(
+        "앱 요청 ID", max_length=64, blank=True, default="", db_default=""
+    )
 
     title = models.CharField("제목", max_length=120)
     start_at = models.DateTimeField("시작 시각")
@@ -335,6 +341,12 @@ class Event(models.Model):
                 fields=["user", "external_id"],
                 condition=Q(external_id__isnull=False),
                 name="events_event_user_external_unique",
+            ),
+            # 같은 추가 요청을 다시 보내도 한 번만 만든다(`client_request_id`).
+            models.UniqueConstraint(
+                fields=["user", "client_request_id"],
+                condition=~Q(client_request_id=""),
+                name="events_event_user_request_unique",
             ),
             models.CheckConstraint(
                 condition=Q(tau_override__isnull=True)

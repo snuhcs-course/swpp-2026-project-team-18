@@ -172,8 +172,10 @@ def test_materialization_failure_rolls_back_the_entire_creation(client, monkeypa
             raise RuntimeError("second occurrence failed")
         return real_compute(event, **kwargs)
     monkeypatch.setattr(services, "compute_and_store", compute)
-    with pytest.raises(RuntimeError, match="second occurrence"):
-        create(client)
+    # 처리하지 못한 오류도 공통 오류 형식으로 온다(11-04). 반복 일정은 통째로 되돌린다.
+    response = create(client)
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "server_error"
     assert Event.objects.count() == 0
 
 
