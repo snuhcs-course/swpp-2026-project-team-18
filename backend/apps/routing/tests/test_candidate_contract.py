@@ -76,6 +76,20 @@ def test_candidates_are_grouped_without_losing_other_modes(api, upstream):
     assert len(upstream[1]) == 4
 
 
+def test_long_walk_stays_so_the_walk_tab_is_not_empty(api, upstream):
+    """11-04: 40분 넘는 도보를 뺐더니 앱 도보 탭이 비어 눌리지 않았다. 64분이어도 둔다."""
+    responses, _ = upstream
+    responses[clients.WALK_URL]["route"]["properties"].update(
+        {"totalTime": 64 * 60, "totalDistance": 4300}
+    )
+    response = api.get("/api/routes/candidates", {"dest_lat": END[0], "dest_lng": END[1]})
+    assert response.status_code == 200
+    walk = response.data["walk"]
+    assert len(walk) == 1
+    assert walk[0]["minutes"] == 64
+    assert response.data["fastest_key"] != "walk"
+
+
 def test_mode_caps_allow_all_thirteen_candidates_without_a_global_cutoff(api, monkeypatch):
     candidates = [
         {

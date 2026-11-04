@@ -91,9 +91,6 @@ def meters_per_unit(level: int) -> float:
     """줌 레벨 하나가 요청 size 한 단위에 담는 거리(m)."""
     return STATIC_MAP_BASE_METERS_PER_UNIT * (2.0 ** (level - STATIC_MAP_BASE_LEVEL))
 
-# 도보를 후보로 제시할 상한. 이보다 멀면 목록만 어지럽힌다.
-WALK_CANDIDATE_MAX_MINUTES = 40
-
 # 수단별 상한. 한 수단의 후보 때문에 다른 수단이 전체 목록에서 잘리지 않는다.
 # 대중교통은 7개다. 3개일 때는 시간·환승·요금 기준만 들어가 비슷한 경로만 나왔고
 # (사용자 요청 10-29 "최대한 다양한 옵션이 나오게"), 5개일 때는 기준별 대표가 칸을 다 채워
@@ -1502,8 +1499,9 @@ def route_candidates(
     사용자가 일정을 추가하면서 명시적으로 요청할 때만 부른다. 알람 재계산에서는
     [resolve_route] 로 선택된 수단 하나만 조회한다.
 
-    도보가 [WALK_CANDIDATE_MAX_MINUTES] 를 넘으면 목록에서 뺀다. 64분 걸어가는
-    선택지는 아무도 고르지 않고 자리만 차지한다.
+    도보는 오래 걸려도 목록에 둔다(11-04). 40분 넘으면 뺐더니 앱 도보 탭이 비어 눌리지
+    않았다. 도보는 탭이 따로 있어 다른 수단의 자리를 차지하지 않는다. 카카오 도보 조회가
+    실패할 때만 빠진다.
 
     **모든 후보에 경로 좌표(`path`)를 싣는다.** 경로 선택 화면이 수단마다 지도
     미리보기를 연다(도보·자전거 BE-23, 자동차·대중교통 2026-10-18). 같은 응답의 좌표라
@@ -1527,7 +1525,7 @@ def route_candidates(
     )
     candidates.extend(transit)
 
-    if walk and walk["minutes"] <= WALK_CANDIDATE_MAX_MINUTES:
+    if walk:
         candidates.append(walk)
 
     bicycle = _single_route_candidate(
