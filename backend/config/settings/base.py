@@ -430,8 +430,9 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 #          첫 차가 아직 없는 경로부터. 배지는 보이는 후보끼리 비교(앱 `RouteMode.TRANSIT` 7)
 #   0.18.0 비밀번호 찾기·변경, 이메일 인증(선택), 리포트 요약 LLM 전체 15초 마감, 출발 전 확인
 #          (`routes/live` context·스로틀)과 출발 전 바꾸기를 새 경로 기준으로 학습(backend-requests R3)
+#   0.18.1 자전거 후보에 `bike_road_percent`(안내 문장으로 추정한 자전거도로 비율, BE-14)
 #
 # 버전만으로 판별하지 않는 것이 더 확실하다. `scripts/check_deployed.py` 와
 # 같은 방식으로 **새 엔드포인트의 404 여부**를 보면 버전을 올리는 것을
 # 잊었더라도 드러난다 — 인증이 필요한 경로는 배포됐으면 401, 미배포면 404 다.
-APP_VERSION = "0.18.0"
+APP_VERSION = "0.18.1"

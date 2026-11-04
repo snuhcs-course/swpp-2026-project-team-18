@@ -1376,11 +1376,61 @@ def _single_route_candidate(
             item["steps"] = round(distance_m / METERS_PER_STEP)
             item["kcal"] = round(distance_m / 1000 * KCAL_PER_KM)
             item["summary"] += f" · {item['steps']:,}걸음 · {item['kcal']}kcal (거리 기반 추정)"
+    if key == "bicycle":
+        item["bike_road_percent"] = bike_road_percent(data, distance_m)
     if with_path:
         path = legs_route_path(data)
         item["path"] = path
         item["path_distance_m"] = path_length_m(path)
     return item
+
+
+# Partly AI-generated (Claude)
+# 자전거도로로 보는 안내 문장의 낱말(공백을 지우고 본다). 카카오 자전거 길찾기에는 자전거도로 비율
+# 필드가 없고 "자전거전용도로 진입 후 도림천자전거길 1.9km 이동" 같은 문장에만 나온다(task.md 13-0).
+BIKE_ROAD_WORDS = ("자전거도로", "자전거전용", "자전거우선", "자전거길")
+
+
+def bike_road_percent(data: dict, total_m) -> int | None:
+    """자전거 경로 중 자전거도로 비율(0~100) **추정**. 계산할 수 없으면 None(앱은 칸을 비운다).
+
+    안내 문장(`route.legs[].steps[].properties.guidance`)에 [BIKE_ROAD_WORDS] 가 들어간 step 의
+    거리(`properties.distance`)를 더해 전체 거리로 나눈다. 전체 거리는 `totalDistance`, 없으면
+    step 거리의 합이다. 안내 문장이 하나도 없으면 None 이다 — 0% 와 "모름" 을 섞지 않는다.
+    문장 기준이라 정확하지 않다(task.md BE-14). 경사도는 카카오에 없어 내지 않는다.
+    """
+    steps = [
+        step.get("properties") or {}
+        for leg in ((data.get("route") or {}).get("legs")) or []
+        for step in leg.get("steps") or []
+    ]
+    known = False
+    on_road = 0.0
+    step_total = 0.0
+    for props in steps:
+        distance = _meters(props.get("distance"))
+        if distance is None:
+            continue
+        step_total += distance
+        guidance = props.get("guidance")
+        if not isinstance(guidance, str) or not guidance.strip():
+            continue
+        known = True
+        text = "".join(guidance.split())
+        if any(word in text for word in BIKE_ROAD_WORDS):
+            on_road += distance
+    total = _meters(total_m) or step_total
+    if not known or total <= 0:
+        return None
+    return max(0, min(100, round(on_road / total * 100)))
+
+
+def _meters(value) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
 
 
 def _car_candidate(
