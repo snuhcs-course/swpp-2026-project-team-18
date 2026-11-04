@@ -48,9 +48,17 @@ class PlaceSerializer(serializers.ModelSerializer):
 
 
 class EventTagSerializer(serializers.ModelSerializer):
+    """종류 응답. 일정 응답의 `tag` 에도 쓴다. 주인(`user`)은 내보내지 않는다.
+
+    `custom` 은 사용자가 만든 종류인지다(BE-21). 사용자 종류의 `default_tau` 는 null 일 수
+    있고, 그러면 프로필 기본 τ 를 쓴다.
+    """
+
+    custom = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = EventTag
-        fields = ("id", "key", "label", "default_tau", "penalty_shape")
+        fields = ("id", "key", "label", "default_tau", "penalty_shape", "custom")
         read_only_fields = fields
 
 
@@ -490,7 +498,9 @@ class EventWriteSerializer(serializers.ModelSerializer):
         key = (value or "").strip()
         if not key:
             return None
-        if not EventTag.objects.filter(key=key).exists():
+        # 남이 만든 종류는 없는 것과 같다(BE-21). 키를 알아도 붙일 수 없다.
+        user = self.context["request"].user
+        if not EventTag.objects.visible_to(user).filter(key=key).exists():
             raise serializers.ValidationError(f"없는 태그다: {key}")
         return key
 
@@ -512,7 +522,10 @@ class EventWriteSerializer(serializers.ModelSerializer):
             **validated_data,
         )
         event.place = self._resolve_place(place_data)
-        event.tag = EventTag.objects.filter(key=tag_key).first() if tag_key else None
+        event.tag = (
+            EventTag.objects.visible_to(event.user).filter(key=tag_key).first()
+            if tag_key else None
+        )
         event.save()
         if weekdays:
             recurrence.attach(event, weekdays)
@@ -524,7 +537,10 @@ class EventWriteSerializer(serializers.ModelSerializer):
             instance.place = self._resolve_place(validated_data.pop("place"))
         if "tag_key" in validated_data:
             key = validated_data.pop("tag_key")
-            instance.tag = EventTag.objects.filter(key=key).first() if key else None
+            instance.tag = (
+                EventTag.objects.visible_to(instance.user).filter(key=key).first()
+                if key else None
+            )
 
         for field, value in validated_data.items():
             setattr(instance, field, value)
@@ -576,7 +592,9 @@ class CalendarEventInputSerializer(serializers.Serializer):
         key = (value or "").strip()
         if not key:
             return None
-        if not EventTag.objects.filter(key=key).exists():
+        # 남이 만든 종류는 없는 것과 같다(BE-21). 키를 알아도 붙일 수 없다.
+        user = self.context["request"].user
+        if not EventTag.objects.visible_to(user).filter(key=key).exists():
             raise serializers.ValidationError(f"없는 태그다: {key}")
         return key
 

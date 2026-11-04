@@ -97,6 +97,7 @@ REST_FRAMEWORK = {  # noqa: F405
         "password_change": None,
         "email_verify": None,
         "email_verify_confirm": None,
+        "event_tag": None,
     },
 }
 

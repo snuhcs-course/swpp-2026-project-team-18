@@ -156,10 +156,13 @@ class PlaceAdmin(admin.ModelAdmin):
 
 @admin.register(EventTag)
 class EventTagAdmin(admin.ModelAdmin):
-    list_display = ("key", "label", "default_tau", "penalty_shape", "order")
+    list_display = ("key", "label", "user", "default_tau", "penalty_shape", "order")
     list_display_links = ("key",)
-    search_fields = ("key", "label")
-    ordering = ("order",)
+    list_select_related = ("user",)
+    search_fields = ("key", "label", "user__email")
+    ordering = ("order", "id")
+    # 사용자가 만든 종류(BE-21)의 주인은 바꾸지 않는다. 비우면 전역 종류가 되어 모두에게 보인다.
+    readonly_fields = ("user",)
     # τ 는 "시험을 고르면 얼마나 일찍 깨울지" 를 정하는 값이다. 시연 전에
     # 목록에서 바로 조정할 수 있어야 한다.
     list_editable = ("default_tau", "order")

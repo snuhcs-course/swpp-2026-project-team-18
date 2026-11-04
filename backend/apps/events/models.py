@@ -8,7 +8,9 @@
    행이 두 개가 되므로 `kakao_place_id` 로 합친다.
 3. `Event.place` 는 null 을 허용한다. 집 목적지는 현재 프로필에서 해석하며,
    장소 미정 일정도 적어둘 수 있다. 계산 가능 여부는 `planning` 이 판단한다.
-4. `EventTag` 는 마이그레이션으로 시드한다. 사용자가 만들지 않는다.
+4. 전역 `EventTag`(`user` 가 null)는 마이그레이션으로 시드한다. 사용자는 자기 종류만
+   만든다(`user` 가 그 사용자, BE-21). 일정에는 전역이나 **자기** 종류만 붙인다
+   (`EventTag.objects.visible_to`).
 """
 
 from django.conf import settings
@@ -55,13 +57,27 @@ class Place(models.Model):
         return self.name
 
 
+class EventTagQuerySet(models.QuerySet):
+    def visible_to(self, user):
+        """이 사용자가 고를 수 있는 종류. 전역 시드와 자기가 만든 것."""
+        return self.filter(Q(user__isnull=True) | Q(user=user))
+
+
 class EventTag(models.Model):
     """일정 종류. τ 기본값과 지각 페널티 모양을 결정한다.
 
     `penalty_shape` 가 τ 기본값의 근거다(back-spec 4.2).
     `step` 은 1분만 늦어도 실패인 경우(기차·시험), `linear` 는 늦은 만큼
     손해가 커지는 경우(수업)다.
+
+    **사용자 종류(BE-21, 11-04).** 일정 추가 화면의 "+ 추가" 로 만든다. `user` 가 주인이고
+    남에게는 보이지 않는다. `default_tau` 가 null 이면 프로필 기본 τ 를 따른다
+    (`Event.effective_tau`). `penalty_shape` 는 `linear` 로 둔다. 계약은
+    `docs/iter3/event-tags-api.md`.
     """
+
+    # 사용자 한 명이 만들 수 있는 종류 수. 드롭다운 한 화면에 들어갈 만큼.
+    MAX_PER_USER = 20
 
     class PenaltyShape(models.TextChoices):
         STEP = "step", "계단형 (1분만 늦어도 실패)"
@@ -69,14 +85,28 @@ class EventTag(models.Model):
 
     key = models.CharField("키", max_length=20, unique=True)
     label = models.CharField("표시명", max_length=30)
+    # null 이면 전역 시드. 값이 있으면 그 사용자만 보고 쓴다.
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="event_tags",
+        verbose_name="만든 사용자",
+    )
+    # 사용자 종류만 null 일 수 있다. null 이면 프로필 기본 τ 를 쓴다.
     default_tau = models.FloatField(
         "기본 τ",
+        null=True,
+        blank=True,
         validators=[MinValueValidator(0.5), MaxValueValidator(0.999)],
     )
     penalty_shape = models.CharField(
         "페널티 모양", max_length=10, choices=PenaltyShape.choices
     )
     order = models.PositiveSmallIntegerField("정렬 순서", default=0)
+
+    objects = EventTagQuerySet.as_manager()
 
     class Meta:
         db_table = "events_tag"
@@ -85,13 +115,29 @@ class EventTag(models.Model):
         ordering = ["order", "id"]
         constraints = [
             models.CheckConstraint(
-                condition=Q(default_tau__gte=0.5) & Q(default_tau__lte=0.999),
+                condition=Q(default_tau__isnull=True)
+                | (Q(default_tau__gte=0.5) & Q(default_tau__lte=0.999)),
                 name="events_tag_default_tau_range",
-            )
+            ),
+            # 전역 시드는 τ 를 반드시 가진다. 상속할 곳은 사용자 프로필뿐이다.
+            models.CheckConstraint(
+                condition=Q(user__isnull=False) | Q(default_tau__isnull=False),
+                name="events_tag_global_has_tau",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "label"],
+                condition=Q(user__isnull=False),
+                name="events_tag_user_label_unique",
+            ),
         ]
 
     def __str__(self):
         return self.label
+
+    @property
+    def custom(self) -> bool:
+        """사용자가 만든 종류인가."""
+        return self.user_id is not None
 
 
 class EventRecurrence(models.Model):
@@ -381,6 +427,7 @@ class Event(models.Model):
         """
         if self.tau_override is not None:
             return self.tau_override
+        # 사용자 종류는 τ 가 비어 있을 수 있다(null). 그러면 프로필 기본값으로 내려간다.
         if self.tag_id and self.tag and self.tag.default_tau:
             return self.tag.default_tau
         return self.user.profile.default_tau

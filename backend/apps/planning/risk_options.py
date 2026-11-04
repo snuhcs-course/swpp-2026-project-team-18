@@ -12,8 +12,10 @@ OPTIONS = (("safe", "안전", .97), ("normal", "보통", .90), ("gamble", "도�
 def build_risk_options(event) -> dict:
     tau = event.effective_tau
     profile = event.user.profile
+    # τ 를 비운 사용자 종류(BE-21)는 프로필 기본값을 그대로 쓰므로 "자동 조정" 이 아니다.
     auto_adjusted = (
         event.tau_override is None and event.tag_id is not None
+        and event.tag.default_tau is not None
         and event.tag.default_tau != profile.default_tau
     )
     result = {

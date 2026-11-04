@@ -12,6 +12,7 @@
 | 도착 | 100m 안 첫 새 유효 GPS 위치에서 확정. `entered_at=observed_at`, 체류 0초. 과거 체류 필드는 호환용이고 현재 관측·학습·리포트 유효성 조건이 아님 |
 | 프로필·가입 검증 | 준비 시간 5~240분은 API 검증(null 유지), 가입은 IP당 10회/시간. DB 범위 CHECK를 추가한 것은 아님 |
 | 이동 학습 계수 (10-30) | `routing.0002`: `UserTravelProfile`(`routing_user_travel_profile`, 사용자별 걷는 속도 `walk_ratio` 0.25~4 CHECK·`walk_samples`). `planning.0013`: `PlanRevision.walk_minutes_raw`(경로 원값 중 걷는 분, null=모름). `RouteCorrection.hour_bucket` 은 -1(경로·전역) 또는 시간대 구간 시작 시 6·9·17·20(전역·수단별 시간대 계수). [travel-factors.md](../iter3/travel-factors.md) |
+| 사용자 일정 종류 (11-04) | `events.0013`: `EventTag.user`(null=전역 시드, 값=그 사용자만 보는 종류, CASCADE). `default_tau` 는 사용자 종류만 null 허용(프로필 기본 τ 상속) — CHECK `events_tag_global_has_tau`. 사용자별 이름 유일(`events_tag_user_label_unique`). [event-tags-api.md](../iter3/event-tags-api.md) |
 
 [현재 TODO](../../task.md) · [알람·도착 정책](alarm-arrival-policy.md) · [경로·리스크·집](route-risk-home.md) · [표본 수·계정 검증](account-ranges-and-travel-counts.md). 배포 시 전체 `migrate`를 적용하고 공용 DB 상태를 별도로 확인한다.
 

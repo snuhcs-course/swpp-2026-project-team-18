@@ -216,6 +216,10 @@ REST_FRAMEWORK = {
         "password_change": "10/hour",
         "email_verify": "3/hour",
         "email_verify_confirm": "10/hour",
+        # 일정 종류 만들기·고치기·지우기(BE-21). 사람이 누르는 것이라 넉넉하다. 고치거나 지우면
+        # 앞으로의 알람을 다시 섞는다(카카오 0회). 목록 조회(GET)는 세지 않는다.
+        # (Partly AI-generated (Claude))
+        "event_tag": "60/hour",
     },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
@@ -435,4 +439,4 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 # 버전만으로 판별하지 않는 것이 더 확실하다. `scripts/check_deployed.py` 와
 # 같은 방식으로 **새 엔드포인트의 404 여부**를 보면 버전을 올리는 것을
 # 잊었더라도 드러난다 — 인증이 필요한 경로는 배포됐으면 401, 미배포면 404 다.
-APP_VERSION = "0.18.2"
+APP_VERSION = "0.19.0"

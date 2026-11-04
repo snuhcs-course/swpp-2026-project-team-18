@@ -2,6 +2,7 @@
 
 from django.urls import path
 
+from .tags import EventTagDetailView, EventTagListView
 from .views import (
     EventCalendarImportView,
     EventDetailView,
@@ -10,7 +11,6 @@ from .views import (
     EventRerouteView,
     EventRiskOptionsView,
     EventSkipView,
-    EventTagListView,
     PlaceReverseView,
     PlaceSearchView,
     PlaceStaticMapView,
@@ -24,6 +24,8 @@ urlpatterns = [
     # 고정 경로를 <int:pk> 보다 먼저 둔다. 순서가 뒤바뀌면 "tags" 를
     # pk 로 해석하려 해서 404 가 난다.
     path("events/tags", EventTagListView.as_view(), name="tag_list"),
+    # 내가 만든 종류 고치기·지우기(BE-21). 키는 `u` + 16진수다.
+    path("events/tags/<str:key>", EventTagDetailView.as_view(), name="tag_detail"),
     path("events/import", EventCalendarImportView.as_view(), name="calendar_import"),
     path("events", EventListCreateView.as_view(), name="list_create"),
     path("events/<int:pk>", EventDetailView.as_view(), name="detail"),

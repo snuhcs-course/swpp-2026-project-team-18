@@ -38,7 +38,6 @@ from .models import Event, EventTag
 from .serializers import (
     CalendarImportSerializer,
     EventSerializer,
-    EventTagSerializer,
     EventWriteSerializer,
     PlaceInputSerializer,
 )
@@ -356,7 +355,7 @@ class EventCalendarImportView(_UserScopedMixin, APIView):
                     else self._resolve_place(row.get("place"))
                 )
                 tag = (
-                    EventTag.objects.filter(key=row["tag_key"]).first()
+                    EventTag.objects.visible_to(request.user).filter(key=row["tag_key"]).first()
                     if row.get("tag_key")
                     else None
                 )
@@ -444,14 +443,6 @@ class EventCalendarImportView(_UserScopedMixin, APIView):
         inner = PlaceInputSerializer(data=place_data)
         inner.is_valid(raise_exception=True)
         return inner.resolve()
-
-
-class EventTagListView(APIView):
-    """GET /api/events/tags — 태그 목록. 일정 추가 화면의 선택지다."""
-
-    def get(self, request):
-        tags = EventTag.objects.all()
-        return Response(EventTagSerializer(tags, many=True).data)
 
 
 # 서비스 범위 판정은 `geo.py` 로 옮겼다. 시리얼라이저도 같은 규칙을 써야 하는데
