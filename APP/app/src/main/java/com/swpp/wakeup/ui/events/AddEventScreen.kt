@@ -69,17 +69,28 @@ import java.time.format.DateTimeFormatter
  * τ 를 함께 보여주는 이유는 종류를 고르는 행위가 곧 안전 여유를 정하는
  * 행위이기 때문이다. "시험을 고르면 더 일찍 깨운다" 는 걸 알 수 있어야 한다.
  *
- * 목록 끝에는 "기타" 대신 "+ 추가" 를 둔다(명세 12-a, [TagDropdown]). 사용자가
- * 만든 종류를 저장하는 일은 서버(B-8)가 하므로 그 전까지 "+ 추가" 는 안내만 띄운다.
+ * 목록 끝에는 "기타" 대신 "+ 추가" 를 둔다(명세 12-a, [TagDropdown]). 사용자가 만든 종류는
+ * 서버가 저장하고(B1), τ 를 정하지 않은 종류(`default_tau` null)는 프로필 기본을 쓴다.
  */
 internal fun tagOptionsOf(tags: List<com.swpp.wakeup.data.remote.EventTagDto>): List<TagOption> =
     tags.map { tag ->
         TagOption(
             key = tag.key,
             label = tag.label,
-            tau = tag.defaultTau?.let { "τ ${"%.2f".format(java.util.Locale.ROOT, it)}" } ?: "",
+            tau = tag.defaultTau?.let { "τ ${"%.2f".format(java.util.Locale.ROOT, it)}" } ?: "프로필 기본",
         )
     }
+
+// Partly AI-generated (Claude)
+/**
+ * 방금 만든 종류를 목록에 붙인다. 같은 `key` 가 이미 있으면(서버가 같은 이름을 200 으로 돌려준
+ * 경우, 목록을 다시 받은 경우) 두 번 붙이지 않는다.
+ */
+internal fun tagsWith(
+    tags: List<com.swpp.wakeup.data.remote.EventTagDto>,
+    created: com.swpp.wakeup.data.remote.EventTagDto,
+): List<com.swpp.wakeup.data.remote.EventTagDto> =
+    if (tags.any { it.key == created.key }) tags else tags + created
 
 internal data class TagOption(val key: String?, val label: String, val tau: String)
 
@@ -142,7 +153,21 @@ fun AddEventScreen(
     /** 기기에만 둔 다른 집. 출발지 검색을 열면 맨 위에 보인다(Figma ⑯ 변형 `498:9` ②) */
     savedHomes: List<SavedHome> = emptyList(),
     onOriginSavedHome: (SavedHome) -> Unit = {},
+    /** 종류 "+ 추가" 대화상자(B1). `open` 이 아니면 그리지 않는다 */
+    tagAdd: HomeViewModel.TagAddState = HomeViewModel.TagAddState(),
+    onAddTag: () -> Unit = {},
+    onTagAddLabelChange: (String) -> Unit = {},
+    onTagAddSubmit: () -> Unit = {},
+    onTagAddDismiss: () -> Unit = {},
 ) {
+    if (tagAdd.open) {
+        TagAddDialog(
+            state = tagAdd,
+            onLabelChange = onTagAddLabelChange,
+            onSubmit = onTagAddSubmit,
+            onDismiss = onTagAddDismiss,
+        )
+    }
     // 일정 수정이면 같은 화면을 수정 모드로 쓴다(Figma ⑫ 변형 `488:9`).
     val editing = state.isEditing
     // 검색 칸은 "검색" 을 눌렀을 때만 펼친다. 고르면 접는다.
@@ -367,6 +392,7 @@ fun AddEventScreen(
                 options = tagOptionsOf(tags),
                 selected = state.tagKey,
                 onChange = onTagChange,
+                onAddTag = onAddTag,
                 enabled = !state.submitting,
             )
             state.fieldErrors[AddField.TAG]?.let { EndpointError(it, tag = "tag_error") }
@@ -853,11 +879,11 @@ private fun TagDropdown(
     options: List<TagOption>,
     selected: String?,
     onChange: (String?) -> Unit,
+    /** 맨 끝 "+ 추가" */
+    onAddTag: () -> Unit,
     enabled: Boolean,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    // "+ 추가" 를 눌렀을 때의 안내. B-8 전까지는 저장할 곳이 없다.
-    var addNotice by remember { mutableStateOf(false) }
     // 서버 목록을 아직 못 받았으면 고른 key 의 이름을 모른다. 따로 표시한다.
     // 종류를 비우면(null) 서버가 프로필 기본 τ 를 쓴다.
     val current = options.firstOrNull { it.key == selected }
@@ -945,14 +971,14 @@ private fun TagDropdown(
                         },
                     )
                 }
-                // 명세 12-a: 맨 끝은 "기타" 가 아니라 "+ 추가".
-                // ⏳ B-8 이후: 이름을 입력받아 서버에 저장하고 목록에 붙인다.
-                // 앱에만 저장하는 임시 구현은 하지 않는다 — 다른 기기·재설치에서 사라진다.
+                // 명세 12-a: 맨 끝은 "기타" 가 아니라 "+ 추가". 이름을 받아 서버에 저장하고(B1)
+                // 목록에 붙여 고른다. 앱에만 저장하면 다른 기기·재설치에서 사라지므로 하지 않는다.
                 DropdownMenuItem(
                     onClick = {
                         expanded = false
-                        addNotice = true
+                        onAddTag()
                     },
+                    modifier = Modifier.testTag("tag_add_item"),
                     text = {
                         Text(
                             text = "+ 추가",
@@ -963,14 +989,6 @@ private fun TagDropdown(
                     },
                 )
             }
-        }
-
-        if (addNotice) {
-            Text(
-                text = "종류 직접 추가는 준비 중",
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
-            )
         }
     }
 }

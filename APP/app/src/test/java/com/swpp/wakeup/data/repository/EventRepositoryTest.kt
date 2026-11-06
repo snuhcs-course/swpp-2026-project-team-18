@@ -13,6 +13,7 @@ import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.ProfileDto
 import com.swpp.wakeup.data.remote.ProfileUpdateRequest
 import com.swpp.wakeup.data.remote.RouteCandidateResponse
+import com.swpp.wakeup.data.remote.TagCreateRequest
 import com.swpp.wakeup.data.repository.EventRepository.HomeData
 import com.swpp.wakeup.data.repository.EventRepository.Result
 import com.swpp.wakeup.testing.FakeEventsApi
@@ -406,6 +407,56 @@ class EventRepositoryTest {
         assertTrue(result.network)
         assertNull(result.status)
         assertNull(result.errorCode)
+    }
+
+    // --- 종류 직접 추가(B1) -----------------------------------------------------
+
+    private val madeTag = fromJson<EventTagDto>(
+        """{"id":31,"key":"u0123456789","label":"Lab","default_tau":null,"penalty_shape":"standard","custom":true}"""
+    )
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `종류 만들기는 이름만 보내고 201 과 200 모두 성공이다`() = runTest {
+        for (code in listOf(201, 200)) {
+            var sent: TagCreateRequest? = null
+            val api = object : FakeEventsApi() {
+                override suspend fun createTag(body: TagCreateRequest): Response<EventTagDto> =
+                    Response.success(code, madeTag).also { sent = body }
+            }
+            val result = EventRepository(api, FakeProfileApi()).createTag("  Lab ")
+            assertEquals("HTTP $code", Result.Success(madeTag), result)
+            assertEquals("""{"label":"Lab"}""", Gson().toJson(sent))
+        }
+        assertNull(madeTag.defaultTau)
+        assertEquals(true, madeTag.custom)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `종류가 20개를 넘으면 409 tag_limit 이 코드로 남는다`() = runTest {
+        val api = object : FakeEventsApi() {
+            override suspend fun createTag(body: TagCreateRequest) = httpError<EventTagDto>(
+                409,
+                """{"error":{"code":"tag_limit","message":"종류는 20개까지","details":{}}}""",
+            )
+        }
+        val result = EventRepository(api, FakeProfileApi()).createTag("Lab") as Result.Failure
+        assertEquals(409, result.status)
+        assertEquals("tag_limit", result.errorCode)
+        assertFalse(result.network)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `종류 이름이 틀리면 400 의 label 문구를 살린다`() = runTest {
+        val api = object : FakeEventsApi() {
+            override suspend fun createTag(body: TagCreateRequest) =
+                httpError<EventTagDto>(400, errorJson("입력이 올바르지 않다.", mapOf("label" to "이름을 입력해야 한다.")))
+        }
+        val result = EventRepository(api, FakeProfileApi()).createTag("x") as Result.Failure
+        assertEquals(400, result.status)
+        assertEquals("이름을 입력해야 한다.", result.fields["label"])
     }
 
     // --- 삭제·태그 ------------------------------------------------------------

@@ -16,6 +16,7 @@ import com.swpp.wakeup.data.remote.EventCreateRequest
 import com.swpp.wakeup.data.remote.EventDto
 import com.swpp.wakeup.data.remote.EventUpdateRequest
 import com.swpp.wakeup.data.remote.EventTagDto
+import com.swpp.wakeup.data.remote.TagCreateRequest
 import com.swpp.wakeup.data.remote.EventsApi
 import com.swpp.wakeup.data.remote.LiveRouteRequest
 import com.swpp.wakeup.data.remote.PlaceInput
@@ -633,6 +634,18 @@ class EventRepository(
 
     suspend fun tags(): Result<List<EventTagDto>> = guard {
         unwrap(api.tags())?.let { Result.Success(it) } ?: Result.Failure(MESSAGE_UNKNOWN)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 내 종류를 만든다(B1, docs/iter3/event-tags-api.md §5). 201(새로 만듦)과 200(같은 이름이 이미
+     * 있어 그것을 돌려줌) 모두 성공이다. 이름은 다듬어서 보낸다(서버가 공백을 하나로 줄인다).
+     * 400 은 `fields["label"]`, 409 `tag_limit` 은 `errorCode` 로 구분한다.
+     */
+    suspend fun createTag(label: String): Result<EventTagDto> = guard {
+        val response = api.createTag(TagCreateRequest(label.trim()))
+        unwrap(response)?.let { Result.Success(it) }
+            ?: failureFrom(response.code(), response.errorBody()?.string())
     }
 
     /**

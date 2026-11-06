@@ -22,6 +22,7 @@ import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.data.remote.AlarmPlanDto
 import com.swpp.wakeup.data.remote.BlockObservationInput
 import com.swpp.wakeup.data.remote.EventTagDto
+import com.swpp.wakeup.ui.events.tagsWith
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.ApiClient
@@ -1223,6 +1224,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         pendingAddDraft = null
         _add.value = AddState()
         _addResumePrompt.value = false
+        // 종류 목록은 계정마다 다르다. 다음 계정에 이 계정의 종류가 잠깐이라도 보이지 않게 비운다.
+        _eventTags.value = emptyList()
+        _tagAdd.value = TagAddState()
         // 순서가 있다. **토큰보다 먼저 지운다** — 지우기 판정이 "지금 로그인한
         // 계정" 을 보므로, 토큰이 먼저 사라지면 소유자를 모르는 상태가 되어
         // 아무것도 지울 수 없다.
@@ -1597,12 +1601,69 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // AI-generated (Claude)
     private var eventTagsJob: Job? = null
 
-    // AI-generated (Claude)
+    // Partly AI-generated (Claude)
+    /**
+     * 추가·수정 화면을 열 때마다 다시 받는다(B1). 다른 기기에서 만든 종류가 보이게 하려는 것이고,
+     * 받는 동안과 실패했을 때는 가진 목록을 그대로 둔다.
+     */
     private fun loadEventTags() {
-        if (_eventTags.value.isNotEmpty() || eventTagsJob?.isActive == true) return
+        if (eventTagsJob?.isActive == true) return
         eventTagsJob = viewModelScope.launch {
             val result = repository.tags()
             if (result is EventRepository.Result.Success) _eventTags.value = result.data
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * "+ 추가" 대화상자(B1, Figma F-49b `528:78`). 보낼 때까지 입력한 이름을 그대로 둔다.
+     *
+     * @property busy 보내는 중. 닫기·중복 전송을 막는다
+     * @property error 대화상자 안의 빨간 줄
+     */
+    data class TagAddState(
+        val open: Boolean = false,
+        val label: String = "",
+        val busy: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _tagAdd = MutableStateFlow(TagAddState())
+    val tagAdd: StateFlow<TagAddState> = _tagAdd.asStateFlow()
+
+    // Partly AI-generated (Claude)
+    fun openTagAdd() {
+        _tagAdd.value = TagAddState(open = true)
+    }
+
+    // Partly AI-generated (Claude)
+    fun onTagAddLabelChange(v: String) {
+        if (_tagAdd.value.busy) return
+        _tagAdd.update { it.copy(label = v.take(TAG_LABEL_MAX), error = null) }
+    }
+
+    // Partly AI-generated (Claude)
+    fun dismissTagAdd() {
+        if (_tagAdd.value.busy) return
+        _tagAdd.value = TagAddState()
+    }
+
+    // Partly AI-generated (Claude)
+    /** 종류를 서버에 만들고 목록에 붙여 고른다. 실패하면 대화상자와 입력을 그대로 두고 이유를 보인다. */
+    fun submitTagAdd() {
+        val current = _tagAdd.value
+        if (current.busy || current.label.isBlank()) return
+        _tagAdd.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            when (val result = repository.createTag(current.label)) {
+                is EventRepository.Result.Success -> {
+                    _eventTags.update { tagsWith(it, result.data) }
+                    onAddTagChange(result.data.key)
+                    _tagAdd.value = TagAddState()
+                }
+                is EventRepository.Result.Failure ->
+                    _tagAdd.update { it.copy(busy = false, error = tagAddErrorOf(result)) }
+            }
         }
     }
 

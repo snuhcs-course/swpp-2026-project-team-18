@@ -112,3 +112,25 @@ internal fun saveErrorOf(failure: EventRepository.Result.Failure, editing: Boole
         }
     }
 }
+
+// Partly AI-generated (Claude)
+/** 종류 이름의 최대 글자 수(서버 20자, docs/iter3/event-tags-api.md §5) */
+internal const val TAG_LABEL_MAX = 20
+
+private const val TAG_LIMIT_LINE = "종류는 20개까지 만들 수 있어요"
+
+// Partly AI-generated (Claude)
+/**
+ * "+ 추가" 로 종류를 만들다 실패했을 때 대화상자에 보일 한 줄.
+ * 통신 실패 → 400(서버 문구) → 409 `tag_limit` → 404/405(구버전 서버) → 429 → 그 밖.
+ */
+internal fun tagAddErrorOf(failure: EventRepository.Result.Failure): String = when {
+    failure.network -> SAVE_NETWORK_LINE
+    failure.status == 400 -> failure.fields["label"] ?: failure.message
+    failure.status == 409 && failure.errorCode == "tag_limit" -> TAG_LIMIT_LINE
+    failure.status == 404 || failure.status == 405 -> SAVE_UNSUPPORTED_LINE
+    failure.status == 429 -> SAVE_THROTTLED_LINE
+    failure.status == 401 -> SAVE_AUTH_LINE
+    failure.errorCode != null -> failure.message
+    else -> SAVE_SERVER_LINE
+}

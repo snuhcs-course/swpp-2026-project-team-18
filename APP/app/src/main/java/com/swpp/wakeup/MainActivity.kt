@@ -229,6 +229,7 @@ private fun MainHost(
     val addResumePrompt by viewModel.addResumePrompt.collectAsStateWithLifecycle()
     val passwordChange by viewModel.passwordChange.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
+    val tagAdd by viewModel.tagAdd.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
@@ -784,6 +785,11 @@ private fun MainHost(
                     onIncludePrepChange = viewModel::onAddIncludePrepChange,
                     savedHomes = state.savedHomes,
                     onOriginSavedHome = viewModel::onAddOriginSavedHome,
+                    tagAdd = tagAdd,
+                    onAddTag = viewModel::openTagAdd,
+                    onTagAddLabelChange = viewModel::onTagAddLabelChange,
+                    onTagAddSubmit = viewModel::submitTagAdd,
+                    onTagAddDismiss = viewModel::dismissTagAdd,
                 )
 
                 AppRoute.RouteChoice -> RouteChoiceScreen(

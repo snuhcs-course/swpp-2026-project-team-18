@@ -99,6 +99,14 @@ interface EventsApi {
     @GET("api/events/tags")
     suspend fun tags(): Response<List<EventTagDto>>
 
+    // Partly AI-generated (Claude)
+    /**
+     * 내 종류 만들기(docs/iter3/event-tags-api.md §5). 201 새로 만듦, 200 같은 이름이 이미 있어
+     * 그것을 돌려줌. 400 `invalid`(`details.label`), 409 `tag_limit`(계정당 20개).
+     */
+    @POST("api/events/tags")
+    suspend fun createTag(@Body body: TagCreateRequest): Response<EventTagDto>
+
     /**
      * 장소 검색.
      *
@@ -574,7 +582,13 @@ data class EventTagDto(
     val label: String,
     @SerializedName("default_tau") val defaultTau: Double?,
     @SerializedName("penalty_shape") val penaltyShape: String?,
+    /** 사용자가 만든 종류인가. 구버전 서버면 null */
+    val custom: Boolean? = null,
 )
+
+// Partly AI-generated (Claude)
+/** `POST /api/events/tags` 본문. `default_tau` 는 보내지 않아 서버가 프로필 기본을 쓴다. */
+data class TagCreateRequest(val label: String)
 
 /**
  * 알람 계획.
