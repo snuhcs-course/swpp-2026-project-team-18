@@ -11,7 +11,9 @@ import com.swpp.wakeup.data.remote.OutcomeDto
 import com.swpp.wakeup.data.remote.PlannedDto
 import com.swpp.wakeup.data.remote.PreviousWeekDto
 import com.swpp.wakeup.data.remote.WeeklyDeviationDto
+import com.swpp.wakeup.data.remote.WakeWeekdayDto
 import com.swpp.wakeup.data.remote.WeeklyReportDto
+import com.swpp.wakeup.data.remote.WeeklyWakeDto
 import com.swpp.wakeup.data.repository.toView
 import com.swpp.wakeup.domain.model.CalibrationView
 import com.swpp.wakeup.domain.model.WeeklyReportView
@@ -153,6 +155,15 @@ internal object ReportPreviewData {
             "지난주 60%보다 23%p 올랐음. 이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 " +
             "보거나 몇 분 일찍 나서 볼 것.",
         summarySource = WeeklyReportDto.SOURCE_LLM,
+        wake = WeeklyWakeDto(
+            alarmsFired = 6, snoozeCount = 3, snoozedAlarms = 2, wakeSecondsMedian = 85.0,
+            byWeekday = listOf(
+                WakeWeekdayDto(0, 1, 0, 52.0), WakeWeekdayDto(1, 1, 2, 310.0),
+                WakeWeekdayDto(2, 1, 0, 40.0), WakeWeekdayDto(3, 1, 1, 95.0),
+                WakeWeekdayDto(4, 2, 0, 70.0), WakeWeekdayDto(5, 0, 0, null),
+                WakeWeekdayDto(6, 0, 0, null),
+            ),
+        ),
     ).toView(SEOUL)
 
     /** 일정은 있었지만 도착을 하나도 기록하지 못한 주(⑧-a). */

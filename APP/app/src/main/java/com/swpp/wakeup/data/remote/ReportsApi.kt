@@ -94,6 +94,8 @@ data class WeeklyReportDto(
     val summary: String? = null,
     /** `llm` / `template`. 모르는 값이면 템플릿으로 본다 */
     @SerializedName("summary_source") val summarySource: String? = null,
+    /** 기상 통계(알람·미루기·끄기까지). 그 주 울린 알람이 없거나 구버전 서버면 null */
+    val wake: WeeklyWakeDto? = null,
 ) {
     companion object {
         const val SOURCE_LLM = "llm"
@@ -101,6 +103,27 @@ data class WeeklyReportDto(
     }
 }
 
+// Partly AI-generated (Claude)
+/**
+ * 그 주 기상 통계(서버 `wake_stats`). 알람 하나 = (일정, 등록한 알람 시각), 미뤄서 다시 울린
+ * 것도 같은 알람이다. `wake_seconds_median` = 처음 울린 때부터 처음 끈 때까지의 초(끈 기록이
+ * 없으면 null). 서버는 울린 알람이 없는 주에 `wake` 자체를 null 로 준다.
+ */
+data class WeeklyWakeDto(
+    @SerializedName("alarms_fired") val alarmsFired: Int = 0,
+    @SerializedName("snooze_count") val snoozeCount: Int = 0,
+    @SerializedName("snoozed_alarms") val snoozedAlarms: Int = 0,
+    @SerializedName("wake_seconds_median") val wakeSecondsMedian: Double? = null,
+    @SerializedName("by_weekday") val byWeekday: List<WakeWeekdayDto>? = null,
+)
+// Partly AI-generated (Claude)
+/** 요일 하나의 기상 통계. `weekday` 0 = 월요일. 서버는 7칸을 모두 준다. */
+data class WakeWeekdayDto(
+    val weekday: Int? = null,
+    val fired: Int = 0,
+    @SerializedName("snooze_count") val snoozeCount: Int = 0,
+    @SerializedName("wake_seconds_median") val wakeSecondsMedian: Double? = null,
+)
 // Partly AI-generated (Claude)
 /** 앞 주 정시 집계. 앞 주에 지난 일정이 없으면 응답에서 null 이다. */
 data class PreviousWeekDto(

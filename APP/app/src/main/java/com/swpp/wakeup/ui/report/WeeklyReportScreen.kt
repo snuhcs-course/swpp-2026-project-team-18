@@ -44,6 +44,7 @@ import com.swpp.wakeup.domain.model.DayStatus
 import com.swpp.wakeup.domain.model.LateDayLine
 import com.swpp.wakeup.domain.model.ReportDay
 import com.swpp.wakeup.domain.model.ReportSummary
+import com.swpp.wakeup.domain.model.WakeView
 import com.swpp.wakeup.domain.model.WeeklyReportView
 import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.common.JitChip
@@ -152,6 +153,7 @@ fun WeeklyReportScreen(
         if (report.showLateDays) LateDaysCard(report, enabled = !loading, onOpenDay = onOpenDay)
 
         if (report.showDeviations) DeviationCard(report)
+        report.wake?.let { WakeCard(it) }
 
         if (report.bufferNotes.isNotEmpty()) BufferCard(report)
 
@@ -517,7 +519,79 @@ private fun DeviationCard(report: WeeklyReportView) {
     }
 }
 
+// Partly AI-generated (Claude)
 /**
+ * 기상 · 이번 주(Figma F-51 `529:40`). 서버 `wake` 가 있을 때만 그린다.
+ * 울린 알람 수·미룬 횟수·끄기까지 걸린 시간(중간값)과 요일별 한 줄.
+ * 끈 기록이 없으면 "기록 없음" 이다 — 0 으로 그리지 않는다.
+ */
+@Composable
+private fun WakeCard(wake: WakeView) {
+    JitCard(padding = 14.dp, gap = 9.dp, modifier = Modifier.testTag("report_wake")) {
+        Text("기상 · 이번 주", color = JitColor.TextSecondary, fontSize = 11.sp)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WakeStat("울린 알람", wake.firedLabel, null, false, Modifier.weight(1f))
+            WakeStat("미루기", wake.snoozeLabel, wake.snoozeSubLabel, false, Modifier.weight(1f))
+            WakeStat("끄기까지 (중간값)", wake.medianLabel, null, wake.medianMissing, Modifier.weight(1.3f))
+        }
+        Row(modifier = Modifier.fillMaxWidth()) {
+            wake.days.forEachIndexed { index, day ->
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("report_wake_day_$index")
+                        .semantics(mergeDescendants = true) { contentDescription = day.description },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    // 낭독은 칸 전체의 설명이 맡는다. 글자 하나씩 따로 읽지 않게 숨긴다.
+                    Text(
+                        text = day.valueLabel.ifEmpty { " " },
+                        color = if (day.valueLabel == "—") JitColor.TextSecondary else JitColor.TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clearAndSetSemantics {},
+                    )
+                    Text(
+                        text = day.label,
+                        color = if (day.fired == 0) JitColor.Track else JitColor.TextSecondary,
+                        fontSize = 10.sp,
+                        modifier = Modifier.clearAndSetSemantics {},
+                    )
+                    Text(
+                        text = day.snoozeLabel.ifEmpty { " " },
+                        color = JitColor.Amber,
+                        fontSize = 9.sp,
+                        modifier = Modifier.clearAndSetSemantics {},
+                    )
+                }
+            }
+        }
+        Text(
+            text = "처음 울린 때부터 끌 때까지. 미뤄서 다시 울린 것도 한 알람으로 셈",
+            color = JitColor.TextSecondary,
+            fontSize = 9.sp,
+        )
+    }
+}
+@Composable
+private fun WakeStat(
+    label: String,
+    value: String,
+    sub: String?,
+    dim: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, color = JitColor.TextSecondary, fontSize = 10.sp)
+        Text(
+            text = value,
+            color = if (dim) JitColor.TextSecondary else JitColor.TextPrimary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        sub?.let { Text(it, color = JitColor.TextSecondary, fontSize = 10.sp) }
+    }
+}/**
  * 예측 검증 · 최근 90일. 판정만 보여준다 — 구간별 표는 ⑨ 에 있다.
  *
  * 한 주는 표본이 적어 거의 늘 "표본 부족" 이라, 이 주 캘리브레이션 대신 90일을 쓴다.

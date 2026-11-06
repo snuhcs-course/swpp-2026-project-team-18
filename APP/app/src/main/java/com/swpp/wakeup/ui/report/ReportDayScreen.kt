@@ -130,6 +130,7 @@ fun ReportDayScreen(
             skipEnabled = skipEnabled,
         )
         PlanActualCard(selected)
+        report.wake?.days?.firstOrNull { it.weekday == date.dayOfWeek.value - 1 }?.dayLine?.let { WakeDayCard(it) }
         selected.cause?.let { CauseCard(it) }
         longTerm?.let { CalibrationTable(it, highlightLower = selected.tauBucketLower) }
     }
@@ -292,7 +293,15 @@ private fun PlanActualCard(outcome: MorningOutcome) {
     }
 }
 
+// Partly AI-generated (Claude)
+/** 그날 기상 한 줄(Figma F-52 `529:80`). 서버 `wake` 에 그 요일 알람이 있을 때만. */
 @Composable
+private fun WakeDayCard(line: String) {
+    JitCard(padding = 14.dp, gap = 6.dp, modifier = Modifier.testTag("report_day_wake")) {
+        Text("기상", color = JitColor.TextSecondary, fontSize = 11.sp)
+        Text(line, color = JitColor.TextPrimary, fontSize = 12.sp)
+    }
+}@Composable
 private fun LegendItem(color: Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(7.dp).clip(RoundedCornerShape(2.dp)).background(color))
