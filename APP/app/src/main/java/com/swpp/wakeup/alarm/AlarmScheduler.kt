@@ -81,9 +81,10 @@ class AlarmScheduler(private val context: Context) {
         val at = System.currentTimeMillis() + minutes * 60_000L
         val local = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault())
 
-        val next = schedule.copy(
-            alarmAtMillis = at,
-            alarmLabel = local.format(LABEL_FORMAT),
+        // Partly AI-generated (Claude) — 계획의 알람 시각은 기록용으로 남긴다(AlarmSchedule.snoozedTo).
+        val next = schedule.snoozedTo(
+            atMillis = at,
+            label = local.format(LABEL_FORMAT),
             meridiem = if (local.hour < 12) "AM" else "PM",
         )
         store.upsert(next)

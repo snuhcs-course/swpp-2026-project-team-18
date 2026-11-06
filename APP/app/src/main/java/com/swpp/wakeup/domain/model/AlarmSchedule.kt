@@ -54,7 +54,31 @@ data class AlarmSchedule(
      * 함께 저장해 두면 알람 화면이 네트워크 없이도 목록을 그린다.
      */
     val prepBlocks: List<ScheduledBlock> = emptyList(),
+    /**
+     * 미뤄서 다시 울리는 알람일 때, 계획의 알람 시각(처음 울리기로 한 시각). 아니면 null.
+     *
+     * 서버는 알람을 (일정, `alarm_at`) 으로 구분하고 `alarm_at` 을 계획의 알람 시각으로 본다. 미룬
+     * 알람의 기록에 다시 울릴 시각을 보내면 한 알람이 둘로 셈된다. 두 번 미뤄도 처음 값을 지킨다.
+     * 이전 버전이 저장한 JSON 에는 이 키가 없고 Gson 은 null 로 남긴다.
+     */
+    val firstAlarmAtMillis: Long? = null,
 ) {
+    // Partly AI-generated (Claude)
+    /**
+     * 미룬 알람의 사본. 다시 울릴 시각·표시 라벨만 바꾸고 계획의 알람 시각은 처음 값을 지킨다.
+     * 처음 미루면 지금 알람 시각이, 두 번째부터는 이미 지키던 값이 [firstAlarmAtMillis] 가 된다.
+     */
+    fun snoozedTo(atMillis: Long, label: String, meridiem: String): AlarmSchedule = copy(
+        alarmAtMillis = atMillis,
+        alarmLabel = label,
+        meridiem = meridiem,
+        firstAlarmAtMillis = firstAlarmAtMillis ?: alarmAtMillis,
+    )
+
+    // Partly AI-generated (Claude)
+    /** 서버에 보내는 `alarm_at` 의 기준. 미룬 알람이면 계획의 알람 시각, 아니면 알람 시각. */
+    val plannedAlarmAtMillis: Long get() = firstAlarmAtMillis ?: alarmAtMillis
+
     /** 출발지가 있으면 "언제 나갔는지" 를 판별할 수 있다. */
     val canDetectDeparture: Boolean get() = homeLat != null && homeLng != null
 
