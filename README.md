@@ -45,6 +45,19 @@ The event is a class tomorrow at 15:00 at the SNU College of Engineering, leavin
 Station. The same scenario runs end to end without a phone in the
 [automated run](#automated-end-to-end-run).
 
+Previews (GIF, no sound; click one to open its video):
+
+<table>
+  <tr>
+    <td align="center"><a href="demo-video/iteration3_demo_1.mp4"><img src="demo-video/iteration3_demo_1.gif" width="280" alt="Clip 1: faster route before the alarm"></a><br><b>1 · Faster route before the alarm</b></td>
+    <td align="center"><a href="demo-video/iteration3_demo_2.mp4"><img src="demo-video/iteration3_demo_2.gif" width="280" alt="Clip 2: edit the event and the route candidates"></a><br><b>2 · Edit and route candidates</b></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="demo-video/iteration3_demo_3.mp4"><img src="demo-video/iteration3_demo_3.gif" width="280" alt="Clip 3: reroute when late on the way"></a><br><b>3 · Reroute when late</b></td>
+    <td align="center"><a href="demo-video/iteration3_demo_4.mp4"><img src="demo-video/iteration3_demo_4.gif" width="280" alt="Clip 4: arrival by hand"></a><br><b>4 · Arrival by hand</b></td>
+  </tr>
+</table>
+
 | Clip | Length | What it shows |
 | --- | --- | --- |
 | [1 · Faster route before the alarm](demo-video/iteration3_demo_1.mp4) | 8 s | The event was saved on purpose with a slow route (2호선 → 5511, 33 min). The next-alarm card on Home says "2호선 → 5513으로 가면 9분 빨라요" (9 minutes faster via 2호선 → 5513). "이 경로로 바꾸기" (switch to this route) changes the saved route, the alarm moves from 13:57 to 14:06, and the offer disappears |
