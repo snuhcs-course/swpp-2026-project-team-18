@@ -15,10 +15,10 @@ you are late more often than τ promised and lowered when you never needed it (4
 | | |
 | --- | --- |
 | Iteration | 3 · 2026-10-26 – 2026-11-06 |
-| Snapshot | `main` at `5dc51ef` (2026-11-05), the final Iteration 3 snapshot |
+| Snapshot | App and server code of `main` at `5dc51ef` (2026-11-05), the final Iteration 3 snapshot; this branch adds the README, the demo videos and [`qa/demo/iter3_e2e.py`](qa/demo/iter3_e2e.py) |
 | Version | Server 0.20.0 (`APP_VERSION`, deployed) · app `versionName` 0.14.0 |
 | Server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
-| Demo video | [`iteration3_demo.mp4`](iteration3_demo.mp4) |
+| Demo video | [`iteration3_demo.mp4`](iteration3_demo.mp4) (44 s, four scenes) · the clips one by one in [`demo-video/`](demo-video/) |
 
 Everything needed to run the demo is on this page. The full project README
 (architecture, API, deployment, configuration) is on
@@ -30,14 +30,32 @@ and [`iteration-2-demo`](https://github.com/snuhcs-course/swpp-2026-project-team
 **Contents:** [Demo video](#demo-video) · [What the demo shows](#what-the-demo-shows) ·
 [Major progress in Iteration 3](#major-progress-in-iteration-3) ·
 [Tech stack and environment](#tech-stack-and-environment) · [How to run](#how-to-run) ·
+[Automated end-to-end run](#automated-end-to-end-run) ·
 [Known limitations and todos](#known-limitations-and-todos) · [Verification](#verification)
 
 ---
 
 ## Demo video
 
-**[▶ iteration3_demo.mp4](iteration3_demo.mp4)** — the key functionalities of this snapshot
-on an Android device, with the Iteration 3 features listed below.
+**[▶ iteration3_demo.mp4](iteration3_demo.mp4)** — 44 s, no audio: the four clips below joined
+in order. Each clip is also in [`demo-video/`](demo-video/).
+
+All four were recorded on a physical Android phone against a local server with a test account.
+The event is a class tomorrow at 15:00 at the SNU College of Engineering, leaving from Sillim
+Station. The same scenario runs end to end without a phone in the
+[automated run](#automated-end-to-end-run).
+
+| Clip | Length | What it shows |
+| --- | --- | --- |
+| [1 · Faster route before the alarm](demo-video/iteration3_demo_1.mp4) | 8 s | The event was saved on purpose with a slow route (2호선 → 5511, 33 min). The next-alarm card on Home says "2호선 → 5513으로 가면 9분 빨라요" (9 minutes faster via 2호선 → 5513). "이 경로로 바꾸기" (switch to this route) changes the saved route, the alarm moves from 13:57 to 14:06, and the offer disappears |
+| [2 · Edit the event and the route candidates](demo-video/iteration3_demo_2.mp4) | 12 s | On the edit screen, "변경" (change) next to the route opens route choice. The fastest transit candidate (24 min) shows its stops and times per leg; scrolling shows the 25- and 26-minute candidates with the "최소 비용" (cheapest) and "최소 도보" (least walking) badges |
+| [3 · Reroute when late on the way](demo-video/iteration3_demo_3.mp4) | 15 s | The demo tool's "이동하기" (move) walks a fake location along the route. Moving the start earlier on the server makes the trip late: a heads-up notification and the card "지금 경로로는 9분 늦어요 · 6515 → 5513으로 가면 6분 덜 늦어요" (9 minutes late now; 6 minutes less late via 6515 → 5513). "이 경로로 바꾸기" shows "경로를 바꿨습니다" (route changed) and redraws the map. In demo mode this change is not sent to the server |
+| [4 · Arrival by hand](demo-video/iteration3_demo_4.mp4) | 9 s | On the in-transit progress card, "도착했어요" (I've arrived) turns the state into "도착 완료 · 정시" (arrived · on time) |
+
+The demo tool in clip 3 (move the location, fast-forward time) belongs to the build used for the
+heuristic evaluation (`dev` branch) and is not on this branch. Here, move an emulator with its
+location controls ([step 8](#8-demo-tips)), or run the scene through the API with the
+[automated run](#automated-end-to-end-run).
 
 ---
 
@@ -354,6 +372,59 @@ Debug builds no longer print tokens, but logs still contain locations; don't sha
 
 ---
 
+## Automated end-to-end run
+
+[`qa/demo/iter3_e2e.py`](qa/demo/iter3_e2e.py) runs the four scenes of the demo video end to end
+through the real server API, with a new demo account and the same event: a class tomorrow at
+15:00 at the SNU College of Engineering, leaving from Sillim Station.
+
+| Scene | What the script does | Passes when |
+| --- | --- | --- |
+| 1 · Faster route before the alarm | Lists the transit candidates, saves the event with the slowest one, then switches to the faster route the server offers (`alt_route_key`) | The server offers a faster route and the alarm moves later after the switch |
+| 2 · Edit and route candidates | Lists the candidates with their badges and edits the saved event | At least two transit candidates; the edit is saved and the route kept |
+| 3 · Reroute when late | Rides the slow route again, moves the start close to now, uploads a departure from Sillim Station and asks for the live route | The live route is judged late; when an earlier route exists, `switch_suggestion` is sent back with `POST /events/{id}/reroute` |
+| 4 · Arrival by hand | Uploads a manual arrival (`detector=manual`) | The server stores it and the arrival is on time against the moved start |
+
+**Local server (default).** The script starts a throwaway server with the code of this branch
+and an SQLite database under `.artifacts/demo-iter3/`; the shared database is never touched.
+It needs the backend environment and the Kakao keys in `backend/.env`
+([backend/README.md](backend/README.md)).
+
+```bash
+python3.12 -m venv backend/.venv
+backend/.venv/bin/python -m pip install -r backend/requirements/dev.txt
+backend/.venv/bin/python qa/demo/iter3_e2e.py
+```
+
+**Shared server.** No keys or local setup are needed, but each run creates a demo account there
+(sign-up allows 10 per hour per network address):
+
+```bash
+backend/.venv/bin/python qa/demo/iter3_e2e.py --server https://justintime-api.onrender.com
+```
+
+**Show it in the app.** `--keep` leaves the local server running on port 8000 after the run and
+prints the demo account. Put `devServerHost=10.0.2.2` in `APP/local.properties`, run the app on an
+emulator, and sign in with that account to see the same event, route and arrival; Ctrl+C stops
+the server. Remove the line afterwards to go back to the shared server.
+
+```bash
+backend/.venv/bin/python qa/demo/iter3_e2e.py --keep
+```
+
+The run prints each scene and ends with `PASSED · 4/4 scenes` and exit code 0. The details are in
+`.artifacts/demo-iter3/<time>/result.json`, the server log next to it. On 2026-11-06 (macOS, Python
+3.12, local server with live Kakao responses) all four scenes passed in under 10 s once the server
+was up; scene 3 got
+"21분 늦어요 · 2호선 → 5513으로 가면 8분 덜 늦어요" and rerouted. Scene 3 depends on live transit
+data: when no earlier route exists at that moment, it still passes on the late judgement and says
+that no suggestion came.
+
+The Iteration 2 runner [`qa/demo/run.py`](qa/demo/README.md), which drives the app's screens with
+UI Automator on an emulator, is still here but was not rerun in Iteration 3.
+
+---
+
 ## Known limitations and todos
 
 **Partial**
@@ -371,8 +442,9 @@ Debug builds no longer print tokens, but logs still contain locations; don't sha
 
 **Not checked yet** — Kakao and Google sign-in with real accounts on a registered build, the
 reroute and "도착했어요" notification buttons on a physical phone, and a week of alarms on a
-Galaxy phone (AT-24). The end-to-end runner `qa/demo/run.py` was not rerun in Iteration 3; each
-new screen was checked on the emulator instead.
+Galaxy phone (AT-24). The UI runner `qa/demo/run.py` from Iteration 2 was not rerun; each new
+screen was checked on the emulator, and the Iteration 3 scenario runs through the API with
+[`qa/demo/iter3_e2e.py`](#automated-end-to-end-run).
 
 **From the heuristic evaluation (11-04)** — the main screens show too much at one level, some
 texts read like developer logs, the computed alarm feels fixed, and there is no help or
