@@ -2,8 +2,8 @@
 브랜치 `front-iter3`, 기준 `origin/main` = `3d39fc8`(10-31). 11-03 에 `front-iter3`(`c527cea`)를 main 에 합쳤다. main 은 `dbe38da`(머지 커밋, 부모 `3d39fc8`·`c527cea`)이고 트리는 `c527cea` 와 같다. 그 뒤 11-03 밤 작업(아래 "11-03 노션 남은 프론트 항목")은 `front-iter3` 에서 이어 갔고 아직 main 에 없다. 백엔드가 `todo.md` §2 에 넘긴 일과 팀 회의 내용을 앱에 넣었다. 항목 번호는 [figma-changes.md](figma-changes.md) 의 번호와 같다(1~22 는 아래 절 제목, 5b·5c·19b 는 만들지 않음). 서버에 아직 없는 부분은 [backend-requests.md](backend-requests.md) 에 요청으로 적었다.
 
 ## 요약
-- 단위 테스트: main 기준 **739건 → 950건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml`, 최신 앱 커밋 `d79fb67` 의 실행 결과). 877건은 `c527cea`(main 에 합친 시점)의 값이고, 11-03 밤에 70건이 늘었다(902 → 927 → 939 → 948 → 947 → 950).
-- 린트: 오류 0 / 경고 62 (기준선과 같다). 11-03 밤 커밋마다 `lintDebug` 를 돌렸다. S1 커밋에서 늘었던 경고 2개는 `LastEmailStore` 의 UseKtx 였고 `d79fb67` 에서 고쳤다(64 → 62).
+- 단위 테스트: main 기준 **739건 → 1029건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml`, 최신 앱 커밋 `1bc8617` 의 실행 결과). 950건은 11-03 밤 끝(`d79fb67`)의 값이고, 11-06 저녁에 79건이 늘었다(975 → 984 → 987 → 1012 → 1018 → 1029, 아래 "11-06 task.md 프론트 할 일"). 877건은 `c527cea`(main 에 합친 시점)의 값이고, 11-03 밤에 70건이 늘었다(902 → 927 → 939 → 948 → 947 → 950).
+- 린트: 오류 0 / 경고 63 (11-06 에 1개 늘었다. 아래 절 참조. 11-03 밤까지는 62 로 기준선과 같았다). 11-03 밤 커밋마다 `lintDebug` 를 돌렸다. S1 커밋에서 늘었던 경고 2개는 `LastEmailStore` 의 UseKtx 였고 `d79fb67` 에서 고쳤다(64 → 62).
 - 기기 테스트(`androidTest`)는 컴파일(`compileDebugAndroidTestKotlin`, `assembleDebugAndroidTest`)만 확인했다. 기기에서 돌린 기록은 없다.
 - 기준선(11-01, 손대지 않은 브랜치): 단위 739건, 린트 오류 0 / 경고 62, 백엔드 pytest 1684건 통과.
 - 에뮬레이터 확인(11-02)과 main 대중교통 5개 확인(11-03)은 맨 아래에 적었다.
@@ -243,6 +243,68 @@
 ### 이 밤에 지켜진 것
 - `backend/` 는 바꾸지 않았다. 필요한 서버 일은 [R3-9 ~ R3-11](backend-requests.md) 에 요청으로 적었다.
 - 에뮬레이터 확인은 로컬 서버에서만 했고 확인 뒤 에뮬레이터와 서버를 껐다.
+## 11-06 task.md 프론트 할 일 (A1-A7, B1-B5)
+`task.md` 의 "🟢 프론트 할 일 (11-04 정리)" 를 `front-iter3` 에서 했다. 서버는 main `5dc51ef`(0.20.0)이고 `backend/` 는 바꾸지 않았다. Figma 를 먼저 그리고(F-46 ~ F-54, [figma-changes.md](figma-changes.md)) 그 프레임대로 코드를 짰다. 코드는 `APP/app/src/main/java/com/swpp/wakeup/` 아래 경로다. 커밋마다 `testDebugUnitTest lintDebug assembleDebug compileDebugAndroidTestKotlin` 을 한 번 돌렸다. 에뮬레이터는 로컬 서버(일회용 SQLite)에만 붙였고 공용 서버는 부르지 않았다. 코드 리뷰는 승인(막는 문제 없음, 사소한 지적 넷)이다.
+| 항목 | 커밋 | 단위 테스트(누적) | 린트 오류 / 경고 |
+| --- | --- | --- | --- |
+| A1-A7 일정 저장 오류 | `6d6627b` | 975 | 0 / 63 |
+| B1 종류 직접 추가 | `bdc392e` | 984 | 0 / 63 |
+| B3 출발 전 표시, X1, T2 이유 줄 | `b067d14` | 987 | 0 / 63 |
+| B2 저장한 집 서버 동기화 | `e024b4d` | 1012 | 0 / 63 |
+| B4 주간 기상 패널 | `2da5146` | 1018 | 0 / 63 |
+| B5 이메일 인증 | `1bc8617` | 1029 | 0 / 63 |
+기준은 `5dc51ef` 의 950건 / 경고 62 다. 경고 1개는 `UnusedResources`·의존성 버전 쪽이고 이번에 고친 파일에는 없다.
+### A1-A7. 일정 저장 오류 — `6d6627b` (Figma F-46, F-47, F-48)
+- **바뀐 것**:
+  - A1·A3: 저장이 실패하면 스낵바 "일정을 저장하지 못했어요. 입력한 내용은 그대로 있어요"와 [다시 시도]를 보인다. 네트워크·시간 초과·500 은 칸 위 한 줄에 이유를 적는다. 401 은 로그인으로 보내되 입력을 남긴다.
+  - A2: 400 `invalid` 의 `error.details` 를 제목·시각·종류·경로·출발지·도착지 칸 아래에 보인다. 칸이 없는 필드는 `error.message` 로 보인다. 출발지 = 도착지 오류도 이 길로 나온다(`endpointErrorsOf` 를 없애고 `SaveErrorsTest` 로 옮김).
+  - A4: 홈의 "일정 추가"에서 저장 못 한 초안이 있으면 "작성 중인 일정이 있어요. 이어서 쓸까요?"를 묻는다(이어서 쓰기·새로 쓰기). 성공했거나 버렸을 때만 지운다. 초안은 디스크에 쓰지 않고 프로세스 안(`AddDraftHolder`)에만 둔다. 앱 프로세스가 죽으면 초안도 사라진다(task.md 의 "(선택) 앱이 꺼져도 남게"는 하지 않음).
+  - A5: 추가 화면을 새로 열 때 UUID 를 `AddState.clientRequestId` 에 두고 `POST /api/events` 에 `client_request_id` 로 보낸다. 다시 시도는 같은 값이고 성공·버림 뒤에는 새 값이다. 200 도 성공으로 본다.
+  - A6: 201 인데 `alarm_plan.status == "route_failed"` 면 "일정은 저장했어요. 알람을 계산하지 못해 다시 계산이 필요해요"를 보이고 알람 결정 화면으로 이끈다. 결정 화면의 "다시 계산"은 계획이 계산되지 않았을 때만 다시 나온다(`NotComputedCard`, `recomputePlan`).
+  - A7: 일정 수정(`submitEdit`)도 같은 오류 표시와 입력 남기기를 쓴다. 수정 뒤 `route_failed` 면 "일정을 고쳤어요. 알람을 계산하지 못해 다시 계산이 필요해요".
+- **파일**: `ui/home/{EventSaveErrors,AddDraft,HomeViewModel,RouteChoiceRules}.kt`, `ui/events/{AddEventScreen,AddResumeDialog}.kt`, `ui/alarm/AlarmDecisionScreen.kt`, `data/repository/EventRepository.kt`, `data/remote/EventsApi.kt`, `MainActivity.kt`.
+- **테스트**: `SaveErrorsTest`(15), `AddDraftTest`(11), `EventFailureFieldsTest`(+2), `EventRepositoryTest`(+3). `EndpointErrorsTest` 는 `RouteChoiceRulesTest` 로 이름을 바꾸고 8건 중 2건만 남겼다(나머지 6건은 `SaveErrorsTest` 로 옮김). 합쳐서 25건이 늘었다(950 → 975).
+- **확인**: 단위 + 에뮬레이터(로컬 서버). 과거 시각으로 저장하면 시각 칸 아래 "반복 시작은 현재 이후로 설정해야 한다."와 스낵바가 떴고 입력이 남았다. 출발지 = 도착지는 도착지 아래 "출발지와 도착지는 50m 이상 떨어져 있어야 한다."가 떴다. 서버를 끄고 저장하면 스낵바 + [다시 시도]와 "서버에 연결하지 못했어요…" 줄이 떴고, 서버를 켠 뒤 빠르게 두 번 저장해도 `POST /api/events` 201 한 번, 일정 1개였다. 초안 이어쓰기 대화상자(이어서 쓰기는 "Past" 유지, 새로 쓰기는 빈 칸)도 봤다. 계획을 `route_failed` 로 바꾼 일정은 결정 화면에 "경로 조회 실패"와 [다시 계산]이 보였고, 누르면 계산되어 "알람을 다시 계산했어요"가 떴다.
+- **보지 못한 것**: 만들 때 `route_failed` 로 오는 스낵바 문구(단위 테스트만), 서버의 200 재전송 응답(단위 테스트만; 위 재시도는 스낵바가 먼저 사라져 주 버튼으로 했다), 401 때 초안 보관함 왕복, 일정 수정 화면의 오류 표시.
+- **정한 것**: `AddField` 는 `AddState.fieldErrors` 의 키라서 `public` 이다. 다시 계산 컨트롤은 Figma F-48 처럼 `JitPrimaryButton` 이 아니라 강조색 글자 버튼과 설명 한 줄이다. 서버는 시작 시각이 맞을 때만 출발지 = 도착지를 돌려줬다(시각이 틀리면 시각 오류만 옴).
+### B1. 종류 직접 추가 — `bdc392e` (Figma F-49, F-49b, F-49c)
+- **바뀐 것**: 종류 목록 끝의 "+ 추가" → 이름 대화상자("종류 이름", 20자까지) → `POST /api/events/tags {label}` → 돌려받은 종류를 목록에 넣고 고른다. `default_tau` 가 null 이면 τ 칸에 "프로필 기본". 같은 이름은 서버가 200 으로 돌려주고, 이미 목록에 있는 `key` 는 두 번 넣지 않고 고르기만 한다. 409 `tag_limit` 는 "종류는 20개까지 만들 수 있어요". 추가 화면을 열 때마다 목록을 다시 받고(받는 동안은 이전 목록), 로그아웃하면 목록과 대화상자 상태를 비운다. task.md L250(12-a) 도 이것이다.
+- **파일**: `data/remote/EventsApi.kt`, `data/repository/EventRepository.kt`, `ui/events/{AddEventScreen,TagAddDialog}.kt`, `ui/home/{EventSaveErrors,HomeViewModel}.kt`, `MainActivity.kt`, `testing/Fakes.kt`(sharedTest).
+- **테스트**: `TagOptionsTest`(+2), `TagAddErrorTest`(4), `EventRepositoryTest`(+3: 201·200 본문 `{"label":"Lab"}`, 409 `tag_limit`, 400 label). 합쳐서 9건(975 → 984).
+- **확인**: 단위 + 에뮬레이터. "+ 추가" → `Lab` → "프로필 기본"으로 골라졌고 `lab` 을 다시 넣어도 목록에 Lab 한 줄이었다. 에뮬레이터는 ASCII 만 입력할 수 있어 한글 이름은 보지 않았다.
+### B2. 저장한 집 서버 동기화 — `e024b4d` (Figma F-50)
+- **바뀐 것**: 기기의 집 목록(`SavedHomesStore`)을 `POST /api/saved-places/bulk/` 로 한 번 올리고, 200 이 오면 서버 목록으로 바꾼다. 그 뒤 추가·삭제·"기본으로"는 API 로 한다(`make-default`). 일정 출발지가 저장한 집이면 생성·수정에 `origin_place_id` 를 보내고, 이때 스위치가 꺼져 있으면 `include_prep: false` 도 보낸다. 설정에는 "다른 집은 계정에 저장돼 다른 기기에서도 보임…" 안내를 보인다. 서버가 404·405 로 답하면 기기 목록을 그대로 쓴다(추가는 기기에 저장). 네트워크 오류·5xx 는 기기 목록을 남기고 나중에 다시 올린다. 400 이면 그 앱 실행 동안은 기기 모드다. 한도(5개)·기본 집과 같은 곳(`same_as_default`) 안내 문구를 더했다. 저장한 집 수정(PATCH) 화면은 만들지 않았다.
+- **파일**: `data/remote/{SavedPlacesApi,ApiClient,EventsApi}.kt`, `data/repository/{SavedPlacesRepository,EventRepository,EventEditPatch}.kt`, `data/local/SavedHomesStore.kt`, `domain/model/{SavedHome,SavedHomeSync}.kt`, `ui/home/HomeViewModel.kt`, `ui/settings/SettingsScreen.kt`, `ui/events/AddEventScreen.kt`.
+- **테스트**: `SavedHomeSyncTest`(9), `SavedPlacesRepositoryTest`(9), `SavedHomesTest`(+1), `EventRepositoryTest`(+2), `EventEditPatchTest`(+4). 합쳐서 25건(987 → 1012). `PrefsScopeAuditTest` 는 같은 prefs 파일이라 그대로 통과한다.
+- **확인**: 단위 + 에뮬레이터. 이전 빌드(`5dc51ef`)에 집 두 개(Home2, Home3)를 저장한 뒤 새 빌드로 덮어 설치했더니 두 행이 남았고 서버 로그에 `POST /api/saved-places/bulk/` 200, 서버 목록 `['Home3', 'Home2']` 였다. 출발지 선택에 "🏠 Home3 / Home2"가 보였고 Home2 에서 출발하는 일정을 저장하니 DB 에 `origin_place_id = 2`, 결정 화면에 "Home2에서 출발"이 떴다.
+- **보지 못한 것**: 저장한 집 삭제·"기본으로"·`same_as_default` 오류를 기기에서 직접 눌러 보지 않았다(단위 테스트만). `HomeViewModel` 의 동기화 흐름은 단위 테스트가 없다.
+### B3, X1, T2. 출발 전 표시 · 버퍼 문구 · 준비 시간 이유 — `b067d14` (Figma F-54)
+- **B3**: 알람을 끌 때와 출발 10분 전의 `POST /api/routes/live` 에 `"context": "pre_departure"` 를 싣는다(`TripTrackingService.runPreDepartureCheck` 만 `preDeparture = true`). 이동 중 갱신은 `context` 를 보내지 않는다(null 이면 Gson 이 빼 준다). 테스트 `EventRepositoryTest`(+1), `TripLiveRouteBackgroundContractTest`(소스 계약을 새 호출에 맞춤). 본문은 단위로만 확인했고 서버 로그로 `context` 를 보지는 않았다.
+- **X1**: 안전 버퍼 기본이 5분이 된 것(`5dc51ef`)에 맞춰 `EventRepository.kt` 의 주석 "기본 10분"을 고쳤다. 화면 문구에는 10분 기본 버퍼를 말하는 곳이 없어 바뀐 문구는 없다.
+- **T2**: 알람 결정 화면 ④ "계산 방법"의 준비 시간 줄이 `include_prep == true` 이고 출발지가 집이 아니며 저장한 집도 아닐 때 "준비 시간 포함(직접 켬) · "으로 시작한다(`prepEnabledByUser`, `PREP_USER_ENABLED_REASON`). 테스트 `PrepReasonTest`(2). B3·X1·T2 합쳐서 3건(984 → 987).
+### B4. 주간 리포트 기상 패널 — `2da5146` (Figma F-51, F-52)
+- **바뀐 것**: 주간 응답의 `wake` 를 ⑧ 카드 "기상 · 이번 주"(울린 알람, 미루기, 끄기까지 중간값, 요일 칸)와 ⑨ 카드 "기상"으로 그린다. `wake` 가 null 이거나 `alarms_fired` 가 0 이면 카드를 숨긴다. 중간값이 없으면 "기록 없음"/"—". 숫자는 모두 서버 값이다.
+- **파일**: `data/remote/ReportsApi.kt`, `domain/model/WeeklyReport.kt`, `ui/report/{ReportMapping,WeeklyReportScreen,ReportDayScreen,ReportPreviewData}.kt`.
+- **테스트**: `ReportMappingTest`(+5), `NetworkDtoNullSafetyTest`(+1). 합쳐서 6건(1012 → 1018).
+- **확인**: 단위 + 에뮬레이터. 알람을 울려 한 번 미루고 끈 뒤 패널에 울린 알람 2번, 미루기 1번, 끄기까지 31초, 금요일 칸 "0:31"·"미룸 1"이 보였다. 열린 것 m2 참조(이 숫자가 틀린 이유).
+### B5. 이메일 인증 — `1bc8617` (Figma F-53, F-53b, F-53c)
+- **바뀐 것**: 설정에 "이메일 인증" 행("아직 인증하지 않음 · 로그인에는 필요 없음", 인증되면 "인증됨")과 코드 입력 화면을 더했다. `POST /api/auth/me/email/verify` 로 코드를 받고(`expires_in` 600초), `…/verify/confirm {code}` 로 확인한다. 409(이미 인증·메일 못 받는 계정), 400 세 가지 코드, 429 에 각각 문구가 있다. 404·405 는 "아직 서버에서 지원하지 않아요". 로그인은 막지 않는다. 행은 `email_verified` 와 계정 이메일을 알 때만 보인다. 코드는 메모리에만 두며 저장하지 않으므로 `wipeAll`·감사 테스트·백업 제외는 바꾸지 않았다. HTTP 로그에서는 `"code"` 의 4~8자리 숫자를 가린다(`ApiClient.VERIFY_CODE_FIELD`).
+- **파일**: `data/remote/{AuthApi,ApiClient}.kt`, `data/repository/AuthRepository.kt`, `ui/settings/{EmailVerifyState,EmailVerifyScreen,SettingsScreen}.kt`, `ui/nav/AppRoute.kt`, `ui/home/HomeViewModel.kt`, `MainActivity.kt`.
+- **테스트**: `AuthRepositoryEmailVerifyTest`(9), `ApiLogRedactionTest`(+1), `AuthResponseNullSafetyTest`(+1). 합쳐서 11건(1018 → 1029).
+- **확인**: 단위 + 에뮬레이터. 설정 행 → 서버 콘솔의 코드 입력 → "인증됨". 로그아웃·로그인 뒤에도 "인증됨"이다. "코드 다시 받기" 대기 시간은 보지 않았다.
+### X·S·T. 나머지
+- **S1 비밀번호 찾기·변경 끝까지 확인**: 에뮬레이터 + 로컬 서버. 비밀번호 찾기 → 콘솔 코드 → 새 비밀번호 → 로그인됨(`/password/reset/confirm` 200). 설정 → 비밀번호 변경으로 원래 비밀번호로 되돌리니 200, "비밀번호를 바꿨어요. 다른 기기는 로그아웃됐어요"가 뜨고 앱은 로그인된 채였다. 앱 코드는 바꾸지 않았다.
+- **T1 (task.md L223)**: A2 로 해결. 도착지 아래 줄을 에뮬레이터에서 봤다.
+- **T2 (task.md L224)**: `9616680` 에 스위치·초기 상태·출발지 변경 시 초기화·생성과 PATCH 전송이 있었고, 마지막 하위 항목인 결정 화면 이유 줄은 `b067d14` 에서 채웠다. 남은 차이는 스위치가 출발지를 따로 골랐을 때만 보이고(저장한 집 포함), 끄면 보통 `false` 를 보내지 않는다는 것이다(`include-prep-api.md` 5절 3번이 허용함). 예외는 저장한 집(B2)이다. 서버가 저장한 집 출발을 집으로 쳐서 준비 시간을 넣으므로, 끈 것을 `false` 로 보낸다(`createIncludePrep`).
+- **T3 (task.md L250)**: B1 로 해결.
+### 열린 것
+- **m1 (B2) 첫 업로드 중 추가·삭제가 덮어써짐**: 처음 `bulk` 업로드가 서버 응답을 기다리는 동안 설정에서 집을 추가하거나 지우면 기기 목록에만 반영되고(`synced` 가 아직 false), 200 이 오면 서버 목록이 그 위를 덮는다. 사용자당 한 번, 응답이 사용자의 저장보다 늦을 때만 생긴다. 고치는 방법: 업로드가 끝날 때까지 추가·삭제를 막거나, 200 뒤에 올라가지 않은 행을 다시 올린다(`HomeViewModel.kt:4034-4043`, `saveExtraHomeOnDevice`).
+- **m2 (B4) 미룬 알람이 두 번 셈됨**: 미룬 뒤 다시 울린 알람의 로그가 새 `alarmAtMillis` 를 `alarm_at` 으로 보낸다(`alarm/AlarmLogQueue.kt:177`). 서버는 (일정, `alarm_at`)을 알람 하나로 보므로 한 번 미룬 알람이 알람 2개로 세어지고 끄기까지 시간은 다시 울린 때부터 잰다. 에뮬레이터에서 실제로 알람 2번·31초가 나왔다(맞는 값은 1번·약 5분 30초). 패널 설명 "미뤄서 다시 울린 것도 한 알람으로 셈"이 이 경우 틀린다. 고치는 방법: 미룬 일정에 처음 알람 시각을 남기고 다시 울린 로그에 그 값을 `alarm_at` 으로 보낸다(`AlarmSchedule`, 저장소, 인텐트, 로그 입력을 건드려서 이번에 하지 않음).
+- **m3 (Figma)**: F-50 의 `same_as_default` 오류는 프레임처럼 이름 칸 아래가 아니라 폼 아래의 기존 오류 줄(`HomeSetupState.error`)에 나온다.
+- **m4 (테스트)**: `HomeViewModel` 이 `Application` 을 요구해서 `syncSavedHomes`, `onAddEventClick`, `onCleared`, `logout`, 이메일 인증 흐름은 단위 테스트가 없다. 결정은 테스트된 순수 함수로 뺐고 에뮬레이터로 확인했다.
+- 기기 테스트(`androidTest`)는 이번에도 컴파일만 했다. 실기기 확인과 공용 서버 확인은 하지 않았다.
+- 에뮬레이터 확인 중 홈이 스크립트로 바꾼 계획을 앱을 다시 시작하기 전까지 보이지 않은 적이 있다(당겨서 새로고침 첫 시도). 테스트 준비 방식 때문일 수 있고 더 보지 않았다.
+- `backend-requests.md` 에 새로 적은 요청은 없다. 이번 필요는 모두 0.20.0 에 있다.
 ## 정한 기본값
 코드로 확인한 값이다. 바꾸고 싶으면 괄호의 상수를 고친다.
 - 이동 중 경로 바꾸기 알림은 탑승 중이면 미룬다. 6 m/s(약 22 km/h) 이상으로 움직이면 2분 동안 탑승 중으로 본다(`RerouteAlert.RIDING_SPEED_MPS`, `RIDING_HOLD_MILLIS`). 남은 이동이 5분 이하이거나 목적지까지 400m 이하여도 알리지 않는다(`NEAR_ARRIVAL_MINUTES`, `NEAR_ARRIVAL_METERS`). 미룬 경로는 "알림 보냄"에 넣지 않아서 내린 뒤 다음 갱신에서 알린다.
@@ -260,19 +322,26 @@
 - 알람 전 더 빠른 경로는 5분 이상 빠를 때만 제안한다(`FasterRoute.MIN_FASTER_MINUTES`).
 - 출발 전 확인은 한 번의 추적에서 최대 2번이다(`PreDepartureCheck.MAX_CALLS`). 두 번째는 `max(출발 − 10분, 첫 확인 + 5분)` 에 하고(`LEAD_MILLIS`, `MIN_GAP_MILLIS`), 20분이 지난 결과는 카드로 보이지 않는다(`MAX_AGE_MILLIS`).
 - 마지막 로그인 이메일은 기기 단위로 저장하고 로그아웃으로 지우지 않는다(`LastEmailStore`). 확인 코드는 6자리다(`AuthViewModel.RESET_CODE_LENGTH`).
-- 서버가 비밀번호 엔드포인트에 404·405 로 답하면 "아직 서버에서 지원하지 않아요"를 보인다.
+- 서버가 비밀번호 엔드포인트에 404·405 로 답하면 "아직 서버에서 지원하지 않아요"를 보인다. 저장한 집·이메일 인증도 같다.
+- 쓰다 만 일정(초안)은 디스크에 쓰지 않고 프로세스 안에만 둔다(`AddDraftHolder`). 제목·목적지·출발지·경로·반복 요일 중 하나라도 채웠으면 초안이다. 날짜·시각·종류만으로는 초안이 아니다.
+- 일정 추가 화면을 새로 열 때마다 `client_request_id` 로 새 UUID 를 만든다. 실패한 뒤 다시 시도하는 동안은 같은 값이다.
+- 직접 만드는 종류 이름은 20자까지이고 계정당 20개까지다(`TAG_LABEL_MAX`, 서버 `tag_limit`). τ 는 보내지 않아서 "프로필 기본"이다.
+- 저장한 집 `bulk` 업로드는 한 번에 20개까지이고 기기 목록은 5개까지다(`SAVED_PLACES_BULK_MAX`, `SavedHomes.MAX`). 서버가 200 으로 답해야 기기 목록을 서버 목록으로 바꾼다.
+- 출발 전 확인(알람을 끌 때, 출발 10분 전)만 `context: "pre_departure"` 를 싣는다. 이동 중 갱신은 싣지 않는다.
+- 주간 기상 카드는 `wake` 가 있고 `alarms_fired` 가 0 보다 클 때만 보인다.
+- 이메일 인증 코드는 6자리다(`EmailVerifyState.CODE_LENGTH`). 코드는 저장하지 않는다.
 
 ## 사용자나 팀이 해야 하는 것
 - 이 PC 의 디버그 키를 카카오·구글 콘솔에 등록한다. 지금은 김수연의 디버그 키만 있다. 값은 [R3-4](backend-requests.md) 에 있다.
 - 실기기에서 확인한다: 카카오·구글 로그인, 이동 중 경로 바꾸기 헤드업 알림, 추적 알림의 "도착했어요", GPS 출발·도착, 집을 나선 뒤 "기록 끝내기"가 안 나오는지, 로고와 스플래시, 핀치 줌 느낌.
 - `JWT_ROTATE_REFRESH_TOKENS=1` 은 팀원이 이 브랜치의 앱을 쓴 뒤에 켠다([R3-5](backend-requests.md)).
-- 서버 쪽 요청: [R3-1 ~ R3-11](backend-requests.md). 이메일 계정 기능(비밀번호 찾기·변경)은 R3-9 가 나와야 동작한다. 앞의 `SavedPlace`(R3-2)가 나오면 앱이 기기 목록을 한 번 올리는 일을 더해야 한다.
+- 서버 쪽 요청: [R3-1 ~ R3-11](backend-requests.md). 이메일 계정 기능(비밀번호 찾기·변경)은 R3-9 가 나와야 동작한다. `SavedPlace`(R3-2)의 기기 목록 올리기는 11-06 에 앱에 넣었다(B2).
 - 공용 서버(Render)가 이 브랜치가 쓰는 필드(`preferred_key`, `switch_suggestion`, `skipped`, 패치 0034·0036·0038 등)를 이미 내는지는 보지 않았다. 공용 서버는 부르지 않았다.
 
 ## 하지 않은 것
 - **도착 감지 개선(활동 인식·기압계·Wi-Fi)**: 팀 회의에서 새 센서는 쓰지 않기로 했다("센서 필요 없을 듯").
-- **이메일 인증(R3-10)**: 계약만 적었고 화면은 없다. 5b·5c·19b 는 11-03 밤에 만들었다.
-- **리포트의 수면·미루기·요일별 조정 패널**: 기록하는 데이터를 읽을 API 가 없다([R3-6](backend-requests.md)).
+- **이메일 인증(R3-10)**: 11-06 에 설정 화면을 만들었다(B5). 5b·5c·19b 는 11-03 밤에 만들었다.
+- **리포트의 수면·요일별 조정 패널**: 수면·요일별 자동 조정은 읽을 API 가 없다. 알람 울림·미루기·기상 패널은 11-06 에 만들었다(B4).
 
 ## 에뮬레이터 확인 (11-02)
 - **준비**: AVD `SWPP_APP`, `44fd887` 의 디버그 빌드(`devServerHost=10.0.2.2`), 이 워크트리의 로컬 백엔드(main 과 같은 코드, 0.17.0)를 일회용 SQLite 로, 시험 계정, 집 신림역(37.4842, 126.9295), 일정 "GPS check"(서울대학교, 37.4598, 126.9511), 가짜 GPS 는 `adb emu geo fix <lng> <lat>`. 공용 서버는 쓰지 않았다.
