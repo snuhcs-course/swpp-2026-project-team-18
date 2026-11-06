@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -86,6 +87,10 @@ fun SettingsScreen(
     onRetryLoginMethods: () -> Unit = {},
     /** "비밀번호" 줄의 [변경]. null 이면 줄을 그리지 않는다. 비밀번호 로그인이 있는 계정에서만 그린다 */
     onChangePassword: (() -> Unit)? = null,
+    /** "이메일 인증" 줄의 [인증](R3-10). null 이면 줄을 그리지 않는다 */
+    onVerifyEmail: (() -> Unit)? = null,
+    /** 인증 코드를 보내는 중 */
+    emailVerifySending: Boolean = false,
     /** "+ 다른 집 추가". null 이면 다른 집 칸을 그리지 않는다 */
     onAddExtraHome: (() -> Unit)? = null,
     onMakeHomeDefault: (String) -> Unit = {},
@@ -120,6 +125,21 @@ fun SettingsScreen(
         )
 
         AccountCard(nickname = state.nickname, initials = avatarInitials, email = state.accountEmail)
+        // Figma F-53c `530:85`. 서버가 `email_verified` 를 주고 메일을 받을 수 있는 주소일 때만 그린다.
+        if (onVerifyEmail != null && state.emailVerified != null && state.accountEmail != null) {
+            Box(Modifier.testTag("settings_email_verify")) {
+                if (state.emailVerified) {
+                    SettingRow(label = "이메일 인증", value = "인증됨", valueColor = JitColor.Green)
+                } else {
+                    SettingRow(
+                        label = "이메일 인증",
+                        value = "아직 인증하지 않음 · 로그인에는 필요 없음",
+                        action = if (emailVerifySending) "보내는 중…" else "인증",
+                        onClick = if (emailVerifySending) null else onVerifyEmail,
+                    )
+                }
+            }
+        }
         // Figma F-40 `507:57`. 방법을 아직 모르거나(null) 소셜만 있는 계정에는 그리지 않는다.
         if (onChangePassword != null && state.loginMethods?.contains("password") == true) {
             Box(Modifier.testTag("settings_password")) {
@@ -472,15 +492,17 @@ private fun AccountCard(nickname: String, initials: String, email: String?) {
 private fun SettingRow(
     label: String,
     value: String,
-    action: String,
-    onClick: () -> Unit,
+    action: String? = null,
+    onClick: (() -> Unit)? = null,
+    valueColor: Color = JitColor.TextPrimary,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Card))
             .background(JitColor.Surface)
-            .clickable(onClick = onClick)
+            // 눌러도 할 일이 없는 줄(인증됨)과 처리 중인 줄은 누를 수 없다.
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -489,22 +511,24 @@ private fun SettingRow(
             Spacer(Modifier.height(3.dp))
             Text(
                 text = value,
-                color = JitColor.TextPrimary,
+                color = valueColor,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
             )
         }
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = action,
-            color = JitColor.Accent,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .clip(RoundedCornerShape(999.dp))
-                .background(JitColor.Surface2)
-                .padding(horizontal = 11.dp, vertical = 6.dp),
-        )
+        if (action != null) {
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = action,
+                color = if (onClick != null) JitColor.Accent else JitColor.TextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(JitColor.Surface2)
+                    .padding(horizontal = 11.dp, vertical = 6.dp),
+            )
+        }
     }
 }
 

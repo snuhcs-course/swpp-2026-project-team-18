@@ -88,6 +88,7 @@ import com.swpp.wakeup.domain.model.RiskOptionsView
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.ui.nav.AppRoute
 import com.swpp.wakeup.ui.nav.NavState
+import com.swpp.wakeup.ui.settings.EmailVerifyState
 import com.swpp.wakeup.ui.settings.PasswordChangeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -224,6 +225,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 설정 계정 카드에 보일 이메일. 소셜 자리 표시 주소(`@social.invalid`)면 null */
         val accountEmail: String? = null,
+        /** 이메일 인증을 마쳤는가(R3-10). 구버전 서버·아직 모르면 null — 설정 줄을 그리지 않는다 */
+        val emailVerified: Boolean? = null,
         /**
          * 가진 로그인 방법(`password`·`kakao`·`google`). 아직 모르면 null — 설정을 열 때 받는다
          * (social-login-api.md §4). (Partly AI-generated (Claude))
@@ -1359,6 +1362,88 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- 이메일 인증 (R3-10, Figma F-53) — Partly AI-generated (Claude) -----------------
+    private val _emailVerify = MutableStateFlow(EmailVerifyState())
+    val emailVerify: StateFlow<EmailVerifyState> = _emailVerify.asStateFlow()
+
+    /** 설정의 "이메일 인증" 줄. 코드를 보내고, 보냈으면 입력 화면을 연다. 인증은 로그인을 막지 않는다 */
+    fun startEmailVerify() {
+        if (_emailVerify.value.sending) return
+        _emailVerify.value = EmailVerifyState(sending = true)
+        viewModelScope.launch {
+            when (val result = authRepository.requestEmailVerify()) {
+                is AuthRepository.EmailVerifyResult.Sent -> {
+                    _emailVerify.value = EmailVerifyState(sentTo = _state.value.accountEmail)
+                    _nav.update { it.copy(stack = it.stack + AppRoute.VerifyEmail, forward = true) }
+                }
+                is AuthRepository.EmailVerifyResult.AlreadyVerified,
+                is AuthRepository.EmailVerifyResult.Verified -> {
+                    _emailVerify.value = EmailVerifyState()
+                    _state.update { it.copy(emailVerified = true) }
+                    notify("이미 인증된 이메일이에요")
+                }
+                is AuthRepository.EmailVerifyResult.Failure -> {
+                    _emailVerify.value = EmailVerifyState()
+                    notify(result.message)
+                }
+            }
+        }
+    }
+
+    /** 숫자만 6자리까지 받는다 */
+    fun onEmailVerifyCodeChange(value: String) =
+        _emailVerify.update {
+            it.copy(code = value.filter(Char::isDigit).take(EmailVerifyState.CODE_LENGTH), error = null, info = null)
+        }
+
+    /** "코드 다시 받기". 서버가 이전 코드를 무효로 만든다 */
+    fun resendEmailVerify() {
+        val form = _emailVerify.value
+        if (form.sending || form.busy) return
+        _emailVerify.update { it.copy(sending = true, error = null, info = null) }
+        viewModelScope.launch {
+            when (val result = authRepository.requestEmailVerify()) {
+                is AuthRepository.EmailVerifyResult.Sent -> _emailVerify.update {
+                    it.copy(sending = false, code = "", info = "코드를 다시 보냈음 · 이전 코드는 쓸 수 없음")
+                }
+                is AuthRepository.EmailVerifyResult.AlreadyVerified,
+                is AuthRepository.EmailVerifyResult.Verified -> finishEmailVerify("이미 인증된 이메일이에요", null)
+                is AuthRepository.EmailVerifyResult.Failure -> _emailVerify.update {
+                    it.copy(sending = false, error = result.message)
+                }
+            }
+        }
+    }
+
+    /** "인증하기". 6자리가 찼을 때만 */
+    fun confirmEmailVerify() {
+        val form = _emailVerify.value
+        if (!form.canSubmit) return
+        _emailVerify.update { it.copy(busy = true, error = null, info = null) }
+        viewModelScope.launch {
+            when (val result = authRepository.confirmEmailVerify(form.code)) {
+                is AuthRepository.EmailVerifyResult.Verified -> finishEmailVerify("이메일을 인증했어요", result.user?.email)
+                is AuthRepository.EmailVerifyResult.AlreadyVerified -> finishEmailVerify("이미 인증된 이메일이에요", null)
+                is AuthRepository.EmailVerifyResult.Failure -> _emailVerify.update {
+                    it.copy(busy = false, error = result.message)
+                }
+                is AuthRepository.EmailVerifyResult.Sent -> _emailVerify.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    private fun finishEmailVerify(message: String, email: String?) {
+        _emailVerify.value = EmailVerifyState()
+        _state.update {
+            it.copy(
+                emailVerified = true,
+                accountEmail = email?.let(SocialLogin::visibleEmail) ?: it.accountEmail,
+            )
+        }
+        notify(message)
+        // 열린 화면일 때만 닫는다. 기다리는 동안 뒤로 갔다면 그대로 둔다.
+        if (_nav.value.current is AppRoute.VerifyEmail) goBack()
+    }
     // --- 로그인 연결 (social-login-api.md §3) — Partly AI-generated (Claude) ---------
 
     /** 설정의 "로그인 연결" 이 쓰는 로그인 방법을 받는다(`GET /api/auth/me`) */
@@ -1370,6 +1455,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         loginMethods = result.user.loginMethods.orEmpty(),
                         loginMethodsFailed = false,
                         accountEmail = SocialLogin.visibleEmail(result.user.email),
+                        emailVerified = result.user.emailVerified,
                     )
                 }
 

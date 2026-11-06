@@ -39,6 +39,22 @@ class AuthResponseNullSafetyTest {
     }
 
     @Test
+    fun `email_verified 키가 없거나 널이면 널이다`() {
+        val missing = gson.fromJson("""{"id": 7, "email": "a@b.c", "nickname": "가"}""", UserDto::class.java)
+        assertNull("구버전 서버는 키를 주지 않는다", missing.emailVerified)
+        val explicit = gson.fromJson(
+            """{"id": 7, "email": "a@b.c", "nickname": "가", "email_verified": null}""",
+            UserDto::class.java,
+        )
+        assertNull(explicit.emailVerified)
+        val verified = gson.fromJson(
+            """{"id": 7, "email": "a@b.c", "nickname": "가", "email_verified": true}""",
+            UserDto::class.java,
+        )
+        assertEquals(true, verified.emailVerified)
+    }
+
+    @Test
     fun `명시적 널도 견딘다`() {
         val body = gson.fromJson(
             """{"access": null, "refresh": null, "user": null}""",

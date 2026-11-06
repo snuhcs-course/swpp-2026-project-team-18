@@ -89,6 +89,7 @@ import com.swpp.wakeup.ui.places.MapPickScreen
 import com.swpp.wakeup.ui.report.ReportDayScreen
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
 import com.swpp.wakeup.ui.settings.ChangePasswordScreen
+import com.swpp.wakeup.ui.settings.EmailVerifyScreen
 import com.swpp.wakeup.ui.settings.SettingsScreen
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
 import com.swpp.wakeup.data.local.SessionState
@@ -228,6 +229,7 @@ private fun MainHost(
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val addResumePrompt by viewModel.addResumePrompt.collectAsStateWithLifecycle()
     val passwordChange by viewModel.passwordChange.collectAsStateWithLifecycle()
+    val emailVerify by viewModel.emailVerify.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
     val tagAdd by viewModel.tagAdd.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
@@ -869,6 +871,14 @@ private fun MainHost(
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                 )
+                AppRoute.VerifyEmail -> EmailVerifyScreen(
+                    state = emailVerify,
+                    onCodeChange = viewModel::onEmailVerifyCodeChange,
+                    onSubmit = viewModel::confirmEmailVerify,
+                    onResend = viewModel::resendEmailVerify,
+                    onBack = viewModel::goBack,
+                    modifier = Modifier.padding(innerPadding),
+                )
                 AppRoute.Settings -> SettingsScreen(
                     state = state,
                     avatarInitials = viewModel.avatarInitials(),
@@ -901,6 +911,8 @@ private fun MainHost(
                     onSocialUnlink = viewModel::unlinkSocial,
                     onRetryLoginMethods = viewModel::loadLoginMethods,
                     onChangePassword = viewModel::openChangePassword,
+                    onVerifyEmail = viewModel::startEmailVerify,
+                    emailVerifySending = emailVerify.sending,
                     // 기기에만 둔 다른 집(Figma ⑯ 변형 `498:9` ①)
                     onAddExtraHome = viewModel::openExtraHomeSetup,
                     onMakeHomeDefault = viewModel::makeSavedHomeDefault,

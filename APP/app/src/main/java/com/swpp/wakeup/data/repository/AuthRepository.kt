@@ -12,6 +12,7 @@ import com.swpp.wakeup.data.remote.LoginRequest
 import com.swpp.wakeup.data.remote.PasswordChangeRequest
 import com.swpp.wakeup.data.remote.PasswordCheckRequest
 import com.swpp.wakeup.data.remote.PasswordCheckResponse
+import com.swpp.wakeup.data.remote.EmailVerifyConfirmRequest
 import com.swpp.wakeup.data.remote.PasswordResetConfirmRequest
 import com.swpp.wakeup.data.remote.PasswordResetRequest
 import com.swpp.wakeup.data.remote.RegisterRequest
@@ -78,6 +79,15 @@ class AuthRepository(
     sealed interface ResetRequestResult {
         data class Sent(val expiresInSeconds: Int?) : ResetRequestResult
         data class Failure(val message: String) : ResetRequestResult
+    }
+
+    // Partly AI-generated (Claude)
+    /** 이메일 인증 코드 요청·확인 결과(R3-10). 인증은 로그인을 막지 않는다 */
+    sealed interface EmailVerifyResult {
+        data class Sent(val expiresInSeconds: Int?) : EmailVerifyResult
+        data class Verified(val user: UserDto?) : EmailVerifyResult
+        data object AlreadyVerified : EmailVerifyResult
+        data class Failure(val message: String) : EmailVerifyResult
     }
 
     // Partly AI-generated (Claude)
@@ -346,6 +356,55 @@ class AuthRepository(
             nickname = user.nickname,
         )
         return AuthResult.Success(user)
+    }
+
+    // Partly AI-generated (Claude)
+    /** 내 이메일로 인증 코드를 보낸다(`POST /api/auth/me/email/verify`). 이미 인증했으면 [EmailVerifyResult.AlreadyVerified] */
+    suspend fun requestEmailVerify(): EmailVerifyResult = emailVerifyCall { api.requestEmailVerify() }
+        .let { (response, failure) ->
+            if (response?.isSuccessful == true) EmailVerifyResult.Sent(response.body()?.expiresIn) else failure!!
+        }
+
+    // Partly AI-generated (Claude)
+    /** 코드를 확인한다(`POST /api/auth/me/email/verify/confirm`). 코드는 앞뒤 공백을 자른다 */
+    suspend fun confirmEmailVerify(code: String): EmailVerifyResult =
+        emailVerifyCall { api.confirmEmailVerify(EmailVerifyConfirmRequest(code.trim())) }
+            .let { (response, failure) ->
+                if (response?.isSuccessful == true) EmailVerifyResult.Verified(response.body()?.user) else failure!!
+            }
+
+    /** 호출하고 (성공 응답, null) 또는 (null, 실패 결과) 로 돌려준다. 예외를 밖으로 던지지 않는다 */
+    private suspend fun <T> emailVerifyCall(
+        block: suspend () -> retrofit2.Response<T>,
+    ): Pair<retrofit2.Response<T>?, EmailVerifyResult?> = try {
+        val response = block()
+        if (response.isSuccessful) {
+            response to null
+        } else {
+            val error = errorBodyOf(response.errorBody()?.string())
+            null to when {
+                response.code() == 409 && error?.code == "email_already_verified" -> EmailVerifyResult.AlreadyVerified
+                else -> EmailVerifyResult.Failure(emailVerifyMessage(response.code(), error))
+            }
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: IOException) {
+        null to EmailVerifyResult.Failure(MESSAGE_NETWORK)
+    } catch (e: Exception) {
+        null to EmailVerifyResult.Failure(MESSAGE_UNKNOWN)
+    }
+
+    private fun emailVerifyMessage(status: Int, error: ApiErrorBody?): String = when {
+        status == 404 || status == 405 -> MESSAGE_UNSUPPORTED
+        status == 429 || error?.code == "throttled" -> "요청이 많음. 잠시 뒤 다시 시도"
+        else -> when (error?.code) {
+            "email_not_deliverable" -> "이 주소로는 메일을 보낼 수 없음"
+            "invalid_verify_code" -> "코드가 맞지 않음"
+            "verify_code_expired" -> "코드가 만료됨. 다시 받아야 함"
+            "too_many_attempts" -> "시도가 너무 많음. 코드를 다시 받아야 함"
+            else -> error?.message?.takeIf { it.isNotBlank() } ?: defaultMessage(status)
+        }
     }
 
     // Partly AI-generated (Claude)

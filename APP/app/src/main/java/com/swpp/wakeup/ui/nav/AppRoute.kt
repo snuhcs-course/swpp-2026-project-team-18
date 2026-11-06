@@ -73,6 +73,9 @@ sealed interface AppRoute {
     /** Figma ⑯ 변형 "비밀번호 변경"(F-41). [Settings] 의 "비밀번호" 줄에서 들어온다 */
     data object ChangePassword : AppRoute
 
+    /** Figma ⑯ 변형 이메일 인증(F-53). [Settings] 의 이메일 인증 줄에서 들어온다. 로그인을 막지 않는다 */
+    data object VerifyEmail : AppRoute
+
     /**
      * Figma ⑮ 준비 시간. 가입 직후 평소 외출 준비 시간을 받는다.
      *

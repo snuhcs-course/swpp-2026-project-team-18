@@ -217,6 +217,14 @@ open class FakeAuthApi : AuthApi {
     override suspend fun changePassword(
         body: com.swpp.wakeup.data.remote.PasswordChangeRequest,
     ): Response<com.swpp.wakeup.data.remote.PasswordChangeResponse> = httpError(404)
+
+    // 이메일 인증(R3-10). 서버가 아직 없는 것처럼 404 가 기본이다.
+    override suspend fun requestEmailVerify(): Response<com.swpp.wakeup.data.remote.PasswordResetResponse> =
+        httpError(404)
+
+    override suspend fun confirmEmailVerify(
+        body: com.swpp.wakeup.data.remote.EmailVerifyConfirmRequest,
+    ): Response<com.swpp.wakeup.data.remote.SocialUserResponse> = httpError(404)
 }
 
 /**
