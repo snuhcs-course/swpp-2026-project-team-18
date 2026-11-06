@@ -5,6 +5,8 @@ import com.swpp.wakeup.data.remote.EventCreateRequest
 import com.swpp.wakeup.data.remote.EventDto
 import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.EventUpdateRequest
+import com.swpp.wakeup.data.remote.LiveRouteRequest
+import com.swpp.wakeup.data.remote.LiveRouteResponse
 import com.swpp.wakeup.data.remote.Paged
 import com.swpp.wakeup.data.remote.PlaceInput
 import com.swpp.wakeup.data.remote.PlaceReverseResponse
@@ -16,6 +18,7 @@ import com.swpp.wakeup.data.remote.RouteCandidateResponse
 import com.swpp.wakeup.data.remote.TagCreateRequest
 import com.swpp.wakeup.data.repository.EventRepository.HomeData
 import com.swpp.wakeup.data.repository.EventRepository.Result
+import com.swpp.wakeup.sensing.GeoPoint
 import com.swpp.wakeup.testing.FakeEventsApi
 import com.swpp.wakeup.testing.FakeProfileApi
 import com.swpp.wakeup.testing.errorJson
@@ -457,6 +460,28 @@ class EventRepositoryTest {
         val result = EventRepository(api, FakeProfileApi()).createTag("x") as Result.Failure
         assertEquals(400, result.status)
         assertEquals("이름을 입력해야 한다.", result.fields["label"])
+    }
+
+    // --- 출발 전 확인(B3) -------------------------------------------------------
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `출발 전 확인은 context pre_departure 를 싣고 기본 호출은 싣지 않는다`() = runTest {
+        val bodies = mutableListOf<LiveRouteRequest>()
+        val api = object : FakeEventsApi() {
+            override suspend fun liveRoute(body: LiveRouteRequest): Response<LiveRouteResponse> {
+                bodies += body
+                return ok(LiveRouteResponse(route = null))
+            }
+        }
+        val repo = EventRepository(api, FakeProfileApi())
+        val here = GeoPoint(37.48, 126.95)
+        assertTrue(repo.liveRoute(7L, here, preDeparture = true) is Result.Success)
+        assertTrue(repo.liveRoute(7L, here) is Result.Success)
+        val gson = Gson()
+        assertEquals("pre_departure", gson.toJsonTree(bodies[0]).asJsonObject.get("context").asString)
+        assertFalse(gson.toJsonTree(bodies[1]).asJsonObject.has("context"))
+        assertEquals(7L, gson.toJsonTree(bodies[1]).asJsonObject.get("event_id").asLong)
     }
 
     // --- 삭제·태그 ------------------------------------------------------------

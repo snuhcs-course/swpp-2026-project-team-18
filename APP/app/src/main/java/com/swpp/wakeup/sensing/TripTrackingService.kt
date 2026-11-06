@@ -427,7 +427,7 @@ class TripTrackingService : Service() {
         preDepartureCalls++
         val sessionGeneration = liveRouteSessionGeneration
         scope.launch {
-            val result = repository.liveRoute(current.eventId, GeoPoint(lat, lng))
+            val result = repository.liveRoute(current.eventId, GeoPoint(lat, lng), preDeparture = true)
             val route = (result as? EventRepository.Result.Success)?.data
             if (route == null) {
                 Log.i(TAG, "출발 전 경로 확인 결과 없음: 일정 ${current.eventId}")

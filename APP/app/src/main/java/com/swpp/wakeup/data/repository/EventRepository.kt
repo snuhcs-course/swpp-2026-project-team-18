@@ -393,10 +393,23 @@ class EventRepository(
      * 호출 간격은 [com.swpp.wakeup.domain.model.LiveRouteDecision] 이 정한다.
      * 이 함수는 부르라고 하면 부르기만 한다 — 간격 판단을 여기 섞으면 시험할
      * 수 없다.
+     *
+     * [preDeparture] 가 true 면 출발 전 확인(알람 끈 뒤, 출발 10분 전)이라고 서버에 알린다
+     * (`context: "pre_departure"`, reroute-api.md §4-1). 서버는 이 호출을 따로 기록하고 따로
+     * 센다. 기본 false 는 필드를 보내지 않아 이동 중 호출과 같다.
      */
-    suspend fun liveRoute(eventId: Long, here: GeoPoint): Result<LiveRoute?> = guard {
+    suspend fun liveRoute(
+        eventId: Long,
+        here: GeoPoint,
+        preDeparture: Boolean = false,
+    ): Result<LiveRoute?> = guard {
         val response = api.liveRoute(
-            LiveRouteRequest(eventId = eventId, lat = here.lat, lng = here.lng)
+            LiveRouteRequest(
+                eventId = eventId,
+                lat = here.lat,
+                lng = here.lng,
+                context = LIVE_CONTEXT_PRE_DEPARTURE.takeIf { preDeparture },
+            )
         )
         val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
 
@@ -948,6 +961,9 @@ class EventRepository(
 private const val TAG = "EventRepository"
 private const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
 
+/** `POST /api/routes/live` 본문의 `context`. 출발 전 확인(reroute-api.md §4-1) */
+internal const val LIVE_CONTEXT_PRE_DEPARTURE = "pre_departure"
+
 // AI-generated (Claude)
 /** 서버가 메시지를 주지 않았을 때(HTML 본문·빈 본문 등) 상태 코드별 문구. */
 private fun fallbackErrorMessage(code: Int): String = when (code) {
@@ -1260,7 +1276,21 @@ private fun meridiem(time: java.time.ZonedDateTime): String = if (time.hour < 12
  * 블록 관측으로 학습된 값까지 "고정값 · 기본 30분" 으로 적었다. 학습이 되고
  * 있는데 화면이 아니라고 말하면 사용자가 블록을 등록할 이유를 못 느낀다.
  */
-private fun prepNote(plan: AlarmPlanDto, blockCount: Int): String {
+private fun prepNote(plan: AlarmPlanDto, blockCount: Int, userEnabled: Boolean = false): String =
+    (if (userEnabled) PREP_USER_ENABLED_REASON else "") + prepSourceNote(plan, blockCount)
+
+/** 준비 시간 줄 맨 앞의 이유. 집이 아닌 출발지에서 사용자가 스위치를 켠 일정에만 붙는다 */
+internal const val PREP_USER_ENABLED_REASON = "준비 시간 포함(직접 켬) · "
+
+// Partly AI-generated (Claude)
+/**
+ * 준비 시간을 사용자가 직접 켰는가(`include_prep == true`, 집이 아닌 출발지). 출발지가 없으면
+ * 집이고, 저장한 집(`origin_place_id`)도 집으로 쳐서 서버가 알아서 준비 시간을 넣으므로 켠 것이 아니다.
+ */
+internal fun prepEnabledByUser(includePrep: Boolean?, originLat: Double?, originPlaceId: Long?): Boolean =
+    includePrep == true && originLat != null && originPlaceId == null
+
+private fun prepSourceNote(plan: AlarmPlanDto, blockCount: Int): String {
     val blocks = if (blockCount > 0) "블록 ${blockCount}개" else "블록"
     return when (plan.prepSource) {
         AlarmPlanDto.PREP_OBSERVED ->
@@ -1435,7 +1465,14 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
 
     val rows = buildList {
         plan.prepMinutes?.takeIf { prepApplies }?.let {
-            add(PlanRow("준비 시간", it, prepNote(plan, prepBlocks.size), PlanRow.Kind.PREP))
+            add(
+                PlanRow(
+                    "준비 시간",
+                    it,
+                    prepNote(plan, prepBlocks.size, prepEnabledByUser(includePrep, originLat, originPlaceId)),
+                    PlanRow.Kind.PREP,
+                ),
+            )
         }
         plan.travelMinutes?.let {
             val label = plan.travelMode?.takeIf(String::isNotBlank)?.let { m -> "$m 이동" }
@@ -1550,8 +1587,8 @@ internal fun SwitchSuggestionDto.toSuggestion(zone: ZoneId = ZoneId.systemDefaul
 
 // Partly AI-generated (Claude)
 /**
- * 안전 버퍼 줄의 근거. 서버 `buffer_source` 는 `fixed`(기본 10분) 또는 `learned`(지각 이력으로
- * 조정, todo §1 "안전 버퍼 10분 조정")다. 모르는 값은 고정값으로 본다.
+ * 안전 버퍼 줄의 근거. 서버 `buffer_source` 는 `fixed`(기본 5분, 서버 0.20.0 부터. 그 전에는 10분) 또는
+ * `learned`(지각 이력으로 조정, todo §1 안전 버퍼 조정)다. 모르는 값은 고정값으로 본다.
  */
 internal fun bufferNote(source: String?): String = when (source) {
     AlarmPlanDto.BUFFER_LEARNED -> "지각 기록으로 조정됨 · 문 앞에서 실제 출발까지의 여유"

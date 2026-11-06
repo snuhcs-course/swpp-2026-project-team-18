@@ -226,6 +226,8 @@ data class LiveRouteRequest(
     @SerializedName("event_id") val eventId: Long,
     val lat: Double,
     val lng: Double,
+    /** 출발 전 확인이면 `"pre_departure"`. null 이면 Gson 이 빼서 이동 중 호출과 같은 본문이 된다. */
+    val context: String? = null,
 )
 
 /**
@@ -356,6 +358,11 @@ data class EventDto(
     @SerializedName("origin_lat") val originLat: Double? = null,
     @SerializedName("origin_lng") val originLng: Double? = null,
     @SerializedName("origin_label") val originLabel: String? = null,
+    /**
+     * 출발지가 저장한 집(계정에 저장)이면 그 id, 아니면 null. 구버전 서버면 null.
+     * 저장한 집은 집으로 치므로 ④ 의 "직접 켬" 설명이 붙지 않는다.
+     */
+    @SerializedName("origin_place_id") val originPlaceId: Long? = null,
 
     @SerializedName("alarm_plan") val alarmPlan: AlarmPlanDto?,
     @SerializedName("created_at") val createdAt: String?,
