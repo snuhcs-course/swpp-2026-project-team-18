@@ -23,6 +23,14 @@ class SavedHomeSyncTest {
         SavedHome(id = id, label = label, name = "인계동 아파트", address = null, lat = lat, lng = 127.03, serverId = serverId)
 
     @Test
+    fun `처음 올리는 중은 동기화 작업이 돌고 아직 확인되지 않았을 때만이다`() {
+        assertEquals(true, savedHomesFirstUploadRunning(syncJobActive = true, synced = false))
+        assertEquals(false, savedHomesFirstUploadRunning(syncJobActive = true, synced = true))
+        assertEquals(false, savedHomesFirstUploadRunning(syncJobActive = false, synced = false))
+        assertEquals(false, savedHomesFirstUploadRunning(syncJobActive = false, synced = true))
+    }
+
+    @Test
     fun `서버 행은 client_uuid 를 화면 키로 쓰고 server id 를 남긴다`() {
         val h = row().toSavedHome()!!
         assertEquals("u-7", h.id)

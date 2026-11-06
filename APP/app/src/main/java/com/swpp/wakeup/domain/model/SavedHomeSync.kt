@@ -67,3 +67,13 @@ fun bulkItemsOf(homes: List<SavedHome>): List<SavedPlaceInput> = homes.take(SAVE
  * 세지 않는다.
  */
 fun skippedOverLimit(dto: SavedPlacesListDto): Int = dto.skipped.orEmpty().count { it?.reason == SKIP_REASON_LIMIT }
+
+// Partly AI-generated (Claude)
+/**
+ * 처음 올리는 중인가. 동기화 작업이 도는 동안 서버가 아직 "확인함" 표시를 만들지 않았으면 true. 이때 집을
+ * 더하거나 지우면 업로드 응답(`replaceSynced`)이 그 변경을 덮어쓰므로 막는다(code-review m1).
+ */
+fun savedHomesFirstUploadRunning(syncJobActive: Boolean, synced: Boolean): Boolean = syncJobActive && !synced
+
+/** 처음 올리는 중에 집을 더하거나 지우거나 기본으로 바꾸려 할 때의 안내 */
+const val SAVED_HOMES_UPLOADING_NOTICE = "저장한 집을 서버에 올리는 중이에요. 잠시 뒤 다시 해 주세요"

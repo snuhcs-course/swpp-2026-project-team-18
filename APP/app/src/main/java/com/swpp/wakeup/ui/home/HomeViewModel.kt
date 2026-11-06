@@ -40,6 +40,8 @@ import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.ArrivalLedger
 import com.swpp.wakeup.domain.model.SavedHome
 import com.swpp.wakeup.domain.model.SavedHomes
+import com.swpp.wakeup.domain.model.SAVED_HOMES_UPLOADING_NOTICE
+import com.swpp.wakeup.domain.model.savedHomesFirstUploadRunning
 import com.swpp.wakeup.domain.model.SocialLogin
 import com.swpp.wakeup.domain.model.SocialProvider
 import com.swpp.wakeup.ui.auth.SocialSignIn
@@ -4066,8 +4068,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 처음 서버에 올리는 중이면 안내만 띄우고 true 를 돌려준다(code-review m1). 이때 더하거나 지운 집은
+     * 업로드 응답이 덮어쓰므로 집을 바꾸는 동작은 모두 이 확인을 먼저 한다.
+     */
+    private fun blockedByFirstUpload(): Boolean {
+        val running = savedHomesFirstUploadRunning(
+            syncJobActive = savedHomesSyncJob?.isActive == true,
+            synced = runCatching { savedHomesStore.synced() }.getOrDefault(false),
+        )
+        if (running) notify(SAVED_HOMES_UPLOADING_NOTICE)
+        return running
+    }
+
     /** "+ 다른 집 추가". 집 주소 화면(⑭)을 이름 칸과 함께 연다 */
     fun openExtraHomeSetup() {
+        if (blockedByFirstUpload()) return
         _homeSetup.value = HomeSetupState(target = HomeTarget.EXTRA)
         openHomeSetup()
     }
@@ -4076,6 +4093,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _homeSetup.update { it.copy(label = value.take(SavedHomes.LABEL_MAX), error = null) }
 
     fun removeSavedHome(id: String) {
+        if (blockedByFirstUpload()) return
         val target = _state.value.savedHomes.firstOrNull { it.id == id }
         val serverId = target?.serverId
         if (serverId != null && useSavedPlacesServer()) {
@@ -4122,6 +4140,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun makeSavedHomeDefault(id: String) {
         val current = _state.value
         if (current.savedHomeBusyId != null) return
+        if (blockedByFirstUpload()) return
         val home = current.savedHomes.firstOrNull { it.id == id } ?: return
         val serverId = home.serverId
         if (serverId != null && useSavedPlacesServer()) {
@@ -4730,6 +4749,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         // 다른 집은 기기에만 둔다. 서버의 집(알람 계산의 기본 출발지)은 그대로다.
         if (current.target == HomeTarget.EXTRA) {
+            if (blockedByFirstUpload()) return
             val home = SavedHome(
                 id = java.util.UUID.randomUUID().toString(),
                 label = SavedHomes.labelOf(current.label, place.name),
