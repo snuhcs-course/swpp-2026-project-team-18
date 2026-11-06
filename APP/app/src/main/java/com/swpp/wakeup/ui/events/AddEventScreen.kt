@@ -53,6 +53,7 @@ import com.swpp.wakeup.ui.common.JitPrimaryButton
 import com.swpp.wakeup.ui.common.JitTextField
 import com.swpp.wakeup.ui.common.JitTimePickerDialog
 import com.swpp.wakeup.ui.common.PlacePicker
+import com.swpp.wakeup.ui.home.AddField
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
@@ -191,19 +192,26 @@ fun AddEventScreen(
             )
         }
 
-        JitTextField(
-            label = "일정 제목",
-            inputTag = "event_title",
-            value = state.title,
-            onValueChange = onTitleChange,
-            imeAction = ImeAction.Next,
-            enabled = !state.submitting,
-        )
+        // 저장 실패의 줄별 문구(A2)는 그 줄 바로 아래에 붙인다(Figma F-46 `526:9`).
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            JitTextField(
+                label = "일정 제목",
+                inputTag = "event_title",
+                value = state.title,
+                onValueChange = onTitleChange,
+                imeAction = ImeAction.Next,
+                enabled = !state.submitting,
+            )
+            state.fieldErrors[AddField.TITLE]?.let { EndpointError(it, tag = "title_error") }
+        }
 
         DateRow(state.date, onDateChange, enabled = !state.submitting)
         // Figma 순서: 날짜 → 반복 → 시작 시각. 수정에서는 반복을 고칠 수 없어 숨긴다.
         if (!editing) RepeatRow(state.repeatWeekdays, onRepeatDayToggle, enabled)
-        TimeRow(state.hour, state.minute, onTimeChange, enabled = !state.submitting)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            TimeRow(state.hour, state.minute, onTimeChange, enabled = !state.submitting)
+            state.fieldErrors[AddField.TIME]?.let { EndpointError(it, tag = "time_error") }
+        }
 
         // Figma 13-a 출발·도착 지정: 각 줄 [값] [집] [검색].
         JitCard(gap = 10.dp) {
@@ -232,7 +240,7 @@ fun AddEventScreen(
                 },
                 onSearchToggle = { originSearching = !originSearching },
             )
-            state.originError?.let { EndpointError(it, tag = "origin_error") }
+            state.fieldErrors[AddField.ORIGIN]?.let { EndpointError(it, tag = "origin_error") }
             state.originNotice?.let { NoticeLine(it) }
             if (originSearching) {
                 // 다른 집(본가·기숙사)은 검색 맨 위에. 고르면 준비 시간을 넣은 채로 둔다.
@@ -311,7 +319,7 @@ fun AddEventScreen(
                 },
                 onSearchToggle = { destinationSearching = !destinationSearching },
             )
-            state.destinationError?.let { EndpointError(it, tag = "destination_error") }
+            state.fieldErrors[AddField.DESTINATION]?.let { EndpointError(it, tag = "destination_error") }
             if (destinationSearching) {
                 PlacePicker(
                     label = "도착지 검색",
@@ -344,26 +352,32 @@ fun AddEventScreen(
 
         // Figma 순서: 출발지 → 도착지 → 경로 → 종류 → "일정 추가"
         val canPickRoute = state.canPickRoute(hasHome)
-        RouteRow(
-            routeLabel = state.routeLabel,
-            enabled = canPickRoute,
-            ready = state.selectedPlace != null && (state.origin != null || hasHome),
-            onClick = onPickRoute,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            RouteRow(
+                routeLabel = state.routeLabel,
+                enabled = canPickRoute,
+                ready = state.selectedPlace != null && (state.origin != null || hasHome),
+                onClick = onPickRoute,
+            )
+            state.fieldErrors[AddField.ROUTE]?.let { EndpointError(it, tag = "route_error") }
+        }
 
-        TagDropdown(
-            options = tagOptionsOf(tags),
-            selected = state.tagKey,
-            onChange = onTagChange,
-            enabled = !state.submitting,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            TagDropdown(
+                options = tagOptionsOf(tags),
+                selected = state.tagKey,
+                onChange = onTagChange,
+                enabled = !state.submitting,
+            )
+            state.fieldErrors[AddField.TAG]?.let { EndpointError(it, tag = "tag_error") }
+        }
 
         state.error?.let {
             Text(
                 text = it,
                 color = JitColor.Red,
                 fontSize = 12.sp,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("add_error"),
             )
         }
 
@@ -1110,7 +1124,7 @@ private fun EndpointButton(
 
 // AI-generated (Claude)
 /**
- * 출발지·도착지 줄 바로 아래의 서버 오류. 예: "출발지와 도착지는 50m 이상 떨어져
+ * 각 줄(제목·시각·출발지·도착지·경로·종류) 바로 아래의 서버 오류. 예: "출발지와 도착지는 50m 이상 떨어져
  * 있어야 한다." 규칙은 서버가 소유하므로 문구를 그대로 쓴다.
  */
 @Composable

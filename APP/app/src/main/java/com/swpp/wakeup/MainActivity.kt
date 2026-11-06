@@ -75,6 +75,7 @@ import com.swpp.wakeup.ui.common.durationLabel
 import com.swpp.wakeup.ui.alarm.RiskChoiceScreen
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.ui.events.AddEventScreen
+import com.swpp.wakeup.ui.events.AddResumeDialog
 import com.swpp.wakeup.ui.events.HomeSetupScreen
 import com.swpp.wakeup.ui.events.PrepOnboardingScreen
 import com.swpp.wakeup.ui.events.RouteChoiceScreen
@@ -225,6 +226,7 @@ private fun MainHost(
     val checkpointState by viewModel.checkpoints.collectAsStateWithLifecycle()
     val preDepartureState by viewModel.preDeparture.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
+    val addResumePrompt by viewModel.addResumePrompt.collectAsStateWithLifecycle()
     val passwordChange by viewModel.passwordChange.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
@@ -344,10 +346,44 @@ private fun MainHost(
         if (addState.done) {
             // 수정이면 알람 결정 화면으로 돌아간다(같은 goBack). 안내 문구만 다르다.
             val message = addState.doneMessage ?: "일정을 추가했습니다"
+            // 알람을 계산하지 못한 채 저장했으면 결정 화면의 "다시 계산" 으로 잇는다(A6).
+            val recomputeId = addState.routeFailedEventId
             viewModel.goBack()
             viewModel.resetAdd()
-            snackbarHostState.showSnackbar(message)
+            if (recomputeId != null) {
+                val result = snackbarHostState.showSnackbar(
+                    message = message,
+                    actionLabel = "다시 계산",
+                    duration = SnackbarDuration.Long,
+                )
+                if (result == SnackbarResult.ActionPerformed) viewModel.openAlarmDecision(recomputeId)
+            } else {
+                snackbarHostState.showSnackbar(message)
+            }
         }
+    }
+
+    // Partly AI-generated (Claude)
+    // 저장 실패(A1·A3): 입력은 그대로이고, 다시 시도할 수 있는 오류에는 [다시 시도] 를 둔다.
+    // 다 띄운 뒤에 지운다(먼저 지우면 키가 바뀌어 스낵바가 바로 취소된다).
+    LaunchedEffect(addState.failureNotice?.id) {
+        val notice = addState.failureNotice ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = notice.message,
+            actionLabel = "다시 시도".takeIf { notice.retry },
+            duration = if (notice.retry) SnackbarDuration.Long else SnackbarDuration.Short,
+        )
+        if (result == SnackbarResult.ActionPerformed && notice.retry) viewModel.submitAdd()
+        viewModel.consumeAddFailureNotice(notice.id)
+    }
+
+    // 쓰다 만 일정이 있을 때 "일정 추가" 를 누르면 이어 쓸지 묻는다(A4).
+    if (addResumePrompt) {
+        AddResumeDialog(
+            onResume = viewModel::resumeAddDraft,
+            onDiscard = viewModel::discardAddDraft,
+            onDismiss = viewModel::dismissAddResumePrompt,
+        )
     }
     LaunchedEffect(homeSetupState.done) {
         if (homeSetupState.done) {
@@ -515,10 +551,7 @@ private fun MainHost(
                     onAvatarClick = viewModel::openSettings,
                     onEventClick = { viewModel.openAlarmDecision(it.id) },
                     onAlarmToggle = viewModel::setAlarmEnabled,
-                    onAddEventClick = {
-                        viewModel.resetAdd()
-                        viewModel.openAddEvent()
-                    },
+                    onAddEventClick = viewModel::onAddEventClick,
                     onSetHomeClick = {
                         viewModel.resetHomeSetup()
                         viewModel.openHomeSetup()
@@ -652,6 +685,8 @@ private fun MainHost(
                         onChangeRisk = { viewModel.openRiskChoice(route.eventId) },
                         onEditBlocks = { viewModel.openEventBlocks(route.eventId) },
                         onDelete = { viewModel.deleteEvent(route.eventId) },
+                        onRecompute = { viewModel.recomputePlan(route.eventId) },
+                        recomputeBusy = state.recomputeBusyId == route.eventId,
                         modifier = Modifier.padding(innerPadding),
                         nickname = state.nickname,
                         initials = viewModel.avatarInitials(),

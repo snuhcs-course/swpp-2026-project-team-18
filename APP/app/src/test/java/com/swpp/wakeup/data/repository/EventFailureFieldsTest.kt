@@ -52,6 +52,24 @@ class EventFailureFieldsTest {
         assertEquals("입력값을 확인해야 한다.", failureFrom(400, null).message)
     }
 
+    // Partly AI-generated (Claude)
+    @Test
+    fun `상태 코드와 error code 를 함께 담는다`() {
+        val body = """{"error":{"code":"server_error","message":"잠시 뒤 다시 시도해 주세요.","details":{}}}"""
+        val failure = failureFrom(500, body)
+        assertEquals(500, failure.status)
+        assertEquals("server_error", failure.errorCode)
+        assertEquals(false, failure.network)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `HTML 500 은 error code 가 없다`() {
+        val failure = failureFrom(500, "<html>Server Error (500)</html>")
+        assertEquals(500, failure.status)
+        assertEquals(null, failure.errorCode)
+    }
+
     @Test
     fun `429 는 서버 문구가 없으면 잠시 뒤 다시 시도하라고 한다`() {
         assertEquals("요청이 너무 잦음. 잠시 뒤 다시 시도", failureFrom(429, "").message)

@@ -353,7 +353,59 @@ class EventRepositoryTest {
             tagKey = null,
         )
 
-        assertEquals(Result.Failure("출발지와 도착지가 같다."), result)
+        assertEquals(Result.Failure("출발지와 도착지가 같다.", status = 400, errorCode = "invalid"), result)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `일정 생성은 client_request_id 를 본문에 싣고 없으면 싣지 않는다`() = runTest {
+        var sent: EventCreateRequest? = null
+        val api = object : FakeEventsApi() {
+            override suspend fun create(body: EventCreateRequest) =
+                ok(event(9, future(days = 1))).also { sent = body }
+        }
+        val startAt = OffsetDateTime.parse("2030-03-02T09:00+09:00")
+        val repo = EventRepository(api, FakeProfileApi())
+        repo.createEvent(title = "수업", startAt = startAt, place = snu, tagKey = null, clientRequestId = "req-1234-abcd")
+        assertEquals("req-1234-abcd", Gson().toJsonTree(sent).asJsonObject.get("client_request_id").asString)
+        repo.createEvent(title = "수업", startAt = startAt, place = snu, tagKey = null)
+        assertFalse(Gson().toJsonTree(sent).asJsonObject.has("client_request_id"))
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `같은 client_request_id 로 먼저 만든 일정이 200 으로 와도 성공이다`() = runTest {
+        val first = event(7, future(days = 1))
+        val api = object : FakeEventsApi() {
+            override suspend fun create(body: EventCreateRequest): Response<EventDto> =
+                Response.success(200, first)
+        }
+        val result = EventRepository(api, FakeProfileApi()).createEvent(
+            title = "수업",
+            startAt = OffsetDateTime.parse("2030-03-02T09:00+09:00"),
+            place = snu,
+            tagKey = null,
+            clientRequestId = "req-1234-abcd",
+        )
+        assertEquals(Result.Success(first), result)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `통신 실패는 network 로 표시하고 상태 코드는 없다`() = runTest {
+        val api = object : FakeEventsApi() {
+            override suspend fun create(body: EventCreateRequest): Response<EventDto> =
+                throw IOException("timeout")
+        }
+        val result = EventRepository(api, FakeProfileApi()).createEvent(
+            title = "수업",
+            startAt = OffsetDateTime.parse("2030-03-02T09:00+09:00"),
+            place = snu,
+            tagKey = null,
+        ) as Result.Failure
+        assertTrue(result.network)
+        assertNull(result.status)
+        assertNull(result.errorCode)
     }
 
     // --- 삭제·태그 ------------------------------------------------------------

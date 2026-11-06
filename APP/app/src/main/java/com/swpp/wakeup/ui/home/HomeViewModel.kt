@@ -19,6 +19,7 @@ import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.data.local.TokenStore
 import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Offset
+import com.swpp.wakeup.data.remote.AlarmPlanDto
 import com.swpp.wakeup.data.remote.BlockObservationInput
 import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.PlaceSearchItem
@@ -197,6 +198,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val notice: HomeNotice? = null,
         /** 모든 기기 로그아웃을 서버에 요청하는 중 */
         val logoutAllBusy: Boolean = false,
+        /** "다시 계산" 을 부른 일정. 계산 중 버튼을 막는다(A6) */
+        val recomputeBusyId: Long? = null,
 
         /** 설정 계정 카드에 보일 이메일. 소셜 자리 표시 주소(`@social.invalid`)면 null */
         val accountEmail: String? = null,
@@ -680,6 +683,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private var foreground = false
 
     private var noticeCounter = 0L
+
+    // Partly AI-generated (Claude)
+    /** 저장 실패 snackbar 번호. 같은 문구도 다시 띄우려고 올린다 */
+    private var addNoticeSeq = 0L
+
+    /**
+     * 이 ViewModel 을 만들 때의 로그인 계정. 세션이 끝나면 토큰 저장소가 이메일을 지우고 나서 [onCleared] 가
+     * 불리므로 미리 들고 있는다. init 이 부르는 함수가 쓰는 속성은 init 위에 있어야 한다.
+     */
+    private val draftOwner: String? = tokenStore.email
+
+    /**
+     * 화면 밖에 잠시 맡겨 둔 쓰다 만 일정. 로그인 만료로 액티비티가 끝났다 돌아온 경우와, 수정 화면을 열며
+     * 밀려난 경우다. "일정 추가" 를 누르면 이어 쓸지 묻는다(A4).
+     */
+    private var pendingAddDraft: AddState? = AddDraftHolder.take(tokenStore.email)
 
     /** 지금 추적 중인 일정. 아침 기록 화면이 "저절로 끝남" 을 말해도 되는지 본다 */
     val trackingEventId: StateFlow<Long?> = TripLiveState.trackingEventId
@@ -1199,6 +1218,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 서버에 이 refresh 를 취소하게 한다(token-security-api.md §5). 기기 토큰은 결과와
         // 상관없이 아래에서 지운다 — 서버 호출은 화면과 떼어 뒤에서 한다([ServerLogout]).
         val refresh = runCatching { tokenStore.refreshToken }.getOrNull()
+        // 쓰다 만 일정은 이 계정의 것이다. 로그아웃하면 남기지 않는다(onCleared 가 맡기지도 않게 비운다).
+        AddDraftHolder.clear()
+        pendingAddDraft = null
+        _add.value = AddState()
+        _addResumePrompt.value = false
         // 순서가 있다. **토큰보다 먼저 지운다** — 지우기 판정이 "지금 로그인한
         // 계정" 을 보므로, 토큰이 먼저 사라지면 소유자를 모르는 상태가 되어
         // 아무것도 지울 수 없다.
@@ -1404,6 +1428,35 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun openAlarmDecision(eventId: Long) {
         _nav.update { it.copy(stack = it.stack + AppRoute.AlarmDecision(eventId), forward = true) }
         loadPlan(eventId)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 계산하지 못한 알람(`route_failed`)을 다시 계산한다(`POST /api/events/{id}/recompute`, A6).
+     * 서버가 카카오 경로를 한 번 더 부르므로 **사용자가 누를 때만** 부르고, 계산 중에는 막는다.
+     * 계산에 성공하면 홈과 기기 알람을 다시 맞춘다([refresh]).
+     */
+    fun recomputePlan(eventId: Long) {
+        if (_state.value.recomputeBusyId != null) return
+        _state.update { it.copy(recomputeBusyId = eventId) }
+        viewModelScope.launch {
+            when (val r = repository.recomputePlan(eventId)) {
+                is EventRepository.Result.Success -> {
+                    if (_nav.value.current == AppRoute.AlarmDecision(eventId)) {
+                        ++planLoadGeneration
+                        _plan.value = r.data
+                    }
+                    refresh()
+                    notify(
+                        if (r.data.isComputed) "알람을 다시 계산했어요"
+                        else "다시 계산했지만 경로를 찾지 못했어요. 출발지·도착지를 확인해 주세요"
+                    )
+                }
+
+                is EventRepository.Result.Failure -> notify("다시 계산하지 못했어요. ${r.message}")
+            }
+            _state.update { it.copy(recomputeBusyId = null) }
+        }
     }
 
     // Partly AI-generated (Claude)
@@ -2967,7 +3020,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 // 가까운 출발·도착(400)은 일정 추가 화면의 도착지 줄에도 남긴다.
                 // 뒤로 돌아가면 무엇을 고쳐야 하는지 그 줄이 말한다.
                 result.fields["destination"]?.let { message ->
-                    _add.update { it.copy(destinationError = message) }
+                    _add.update { it.copy(fieldErrors = it.fieldErrors + (AddField.DESTINATION to message)) }
                 }
             }
         }
@@ -3033,6 +3086,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 origin = eventOrigin,
                 originLabel = current.origin?.name ?: choice.originLabel,
                 error = null,
+                fieldErrors = it.fieldErrors - AddField.ROUTE - AddField.ORIGIN,
             )
         }
         goBack()
@@ -3560,15 +3614,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val originNotice: String? = null,
 
         /**
-         * 출발지·도착지 줄 바로 아래에 붙일 서버 오류. 예: 가까운 출발·도착(400)
-         * "출발지와 도착지는 50m 이상 떨어져 있어야 한다." 출발지나 도착지가 바뀌면 지운다.
+         * 각 줄 바로 아래에 붙일 서버 오류(제목·시각·종류·경로·출발지·도착지). 예: 가까운 출발·도착(400)
+         * "출발지와 도착지는 50m 이상 떨어져 있어야 한다." 그 줄의 값을 고치면 지운다(A2).
          */
-        val originError: String? = null,
-        val destinationError: String? = null,
+        val fieldErrors: Map<AddField, String> = emptyMap(),
 
         val submitting: Boolean = false,
+        /** 버튼 위의 빨간 줄. 줄에 붙지 않은 오류와 통신·서버 오류 */
         val error: String? = null,
         val done: Boolean = false,
+        /** 저장 실패를 한 번 눈에 띄게 알릴 snackbar. 화면이 띄운 뒤 [consumeAddFailureNotice] 로 지운다(A1) */
+        val failureNotice: AddFailureNotice? = null,
+        /**
+         * 같은 요청을 다시 보내도 일정이 하나만 생기게 하는 값(A5). 새 [AddState] 마다 새 UUID 이고
+         * `copy` 는 유지한다. 다시 시도·입력 고침은 같은 값, 새로 열기·버리기·저장 성공 뒤는 새 값.
+         */
+        val clientRequestId: String = java.util.UUID.randomUUID().toString(),
+        /** 방금 저장했지만 알람 계산이 `route_failed` 인 일정(A6). 화면이 "다시 계산" 안내를 띄운다 */
+        val routeFailedEventId: Long? = null,
 
         /**
          * 집이 아닌 출발지에서 준비 시간을 넣는가(include-prep-api.md, "여기서 자고 출발해요").
@@ -3597,22 +3660,93 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     }
 
+    /** 저장 실패 안내 한 건. [id] 가 바뀌면 같은 문구도 다시 띄운다 */
+    data class AddFailureNotice(val id: Long, val message: String, val retry: Boolean)
+
     private val _add = MutableStateFlow(AddState())
     val add: StateFlow<AddState> = _add.asStateFlow()
+
+    fun consumeAddFailureNotice(id: Long) {
+        _add.update { if (it.failureNotice?.id == id) it.copy(failureNotice = null) else it }
+    }
 
     fun resetAdd() {
         _add.value = AddState()
         _routeChoice.value = null
     }
 
-    fun onAddTitleChange(v: String) = _add.update { it.copy(title = v, error = null) }
-    fun onAddDateChange(v: LocalDate) = _add.update { it.copy(date = v) }
-    fun onAddTimeChange(h: Int, m: Int) = _add.update { it.copy(hour = h, minute = m) }
+    // --- 쓰다 만 일정 (A4) — Partly AI-generated (Claude) ------------------------------
+
+    private val _addResumePrompt = MutableStateFlow(false)
+
+    /** "작성 중인 일정이 있어요. 이어서 쓸까요?" 를 띄울 때 true */
+    val addResumePrompt: StateFlow<Boolean> = _addResumePrompt.asStateFlow()
+
+    private fun addDraftCandidate(): AddState? =
+        _add.value.takeIf { it.isUnsavedDraft } ?: pendingAddDraft
+
+    /**
+     * 홈의 "일정 추가". 쓰다 만 일정이 있으면 이어 쓸지 묻고(대화상자), 없으면 새 폼을 연다.
+     * 입력은 저장에 성공하거나 사용자가 버릴 때만 지운다.
+     */
+    fun onAddEventClick() {
+        if (addDraftCandidate() == null) {
+            resetAdd()
+            openAddEvent()
+        } else {
+            _addResumePrompt.value = true
+        }
+    }
+
+    fun resumeAddDraft() {
+        val draft = addDraftCandidate() ?: run {
+            _addResumePrompt.value = false
+            return
+        }
+        _add.value = draft.copy(submitting = false, failureNotice = null)
+        _routeChoice.value = null
+        pendingAddDraft = null
+        AddDraftHolder.clear()
+        _addResumePrompt.value = false
+        openAddEvent()
+    }
+
+    /** "새로 쓰기". 이어 쓰기 대화상자를 닫고 새 폼(새 `client_request_id`)을 연다 */
+    fun discardAddDraft() {
+        resetAdd()
+        pendingAddDraft = null
+        AddDraftHolder.clear()
+        _addResumePrompt.value = false
+        openAddEvent()
+    }
+
+    /** 대화상자 바깥을 누르거나 뒤로 가면 아무것도 바꾸지 않고 닫는다 */
+    fun dismissAddResumePrompt() {
+        _addResumePrompt.value = false
+    }
+
+    /** 화면이 사라질 때 쓰다 만 일정을 프로세스 안의 보관함에 맡긴다(로그인 만료 → 다시 로그인 대비) */
+    override fun onCleared() {
+        // super.onCleared() 는 빈 메서드라 부르지 않는다(lint EmptySuperCall).
+        addDraftCandidate()?.let { AddDraftHolder.put(draftOwner, it.copy(submitting = false, failureNotice = null)) }
+    }
+
+    // Partly AI-generated (Claude)
+    fun onAddTitleChange(v: String) =
+        _add.update { it.copy(title = v, error = null, fieldErrors = it.fieldErrors - AddField.TITLE) }
+    fun onAddDateChange(v: LocalDate) =
+        _add.update { it.copy(date = v, fieldErrors = it.fieldErrors - AddField.TIME) }
+    fun onAddTimeChange(h: Int, m: Int) =
+        _add.update { it.copy(hour = h, minute = m, fieldErrors = it.fieldErrors - AddField.TIME) }
     fun onAddRepeatDayToggle(day: Int) = _add.update {
         val days = it.repeatWeekdays
-        it.copy(repeatWeekdays = if (day in days) days - day else days + day)
+        it.copy(
+            repeatWeekdays = if (day in days) days - day else days + day,
+            fieldErrors = it.fieldErrors - AddField.TIME,
+        )
     }
-    fun onAddTagChange(key: String?) = _add.update { it.copy(tagKey = key) }
+    fun onAddTagChange(key: String?) =
+        _add.update { it.copy(tagKey = key, fieldErrors = it.fieldErrors - AddField.TAG) }
     fun onAddQueryChange(v: String) =
         _add.update { it.copy(place = it.place.withQuery(v)) }
 
@@ -3637,8 +3771,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 place = it.place.copy(results = emptyList(), query = item?.name ?: ""),
                 routeKey = null,
                 routeLabel = null,
-                originError = null,
-                destinationError = null,
+                fieldErrors = it.fieldErrors - AddField.DESTINATION - AddField.ORIGIN - AddField.ROUTE,
             )
         }
         _routeChoice.value = null
@@ -3687,8 +3820,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 originNotice = null,
                 routeKey = null,
                 routeLabel = null,
-                originError = null,
-                destinationError = null,
+                fieldErrors = it.fieldErrors - AddField.DESTINATION - AddField.ORIGIN - AddField.ROUTE,
                 // 집으로 되돌리면 스위치가 사라진다. 값도 지운다(include-prep-api.md §5 ①).
                 includePrep = if (item == null) false else it.includePrep,
             )
@@ -3805,6 +3937,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     val start = base.startAt.atZoneSameInstant(ZoneId.systemDefault())
                     val plan = dto.alarmPlan
+                    // 쓰다 만 새 일정이 있으면 덮어쓰기 전에 맡겨 둔다. "일정 추가" 에서 이어 쓸 수 있다(A4).
+                    if (_add.value.isUnsavedDraft) {
+                        pendingAddDraft = _add.value.copy(submitting = false, failureNotice = null)
+                    }
                     _add.value = AddState(
                         title = base.title,
                         date = start.toLocalDate(),
@@ -3854,9 +3990,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             _add.update { it.copy(done = true, doneMessage = "바뀐 항목이 없음") }
             return
         }
-        _add.update {
-            it.copy(submitting = true, error = null, originError = null, destinationError = null)
-        }
+        _add.update { it.copy(submitting = true, error = null, fieldErrors = emptyMap()) }
         viewModelScope.launch {
             when (val result = repository.updateEvent(eventId, patch)) {
                 is EventRepository.Result.Success -> {
@@ -3864,23 +3998,39 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         ++planLoadGeneration
                         _plan.value = result.data.plan
                     }
-                    _add.update { it.copy(submitting = false, done = true, doneMessage = "일정을 수정했습니다") }
+                    // 계산하지 못한 계획이면 결정 화면(저장 뒤 돌아가는 곳)의 "다시 계산" 으로 이어진다(A6·A7).
+                    val failed = result.data.plan?.status == AlarmPlanDto.STATUS_ROUTE_FAILED
+                    _add.update {
+                        it.copy(
+                            submitting = false,
+                            done = true,
+                            doneMessage = if (failed) EDIT_ROUTE_FAILED_MESSAGE else "일정을 수정했습니다",
+                        )
+                    }
                     // 다른 날로 옮기면 그날 다른 일정의 켬/끔도 바뀐다(event-edit-api.md §4).
                     refresh()
                 }
 
-                is EventRepository.Result.Failure -> {
-                    val errors = endpointErrorsOf(result)
-                    _add.update {
-                        it.copy(
-                            submitting = false,
-                            error = errors.general,
-                            originError = errors.origin,
-                            destinationError = errors.destination,
-                        )
-                    }
-                }
+                is EventRepository.Result.Failure -> onSaveFailed(result, editing = true)
             }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 저장 실패를 화면에 푼다: 줄별 문구·버튼 위 빨간 줄·snackbar. 입력은 그대로 둔다(A1-A4).
+     * 로그인이 끝난 경우(세션 만료 표시가 올라 있음)는 화면이 곧 로그인으로 나가므로 snackbar 를 건너뛴다.
+     */
+    private fun onSaveFailed(failure: EventRepository.Result.Failure, editing: Boolean) {
+        val e = saveErrorOf(failure, editing)
+        val skipNotice = e.kind == SaveErrorKind.AUTH && SessionState.expired.value
+        _add.update {
+            it.copy(
+                submitting = false,
+                error = e.line,
+                fieldErrors = e.fields,
+                failureNotice = if (skipNotice) null else AddFailureNotice(++addNoticeSeq, e.snackbar, e.retry),
+            )
         }
     }
 
@@ -3940,9 +4090,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
 
-        _add.update {
-            it.copy(submitting = true, error = null, originError = null, destinationError = null)
-        }
+        _add.update { it.copy(submitting = true, error = null, fieldErrors = emptyMap()) }
         viewModelScope.launch {
             val result = repository.createEvent(
                 title = current.title,
@@ -3954,25 +4102,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 destinationIsHome = current.destinationIsHome,
                 repeatWeekdays = current.repeatWeekdays,
                 includePrep = current.includePrep,
+                // 다시 시도는 같은 값이라 서버가 중복 일정을 만들지 않는다(A5). 200 도 성공이다.
+                clientRequestId = current.clientRequestId,
             )
             when (result) {
                 is EventRepository.Result.Success -> {
-                    _add.update { it.copy(submitting = false, done = true) }
-                    refresh()
-                }
-
-                // 가까운 출발·도착 같은 필드 오류는 그 줄 아래에, 나머지는 맨 아래에.
-                is EventRepository.Result.Failure -> {
-                    val errors = endpointErrorsOf(result)
+                    // 일정은 저장됐지만 알람을 계산하지 못했으면 그렇게 알린다(A6).
+                    val failed = result.data.alarmPlan?.status == AlarmPlanDto.STATUS_ROUTE_FAILED
                     _add.update {
                         it.copy(
                             submitting = false,
-                            error = errors.general,
-                            originError = errors.origin,
-                            destinationError = errors.destination,
+                            done = true,
+                            doneMessage = if (failed) ADD_ROUTE_FAILED_MESSAGE else null,
+                            routeFailedEventId = result.data.id.takeIf { failed },
                         )
                     }
+                    refresh()
                 }
+
+                // 줄별 문구·빨간 줄·snackbar. 입력은 그대로 둔다.
+                is EventRepository.Result.Failure -> onSaveFailed(result, editing = false)
             }
         }
     }
@@ -4288,6 +4437,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val TAG = "HomeViewModel"
+
+        const val ADD_ROUTE_FAILED_MESSAGE = "일정은 저장했어요. 알람을 계산하지 못해 다시 계산이 필요해요"
+        const val EDIT_ROUTE_FAILED_MESSAGE = "일정을 고쳤어요. 알람을 계산하지 못해 다시 계산이 필요해요"
 
         /**
          * 지도를 열 때 기준점이 하나도 없을 때의 중심(서울시청).

@@ -985,6 +985,12 @@ data class EventCreateRequest(
      * 끄면 null(보내지 않음 = 출발지로 정함: 집이면 넣고 따로 골랐으면 뺌). 구버전 서버는 무시한다.
      */
     @SerializedName("include_prep") val includePrep: Boolean? = null,
+    /**
+     * 같은 요청을 다시 보내도 일정이 둘이 되지 않게 하는 값(docs/iter3/event-create-errors.md §3).
+     * 추가 화면이 새로 열릴 때 UUID 를 만들고, 다시 시도는 같은 값을 쓴다. 수정(PATCH)에는 보내지 않는다.
+     * 구버전 서버는 모르는 필드로 무시한다. (Partly AI-generated (Claude))
+     */
+    @SerializedName("client_request_id") val clientRequestId: String? = null,
 )
 
 data class EventUpdateRequest(

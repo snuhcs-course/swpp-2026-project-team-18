@@ -101,10 +101,17 @@ class EventRepository(
          * [fields] 는 서버 `error.details` 의 필드별 문구다(첫 항목). 없으면 빈 맵.
          * 화면이 오류를 그 입력 줄 아래에 붙일 때 쓴다(예: 가까운 출발·도착 400 의
          * `destination`). 기본값이 있어 기존 호출부는 그대로다.
+         *
+         * [status] 는 HTTP 상태(응답이 없었으면 null), [errorCode] 는 서버 `error.code`,
+         * [network] 는 통신 자체가 실패했는가(연결·시간 초과). 저장 실패 안내가 종류를 가른다.
+         * (Partly AI-generated (Claude))
          */
         data class Failure(
             val message: String,
             val fields: Map<String, String> = emptyMap(),
+            val status: Int? = null,
+            val errorCode: String? = null,
+            val network: Boolean = false,
         ) : Result<Nothing>
     }
 
@@ -306,6 +313,8 @@ class EventRepository(
         repeatWeekdays: Set<Int> = emptySet(),
         /** 집이 아닌 출발지에서 준비 시간을 넣는가. 출발지가 집이면 무시한다 */
         includePrep: Boolean = false,
+        /** 같은 요청을 다시 보내도 일정이 하나만 생기게 하는 값(A5). null 이면 보내지 않는다 */
+        clientRequestId: String? = null,
     ): Result<EventDto> = guard {
         val body = EventCreateRequest(
             title = title.trim(),
@@ -329,6 +338,10 @@ class EventRepository(
             destinationIsHome = destinationIsHome,
             repeatWeekdays = repeatWeekdays.sorted(),
             includePrep = true.takeIf { includePrep && origin != null },
+            // 200(같은 값으로 먼저 만든 일정)도 성공이다: unwrap 이 isSuccessful 로 본다.
+            // 시간 초과 뒤 서버가 이미 만들었는데 고친 내용으로 다시 보내면, 계약상 먼저 만든 일정이
+            // 그대로 돌아온다(고친 내용은 일정 수정으로 반영).
+            clientRequestId = clientRequestId,
         )
         val response = api.create(body)
         // 필드별 오류를 살린다. 가까운 출발·도착(710545a)은 `details.destination` 으로 온다.
@@ -872,7 +885,7 @@ class EventRepository(
         block()
     } catch (e: IOException) {
         Log.w(TAG, "network failure", e)
-        Result.Failure(MESSAGE_NETWORK)
+        Result.Failure(MESSAGE_NETWORK, network = true)
     } catch (e: Exception) {
         Log.e(TAG, "unexpected failure", e)
         Result.Failure(
@@ -949,7 +962,12 @@ private fun fallbackErrorMessage(code: Int): String = when (code) {
 internal fun failureFrom(code: Int, raw: String?): EventRepository.Result.Failure {
     if (code >= 500 || code == 429) Log.w(TAG, "HTTP $code")
     val message = ApiClient.parseErrorMessage(raw) ?: fallbackErrorMessage(code)
-    return EventRepository.Result.Failure(message, ApiClient.parseErrorFields(raw))
+    return EventRepository.Result.Failure(
+        message = message,
+        fields = ApiClient.parseErrorFields(raw),
+        status = code,
+        errorCode = ApiClient.parseErrorCode(raw),
+    )
 }
 
 // ---------------------------------------------------------------------------
