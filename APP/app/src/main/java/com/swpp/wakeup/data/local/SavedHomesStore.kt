@@ -37,6 +37,23 @@ class SavedHomesStore(context: Context) {
     fun replace(homes: List<SavedHome>): Boolean =
         prefs.editOwned(appContext) { putString(KEY_HOMES, gson.toJson(homes)) }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 서버가 이 목록을 확인했는가(B2). false 인 동안 목록은 **서버에 올릴 기기 사본**이고, true 가 된 뒤에는
+     * 서버 목록의 사본이다. 다른 계정의 저장소면 false 다.
+     */
+    fun synced(): Boolean {
+        if (prefs.discardIfForeign(appContext)) return false
+        return prefs.getBoolean(KEY_SYNCED, false)
+    }
+
+    /** 서버가 확인한 목록으로 바꾸고 [synced] 를 true 로 한다. 같은 트랜잭션이라 둘이 어긋나지 않는다 */
+    fun replaceSynced(homes: List<SavedHome>): Boolean =
+        prefs.editOwned(appContext) {
+            putString(KEY_HOMES, gson.toJson(homes))
+            putBoolean(KEY_SYNCED, true)
+        }
+
     /** 소유자 표시까지 전부 지운다. **로그아웃·계정 전환에서 부른다.** */
     fun wipe() {
         prefs.edit { clear() }
@@ -45,5 +62,6 @@ class SavedHomesStore(context: Context) {
     private companion object {
         const val FILE = "jit_saved_homes"
         const val KEY_HOMES = "homes"
+        const val KEY_SYNCED = "synced"
     }
 }

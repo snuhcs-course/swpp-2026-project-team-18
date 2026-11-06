@@ -1012,6 +1012,12 @@ data class EventCreateRequest(
      * 구버전 서버는 모르는 필드로 무시한다. (Partly AI-generated (Claude))
      */
     @SerializedName("client_request_id") val clientRequestId: String? = null,
+    /**
+     * 출발지가 저장한 집이면 그 id(docs/iter3/saved-places-api.md). 서버가 좌표·이름을 그 집에서 채우고
+     * 보낸 좌표보다 앞선다. 좌표도 함께 보낸다(구버전 서버는 이 필드를 무시하고 좌표를 쓴다). null 이면 보내지 않는다.
+     * (Partly AI-generated (Claude))
+     */
+    @SerializedName("origin_place_id") val originPlaceId: Long? = null,
 )
 
 data class EventUpdateRequest(

@@ -462,6 +462,40 @@ class EventRepositoryTest {
         assertEquals("이름을 입력해야 한다.", result.fields["label"])
     }
 
+    // Partly AI-generated (Claude)
+    @Test
+    fun `저장한 집 출발은 origin_place_id 를 싣고 스위치를 끄면 include_prep false 를 보낸다`() = runTest {
+        val sent = mutableListOf<EventCreateRequest>()
+        val api = object : FakeEventsApi() {
+            override suspend fun create(body: EventCreateRequest) = ok(event(9, future(days = 1))).also { sent += body }
+        }
+        val startAt = OffsetDateTime.parse("2030-03-02T09:00+09:00")
+        val home = PlaceSearchItem(null, "본가", "수원", 37.26, 127.03, null)
+        val repo = EventRepository(api, FakeProfileApi())
+        repo.createEvent("수업", startAt, snu, null, origin = home, includePrep = true, originPlaceId = 5L)
+        repo.createEvent("수업", startAt, snu, null, origin = home, includePrep = false, originPlaceId = 5L)
+        repo.createEvent("수업", startAt, snu, null, origin = home, includePrep = false)
+        repo.createEvent("수업", startAt, snu, null, origin = home, includePrep = true)
+        repo.createEvent("수업", startAt, snu, null, originPlaceId = 5L)
+        val json = sent.map { Gson().toJsonTree(it).asJsonObject }
+        assertEquals(5L, json[0]["origin_place_id"].asLong)
+        assertEquals(true, json[0]["include_prep"].asBoolean)
+        assertEquals(37.26, json[0]["origin_lat"].asDouble, 1e-9)
+        assertEquals("끈 스위치는 false 로 보낸다", false, json[1]["include_prep"].asBoolean)
+        assertFalse("저장한 집이 아니면 끈 값은 보내지 않는다", json[2].has("include_prep") || json[2].has("origin_place_id"))
+        assertEquals(true, json[3]["include_prep"].asBoolean)
+        assertFalse("출발지가 없으면 id 도 보내지 않는다", json[4].has("origin_place_id") || json[4].has("include_prep"))
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `createIncludePrep 는 출발지와 저장한 집으로 값을 정한다`() {
+        assertNull(createIncludePrep(includePrep = true, hasOrigin = false, originPlaceId = null))
+        assertEquals(true, createIncludePrep(true, true, null))
+        assertNull(createIncludePrep(false, true, null))
+        assertEquals(true, createIncludePrep(true, true, 5L))
+        assertEquals(false, createIncludePrep(false, true, 5L))
+    }
     // --- 출발 전 확인(B3) -------------------------------------------------------
 
     // Partly AI-generated (Claude)

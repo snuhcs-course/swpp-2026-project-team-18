@@ -857,6 +857,7 @@ private fun MainHost(
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                     onLabelChange = viewModel::onHomeLabelChange,
+                    savedOnServer = state.savedHomesOnServer,
                 )
 
                 AppRoute.ChangePassword -> ChangePasswordScreen(

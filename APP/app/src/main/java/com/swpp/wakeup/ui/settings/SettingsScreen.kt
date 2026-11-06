@@ -183,8 +183,12 @@ fun SettingsScreen(
                     .padding(vertical = 4.dp),
             )
             Text(
-                text = "다른 집은 이 기기에만 저장됨(서버는 집을 하나만 알고 있음). \"기본으로\" 를 누르면 " +
-                    "서버의 집을 바꾸고 예전 집은 목록에 남음",
+                text = if (state.savedHomesOnServer) {
+                    "다른 집은 계정에 저장돼 다른 기기에서도 보임. \"기본으로\" 를 누르면 기본 집과 자리를 바꿈"
+                } else {
+                    "다른 집은 이 기기에만 저장됨(서버는 집을 하나만 알고 있음). \"기본으로\" 를 누르면 " +
+                        "서버의 집을 바꾸고 예전 집은 목록에 남음"
+                },
                 color = JitColor.TextSecondary,
                 fontSize = 9.sp,
             )

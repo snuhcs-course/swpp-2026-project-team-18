@@ -316,6 +316,8 @@ class EventRepository(
         includePrep: Boolean = false,
         /** 같은 요청을 다시 보내도 일정이 하나만 생기게 하는 값(A5). null 이면 보내지 않는다 */
         clientRequestId: String? = null,
+        /** 출발지가 저장한 집이면 서버의 그 집 id(B2). 아니면 null */
+        originPlaceId: Long? = null,
     ): Result<EventDto> = guard {
         val body = EventCreateRequest(
             title = title.trim(),
@@ -338,7 +340,8 @@ class EventRepository(
             originLabel = origin?.name,
             destinationIsHome = destinationIsHome,
             repeatWeekdays = repeatWeekdays.sorted(),
-            includePrep = true.takeIf { includePrep && origin != null },
+            includePrep = createIncludePrep(includePrep, origin != null, originPlaceId),
+            originPlaceId = originPlaceId.takeIf { origin != null },
             // 200(같은 값으로 먼저 만든 일정)도 성공이다: unwrap 이 isSuccessful 로 본다.
             // 시간 초과 뒤 서버가 이미 만들었는데 고친 내용으로 다시 보내면, 계약상 먼저 만든 일정이
             // 그대로 돌아온다(고친 내용은 일정 수정으로 반영).
@@ -1281,6 +1284,19 @@ private fun prepNote(plan: AlarmPlanDto, blockCount: Int, userEnabled: Boolean =
 
 /** 준비 시간 줄 맨 앞의 이유. 집이 아닌 출발지에서 사용자가 스위치를 켠 일정에만 붙는다 */
 internal const val PREP_USER_ENABLED_REASON = "준비 시간 포함(직접 켬) · "
+
+// Partly AI-generated (Claude)
+/**
+ * 일정 만들기에 보낼 `include_prep`. 서버는 저장한 집 출발을 집으로 쳐서 준비 시간을 넣으므로(`false` 가
+ * 이긴다), 저장한 집에서는 스위치를 끈 것을 `false` 로 **보내야** 끌 수 있다. 그 밖의 출발지는 켰을 때만
+ * `true`, 끄면 보내지 않는다(include-prep-api.md §5).
+ */
+internal fun createIncludePrep(includePrep: Boolean, hasOrigin: Boolean, originPlaceId: Long?): Boolean? = when {
+    !hasOrigin -> null
+    originPlaceId != null -> includePrep
+    includePrep -> true
+    else -> null
+}
 
 // Partly AI-generated (Claude)
 /**

@@ -39,6 +39,11 @@ import com.swpp.wakeup.data.remote.RouteCandidateResponse
 import com.swpp.wakeup.data.remote.RoutineBlockDto
 import com.swpp.wakeup.data.remote.RoutineBlockWriteRequest
 import com.swpp.wakeup.data.remote.RoutinesApi
+import com.swpp.wakeup.data.remote.SavedPlaceDto
+import com.swpp.wakeup.data.remote.SavedPlaceInput
+import com.swpp.wakeup.data.remote.SavedPlacesApi
+import com.swpp.wakeup.data.remote.SavedPlacesBulkRequest
+import com.swpp.wakeup.data.remote.SavedPlacesListDto
 import com.swpp.wakeup.data.remote.UserDto
 import com.swpp.wakeup.data.remote.WeeklyReportDto
 import okhttp3.MediaType.Companion.toMediaType
@@ -328,4 +333,13 @@ open class FakeRoutinesApi : RoutinesApi {
 open class FakeReportsApi : ReportsApi {
     override suspend fun weekly(week: String?): Response<WeeklyReportDto> = unexpected("weekly")
     override suspend fun calibration(): Response<CalibrationDto> = unexpected("calibration")
+}
+
+// Partly AI-generated (Claude)
+open class FakeSavedPlacesApi : SavedPlacesApi {
+    override suspend fun list(): Response<SavedPlacesListDto> = unexpected("savedPlaces.list")
+    override suspend fun create(body: SavedPlaceInput): Response<SavedPlaceDto> = unexpected("savedPlaces.create")
+    override suspend fun delete(id: Long): Response<Unit> = unexpected("savedPlaces.delete")
+    override suspend fun makeDefault(id: Long): Response<SavedPlacesListDto> = unexpected("savedPlaces.makeDefault")
+    override suspend fun bulk(body: SavedPlacesBulkRequest): Response<SavedPlacesListDto> = unexpected("savedPlaces.bulk")
 }

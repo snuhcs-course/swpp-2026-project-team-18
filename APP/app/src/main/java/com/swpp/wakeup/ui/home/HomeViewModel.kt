@@ -44,6 +44,11 @@ import com.swpp.wakeup.domain.model.SocialLogin
 import com.swpp.wakeup.domain.model.SocialProvider
 import com.swpp.wakeup.ui.auth.SocialSignIn
 import com.swpp.wakeup.data.local.SavedHomesStore
+import com.swpp.wakeup.data.remote.SavedPlaceInput
+import com.swpp.wakeup.data.repository.SavedPlacesRepository
+import com.swpp.wakeup.data.repository.createIncludePrep
+import com.swpp.wakeup.data.repository.savedPlaceAddMessage
+import com.swpp.wakeup.data.repository.SavedPlacesResult
 import com.swpp.wakeup.domain.model.CalibrationView
 import com.swpp.wakeup.domain.model.WeeklyReportView
 import com.swpp.wakeup.domain.model.AlarmSchedule
@@ -156,6 +161,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     private val savedHomesStore = SavedHomesStore(application)
 
+    /** 저장한 집 서버 API(B2). `init` 이 [syncSavedHomes] 를 부르므로 `init` 위에 둔다 */
+    private val savedPlaces = SavedPlacesRepository()
+
+    /**
+     * 다른 집을 서버에 두는가(B2). UNKNOWN 은 아직 서버 응답을 못 본 것으로, 기기에 "서버가 확인함" 표시가
+     * 있으면 서버로 본다. DEVICE 는 서버가 이 API 를 모르는 것(404·405)이라 기기 목록만 쓴다.
+     */
+    private enum class SavedPlacesMode { UNKNOWN, SERVER, DEVICE }
+
+    private var savedPlacesMode = SavedPlacesMode.UNKNOWN
+    private var savedHomesSyncJob: Job? = null
+
+    private fun useSavedPlacesServer(): Boolean = savedPlacesMode == SavedPlacesMode.SERVER ||
+        (savedPlacesMode == SavedPlacesMode.UNKNOWN && runCatching { savedHomesStore.synced() }.getOrDefault(false))
+
     /**
      * 진행 중인 아침 기록. 없으면 null.
      *
@@ -216,6 +236,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 기기에만 둔 다른 집(최근 것이 앞). 설정과 일정 출발지에 보인다 */
         val savedHomes: List<SavedHome> = emptyList(),
+        /** 다른 집이 계정(서버)에 저장되는 중이면 true. 안내 문구가 바뀐다(B2) */
+        val savedHomesOnServer: Boolean = false,
         /** "기본으로" 를 서버에 저장하는 중인 다른 집 */
         val savedHomeBusyId: String? = null,
 
@@ -746,6 +768,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 여기서 한 번 읽어야 한다.
         reloadMorning()
         reloadSavedHomes()
+        syncSavedHomes()
         // 서버 응답을 기다리지 않는다. 놓친 알람은 디스크 사본만으로 판별되고,
         // 오프라인이어도 출발 전에 알려야 한다.
         reloadMissedAlarm()
@@ -1673,6 +1696,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // "로그인 연결" 에 쓸 로그인 방법. 설정을 열 때마다 새로 받는다(다른 기기에서 바꿨을 수 있다).
         loadLoginMethods()
         loadCalendarSources()
+        syncSavedHomes()
     }
 
     fun openHomeSetup() {
@@ -3699,6 +3723,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * 출발지가 집이면 스위치가 없고 이 값은 쓰지 않는다.
          */
         val includePrep: Boolean = false,
+        /** 출발지가 저장한 집이면 서버의 그 집 id(B2). 출발지를 바꾸면 지운다 */
+        val originPlaceId: Long? = null,
 
         /** 고치는 일정. null 이면 새 일정 추가다(Figma ⑫ 변형 · 일정 수정) */
         val editingEventId: Long? = null,
@@ -3877,6 +3903,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 origin = item,
                 originLabel = item?.name,
+                originPlaceId = null,
                 originPlace = PlaceSearch(),
                 originNotice = null,
                 routeKey = null,
@@ -3899,7 +3926,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onAddOriginSavedHome(home: SavedHome) {
         onAddOriginSelected(home.toPlace())
-        _add.update { it.copy(includePrep = true) }
+        // 서버에 저장한 집이면 id 를 함께 보낸다. 서버는 저장한 집 출발을 집으로 쳐서 준비 시간을 넣는다.
+        _add.update { it.copy(includePrep = true, originPlaceId = home.serverId) }
     }
 
     // --- 다른 집 (todo §2 "집 여러 개", 기기에만 저장) — Partly AI-generated (Claude) -------
@@ -3908,7 +3936,48 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val homes = runCatching { savedHomesStore.all() }
             .onFailure { Log.w(TAG, "다른 집 목록을 읽지 못했다", it) }
             .getOrDefault(emptyList())
-        _state.update { it.copy(savedHomes = homes) }
+        _state.update { it.copy(savedHomes = homes, savedHomesOnServer = useSavedPlacesServer()) }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 다른 집을 서버와 맞춘다(B2). 기기 사본이 아직 서버에 올라가지 않았으면 한 번에 올리고(`bulk`), 아니면
+     * 서버 목록을 받아 사본을 갱신한다. **서버가 확인하기 전에는 기기 목록을 바꾸지 않는다** — 통신 실패,
+     * 5xx, 이전 서버(404·405)면 기기 목록이 그대로 남는다.
+     */
+    private fun syncSavedHomes() {
+        if (savedHomesSyncJob?.isActive == true) return
+        savedHomesSyncJob = viewModelScope.launch {
+            val local = runCatching { savedHomesStore.all() }.getOrDefault(emptyList())
+            val upload = local.isNotEmpty() && !savedHomesStore.synced()
+            val result = if (upload) savedPlaces.bulk(local) else savedPlaces.list()
+            when (result) {
+                is SavedPlacesResult.Ok -> {
+                    // 로그아웃 중이라 쓰지 못하면 아무것도 바꾸지 않는다(다음 로그인이 새로 맞춘다).
+                    if (!savedHomesStore.replaceSynced(result.homes)) return@launch
+                    savedPlacesMode = SavedPlacesMode.SERVER
+                    _state.update { it.copy(savedHomes = result.homes, savedHomesOnServer = true) }
+                    if (upload && result.skippedOverLimit > 0) {
+                        notify("저장한 집이 5곳을 넘어 ${result.skippedOverLimit}곳은 서버에 올리지 못했어요")
+                    }
+                }
+
+                SavedPlacesResult.Unsupported -> {
+                    savedPlacesMode = SavedPlacesMode.DEVICE
+                    _state.update { it.copy(savedHomesOnServer = false) }
+                }
+
+                is SavedPlacesResult.Failure -> {
+                    Log.w(TAG, "다른 집 동기화 실패: ${result.status} ${result.code}")
+                    // 서버가 요청 자체를 거절(400)하면 다시 보내도 같다. 이번 실행에서는 기기 목록으로 두고
+                    // 다음 실행에 다시 시도한다. 통신 실패·5xx 는 상태를 그대로 두고 다음 기회에 다시 한다.
+                    if (upload && result.status == 400) {
+                        savedPlacesMode = SavedPlacesMode.DEVICE
+                        _state.update { it.copy(savedHomesOnServer = false) }
+                    }
+                }
+            }
+        }
     }
 
     /** "+ 다른 집 추가". 집 주소 화면(⑭)을 이름 칸과 함께 연다 */
@@ -3921,6 +3990,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _homeSetup.update { it.copy(label = value.take(SavedHomes.LABEL_MAX), error = null) }
 
     fun removeSavedHome(id: String) {
+        val target = _state.value.savedHomes.firstOrNull { it.id == id }
+        val serverId = target?.serverId
+        if (serverId != null && useSavedPlacesServer()) {
+            removeSavedHomeOnServer(id, serverId)
+            return
+        }
         val next = SavedHomes.remove(_state.value.savedHomes, id)
         if (!savedHomesStore.replace(next)) {
             notify("다른 집을 지우지 못했습니다")
@@ -3930,14 +4005,43 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         notify("다른 집을 지웠습니다")
     }
 
+    // Partly AI-generated (Claude)
+    /** 서버에 저장한 집을 지운다. 서버가 지운 뒤에만 목록에서 뺀다 */
+    private fun removeSavedHomeOnServer(id: String, serverId: Long) {
+        if (_state.value.savedHomeBusyId != null) return
+        _state.update { it.copy(savedHomeBusyId = id) }
+        viewModelScope.launch {
+            when (val result = savedPlaces.delete(serverId)) {
+                is SavedPlacesResult.Ok -> {
+                    val next = SavedHomes.remove(_state.value.savedHomes, id)
+                    savedHomesStore.replaceSynced(next)
+                    _state.update { it.copy(savedHomes = next, savedHomeBusyId = null) }
+                    notify("다른 집을 지웠습니다")
+                }
+
+                is SavedPlacesResult.Failure -> {
+                    _state.update { it.copy(savedHomeBusyId = null) }
+                    notify("다른 집을 지우지 못했어요. ${result.message}")
+                }
+
+                SavedPlacesResult.Unsupported -> _state.update { it.copy(savedHomeBusyId = null) }
+            }
+        }
+    }
+
     /**
      * "기본으로". 서버의 집을 이 집으로 바꾸고(알람이 다시 계산된다) 예전 집을 목록에 남긴다. 서버가
-     * 받지 못하면 아무것도 바꾸지 않는다.
+     * 받지 못하면 아무것도 바꾸지 않는다. 서버에 저장한 집이면 서버가 기본 집과 자리를 바꾼다.
      */
     fun makeSavedHomeDefault(id: String) {
         val current = _state.value
         if (current.savedHomeBusyId != null) return
         val home = current.savedHomes.firstOrNull { it.id == id } ?: return
+        val serverId = home.serverId
+        if (serverId != null && useSavedPlacesServer()) {
+            makeSavedHomeDefaultOnServer(home, serverId)
+            return
+        }
         _state.update { it.copy(savedHomeBusyId = id) }
         viewModelScope.launch {
             when (val result = repository.setHome(label = home.name, lat = home.lat, lng = home.lng)) {
@@ -3966,6 +4070,37 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update { it.copy(savedHomeBusyId = null) }
                     notify("기본 집을 바꾸지 못했습니다. ${result.message}")
                 }
+            }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    private fun makeSavedHomeDefaultOnServer(home: SavedHome, serverId: Long) {
+        _state.update { it.copy(savedHomeBusyId = home.id) }
+        viewModelScope.launch {
+            when (val result = savedPlaces.makeDefault(serverId)) {
+                is SavedPlacesResult.Ok -> {
+                    savedHomesStore.replaceSynced(result.homes)
+                    _state.update { it.copy(savedHomes = result.homes, savedHomeBusyId = null) }
+                    notify(
+                        "기본 집을 ${home.label}${com.swpp.wakeup.domain.model.RerouteAlert.roParticle(home.label)} " +
+                            "바꿨습니다. 알람을 다시 계산합니다"
+                    )
+                    refresh()
+                }
+
+                is SavedPlacesResult.Failure -> {
+                    _state.update { it.copy(savedHomeBusyId = null) }
+                    if (result.code == SavedPlacesRepository.CODE_NOT_FOUND) {
+                        // 다른 기기에서 지운 집이다. 목록을 다시 받는다.
+                        syncSavedHomes()
+                        notify("이 집을 찾지 못했어요. 목록을 다시 불러왔어요")
+                    } else {
+                        notify("기본 집을 바꾸지 못했습니다. ${result.message}")
+                    }
+                }
+
+                SavedPlacesResult.Unsupported -> _state.update { it.copy(savedHomeBusyId = null) }
             }
         }
     }
@@ -4019,6 +4154,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         origin = base.origin,
                         originLabel = base.origin?.name,
                         includePrep = base.includePrep == true,
+                        originPlaceId = base.originPlaceId,
                         editingEventId = eventId,
                         editBase = base,
                         recurring = dto.recurrenceId != null,
@@ -4044,7 +4180,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             destinationIsHome = current.destinationIsHome,
             origin = current.origin,
             routeKey = current.routeKey,
-            includePrep = true.takeIf { current.includePrep && current.origin != null },
+            // 저장한 집에서는 끈 스위치도 false 로 보낸다(서버가 저장한 집을 집으로 쳐서 준비 시간을 넣는다).
+            includePrep = createIncludePrep(current.includePrep, current.origin != null, current.originPlaceId),
+            originPlaceId = current.originPlaceId.takeIf { current.origin != null },
         )
         val patch = EventEditPatch.build(base, edited)
         if (patch.size() == 0) {
@@ -4163,6 +4301,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 destinationIsHome = current.destinationIsHome,
                 repeatWeekdays = current.repeatWeekdays,
                 includePrep = current.includePrep,
+                originPlaceId = current.originPlaceId,
                 // 다시 시도는 같은 값이라 서버가 중복 일정을 만들지 않는다(A5). 200 도 성공이다.
                 clientRequestId = current.clientRequestId,
             )
@@ -4450,6 +4589,55 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         sort = sort,
     )
 
+    private fun saveExtraHomeOnDevice(home: SavedHome) {
+        val next = SavedHomes.add(_state.value.savedHomes, home)
+        if (!savedHomesStore.replace(next)) {
+            _homeSetup.update { it.copy(submitting = false, error = "이 기기에 저장하지 못했습니다. 다시 로그인해 주세요") }
+            return
+        }
+        _state.update { it.copy(savedHomes = next) }
+        _homeSetup.update { it.copy(submitting = false, done = true, saved = true) }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 다른 집을 서버에 저장한다. 서버가 받은 뒤에만 목록에 넣는다. 서버가 이 API 를 모르면(이전 서버)
+     * 기기에 저장한다. 같은 요청을 다시 보내도 늘지 않게 기기 id 를 `client_uuid` 로 보낸다.
+     */
+    private fun saveExtraHomeOnServer(home: SavedHome) {
+        _homeSetup.update { it.copy(submitting = true, error = null) }
+        viewModelScope.launch {
+            val input = SavedPlaceInput(
+                label = home.label,
+                lat = home.lat,
+                lng = home.lng,
+                name = home.name,
+                address = home.address,
+                clientUuid = home.id,
+            )
+            when (val result = savedPlaces.create(input)) {
+                is SavedPlacesResult.Ok -> {
+                    val next = SavedHomes.merge(_state.value.savedHomes, result.homes.first())
+                    if (!savedHomesStore.replaceSynced(next)) {
+                        _homeSetup.update { it.copy(submitting = false, error = "이 기기에 저장하지 못했습니다. 다시 로그인해 주세요") }
+                        return@launch
+                    }
+                    _state.update { it.copy(savedHomes = next) }
+                    _homeSetup.update { it.copy(submitting = false, done = true, saved = true) }
+                }
+
+                SavedPlacesResult.Unsupported -> {
+                    savedPlacesMode = SavedPlacesMode.DEVICE
+                    _state.update { it.copy(savedHomesOnServer = false) }
+                    saveExtraHomeOnDevice(home)
+                }
+
+                is SavedPlacesResult.Failure ->
+                    _homeSetup.update { it.copy(submitting = false, error = savedPlaceAddMessage(result)) }
+            }
+        }
+    }
+
     fun submitHomeSetup() {
         val current = _homeSetup.value
         val place = current.selected ?: return
@@ -4464,13 +4652,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 lat = place.lat,
                 lng = place.lng,
             )
-            val next = SavedHomes.add(_state.value.savedHomes, home)
-            if (!savedHomesStore.replace(next)) {
-                _homeSetup.update { it.copy(error = "이 기기에 저장하지 못했습니다. 다시 로그인해 주세요") }
-                return
+            if (useSavedPlacesServer()) {
+                saveExtraHomeOnServer(home)
+            } else {
+                saveExtraHomeOnDevice(home)
             }
-            _state.update { it.copy(savedHomes = next) }
-            _homeSetup.update { it.copy(done = true, saved = true) }
             return
         }
 

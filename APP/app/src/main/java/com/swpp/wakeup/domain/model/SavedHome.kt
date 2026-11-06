@@ -23,6 +23,11 @@ data class SavedHome(
     val address: String?,
     val lat: Double,
     val lng: Double,
+    /**
+     * 서버에 저장한 행의 id(`SavedPlace.id`). 기기에만 있는 집이면 null. 예전에 디스크에 쓴 JSON 에는 이
+     * 칸이 없어 null 로 읽힌다. 서버 호출(삭제·기본으로)과 일정의 `origin_place_id` 에 쓴다.
+     */
+    val serverId: Long? = null,
 ) {
     /** 깨진 사본을 거른다 */
     val isUsable: Boolean
@@ -59,6 +64,16 @@ object SavedHomes {
     }
 
     fun remove(homes: List<SavedHome>, id: String): List<SavedHome> = homes.filter { it.id != id }
+
+    /**
+     * 서버가 돌려준 행 하나를 목록에 반영한다: 같은 [SavedHome.serverId] 가 있으면 그 자리에서 바꾸고,
+     * 없으면 맨 앞에 넣는다. 서버가 한도(5)와 중복을 지키므로 여기서 자르지 않는다.
+     */
+    fun merge(homes: List<SavedHome>, row: SavedHome): List<SavedHome> {
+        val sid = row.serverId
+        if (sid == null || homes.none { it.serverId == sid }) return listOf(row) + homes
+        return homes.map { if (it.serverId == sid) row else it }
+    }
 
     /**
      * "기본으로": [id] 를 목록에서 빼고, 예전 기본 집([previous])이 있으면 그 자리에 넣는다. 서버에

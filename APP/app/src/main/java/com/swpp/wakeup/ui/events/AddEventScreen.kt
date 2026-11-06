@@ -480,6 +480,8 @@ fun HomeSetupScreen(
     modifier: Modifier = Modifier,
     /** 다른 집의 이름 칸(Figma ⑯ 변형 `498:9` ③). 기본 집에서는 그리지 않는다 */
     onLabelChange: (String) -> Unit = {},
+    /** 다른 집을 계정(서버)에 저장하는 중이면 true. 안내 문구만 바뀐다(B2) */
+    savedOnServer: Boolean = false,
 ) {
     val extra = state.target == HomeViewModel.HomeTarget.EXTRA
     Column(
@@ -505,7 +507,11 @@ fun HomeSetupScreen(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = if (extra) "이 기기에만 저장함 · 일정 출발지로 고를 수 있음" else "출발지 설정",
+            text = if (extra) {
+                if (savedOnServer) "계정에 저장함 · 일정 출발지로 고를 수 있음" else "이 기기에만 저장함 · 일정 출발지로 고를 수 있음"
+            } else {
+                "출발지 설정"
+            },
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
