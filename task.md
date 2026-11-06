@@ -43,11 +43,11 @@
 - [x] **종류 직접 추가** (BE-21, 서버 0.19.0): "+ 추가" 를 누르면 이름 입력 → `POST /api/events/tags {label}` → 돌려받은 종류를 목록에 넣고 고른다. `default_tau` 가 null 이면 τ 칸에 "프로필 기본". [event-tags-api.md](docs/iter3/event-tags-api.md) 5절, 12-a 항목.
   - ✅ 구현(11-06, bdc392e): "+ 추가" → 이름 대화상자 → `POST /api/events/tags`, 받은 종류를 고르고 `default_tau` null 은 "프로필 기본". 같은 이름은 한 줄만 남는 것을 에뮬레이터에서 확인했다.
 - [x] **저장한 집 서버 동기화** (R3-2·R3-3, 서버 0.18.0): 기기의 집 목록(`SavedHomesStore`)을 `POST /api/saved-places/bulk/` 로 한 번 올리고, 이후 추가·수정·삭제·기본 집 바꾸기는 API 로. 일정 출발지가 저장한 집이면 `origin_place_id` 를 보낸다. [saved-places-api.md](docs/iter3/saved-places-api.md)
-  - ✅ 구현(11-06, e024b4d): 기기 집 목록을 `bulk` 로 한 번 올리고 이후 추가·삭제·기본으로는 API, 출발지가 저장한 집이면 `origin_place_id`. 옛 빌드에서 덮어 설치해 `bulk` 200 과 `origin_place_id = 2` 를 확인했다. 알려진 틈: 첫 업로드 중 추가·삭제가 덮어써질 수 있다(m1, docs/iter3/front-iter3.md).
+  - ✅ 구현(11-06, e024b4d): 기기 집 목록을 `bulk` 로 한 번 올리고 이후 추가·삭제·기본으로는 API, 출발지가 저장한 집이면 `origin_place_id`. 옛 빌드에서 덮어 설치해 `bulk` 200 과 `origin_place_id = 2` 를 확인했다. 첫 업로드 중 추가·삭제가 덮어써지던 틈은 495820a 에서 고쳤다.
 - [x] **출발 전 확인 표시** (R3-11 2번, 서버 0.18.0): 알람 끌 때·출발 10분 전 `POST /api/routes/live` 본문에 `"context": "pre_departure"` 를 싣는다. [reroute-api.md](docs/iter3/reroute-api.md) 4-1절
   - ✅ 구현(11-06, b067d14): 알람을 끌 때와 출발 10분 전의 `routes/live` 에 `"context": "pre_departure"`. 단위 테스트까지만 확인했다.
 - [x] **주간 리포트 기상 패널** (R3-6, 서버 0.18.0): 주간 응답의 `wake` 블록(울린 알람 수, 미루기 수, 기상까지 걸린 시간 중앙값, 요일별)을 ⑧⑨ 패널에 그린다. `wake` 가 null 이면 숨긴다. [report-design.md](docs/iter2/report-design.md) 3절
-  - ✅ 구현(11-06, 2da5146): ⑧ 카드 "기상 · 이번 주"와 ⑨ 카드 "기상", `wake` 가 null 이면 숨김. 에뮬레이터에서 울림·미루기·끄기까지 31초를 확인했다. 알려진 틈: 미룬 알람이 2개로 셈된다(m2, docs/iter3/front-iter3.md).
+  - ✅ 구현(11-06, 2da5146): ⑧ 카드 "기상 · 이번 주"와 ⑨ 카드 "기상", `wake` 가 null 이면 숨김. 에뮬레이터에서 울림·미루기·끄기 기록이 카드에 나오는 것을 확인했다. 미룬 알람을 2개로 세던 것은 954d591 에서 고쳤다(고친 뒤 숫자는 에뮬레이터에서 다시 보지 않았다).
 - [x] (선택) **이메일 인증** (R3-10, 서버 0.18.0): 설정에 인증 코드 받기·입력 화면. 로그인은 막지 않는다. [password-api.md](docs/iter3/password-api.md)
   - ✅ 구현(11-06, 1bc8617): 설정의 "이메일 인증" 행과 코드 화면, 로그인은 막지 않는다. 에뮬레이터에서 코드 입력 → "인증됨"을 확인했다.
 - 앱 변경 없음: 비밀번호 찾기·변경(앱 화면 있음, 서버 0.18.0 배포 뒤 동작), 자전거도로 칸(BE-14, 서버 0.18.1 배포 뒤 보임), 도보 탭(서버 0.18.2 부터 늘 후보가 온다).

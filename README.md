@@ -109,9 +109,8 @@ make the screen look finished while being untrue.
   the fastest) and guidance work. Four car variants (BE-8), arrival-time/operating-hour
   routing (BE-11) and optional bicycle-road ratio (BE-14) remain
 - Weekly and detailed reports ⑧⑨ — built, including the wake panel (alarms fired, snoozes,
-  median time to dismiss, by weekday; hidden when the server sends no `wake`). A snoozed alarm is
-  still counted as two alarms because the re-ring logs carry the new alarm time; sleep and
-  per-weekday auto-adjustment panels are left out
+  median time to dismiss, by weekday; hidden when the server sends no `wake`; a snoozed alarm
+  counts once). Sleep and per-weekday auto-adjustment panels are left out
 - More than one home — other homes (a family home, a dorm) are saved to the account
   (`/api/saved-places/`; a device list is uploaded once with `bulk`) and offered first in the
   origin search, with prep time included; an event from a saved home sends `origin_place_id`.
