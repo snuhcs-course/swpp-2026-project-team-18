@@ -2,7 +2,7 @@
 브랜치 `front-iter3`, 기준 `origin/main` = `3d39fc8`(10-31). 11-03 에 `front-iter3`(`c527cea`)를 main 에 합쳤다. main 은 `dbe38da`(머지 커밋, 부모 `3d39fc8`·`c527cea`)이고 트리는 `c527cea` 와 같다. 그 뒤 11-03 밤 작업(아래 "11-03 노션 남은 프론트 항목")은 `front-iter3` 에서 이어 갔고 아직 main 에 없다. 백엔드가 `todo.md` §2 에 넘긴 일과 팀 회의 내용을 앱에 넣었다. 항목 번호는 [figma-changes.md](figma-changes.md) 의 번호와 같다(1~22 는 아래 절 제목, 5b·5c·19b 는 만들지 않음). 서버에 아직 없는 부분은 [backend-requests.md](backend-requests.md) 에 요청으로 적었다.
 
 ## 요약
-- 단위 테스트: main 기준 **739건 → 1029건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml`, 최신 앱 커밋 `1bc8617` 의 실행 결과). 950건은 11-03 밤 끝(`d79fb67`)의 값이고, 11-06 저녁에 79건이 늘었다(975 → 984 → 987 → 1012 → 1018 → 1029, 아래 "11-06 task.md 프론트 할 일"). 877건은 `c527cea`(main 에 합친 시점)의 값이고, 11-03 밤에 70건이 늘었다(902 → 927 → 939 → 948 → 947 → 950).
+- 단위 테스트: main 기준 **739건 → 1038건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml`, 최신 앱 커밋 `954d591` 의 실행 결과). 950건은 11-03 밤 끝(`d79fb67`)의 값이고, 11-06 저녁에 88건이 늘었다(975 → 984 → 987 → 1012 → 1018 → 1029 → 1030 → 1038, 아래 "11-06 task.md 프론트 할 일"). 877건은 `c527cea`(main 에 합친 시점)의 값이고, 11-03 밤에 70건이 늘었다(902 → 927 → 939 → 948 → 947 → 950).
 - 린트: 오류 0 / 경고 63 (11-06 에 1개 늘었다. 아래 절 참조. 11-03 밤까지는 62 로 기준선과 같았다). 11-03 밤 커밋마다 `lintDebug` 를 돌렸다. S1 커밋에서 늘었던 경고 2개는 `LastEmailStore` 의 UseKtx 였고 `d79fb67` 에서 고쳤다(64 → 62).
 - 기기 테스트(`androidTest`)는 컴파일(`compileDebugAndroidTestKotlin`, `assembleDebugAndroidTest`)만 확인했다. 기기에서 돌린 기록은 없다.
 - 기준선(11-01, 손대지 않은 브랜치): 단위 739건, 린트 오류 0 / 경고 62, 백엔드 pytest 1684건 통과.
@@ -253,6 +253,8 @@
 | B2 저장한 집 서버 동기화 | `e024b4d` | 1012 | 0 / 63 |
 | B4 주간 기상 패널 | `2da5146` | 1018 | 0 / 63 |
 | B5 이메일 인증 | `1bc8617` | 1029 | 0 / 63 |
+| 리뷰 지적 m1 (B2 첫 업로드 중 변경) | `495820a` | 1030 | 0 / 63 |
+| 리뷰 지적 m2 (B4 미룬 알람 기록) | `954d591` | 1038 | 0 / 63 |
 기준은 `5dc51ef` 의 950건 / 경고 62 다. 경고 1개는 `UnusedResources`·의존성 버전 쪽이고 이번에 고친 파일에는 없다.
 ### A1-A7. 일정 저장 오류 — `6d6627b` (Figma F-46, F-47, F-48)
 - **바뀐 것**:
@@ -286,7 +288,7 @@
 - **바뀐 것**: 주간 응답의 `wake` 를 ⑧ 카드 "기상 · 이번 주"(울린 알람, 미루기, 끄기까지 중간값, 요일 칸)와 ⑨ 카드 "기상"으로 그린다. `wake` 가 null 이거나 `alarms_fired` 가 0 이면 카드를 숨긴다. 중간값이 없으면 "기록 없음"/"—". 숫자는 모두 서버 값이다.
 - **파일**: `data/remote/ReportsApi.kt`, `domain/model/WeeklyReport.kt`, `ui/report/{ReportMapping,WeeklyReportScreen,ReportDayScreen,ReportPreviewData}.kt`.
 - **테스트**: `ReportMappingTest`(+5), `NetworkDtoNullSafetyTest`(+1). 합쳐서 6건(1012 → 1018).
-- **확인**: 단위 + 에뮬레이터. 알람을 울려 한 번 미루고 끈 뒤 패널에 울린 알람 2번, 미루기 1번, 끄기까지 31초, 금요일 칸 "0:31"·"미룸 1"이 보였다. 열린 것 m2 참조(이 숫자가 틀린 이유).
+- **확인**: 단위 + 에뮬레이터. 알람을 울려 한 번 미루고 끈 뒤 패널에 울린 알람 2번, 미루기 1번, 끄기까지 31초, 금요일 칸 "0:31"·"미룸 1"이 보였다. 고친 것 m2 참조(이 숫자가 틀렸던 이유).
 ### B5. 이메일 인증 — `1bc8617` (Figma F-53, F-53b, F-53c)
 - **바뀐 것**: 설정에 "이메일 인증" 행("아직 인증하지 않음 · 로그인에는 필요 없음", 인증되면 "인증됨")과 코드 입력 화면을 더했다. `POST /api/auth/me/email/verify` 로 코드를 받고(`expires_in` 600초), `…/verify/confirm {code}` 로 확인한다. 409(이미 인증·메일 못 받는 계정), 400 세 가지 코드, 429 에 각각 문구가 있다. 404·405 는 "아직 서버에서 지원하지 않아요". 로그인은 막지 않는다. 행은 `email_verified` 와 계정 이메일을 알 때만 보인다. 코드는 메모리에만 두며 저장하지 않으므로 `wipeAll`·감사 테스트·백업 제외는 바꾸지 않았다. HTTP 로그에서는 `"code"` 의 4~8자리 숫자를 가린다(`ApiClient.VERIFY_CODE_FIELD`).
 - **파일**: `data/remote/{AuthApi,ApiClient}.kt`, `data/repository/AuthRepository.kt`, `ui/settings/{EmailVerifyState,EmailVerifyScreen,SettingsScreen}.kt`, `ui/nav/AppRoute.kt`, `ui/home/HomeViewModel.kt`, `MainActivity.kt`.
@@ -297,9 +299,10 @@
 - **T1 (task.md L223)**: A2 로 해결. 도착지 아래 줄을 에뮬레이터에서 봤다.
 - **T2 (task.md L224)**: `9616680` 에 스위치·초기 상태·출발지 변경 시 초기화·생성과 PATCH 전송이 있었고, 마지막 하위 항목인 결정 화면 이유 줄은 `b067d14` 에서 채웠다. 남은 차이는 스위치가 출발지를 따로 골랐을 때만 보이고(저장한 집 포함), 끄면 보통 `false` 를 보내지 않는다는 것이다(`include-prep-api.md` 5절 3번이 허용함). 예외는 저장한 집(B2)이다. 서버가 저장한 집 출발을 집으로 쳐서 준비 시간을 넣으므로, 끈 것을 `false` 로 보낸다(`createIncludePrep`).
 - **T3 (task.md L250)**: B1 로 해결.
+### 고친 것 (코드 리뷰 지적 m1, m2)
+- **m1 (B2) 첫 업로드 중 추가·삭제가 덮어써짐 — `495820a`**: 처음 `bulk` 업로드가 도는 동안(`savedHomesSyncJob` 이 활성이고 저장소가 아직 `synced` 가 아님) 집 추가·삭제·"기본으로"는 아무것도 하지 않고 "저장한 집을 서버에 올리는 중이에요. 잠시 뒤 다시 해 주세요"만 띄운다(`HomeViewModel.blockedByFirstUpload`). 판단은 순수 함수 `savedHomesFirstUploadRunning` 에 있다. B2 의 나머지는 바꾸지 않았다. 테스트 `SavedHomeSyncTest`(+1, 1029 → 1030).
+- **m2 (B4) 미룬 알람이 두 번 셈됨 — `954d591`**: `AlarmSchedule.firstAlarmAtMillis`(계획의 알람 시각, 기본 null, 예전 저장 JSON 은 null 로 읽힘)를 더했다. 미루기 사본은 순수 함수 `AlarmSchedule.snoozedTo` 가 만들고 두 번 미뤄도 처음 값을 지킨다. `alarmLogOf` 는 모든 종류에서 `alarm_at = firstAlarmAtMillis ?: alarmAtMillis` 를 보낸다. `AlarmSyncPlan` 이 미룬 알람을 지킬 때 이 값도 같이 지킨다. 알람이 울리는 시각, `MissedAlarms` 키, SCHEDULED 기록의 비교(`changedRegistrations`)는 그대로다. 테스트 `AlarmLogTest`(+6: 울림·미루기·끄기 기록이 모두 처음 시각, 미루지 않은 알람, 두 번 미룸, 예전 JSON, 저장 왕복), `AlarmSyncPlanTest`(+2). 합쳐서 8건(1030 → 1038). 에뮬레이터에서 다시 확인하지는 않았다(단위 테스트만).
 ### 열린 것
-- **m1 (B2) 첫 업로드 중 추가·삭제가 덮어써짐**: 처음 `bulk` 업로드가 서버 응답을 기다리는 동안 설정에서 집을 추가하거나 지우면 기기 목록에만 반영되고(`synced` 가 아직 false), 200 이 오면 서버 목록이 그 위를 덮는다. 사용자당 한 번, 응답이 사용자의 저장보다 늦을 때만 생긴다. 고치는 방법: 업로드가 끝날 때까지 추가·삭제를 막거나, 200 뒤에 올라가지 않은 행을 다시 올린다(`HomeViewModel.kt:4034-4043`, `saveExtraHomeOnDevice`).
-- **m2 (B4) 미룬 알람이 두 번 셈됨**: 미룬 뒤 다시 울린 알람의 로그가 새 `alarmAtMillis` 를 `alarm_at` 으로 보낸다(`alarm/AlarmLogQueue.kt:177`). 서버는 (일정, `alarm_at`)을 알람 하나로 보므로 한 번 미룬 알람이 알람 2개로 세어지고 끄기까지 시간은 다시 울린 때부터 잰다. 에뮬레이터에서 실제로 알람 2번·31초가 나왔다(맞는 값은 1번·약 5분 30초). 패널 설명 "미뤄서 다시 울린 것도 한 알람으로 셈"이 이 경우 틀린다. 고치는 방법: 미룬 일정에 처음 알람 시각을 남기고 다시 울린 로그에 그 값을 `alarm_at` 으로 보낸다(`AlarmSchedule`, 저장소, 인텐트, 로그 입력을 건드려서 이번에 하지 않음).
 - **m3 (Figma)**: F-50 의 `same_as_default` 오류는 프레임처럼 이름 칸 아래가 아니라 폼 아래의 기존 오류 줄(`HomeSetupState.error`)에 나온다.
 - **m4 (테스트)**: `HomeViewModel` 이 `Application` 을 요구해서 `syncSavedHomes`, `onAddEventClick`, `onCleared`, `logout`, 이메일 인증 흐름은 단위 테스트가 없다. 결정은 테스트된 순수 함수로 뺐고 에뮬레이터로 확인했다.
 - 기기 테스트(`androidTest`)는 이번에도 컴파일만 했다. 실기기 확인과 공용 서버 확인은 하지 않았다.
