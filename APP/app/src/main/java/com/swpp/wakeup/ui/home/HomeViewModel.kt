@@ -49,7 +49,6 @@ import com.swpp.wakeup.data.local.SavedHomesStore
 import com.swpp.wakeup.data.remote.SavedPlaceInput
 import com.swpp.wakeup.data.repository.SavedPlacesRepository
 import com.swpp.wakeup.data.repository.createIncludePrep
-import com.swpp.wakeup.data.repository.savedPlaceAddMessage
 import com.swpp.wakeup.data.repository.SavedPlacesResult
 import com.swpp.wakeup.domain.model.CalibrationView
 import com.swpp.wakeup.domain.model.WeeklyReportView
@@ -4090,7 +4089,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onHomeLabelChange(value: String) =
-        _homeSetup.update { it.copy(label = value.take(SavedHomes.LABEL_MAX), error = null) }
+        _homeSetup.update { it.copy(label = value.take(SavedHomes.LABEL_MAX), error = null, labelError = null) }
 
     fun removeSavedHome(id: String) {
         if (blockedByFirstUpload()) return
@@ -4626,6 +4625,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val onboarding: Boolean = false,
         val submitting: Boolean = false,
         val error: String? = null,
+        // Partly AI-generated (Claude)
+        /** 서버가 기본 집과 같은 곳이라고 거절했을 때 이름 칸 아래에 보일 문구(Figma F-50 `528:105`) */
+        val labelError: String? = null,
         val done: Boolean = false,
         /**
          * 닫힌 이유가 저장인가.
@@ -4661,7 +4663,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 표시한다 — 다른 후보로 바로 바꿀 수 있어야 한다. 검색어도 그대로 둔다.
      */
     fun onHomePlaceSelected(item: PlaceSearchItem?) = _homeSetup.update {
-        it.copy(selected = item)
+        it.copy(selected = item, labelError = null)
     }
 
     /**
@@ -4710,7 +4712,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 기기에 저장한다. 같은 요청을 다시 보내도 늘지 않게 기기 id 를 `client_uuid` 로 보낸다.
      */
     private fun saveExtraHomeOnServer(home: SavedHome) {
-        _homeSetup.update { it.copy(submitting = true, error = null) }
+        _homeSetup.update { it.copy(submitting = true, error = null, labelError = null) }
         viewModelScope.launch {
             val input = SavedPlaceInput(
                 label = home.label,
@@ -4738,7 +4740,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 is SavedPlacesResult.Failure ->
-                    _homeSetup.update { it.copy(submitting = false, error = savedPlaceAddMessage(result)) }
+                    _homeSetup.update { it.withAddFailure(result) }
             }
         }
     }

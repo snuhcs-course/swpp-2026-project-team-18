@@ -517,13 +517,17 @@ fun HomeSetupScreen(
         )
 
         if (extra) {
-            JitTextField(
-                label = "이름 (예: 본가·기숙사)",
-                inputTag = "home_setup_label",
-                value = state.label,
-                onValueChange = onLabelChange,
-                enabled = !state.submitting,
-            )
+            // Partly AI-generated (Claude): same_as_default 는 Figma F-50 처럼 이름 칸 아래에 빨간 글씨로 보인다
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                JitTextField(
+                    label = "이름 (예: 본가·기숙사)",
+                    inputTag = "home_setup_label",
+                    value = state.label,
+                    onValueChange = onLabelChange,
+                    enabled = !state.submitting,
+                )
+                state.labelError?.let { EndpointError(it, tag = "home_setup_label_error") }
+            }
         }
 
         PlacePicker(
