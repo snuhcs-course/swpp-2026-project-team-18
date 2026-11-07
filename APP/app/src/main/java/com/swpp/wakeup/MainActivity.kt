@@ -353,15 +353,19 @@ private fun MainHost(
             val recomputeId = addState.routeFailedEventId
             viewModel.goBack()
             viewModel.resetAdd()
-            if (recomputeId != null) {
-                val result = snackbarHostState.showSnackbar(
-                    message = message,
-                    actionLabel = "다시 계산",
-                    duration = SnackbarDuration.Long,
-                )
-                if (result == SnackbarResult.ActionPerformed) viewModel.openAlarmDecision(recomputeId)
-            } else {
-                snackbarHostState.showSnackbar(message)
+            // resetAdd 가 done 을 false 로 돌려 이 효과를 취소하므로, 스낵바는 화면 범위(scope)에서 띄운다.
+            // Partly AI-generated (Claude)
+            scope.launch {
+                if (recomputeId != null) {
+                    val result = snackbarHostState.showSnackbar(
+                        message = message,
+                        actionLabel = "다시 계산",
+                        duration = SnackbarDuration.Long,
+                    )
+                    if (result == SnackbarResult.ActionPerformed) viewModel.openAlarmDecision(recomputeId)
+                } else {
+                    snackbarHostState.showSnackbar(message)
+                }
             }
         }
     }
