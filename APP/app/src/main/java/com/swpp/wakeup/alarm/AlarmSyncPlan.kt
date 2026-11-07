@@ -37,7 +37,13 @@ internal object AlarmSyncPlan {
             if (!inWindow(b.alarmAtMillis)) return@mapNotNull null
             val server = serverById[b.eventId] ?: return@mapNotNull null
             if (server.alarmAtMillis > nowMillis) return@mapNotNull null
-            server.copy(alarmAtMillis = b.alarmAtMillis, alarmLabel = b.alarmLabel, meridiem = b.meridiem)
+            server.copy(
+                alarmAtMillis = b.alarmAtMillis,
+                alarmLabel = b.alarmLabel,
+                meridiem = b.meridiem,
+                // 미룬 알람의 기록은 계획의 알람 시각으로 보낸다. 다시 울릴 시각만 지키면 둘로 셈된다.
+                firstAlarmAtMillis = b.firstAlarmAtMillis,
+            )
         }
 
         return (fresh + kept).sortedBy { it.alarmAtMillis }.take(max)

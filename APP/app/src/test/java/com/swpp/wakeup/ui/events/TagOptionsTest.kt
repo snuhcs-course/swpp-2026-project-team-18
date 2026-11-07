@@ -30,7 +30,23 @@ class TagOptionsTest {
     }
 
     @Test
-    fun `τ 가 없으면 비워 둔다`() {
-        assertEquals("", tagOptionsOf(listOf(tag("etc", "모임", null)))[0].tau)
+    fun `τ 가 없으면 프로필 기본이라고 쓴다`() {
+        assertEquals("프로필 기본", tagOptionsOf(listOf(tag("etc", "모임", null)))[0].tau)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `만든 종류는 목록 끝에 붙는다`() {
+        val base = listOf(tag("class", "수업", 0.9))
+        val made = tag("u0123456789", "Lab", null)
+        assertEquals(listOf("class", "u0123456789"), tagsWith(base, made).map { it.key })
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `이미 있는 key 는 다시 붙이지 않는다`() {
+        val made = tag("u0123456789", "Lab", null)
+        val base = listOf(tag("class", "수업", 0.9), made)
+        assertEquals(base, tagsWith(base, made))
     }
 }

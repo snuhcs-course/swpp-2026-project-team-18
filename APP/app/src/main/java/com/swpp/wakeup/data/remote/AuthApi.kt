@@ -57,6 +57,15 @@ interface AuthApi {
     @POST("api/auth/me/password")
     suspend fun changePassword(@Body body: PasswordChangeRequest): Response<PasswordChangeResponse>
 
+    // --- 이메일 인증 (R3-10, password-api.md §4) — Partly AI-generated (Claude) ---
+    /** 내 이메일로 6자리 인증 코드를 보낸다. Bearer 필요. 202 `{sent, expires_in}`. 시간당 3번 */
+    @POST("api/auth/me/email/verify")
+    suspend fun requestEmailVerify(): Response<PasswordResetResponse>
+
+    /** 코드를 확인한다. 200 `{user}` (`email_verified: true`). 시간당 10번 */
+    @POST("api/auth/me/email/verify/confirm")
+    suspend fun confirmEmailVerify(@Body body: EmailVerifyConfirmRequest): Response<SocialUserResponse>
+
     /** 모든 기기 로그아웃. Bearer 가 필요하다. 응답 `{"revoked": n}` */
     @POST("api/auth/me/logout-all")
     suspend fun logoutAll(): Response<LogoutAllResponse>
@@ -113,6 +122,8 @@ data class PasswordChangeRequest(
     @SerializedName("new_password") val newPassword: String,
     @SerializedName("new_password_confirm") val newPasswordConfirm: String,
 )
+
+data class EmailVerifyConfirmRequest(val code: String)
 
 data class PasswordChangeResponse(
     val access: String? = null,
@@ -179,6 +190,8 @@ data class UserDto(
      * (Partly AI-generated (Claude))
      */
     @SerializedName("login_methods") val loginMethods: List<String>? = null,
+    /** 이메일 인증을 마쳤는가. 로그인에는 필요 없다(R3-10). 구버전 서버는 없다 */
+    @SerializedName("email_verified") val emailVerified: Boolean? = null,
 )
 
 /**

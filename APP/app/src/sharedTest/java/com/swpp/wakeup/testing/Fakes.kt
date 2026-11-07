@@ -20,6 +20,7 @@ import com.swpp.wakeup.data.remote.EventUpdateRequest
 import com.swpp.wakeup.data.remote.EventsApi
 import com.swpp.wakeup.data.remote.LiveRouteRequest
 import com.swpp.wakeup.data.remote.LiveRouteResponse
+import com.swpp.wakeup.data.remote.TagCreateRequest
 import com.swpp.wakeup.data.remote.LoginRequest
 import com.swpp.wakeup.data.remote.Paged
 import com.swpp.wakeup.data.remote.PasswordCheckRequest
@@ -38,6 +39,11 @@ import com.swpp.wakeup.data.remote.RouteCandidateResponse
 import com.swpp.wakeup.data.remote.RoutineBlockDto
 import com.swpp.wakeup.data.remote.RoutineBlockWriteRequest
 import com.swpp.wakeup.data.remote.RoutinesApi
+import com.swpp.wakeup.data.remote.SavedPlaceDto
+import com.swpp.wakeup.data.remote.SavedPlaceInput
+import com.swpp.wakeup.data.remote.SavedPlacesApi
+import com.swpp.wakeup.data.remote.SavedPlacesBulkRequest
+import com.swpp.wakeup.data.remote.SavedPlacesListDto
 import com.swpp.wakeup.data.remote.UserDto
 import com.swpp.wakeup.data.remote.WeeklyReportDto
 import okhttp3.MediaType.Companion.toMediaType
@@ -211,6 +217,14 @@ open class FakeAuthApi : AuthApi {
     override suspend fun changePassword(
         body: com.swpp.wakeup.data.remote.PasswordChangeRequest,
     ): Response<com.swpp.wakeup.data.remote.PasswordChangeResponse> = httpError(404)
+
+    // 이메일 인증(R3-10). 서버가 아직 없는 것처럼 404 가 기본이다.
+    override suspend fun requestEmailVerify(): Response<com.swpp.wakeup.data.remote.PasswordResetResponse> =
+        httpError(404)
+
+    override suspend fun confirmEmailVerify(
+        body: com.swpp.wakeup.data.remote.EmailVerifyConfirmRequest,
+    ): Response<com.swpp.wakeup.data.remote.SocialUserResponse> = httpError(404)
 }
 
 /**
@@ -260,6 +274,8 @@ open class FakeEventsApi : EventsApi {
         unexpected("importCalendar")
 
     override suspend fun tags(): Response<List<EventTagDto>> = unexpected("tags")
+    override suspend fun createTag(body: TagCreateRequest): Response<EventTagDto> =
+        unexpected("createTag")
     override suspend fun searchPlaces(
         query: String,
         lat: Double?,
@@ -325,4 +341,13 @@ open class FakeRoutinesApi : RoutinesApi {
 open class FakeReportsApi : ReportsApi {
     override suspend fun weekly(week: String?): Response<WeeklyReportDto> = unexpected("weekly")
     override suspend fun calibration(): Response<CalibrationDto> = unexpected("calibration")
+}
+
+// Partly AI-generated (Claude)
+open class FakeSavedPlacesApi : SavedPlacesApi {
+    override suspend fun list(): Response<SavedPlacesListDto> = unexpected("savedPlaces.list")
+    override suspend fun create(body: SavedPlaceInput): Response<SavedPlaceDto> = unexpected("savedPlaces.create")
+    override suspend fun delete(id: Long): Response<Unit> = unexpected("savedPlaces.delete")
+    override suspend fun makeDefault(id: Long): Response<SavedPlacesListDto> = unexpected("savedPlaces.makeDefault")
+    override suspend fun bulk(body: SavedPlacesBulkRequest): Response<SavedPlacesListDto> = unexpected("savedPlaces.bulk")
 }

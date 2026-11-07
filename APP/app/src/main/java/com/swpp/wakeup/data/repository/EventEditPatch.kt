@@ -12,7 +12,9 @@ import kotlin.math.abs
  * 일정 수정 화면의 값. 원래 값과 고친 값을 같은 모양으로 두고 [EventEditPatch] 가 비교한다.
  *
  * @property origin null 이면 집에서 출발
- * @property includePrep 준비 시간을 넣는가. 켜면 true, 끄면 null(서버 기본 규칙)
+ * @property includePrep 준비 시간을 넣는가. 켜면 true, 끄면 null(서버 기본 규칙). 저장한 집 출발은 끈 것도
+ *   `false` 로 둔다(서버가 저장한 집을 집으로 쳐서 준비 시간을 넣기 때문이다)
+ * @property originPlaceId 출발지가 저장한 집이면 서버의 그 집 id(B2). 아니면 null
  */
 data class EventEditValues(
     val title: String,
@@ -23,6 +25,7 @@ data class EventEditValues(
     val origin: PlaceSearchItem?,
     val routeKey: String?,
     val includePrep: Boolean?,
+    val originPlaceId: Long? = null,
 ) {
     companion object {
         // Partly AI-generated (Claude)
@@ -64,7 +67,13 @@ data class EventEditValues(
                 origin = origin,
                 routeKey = dto.routeKey?.takeIf { it.isNotBlank() },
                 // 화면 스위치는 켬(true)·끔(null) 둘뿐이다. 다른 기기가 false 로 둔 것도 끔으로 본다.
-                includePrep = if (dto.includePrep == true) true else null,
+                // 저장한 집 출발은 서버가 기본으로 준비 시간을 넣으므로 false 만 끔이다.
+                includePrep = when {
+                    origin != null && dto.originPlaceId != null -> dto.includePrep != false
+                    dto.includePrep == true -> true
+                    else -> null
+                },
+                originPlaceId = dto.originPlaceId.takeIf { origin != null },
             )
         }
     }
@@ -107,7 +116,10 @@ object EventEditPatch {
             }
         }
 
-        val originChanged = !samePoint(base.origin, edited.origin)
+        // 저장한 집으로 바꿨으면 좌표가 같아도 id 를 보낸다(서버가 그 집에 연결한다).
+        val placeAttached = edited.origin != null && edited.originPlaceId != null &&
+            edited.originPlaceId != base.originPlaceId
+        val originChanged = !samePoint(base.origin, edited.origin) || placeAttached
         if (originChanged) {
             val origin = edited.origin
             if (origin == null) {
@@ -118,6 +130,7 @@ object EventEditPatch {
                 body.addProperty("origin_lat", origin.lat)
                 body.addProperty("origin_lng", origin.lng)
                 body.addProperty("origin_label", origin.name.take(ORIGIN_LABEL_MAX))
+                edited.originPlaceId?.let { body.addProperty("origin_place_id", it) }
             }
         }
 
@@ -128,7 +141,10 @@ object EventEditPatch {
         // 집에서 출발하면 스위치가 없다. 켜 두었던 값은 지운다.
         val includePrep = edited.includePrep.takeIf { edited.origin != null }
         if (includePrep != base.includePrep) {
-            if (includePrep == true) body.addProperty("include_prep", true) else body.add("include_prep", JsonNull.INSTANCE)
+            when (includePrep) {
+                null -> body.add("include_prep", JsonNull.INSTANCE)
+                else -> body.addProperty("include_prep", includePrep)
+            }
         }
         return body
     }

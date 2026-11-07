@@ -592,4 +592,98 @@ class ReportMappingTest {
         assertEquals("채점 29건", view.countsLabel)
         assertEquals("잘 맞음", view.verdictLabel)
     }
+
+    // --- 기상 (B4) ---------------------------------------------------------
+    private val wakeJson = """
+        "wake": {"alarms_fired": 6, "snooze_count": 3, "snoozed_alarms": 2,
+                 "wake_seconds_median": 85,
+                 "by_weekday": [
+                   {"weekday":0,"fired":1,"snooze_count":0,"wake_seconds_median":52},
+                   {"weekday":1,"fired":1,"snooze_count":2,"wake_seconds_median":310},
+                   {"weekday":2,"fired":1,"snooze_count":0,"wake_seconds_median":40},
+                   {"weekday":3,"fired":1,"snooze_count":1,"wake_seconds_median":95},
+                   {"weekday":4,"fired":2,"snooze_count":0,"wake_seconds_median":70},
+                   {"weekday":5,"fired":0,"snooze_count":0,"wake_seconds_median":null},
+                   {"weekday":6,"fired":0,"snooze_count":0,"wake_seconds_median":null}]}
+    """.trimIndent()
+
+    private fun withWake(wake: String?) = map(
+        """{"week_start":"2026-10-05","week_end":"2026-10-11","event_count":1,
+            "arrived_count":1,"on_time_count":1${wake?.let { ",$it" }.orEmpty()}}"""
+    )
+
+    // AI-generated (Claude)
+    @Test
+    fun `기상 카드 문구는 서버 wake 에서 만든다`() {
+        val wake = withWake(wakeJson).wake!!
+        assertEquals("6번", wake.firedLabel)
+        assertEquals("3번", wake.snoozeLabel)
+        assertEquals("알람 2개에서", wake.snoozeSubLabel)
+        assertEquals("1분 25초", wake.medianLabel)
+        assertFalse(wake.medianMissing)
+        assertEquals(7, wake.days.size)
+        assertEquals(listOf("월", "화", "수", "목", "금", "토", "일"), wake.days.map { it.label })
+        assertEquals("0:52", wake.days[0].valueLabel)
+        assertEquals("5:10", wake.days[1].valueLabel)
+        assertEquals("미룸 2", wake.days[1].snoozeLabel)
+        assertEquals("", wake.days[0].snoozeLabel)
+        assertEquals("", wake.days[5].valueLabel)
+        assertEquals("화요일, 알람 1번, 미룸 2번, 끄기까지 5분 10초", wake.days[1].description)
+        assertEquals("토요일, 울린 알람 없음", wake.days[5].description)
+        assertEquals("알람 1번 · 미룸 2번 · 끄기까지 5분 10초", wake.days[1].dayLine)
+        assertEquals("알람 2번 · 끄기까지 1분 10초", wake.days[4].dayLine)
+        assertNull("울린 알람이 없는 날은 ⑨ 줄이 없다", wake.days[6].dayLine)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `wake 가 없거나 울린 알람이 0 이면 기상 카드는 없다`() {
+        assertNull(withWake(null).wake)
+        assertNull(withWake("\"wake\": null").wake)
+        assertNull(withWake("\"wake\": {\"alarms_fired\": 0, \"by_weekday\": []}").wake)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `끈 기록이 없으면 기록 없음과 대시이고 미룬 적이 없으면 보조 문구가 없다`() {
+        val wake = withWake(
+            """"wake": {"alarms_fired": 1, "snooze_count": 0, "snoozed_alarms": 0,
+                "wake_seconds_median": null,
+                "by_weekday": [{"weekday":2,"fired":1,"snooze_count":0,"wake_seconds_median":null}]}"""
+        ).wake!!
+        assertEquals("기록 없음", wake.medianLabel)
+        assertTrue(wake.medianMissing)
+        assertNull(wake.snoozeSubLabel)
+        assertEquals("—", wake.days[2].valueLabel)
+        assertEquals("알람 1번", wake.days[2].dayLine)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `by_weekday 가 없거나 모자라도 일곱 칸을 채운다`() {
+        val missing = withWake("\"wake\": {\"alarms_fired\": 2, \"wake_seconds_median\": 30}").wake!!
+        assertEquals(7, missing.days.size)
+        assertTrue(missing.days.all { it.fired == 0 && it.valueLabel.isEmpty() })
+        assertEquals("30초", missing.medianLabel)
+        val partial = withWake(
+            """"wake": {"alarms_fired": 1, "by_weekday": [{"weekday":3,"fired":1,"wake_seconds_median":61},
+                {"weekday":9,"fired":5}]}"""
+        ).wake!!
+        assertEquals(7, partial.days.size)
+        assertEquals("1:01", partial.days[3].valueLabel)
+        assertEquals(1, partial.days.sumOf { it.fired })
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `끄기까지 시간 표기는 반올림하고 분 초로 나눈다`() {
+        assertEquals("0초", wakeDurationLabel(0.0))
+        assertEquals("45초", wakeDurationLabel(45.0))
+        assertEquals("1분", wakeDurationLabel(59.5))
+        assertEquals("1분", wakeDurationLabel(60.0))
+        assertEquals("1분 1초", wakeDurationLabel(61.0))
+        assertEquals("5분 10초", wakeDurationLabel(310.0))
+        assertEquals("1:05", wakeClockLabel(65.0))
+        assertEquals("0:40", wakeClockLabel(40.0))
+    }
 }

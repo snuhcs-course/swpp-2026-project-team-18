@@ -59,7 +59,7 @@ class TripLiveRouteBackgroundContractTest {
         val end = service.indexOf("private fun maybeAlertReroute(")
         assertTrue("출발 전 확인 함수가 없다", start >= 0 && end > start)
         val body = service.substring(start, end)
-        assertTrue(body.contains("repository.liveRoute(current.eventId, GeoPoint(lat, lng))"))
+        assertTrue(body.contains("repository.liveRoute(current.eventId, GeoPoint(lat, lng), preDeparture = true)"))
         assertTrue(body.contains("TripLiveState.publishPreDeparture("))
         assertFalse("이동 중 지도·카드의 사본에 쓰면 출발지 기준 경로가 섞인다", body.contains("liveRouteStore"))
         assertFalse(body.contains("publishLiveRoute"))

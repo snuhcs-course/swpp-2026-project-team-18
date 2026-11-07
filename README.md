@@ -108,12 +108,14 @@ make the screen look finished while being untrue.
 - Route choice — grouped candidates, a default from your past choice (`preferred_key`, else
   the fastest) and guidance work. Four car variants (BE-8), arrival-time/operating-hour
   routing (BE-11) and optional bicycle-road ratio (BE-14) remain
-- Weekly and detailed reports ⑧⑨ — built; the Figma panels for sleep, alarm snoozes and
-  per-weekday auto-adjustment are left out because nothing records that data yet
-- More than one home — other homes (a family home, a dorm) are kept on the device and offered
-  first in the origin search, with prep time included; "기본으로" makes one the server's home.
-  The server still stores a single home until `SavedPlace` exists
-  ([docs/iter3/backend-requests.md](docs/iter3/backend-requests.md))
+- Weekly and detailed reports ⑧⑨ — built, including the wake panel (alarms fired, snoozes,
+  median time to dismiss, by weekday; hidden when the server sends no `wake`; a snoozed alarm
+  counts once). Sleep and per-weekday auto-adjustment panels are left out
+- More than one home — other homes (a family home, a dorm) are saved to the account
+  (`/api/saved-places/`; a device list is uploaded once with `bulk`) and offered first in the
+  origin search, with prep time included; an event from a saved home sends `origin_place_id`.
+  Known gap: a home added or deleted while that first upload is still waiting can be overwritten
+  ([docs/iter3/front-iter3.md](docs/iter3/front-iter3.md))
 - Sign-in with Kakao and Google — the app gets an ID token from the Kakao SDK or Credential
   Manager and sends it to `POST /api/auth/social/{provider}`
   ([docs/iter3/social-login-api.md](docs/iter3/social-login-api.md)); first-time accounts see
@@ -124,18 +126,21 @@ make the screen look finished while being untrue.
 
 - Replanning before departure ⑥ — before the alarm, a faster route is offered from the server's
   alternative; once the alarm is off and 10 minutes before leaving, at most two checks offer a
-  reroute for this trip. The server side is still open (R3-11)
-- Email account features — the screens and calls are built (forgot password, change password,
-  email format check, show/hide password, remembered email) but the server has no endpoint yet;
-  the app shows a notice until R3-9 exists ([docs/iter3/backend-requests.md](docs/iter3/backend-requests.md)).
-  Email verification (R3-10) has a contract only
+  reroute for this trip; those checks send `context: "pre_departure"` to `routes/live`
+- Email account features — forgot password, change password, optional email verification in
+  settings, email format check, show/hide password and remembered email are built and the
+  reset and change flows were checked end to end against the local server; against an older
+  server the app shows a notice ([docs/iter3/backend-requests.md](docs/iter3/backend-requests.md))
+- Saving an event — a failed save shows per-field messages, keeps the input, offers a retry
+  with the same `client_request_id`, and asks whether to continue an unsaved draft (kept only
+  while the app process lives)
 
 **Not started**
 
 
 - Group rooms ⑩⑪
 - Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
-- User-defined tags (BE-21) and sleep-time calculation (BE-22)
+- Sleep-time calculation (BE-22); managing (renaming, deleting) your own event tags
 - Refresh-token rotation on the server stays off until this app version is deployed: the app now
   stores a rotated refresh token, so `JWT_ROTATE_REFRESH_TOKENS=1` can be set on Render after release
   ([docs/iter3/token-security-api.md](docs/iter3/token-security-api.md))

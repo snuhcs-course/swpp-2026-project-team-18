@@ -158,10 +158,12 @@ class AlarmLogQueue(
     }
 }
 
+// Partly AI-generated (Claude)
 /**
  * 알람 사건 → 업로드할 기록 한 건. 값만 다뤄 JVM 테스트로 확인한다.
  *
- * `alarm_at` 은 **그때 기기에 등록돼 있던** 시각이다. 미룬 뒤 다시 울린 것은 미룬 시각이다.
+ * `alarm_at` 은 **계획의 알람 시각**이다. 미뤄서 다시 울린 것도 처음 울리기로 한 시각을 보낸다
+ * (서버가 (일정, `alarm_at`) 으로 알람을 구분하므로 다시 울릴 시각을 보내면 둘로 셈된다).
  * 미룬 분은 미루기에만 붙인다 — 다른 종류에 붙으면 서버가 그 배치를 400 으로 막는다.
  */
 internal fun alarmLogOf(
@@ -174,7 +176,7 @@ internal fun alarmLogOf(
     event = schedule.eventId,
     kind = kind,
     occurredAt = isoAt(nowMillis),
-    alarmAt = schedule.alarmAtMillis.takeIf { it > 0 }?.let { isoAt(it) },
+    alarmAt = schedule.plannedAlarmAtMillis.takeIf { it > 0 }?.let { isoAt(it) },
     snoozeMinutes = snoozeMinutes?.takeIf { kind == AlarmLogInput.KIND_SNOOZED },
     clientUuid = clientUuid,
 )

@@ -126,4 +126,57 @@ class EventEditPatchTest {
         assertEquals(true, values.includePrep)
         assertNull(EventEditValues.from(dto.copy(startAt = "bad"), null, zone))
     }
-}
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `저장한 집으로 바꾸면 origin_place_id 와 좌표를 함께 보낸다`() {
+        val home = place("본가", 37.26, 127.03)
+        val body = sent(base.copy(origin = home, originPlaceId = 5L, includePrep = true, routeKey = null))
+        assertEquals(5L, body["origin_place_id"].asLong)
+        assertEquals(37.26, body["origin_lat"].asDouble, 1e-9)
+        assertTrue(body["include_prep"].asBoolean)
+        assertEquals("", body["route_key"].asString)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `저장한 집 그대로면 id 를 다시 보내지 않고 스위치를 끄면 false 를 보낸다`() {
+        val home = place("본가", 37.26, 127.03)
+        val saved = base.copy(origin = home, originPlaceId = 5L, includePrep = true)
+        assertEquals(0, EventEditPatch.build(saved, saved).size())
+        val off = JsonParser.parseString(EventEditPatch.build(saved, saved.copy(includePrep = false)).toString()).asJsonObject
+        assertEquals(setOf("include_prep"), off.keySet())
+        assertFalse(off["include_prep"].asBoolean)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `같은 좌표여도 저장한 집에 새로 연결하면 id 를 보낸다`() {
+        val home = place("본가", 37.26, 127.03)
+        val manual = base.copy(origin = home, includePrep = true)
+        val body = JsonParser.parseString(EventEditPatch.build(manual, manual.copy(originPlaceId = 5L)).toString()).asJsonObject
+        assertEquals(5L, body["origin_place_id"].asLong)
+        assertFalse("켜 둔 값은 그대로라 다시 보내지 않음", body.has("include_prep"))
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `서버 일정의 origin_place_id 를 옮기고 저장한 집은 false 만 끔으로 본다`() {
+        fun values(extra: String) = EventEditValues.from(
+            Gson().fromJson(
+                """{"id":3,"title":"동아리","start_at":"2026-11-03T01:30:00Z","source":"manual",
+                    "tau_override":null,"alarm_plan":null,"created_at":null,
+                    "origin_lat":37.26,"origin_lng":127.03,"origin_label":"본가"$extra}""",
+                EventDto::class.java,
+            ),
+            homePlace = null,
+            zone = zone,
+        )!!
+        val unset = values(""","origin_place_id":5""")
+        assertEquals(5L, unset.originPlaceId)
+        assertEquals("필드가 없어도 저장한 집이면 켜진 것", true, unset.includePrep)
+        assertEquals(false, values(""","origin_place_id":5,"include_prep":false""").includePrep)
+        assertEquals(true, values(""","origin_place_id":5,"include_prep":true""").includePrep)
+        assertNull(values("").originPlaceId)
+        assertNull(values(""","include_prep":false""").includePrep)
+    }}

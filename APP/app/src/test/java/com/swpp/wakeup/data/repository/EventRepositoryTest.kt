@@ -5,6 +5,8 @@ import com.swpp.wakeup.data.remote.EventCreateRequest
 import com.swpp.wakeup.data.remote.EventDto
 import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.EventUpdateRequest
+import com.swpp.wakeup.data.remote.LiveRouteRequest
+import com.swpp.wakeup.data.remote.LiveRouteResponse
 import com.swpp.wakeup.data.remote.Paged
 import com.swpp.wakeup.data.remote.PlaceInput
 import com.swpp.wakeup.data.remote.PlaceReverseResponse
@@ -13,8 +15,10 @@ import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.ProfileDto
 import com.swpp.wakeup.data.remote.ProfileUpdateRequest
 import com.swpp.wakeup.data.remote.RouteCandidateResponse
+import com.swpp.wakeup.data.remote.TagCreateRequest
 import com.swpp.wakeup.data.repository.EventRepository.HomeData
 import com.swpp.wakeup.data.repository.EventRepository.Result
+import com.swpp.wakeup.sensing.GeoPoint
 import com.swpp.wakeup.testing.FakeEventsApi
 import com.swpp.wakeup.testing.FakeProfileApi
 import com.swpp.wakeup.testing.errorJson
@@ -353,7 +357,165 @@ class EventRepositoryTest {
             tagKey = null,
         )
 
-        assertEquals(Result.Failure("출발지와 도착지가 같다."), result)
+        assertEquals(Result.Failure("출발지와 도착지가 같다.", status = 400, errorCode = "invalid"), result)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `일정 생성은 client_request_id 를 본문에 싣고 없으면 싣지 않는다`() = runTest {
+        var sent: EventCreateRequest? = null
+        val api = object : FakeEventsApi() {
+            override suspend fun create(body: EventCreateRequest) =
+                ok(event(9, future(days = 1))).also { sent = body }
+        }
+        val startAt = OffsetDateTime.parse("2030-03-02T09:00+09:00")
+        val repo = EventRepository(api, FakeProfileApi())
+        repo.createEvent(title = "수업", startAt = startAt, place = snu, tagKey = null, clientRequestId = "req-1234-abcd")
+        assertEquals("req-1234-abcd", Gson().toJsonTree(sent).asJsonObject.get("client_request_id").asString)
+        repo.createEvent(title = "수업", startAt = startAt, place = snu, tagKey = null)
+        assertFalse(Gson().toJsonTree(sent).asJsonObject.has("client_request_id"))
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `같은 client_request_id 로 먼저 만든 일정이 200 으로 와도 성공이다`() = runTest {
+        val first = event(7, future(days = 1))
+        val api = object : FakeEventsApi() {
+            override suspend fun create(body: EventCreateRequest): Response<EventDto> =
+                Response.success(200, first)
+        }
+        val result = EventRepository(api, FakeProfileApi()).createEvent(
+            title = "수업",
+            startAt = OffsetDateTime.parse("2030-03-02T09:00+09:00"),
+            place = snu,
+            tagKey = null,
+            clientRequestId = "req-1234-abcd",
+        )
+        assertEquals(Result.Success(first), result)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `통신 실패는 network 로 표시하고 상태 코드는 없다`() = runTest {
+        val api = object : FakeEventsApi() {
+            override suspend fun create(body: EventCreateRequest): Response<EventDto> =
+                throw IOException("timeout")
+        }
+        val result = EventRepository(api, FakeProfileApi()).createEvent(
+            title = "수업",
+            startAt = OffsetDateTime.parse("2030-03-02T09:00+09:00"),
+            place = snu,
+            tagKey = null,
+        ) as Result.Failure
+        assertTrue(result.network)
+        assertNull(result.status)
+        assertNull(result.errorCode)
+    }
+
+    // --- 종류 직접 추가(B1) -----------------------------------------------------
+
+    private val madeTag = fromJson<EventTagDto>(
+        """{"id":31,"key":"u0123456789","label":"Lab","default_tau":null,"penalty_shape":"standard","custom":true}"""
+    )
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `종류 만들기는 이름만 보내고 201 과 200 모두 성공이다`() = runTest {
+        for (code in listOf(201, 200)) {
+            var sent: TagCreateRequest? = null
+            val api = object : FakeEventsApi() {
+                override suspend fun createTag(body: TagCreateRequest): Response<EventTagDto> =
+                    Response.success(code, madeTag).also { sent = body }
+            }
+            val result = EventRepository(api, FakeProfileApi()).createTag("  Lab ")
+            assertEquals("HTTP $code", Result.Success(madeTag), result)
+            assertEquals("""{"label":"Lab"}""", Gson().toJson(sent))
+        }
+        assertNull(madeTag.defaultTau)
+        assertEquals(true, madeTag.custom)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `종류가 20개를 넘으면 409 tag_limit 이 코드로 남는다`() = runTest {
+        val api = object : FakeEventsApi() {
+            override suspend fun createTag(body: TagCreateRequest) = httpError<EventTagDto>(
+                409,
+                """{"error":{"code":"tag_limit","message":"종류는 20개까지","details":{}}}""",
+            )
+        }
+        val result = EventRepository(api, FakeProfileApi()).createTag("Lab") as Result.Failure
+        assertEquals(409, result.status)
+        assertEquals("tag_limit", result.errorCode)
+        assertFalse(result.network)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `종류 이름이 틀리면 400 의 label 문구를 살린다`() = runTest {
+        val api = object : FakeEventsApi() {
+            override suspend fun createTag(body: TagCreateRequest) =
+                httpError<EventTagDto>(400, errorJson("입력이 올바르지 않다.", mapOf("label" to "이름을 입력해야 한다.")))
+        }
+        val result = EventRepository(api, FakeProfileApi()).createTag("x") as Result.Failure
+        assertEquals(400, result.status)
+        assertEquals("이름을 입력해야 한다.", result.fields["label"])
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `저장한 집 출발은 origin_place_id 를 싣고 스위치를 끄면 include_prep false 를 보낸다`() = runTest {
+        val sent = mutableListOf<EventCreateRequest>()
+        val api = object : FakeEventsApi() {
+            override suspend fun create(body: EventCreateRequest) = ok(event(9, future(days = 1))).also { sent += body }
+        }
+        val startAt = OffsetDateTime.parse("2030-03-02T09:00+09:00")
+        val home = PlaceSearchItem(null, "본가", "수원", 37.26, 127.03, null)
+        val repo = EventRepository(api, FakeProfileApi())
+        repo.createEvent("수업", startAt, snu, null, origin = home, includePrep = true, originPlaceId = 5L)
+        repo.createEvent("수업", startAt, snu, null, origin = home, includePrep = false, originPlaceId = 5L)
+        repo.createEvent("수업", startAt, snu, null, origin = home, includePrep = false)
+        repo.createEvent("수업", startAt, snu, null, origin = home, includePrep = true)
+        repo.createEvent("수업", startAt, snu, null, originPlaceId = 5L)
+        val json = sent.map { Gson().toJsonTree(it).asJsonObject }
+        assertEquals(5L, json[0]["origin_place_id"].asLong)
+        assertEquals(true, json[0]["include_prep"].asBoolean)
+        assertEquals(37.26, json[0]["origin_lat"].asDouble, 1e-9)
+        assertEquals("끈 스위치는 false 로 보낸다", false, json[1]["include_prep"].asBoolean)
+        assertFalse("저장한 집이 아니면 끈 값은 보내지 않는다", json[2].has("include_prep") || json[2].has("origin_place_id"))
+        assertEquals(true, json[3]["include_prep"].asBoolean)
+        assertFalse("출발지가 없으면 id 도 보내지 않는다", json[4].has("origin_place_id") || json[4].has("include_prep"))
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `createIncludePrep 는 출발지와 저장한 집으로 값을 정한다`() {
+        assertNull(createIncludePrep(includePrep = true, hasOrigin = false, originPlaceId = null))
+        assertEquals(true, createIncludePrep(true, true, null))
+        assertNull(createIncludePrep(false, true, null))
+        assertEquals(true, createIncludePrep(true, true, 5L))
+        assertEquals(false, createIncludePrep(false, true, 5L))
+    }
+    // --- 출발 전 확인(B3) -------------------------------------------------------
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `출발 전 확인은 context pre_departure 를 싣고 기본 호출은 싣지 않는다`() = runTest {
+        val bodies = mutableListOf<LiveRouteRequest>()
+        val api = object : FakeEventsApi() {
+            override suspend fun liveRoute(body: LiveRouteRequest): Response<LiveRouteResponse> {
+                bodies += body
+                return ok(LiveRouteResponse(route = null))
+            }
+        }
+        val repo = EventRepository(api, FakeProfileApi())
+        val here = GeoPoint(37.48, 126.95)
+        assertTrue(repo.liveRoute(7L, here, preDeparture = true) is Result.Success)
+        assertTrue(repo.liveRoute(7L, here) is Result.Success)
+        val gson = Gson()
+        assertEquals("pre_departure", gson.toJsonTree(bodies[0]).asJsonObject.get("context").asString)
+        assertFalse(gson.toJsonTree(bodies[1]).asJsonObject.has("context"))
+        assertEquals(7L, gson.toJsonTree(bodies[1]).asJsonObject.get("event_id").asLong)
     }
 
     // --- 삭제·태그 ------------------------------------------------------------

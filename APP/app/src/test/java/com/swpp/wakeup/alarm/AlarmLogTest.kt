@@ -65,6 +65,68 @@ class AlarmLogTest {
         assertNull(dismissed.snoozeMinutes)
     }
 
+    private fun millisOf(iso: String?) = OffsetDateTime.parse(iso).toInstant().toEpochMilli()
+
+    @Test
+    fun `미뤄서 다시 울린 알람의 울림 미루기 끄기 기록은 모두 처음 알람 시각을 보낸다`() {
+        val reRingAt = alarmAt + 5 * 60_000L
+        val snoozed = schedule().snoozedTo(reRingAt, "7:05", "AM")
+
+        listOf(
+            AlarmLogInput.KIND_FIRED,
+            AlarmLogInput.KIND_SNOOZED,
+            AlarmLogInput.KIND_DISMISSED,
+        ).forEach { kind ->
+            val log = alarmLogOf(kind, snoozed, snoozeMinutes = 5)
+            assertEquals(kind, alarmAt, millisOf(log.alarmAt))
+        }
+    }
+
+    @Test
+    fun `미루지 않은 알람의 기록은 등록 시각을 보낸다`() {
+        val log = alarmLogOf(AlarmLogInput.KIND_FIRED, schedule())
+        assertEquals(alarmAt, millisOf(log.alarmAt))
+    }
+
+    @Test
+    fun `미루기 사본은 처음 알람 시각을 지키고 두 번 미뤄도 바뀌지 않는다`() {
+        val first = schedule().snoozedTo(alarmAt + 5 * 60_000L, "7:05", "AM")
+        assertEquals(alarmAt, first.firstAlarmAtMillis)
+        assertEquals(alarmAt + 5 * 60_000L, first.alarmAtMillis)
+        assertEquals("7:05", first.alarmLabel)
+
+        val second = first.snoozedTo(alarmAt + 10 * 60_000L, "7:10", "AM")
+        assertEquals(alarmAt, second.firstAlarmAtMillis)
+        assertEquals(alarmAt + 10 * 60_000L, second.alarmAtMillis)
+        assertEquals(alarmAt, second.plannedAlarmAtMillis)
+    }
+
+    @Test
+    fun `처음 미루기 전에는 계획의 알람 시각이 알람 시각이다`() {
+        val plain = schedule()
+        assertNull(plain.firstAlarmAtMillis)
+        assertEquals(alarmAt, plain.plannedAlarmAtMillis)
+    }
+
+    @Test
+    fun `처음 알람 시각 키가 없는 예전 저장 JSON 도 읽힌다`() {
+        val old = """
+            {"eventId":7,"alarmAtMillis":1000,"startAtMillis":5000,"alarmLabel":"7:40",
+             "meridiem":"AM","eventLine":"09:00 수업"}
+        """.trimIndent()
+        val restored = gson.fromJson(old, AlarmSchedule::class.java)
+
+        assertNull(restored.firstAlarmAtMillis)
+        assertEquals(1000L, restored.plannedAlarmAtMillis)
+    }
+
+    @Test
+    fun `처음 알람 시각은 저장했다 읽어도 남는다`() {
+        val snoozed = schedule().snoozedTo(alarmAt + 5 * 60_000L, "7:05", "AM")
+        val restored = gson.fromJson(gson.toJson(snoozed), AlarmSchedule::class.java)
+        assertEquals(snoozed, restored)
+    }
+
     @Test
     fun `멱등 키는 사건마다 새로 만든다`() {
         val a = alarmLogOf(AlarmLogInput.KIND_FIRED, schedule())

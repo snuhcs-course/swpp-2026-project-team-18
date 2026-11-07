@@ -39,6 +39,26 @@ class AlarmSyncPlanTest {
     }
 
     @Test
+    fun `미룬 알람을 지켜도 처음 알람 시각을 함께 지킨다`() {
+        val server = schedule(1, now - 2 * minute, label = "7:38")
+        val snoozed = schedule(1, now + 3 * minute, label = "7:43")
+            .copy(firstAlarmAtMillis = now - 2 * minute)
+
+        val result = plan(listOf(snoozed), listOf(server))
+
+        assertEquals(now + 3 * minute, result.single().alarmAtMillis)
+        assertEquals(now - 2 * minute, result.single().firstAlarmAtMillis)
+    }
+
+    @Test
+    fun `서버가 시각을 옮겨 서버 것이 이기면 처음 알람 시각은 비어 있다`() {
+        val snoozed = schedule(1, now + 3 * minute).copy(firstAlarmAtMillis = now - 2 * minute)
+        val moved = schedule(1, now + 30 * minute)
+
+        assertEquals(null, plan(listOf(snoozed), listOf(moved)).single().firstAlarmAtMillis)
+    }
+
+    @Test
     fun `서버 목록에서 빠진 일정의 미룬 알람은 버린다`() {
         val snoozed = schedule(1, now + 3 * minute)
 

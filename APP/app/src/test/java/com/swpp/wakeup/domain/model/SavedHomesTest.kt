@@ -77,4 +77,14 @@ class SavedHomesTest {
         val usable = parsed.filterNotNull().filter { runCatching { it.isUsable }.getOrDefault(false) }
         assertEquals(listOf("a"), usable.map { it.id })
     }
-}
+
+    @Test
+    fun `serverId 칸이 없는 예전 JSON 도 읽히고 새 JSON 은 serverId 를 왕복한다`() {
+        val gson = Gson()
+        val type = object : TypeToken<List<SavedHome?>>() {}.type
+        val old: List<SavedHome?> = gson.fromJson("""[{"id":"a","label":"본가","name":"x","lat":37.2,"lng":127.0}]""", type)
+        assertEquals(null, old.single()!!.serverId)
+        assertTrue(old.single()!!.isUsable)
+        val round: List<SavedHome?> = gson.fromJson(gson.toJson(listOf(home("b").copy(serverId = 9L))), type)
+        assertEquals(9L, round.single()!!.serverId)
+    }}

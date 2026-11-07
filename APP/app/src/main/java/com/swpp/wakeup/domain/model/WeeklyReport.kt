@@ -78,6 +78,8 @@ data class WeeklyReportView(
     val bufferNotes: List<String> = emptyList(),
     /** "지금 안전 버퍼 8분 · 지각 기록으로 조정됨". [bufferNotes] 가 있을 때만 */
     val bufferCurrentLabel: String? = null,
+    /** 기상 카드(⑧)와 날짜 줄(⑨). 서버 `wake` 가 null 이면 null */
+    val wake: WakeView? = null,
 ) {
     val hasArrivals: Boolean get() = arrivedCount > 0
 
@@ -311,3 +313,35 @@ internal fun halfUp(value: Double): Int {
     val magnitude = floor(Math.round(abs(value) * 1_000_000) / 1_000_000.0 + 0.5).toInt()
     return if (value < 0) -magnitude else magnitude
 }
+// Partly AI-generated (Claude)
+/** 기상 카드(⑧ "기상 · 이번 주") 문구. 만드는 곳은 [com.swpp.wakeup.data.repository.toWakeView]. */
+data class WakeView(
+    /** "6번" */
+    val firedLabel: String,
+    /** "3번" */
+    val snoozeLabel: String,
+    /** "알람 2개에서". 미룬 적이 없으면 null */
+    val snoozeSubLabel: String?,
+    /** "1분 25초" / "기록 없음" */
+    val medianLabel: String,
+    /** 끈 기록이 없어 [medianLabel] 이 "기록 없음" 인가 */
+    val medianMissing: Boolean,
+    /** 월~일 일곱 칸 */
+    val days: List<WakeDay>,
+)
+// Partly AI-generated (Claude)
+/** 기상 요일 칸 하나. [weekday] 0 = 월요일. */
+data class WakeDay(
+    val weekday: Int,
+    /** "월" */
+    val label: String,
+    val fired: Int,
+    /** 위 줄. 울린 알람이 없으면 "", 끈 기록이 없으면 "—", 아니면 "0:52" */
+    val valueLabel: String,
+    /** 아래 줄. "미룸 2" / "" */
+    val snoozeLabel: String,
+    /** 낭독용. "화요일, 알람 1번, 미룸 2번, 끄기까지 5분 10초" */
+    val description: String,
+    /** ⑨ 한 줄. "알람 1번 · 미룸 2번 · 끄기까지 5분 10초". 울린 알람이 없으면 null */
+    val dayLine: String?,
+)

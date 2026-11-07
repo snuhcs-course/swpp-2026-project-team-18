@@ -99,6 +99,14 @@ interface EventsApi {
     @GET("api/events/tags")
     suspend fun tags(): Response<List<EventTagDto>>
 
+    // Partly AI-generated (Claude)
+    /**
+     * 내 종류 만들기(docs/iter3/event-tags-api.md §5). 201 새로 만듦, 200 같은 이름이 이미 있어
+     * 그것을 돌려줌. 400 `invalid`(`details.label`), 409 `tag_limit`(계정당 20개).
+     */
+    @POST("api/events/tags")
+    suspend fun createTag(@Body body: TagCreateRequest): Response<EventTagDto>
+
     /**
      * 장소 검색.
      *
@@ -218,6 +226,8 @@ data class LiveRouteRequest(
     @SerializedName("event_id") val eventId: Long,
     val lat: Double,
     val lng: Double,
+    /** 출발 전 확인이면 `"pre_departure"`. null 이면 Gson 이 빼서 이동 중 호출과 같은 본문이 된다. */
+    val context: String? = null,
 )
 
 /**
@@ -348,6 +358,11 @@ data class EventDto(
     @SerializedName("origin_lat") val originLat: Double? = null,
     @SerializedName("origin_lng") val originLng: Double? = null,
     @SerializedName("origin_label") val originLabel: String? = null,
+    /**
+     * 출발지가 저장한 집(계정에 저장)이면 그 id, 아니면 null. 구버전 서버면 null.
+     * 저장한 집은 집으로 치므로 ④ 의 "직접 켬" 설명이 붙지 않는다.
+     */
+    @SerializedName("origin_place_id") val originPlaceId: Long? = null,
 
     @SerializedName("alarm_plan") val alarmPlan: AlarmPlanDto?,
     @SerializedName("created_at") val createdAt: String?,
@@ -574,7 +589,13 @@ data class EventTagDto(
     val label: String,
     @SerializedName("default_tau") val defaultTau: Double?,
     @SerializedName("penalty_shape") val penaltyShape: String?,
+    /** 사용자가 만든 종류인가. 구버전 서버면 null */
+    val custom: Boolean? = null,
 )
+
+// Partly AI-generated (Claude)
+/** `POST /api/events/tags` 본문. `default_tau` 는 보내지 않아 서버가 프로필 기본을 쓴다. */
+data class TagCreateRequest(val label: String)
 
 /**
  * 알람 계획.
@@ -985,6 +1006,18 @@ data class EventCreateRequest(
      * 끄면 null(보내지 않음 = 출발지로 정함: 집이면 넣고 따로 골랐으면 뺌). 구버전 서버는 무시한다.
      */
     @SerializedName("include_prep") val includePrep: Boolean? = null,
+    /**
+     * 같은 요청을 다시 보내도 일정이 둘이 되지 않게 하는 값(docs/iter3/event-create-errors.md §3).
+     * 추가 화면이 새로 열릴 때 UUID 를 만들고, 다시 시도는 같은 값을 쓴다. 수정(PATCH)에는 보내지 않는다.
+     * 구버전 서버는 모르는 필드로 무시한다. (Partly AI-generated (Claude))
+     */
+    @SerializedName("client_request_id") val clientRequestId: String? = null,
+    /**
+     * 출발지가 저장한 집이면 그 id(docs/iter3/saved-places-api.md). 서버가 좌표·이름을 그 집에서 채우고
+     * 보낸 좌표보다 앞선다. 좌표도 함께 보낸다(구버전 서버는 이 필드를 무시하고 좌표를 쓴다). null 이면 보내지 않는다.
+     * (Partly AI-generated (Claude))
+     */
+    @SerializedName("origin_place_id") val originPlaceId: Long? = null,
 )
 
 data class EventUpdateRequest(

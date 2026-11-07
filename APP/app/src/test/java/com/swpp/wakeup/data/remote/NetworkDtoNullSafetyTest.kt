@@ -325,6 +325,17 @@ class NetworkDtoNullSafetyTest {
 
     // AI-generated (Claude)
     @Test
+    fun `wake 키가 없거나 null 이거나 비어 있어도 견딘다`() {
+        assertNull(weekly("{}").wake)
+        assertNull(weekly("""{"wake":null}""").wake)
+        assertNull(weekly("""{"wake":{}}""").wake)
+        val dto = gson.fromJson("""{"wake":{"by_weekday":null}}""", WeeklyReportDto::class.java)
+        assertEquals(0, dto.wake?.alarmsFired)
+        assertNull(dto.wake?.byWeekday)
+        assertEquals(7, weekly("""{"wake":{"alarms_fired":3,"by_weekday":null}}""").wake?.days?.size)
+    }
+    // AI-generated (Claude)
+    @Test
     fun `목록·객체 키가 null 이어도 견딘다`() {
         val view = weekly(
             """{"week_start":"2026-10-05","week_end":"2026-10-11","by_weekday":null,

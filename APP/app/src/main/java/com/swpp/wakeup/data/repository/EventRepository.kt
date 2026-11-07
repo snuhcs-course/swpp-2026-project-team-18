@@ -16,6 +16,7 @@ import com.swpp.wakeup.data.remote.EventCreateRequest
 import com.swpp.wakeup.data.remote.EventDto
 import com.swpp.wakeup.data.remote.EventUpdateRequest
 import com.swpp.wakeup.data.remote.EventTagDto
+import com.swpp.wakeup.data.remote.TagCreateRequest
 import com.swpp.wakeup.data.remote.EventsApi
 import com.swpp.wakeup.data.remote.LiveRouteRequest
 import com.swpp.wakeup.data.remote.PlaceInput
@@ -101,10 +102,17 @@ class EventRepository(
          * [fields] 는 서버 `error.details` 의 필드별 문구다(첫 항목). 없으면 빈 맵.
          * 화면이 오류를 그 입력 줄 아래에 붙일 때 쓴다(예: 가까운 출발·도착 400 의
          * `destination`). 기본값이 있어 기존 호출부는 그대로다.
+         *
+         * [status] 는 HTTP 상태(응답이 없었으면 null), [errorCode] 는 서버 `error.code`,
+         * [network] 는 통신 자체가 실패했는가(연결·시간 초과). 저장 실패 안내가 종류를 가른다.
+         * (Partly AI-generated (Claude))
          */
         data class Failure(
             val message: String,
             val fields: Map<String, String> = emptyMap(),
+            val status: Int? = null,
+            val errorCode: String? = null,
+            val network: Boolean = false,
         ) : Result<Nothing>
     }
 
@@ -306,6 +314,10 @@ class EventRepository(
         repeatWeekdays: Set<Int> = emptySet(),
         /** 집이 아닌 출발지에서 준비 시간을 넣는가. 출발지가 집이면 무시한다 */
         includePrep: Boolean = false,
+        /** 같은 요청을 다시 보내도 일정이 하나만 생기게 하는 값(A5). null 이면 보내지 않는다 */
+        clientRequestId: String? = null,
+        /** 출발지가 저장한 집이면 서버의 그 집 id(B2). 아니면 null */
+        originPlaceId: Long? = null,
     ): Result<EventDto> = guard {
         val body = EventCreateRequest(
             title = title.trim(),
@@ -328,7 +340,12 @@ class EventRepository(
             originLabel = origin?.name,
             destinationIsHome = destinationIsHome,
             repeatWeekdays = repeatWeekdays.sorted(),
-            includePrep = true.takeIf { includePrep && origin != null },
+            includePrep = createIncludePrep(includePrep, origin != null, originPlaceId),
+            originPlaceId = originPlaceId.takeIf { origin != null },
+            // 200(같은 값으로 먼저 만든 일정)도 성공이다: unwrap 이 isSuccessful 로 본다.
+            // 시간 초과 뒤 서버가 이미 만들었는데 고친 내용으로 다시 보내면, 계약상 먼저 만든 일정이
+            // 그대로 돌아온다(고친 내용은 일정 수정으로 반영).
+            clientRequestId = clientRequestId,
         )
         val response = api.create(body)
         // 필드별 오류를 살린다. 가까운 출발·도착(710545a)은 `details.destination` 으로 온다.
@@ -379,10 +396,23 @@ class EventRepository(
      * 호출 간격은 [com.swpp.wakeup.domain.model.LiveRouteDecision] 이 정한다.
      * 이 함수는 부르라고 하면 부르기만 한다 — 간격 판단을 여기 섞으면 시험할
      * 수 없다.
+     *
+     * [preDeparture] 가 true 면 출발 전 확인(알람 끈 뒤, 출발 10분 전)이라고 서버에 알린다
+     * (`context: "pre_departure"`, reroute-api.md §4-1). 서버는 이 호출을 따로 기록하고 따로
+     * 센다. 기본 false 는 필드를 보내지 않아 이동 중 호출과 같다.
      */
-    suspend fun liveRoute(eventId: Long, here: GeoPoint): Result<LiveRoute?> = guard {
+    suspend fun liveRoute(
+        eventId: Long,
+        here: GeoPoint,
+        preDeparture: Boolean = false,
+    ): Result<LiveRoute?> = guard {
         val response = api.liveRoute(
-            LiveRouteRequest(eventId = eventId, lat = here.lat, lng = here.lng)
+            LiveRouteRequest(
+                eventId = eventId,
+                lat = here.lat,
+                lng = here.lng,
+                context = LIVE_CONTEXT_PRE_DEPARTURE.takeIf { preDeparture },
+            )
         )
         val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
 
@@ -620,6 +650,18 @@ class EventRepository(
 
     suspend fun tags(): Result<List<EventTagDto>> = guard {
         unwrap(api.tags())?.let { Result.Success(it) } ?: Result.Failure(MESSAGE_UNKNOWN)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 내 종류를 만든다(B1, docs/iter3/event-tags-api.md §5). 201(새로 만듦)과 200(같은 이름이 이미
+     * 있어 그것을 돌려줌) 모두 성공이다. 이름은 다듬어서 보낸다(서버가 공백을 하나로 줄인다).
+     * 400 은 `fields["label"]`, 409 `tag_limit` 은 `errorCode` 로 구분한다.
+     */
+    suspend fun createTag(label: String): Result<EventTagDto> = guard {
+        val response = api.createTag(TagCreateRequest(label.trim()))
+        unwrap(response)?.let { Result.Success(it) }
+            ?: failureFrom(response.code(), response.errorBody()?.string())
     }
 
     /**
@@ -872,7 +914,7 @@ class EventRepository(
         block()
     } catch (e: IOException) {
         Log.w(TAG, "network failure", e)
-        Result.Failure(MESSAGE_NETWORK)
+        Result.Failure(MESSAGE_NETWORK, network = true)
     } catch (e: Exception) {
         Log.e(TAG, "unexpected failure", e)
         Result.Failure(
@@ -922,6 +964,9 @@ class EventRepository(
 private const val TAG = "EventRepository"
 private const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
 
+/** `POST /api/routes/live` 본문의 `context`. 출발 전 확인(reroute-api.md §4-1) */
+internal const val LIVE_CONTEXT_PRE_DEPARTURE = "pre_departure"
+
 // AI-generated (Claude)
 /** 서버가 메시지를 주지 않았을 때(HTML 본문·빈 본문 등) 상태 코드별 문구. */
 private fun fallbackErrorMessage(code: Int): String = when (code) {
@@ -949,7 +994,12 @@ private fun fallbackErrorMessage(code: Int): String = when (code) {
 internal fun failureFrom(code: Int, raw: String?): EventRepository.Result.Failure {
     if (code >= 500 || code == 429) Log.w(TAG, "HTTP $code")
     val message = ApiClient.parseErrorMessage(raw) ?: fallbackErrorMessage(code)
-    return EventRepository.Result.Failure(message, ApiClient.parseErrorFields(raw))
+    return EventRepository.Result.Failure(
+        message = message,
+        fields = ApiClient.parseErrorFields(raw),
+        status = code,
+        errorCode = ApiClient.parseErrorCode(raw),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1229,7 +1279,34 @@ private fun meridiem(time: java.time.ZonedDateTime): String = if (time.hour < 12
  * 블록 관측으로 학습된 값까지 "고정값 · 기본 30분" 으로 적었다. 학습이 되고
  * 있는데 화면이 아니라고 말하면 사용자가 블록을 등록할 이유를 못 느낀다.
  */
-private fun prepNote(plan: AlarmPlanDto, blockCount: Int): String {
+private fun prepNote(plan: AlarmPlanDto, blockCount: Int, userEnabled: Boolean = false): String =
+    (if (userEnabled) PREP_USER_ENABLED_REASON else "") + prepSourceNote(plan, blockCount)
+
+/** 준비 시간 줄 맨 앞의 이유. 집이 아닌 출발지에서 사용자가 스위치를 켠 일정에만 붙는다 */
+internal const val PREP_USER_ENABLED_REASON = "준비 시간 포함(직접 켬) · "
+
+// Partly AI-generated (Claude)
+/**
+ * 일정 만들기에 보낼 `include_prep`. 서버는 저장한 집 출발을 집으로 쳐서 준비 시간을 넣으므로(`false` 가
+ * 이긴다), 저장한 집에서는 스위치를 끈 것을 `false` 로 **보내야** 끌 수 있다. 그 밖의 출발지는 켰을 때만
+ * `true`, 끄면 보내지 않는다(include-prep-api.md §5).
+ */
+internal fun createIncludePrep(includePrep: Boolean, hasOrigin: Boolean, originPlaceId: Long?): Boolean? = when {
+    !hasOrigin -> null
+    originPlaceId != null -> includePrep
+    includePrep -> true
+    else -> null
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 준비 시간을 사용자가 직접 켰는가(`include_prep == true`, 집이 아닌 출발지). 출발지가 없으면
+ * 집이고, 저장한 집(`origin_place_id`)도 집으로 쳐서 서버가 알아서 준비 시간을 넣으므로 켠 것이 아니다.
+ */
+internal fun prepEnabledByUser(includePrep: Boolean?, originLat: Double?, originPlaceId: Long?): Boolean =
+    includePrep == true && originLat != null && originPlaceId == null
+
+private fun prepSourceNote(plan: AlarmPlanDto, blockCount: Int): String {
     val blocks = if (blockCount > 0) "블록 ${blockCount}개" else "블록"
     return when (plan.prepSource) {
         AlarmPlanDto.PREP_OBSERVED ->
@@ -1404,7 +1481,14 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
 
     val rows = buildList {
         plan.prepMinutes?.takeIf { prepApplies }?.let {
-            add(PlanRow("준비 시간", it, prepNote(plan, prepBlocks.size), PlanRow.Kind.PREP))
+            add(
+                PlanRow(
+                    "준비 시간",
+                    it,
+                    prepNote(plan, prepBlocks.size, prepEnabledByUser(includePrep, originLat, originPlaceId)),
+                    PlanRow.Kind.PREP,
+                ),
+            )
         }
         plan.travelMinutes?.let {
             val label = plan.travelMode?.takeIf(String::isNotBlank)?.let { m -> "$m 이동" }
@@ -1519,8 +1603,8 @@ internal fun SwitchSuggestionDto.toSuggestion(zone: ZoneId = ZoneId.systemDefaul
 
 // Partly AI-generated (Claude)
 /**
- * 안전 버퍼 줄의 근거. 서버 `buffer_source` 는 `fixed`(기본 10분) 또는 `learned`(지각 이력으로
- * 조정, todo §1 "안전 버퍼 10분 조정")다. 모르는 값은 고정값으로 본다.
+ * 안전 버퍼 줄의 근거. 서버 `buffer_source` 는 `fixed`(기본 5분, 서버 0.20.0 부터. 그 전에는 10분) 또는
+ * `learned`(지각 이력으로 조정, todo §1 안전 버퍼 조정)다. 모르는 값은 고정값으로 본다.
  */
 internal fun bufferNote(source: String?): String = when (source) {
     AlarmPlanDto.BUFFER_LEARNED -> "지각 기록으로 조정됨 · 문 앞에서 실제 출발까지의 여유"

@@ -72,6 +72,13 @@ fun AlarmDecisionScreen(
     onEditBlocks: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * "다시 계산"(`POST /api/events/{id}/recompute`). **알람을 계산하지 못한(`route_failed`) 계획에만**
+     * 보인다. 계산된 계획에는 없다(서버가 알아서 다시 계산하고 경로 갱신 워커가 새로 받는다). null 이면 그리지 않는다
+     */
+    onRecompute: (() -> Unit)? = null,
+    /** 다시 계산하는 중. 버튼을 막고 문구를 바꾼다 */
+    recomputeBusy: Boolean = false,
     /** 진행 바에 쓸 이름과 아바타 두 글자 */
     nickname: String = "나",
     initials: String = "나",
@@ -245,7 +252,7 @@ fun AlarmDecisionScreen(
                 )
             }
         } else {
-            NotComputedCard(plan)
+            NotComputedCard(plan, onRecompute, recomputeBusy)
         }
 
         Spacer(Modifier.height(4.dp))
@@ -263,8 +270,9 @@ fun AlarmDecisionScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center,
             ) {
-                // "다시 계산" 은 없앴다. 서버가 블록 정의·밤 학습 뒤 알아서 다시 계산하고,
-                // 임박한 일정은 경로 갱신 워커가 15분마다 새로 받는다(todo §2 ③).
+                // 계산된 계획의 "다시 계산" 은 없앴다. 서버가 블록 정의·밤 학습 뒤 알아서 다시 계산하고,
+                // 임박한 일정은 경로 갱신 워커가 15분마다 새로 받는다(todo §2 ③). 계산하지 못한
+                // (route_failed) 계획에만 NotComputedCard 가 "다시 계산" 을 둔다(A6).
                 Text(
                     text = "지각 위험 바꾸기",
                     color = JitColor.TextSecondary,
@@ -717,7 +725,7 @@ private fun BreakdownRow(row: PlanRow) {
 
 /** 알람을 계산할 수 없는 경우. 이유를 그대로 보여준다. */
 @Composable
-private fun NotComputedCard(plan: AlarmPlanView) {
+private fun NotComputedCard(plan: AlarmPlanView, onRecompute: (() -> Unit)?, recomputeBusy: Boolean) {
     val (dot, body) = when (plan.status) {
         "no_home" -> JitColor.Amber to
             "이동 시간을 구하려면 출발지가 필요함. 홈 화면 안내에서 집 위치를 설정하면 바로 계산됨"
@@ -739,6 +747,21 @@ private fun NotComputedCard(plan: AlarmPlanView) {
             dotSize = 8.dp,
         )
         Text(text = body, color = JitColor.TextSecondary, fontSize = 11.sp)
+        // 경로 조회 실패에서만 다시 계산할 수 있다(Figma F-48 `526:176`). 카카오를 한 번 더 부르므로 눌렀을 때만.
+        if (plan.status == "route_failed" && onRecompute != null) {
+            Text(
+                text = if (recomputeBusy) "계산하는 중…" else "다시 계산",
+                color = if (recomputeBusy) JitColor.TextSecondary else JitColor.Accent,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .testTag("plan_recompute")
+                    .clickable(enabled = !recomputeBusy, onClick = onRecompute)
+                    .padding(vertical = 8.dp),
+            )
+            Text(text = "카카오 경로를 한 번 다시 조회함", color = JitColor.TextSecondary, fontSize = 10.sp)
+        }
     }
 }
 

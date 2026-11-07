@@ -5,6 +5,7 @@ import com.swpp.wakeup.data.remote.CalibrationDto
 import com.swpp.wakeup.data.remote.DeviationStatDto
 import com.swpp.wakeup.data.remote.LateCauseDto
 import com.swpp.wakeup.data.remote.OutcomeDto
+import com.swpp.wakeup.data.remote.WeeklyWakeDto
 import com.swpp.wakeup.data.remote.WeeklyReportDto
 import com.swpp.wakeup.domain.model.CalibrationPoint
 import com.swpp.wakeup.domain.model.CalibrationView
@@ -20,6 +21,8 @@ import com.swpp.wakeup.domain.model.ReportDay
 import com.swpp.wakeup.domain.model.ReportSummary
 import com.swpp.wakeup.domain.model.RowKind
 import com.swpp.wakeup.domain.model.Tone
+import com.swpp.wakeup.domain.model.WakeDay
+import com.swpp.wakeup.domain.model.WakeView
 import com.swpp.wakeup.domain.model.WeeklyReportView
 import com.swpp.wakeup.domain.model.halfUp
 import java.time.Instant
@@ -160,9 +163,72 @@ internal fun WeeklyReportDto.toView(zone: ZoneId = ZoneId.systemDefault()): Week
         skippedNote = skippedCount.takeIf { it > 0 }?.let { "안 감으로 표시한 일정 ${it}건은 빼고 계산함" },
         bufferNotes = bufferNotes,
         bufferCurrentLabel = bufferCurrentLabel(bufferNotes),
+        wake = wake.toWakeView(),
     )
 }
 
+// Partly AI-generated (Claude)
+/**
+ * 기상 카드(⑧)·날짜 줄(⑨) 문구. 서버가 `wake` 를 주지 않았거나 울린 알람이 0 이면 null 이라
+ * 화면이 카드를 그리지 않는다. 요일은 항상 7칸이다(빠진 요일은 울린 알람 0).
+ */
+internal fun WeeklyWakeDto?.toWakeView(): WakeView? {
+    if (this == null || alarmsFired <= 0) return null
+    val byDay = byWeekday.orEmpty().filter { it.weekday in 0..6 }.associateBy { it.weekday }
+    val days = (0..6).map { weekday ->
+        val row = byDay[weekday]
+        val fired = row?.fired ?: 0
+        val snoozes = row?.snoozeCount ?: 0
+        val seconds = row?.wakeSecondsMedian
+        val name = WEEKDAY_NAMES[weekday]
+        val parts = listOfNotNull(
+            "알람 ${fired}번",
+            "미룸 ${snoozes}번".takeIf { snoozes > 0 },
+            seconds?.let { "끄기까지 ${wakeDurationLabel(it)}" },
+        )
+        WakeDay(
+            weekday = weekday,
+            label = name,
+            fired = fired,
+            valueLabel = when {
+                fired <= 0 -> ""
+                seconds == null -> "—"
+                else -> wakeClockLabel(seconds)
+            },
+            snoozeLabel = if (fired > 0 && snoozes > 0) "미룸 $snoozes" else "",
+            description = if (fired <= 0) {
+                "${name}요일, 울린 알람 없음"
+            } else {
+                "${name}요일, " + parts.joinToString(", ")
+            },
+            dayLine = if (fired > 0) parts.joinToString(" · ") else null,
+        )
+    }
+    return WakeView(
+        firedLabel = "${alarmsFired}번",
+        snoozeLabel = "${snoozeCount}번",
+        snoozeSubLabel = if (snoozeCount > 0) "알람 ${snoozedAlarms}개에서" else null,
+        medianLabel = wakeSecondsMedian?.let(::wakeDurationLabel) ?: "기록 없음",
+        medianMissing = wakeSecondsMedian == null,
+        days = days,
+    )
+}
+// Partly AI-generated (Claude)
+/** 끄기까지 걸린 초 → "45초" / "2분" / "1분 25초". 초는 반올림한다. */
+internal fun wakeDurationLabel(seconds: Double): String {
+    val n = halfUp(maxOf(0.0, seconds))
+    return when {
+        n < 60 -> "${n}초"
+        n % 60 == 0 -> "${n / 60}분"
+        else -> "${n / 60}분 ${n % 60}초"
+    }
+}
+// Partly AI-generated (Claude)
+/** 요일 칸용 "m:ss" ("0:52", "5:10"). */
+internal fun wakeClockLabel(seconds: Double): String {
+    val n = halfUp(maxOf(0.0, seconds))
+    return "${n / 60}:${(n % 60).toString().padStart(2, '0')}"
+}
 // Partly AI-generated (Claude)
 /** 그 주에 한 버퍼 조정의 이유 문장. 빈 문장은 뺀다. */
 private val WeeklyReportDto.bufferNotes: List<String>

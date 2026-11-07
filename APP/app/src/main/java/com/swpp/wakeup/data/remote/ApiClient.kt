@@ -58,7 +58,10 @@ object ApiClient {
     // Partly AI-generated (Claude)
     /** 로그 한 줄에서 비밀번호·토큰 값을 `***` 로 바꾼다. */
     internal fun redactSecrets(message: String): String =
-        SECRET_FIELD.replace(message) { "\"${it.groupValues[1]}\":\"***\"" }
+        VERIFY_CODE_FIELD.replace(
+            SECRET_FIELD.replace(message) { "\"${it.groupValues[1]}\":\"***\"" },
+            "\"code\":\"***\"",
+        )
 
     private val client: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -136,6 +139,8 @@ object ApiClient {
     val events: EventsApi by lazy { retrofit.create(EventsApi::class.java) }
 
     val profile: ProfileApi by lazy { retrofit.create(ProfileApi::class.java) }
+    /** 저장한 집(계정에 저장). (Partly AI-generated (Claude)) */
+    val savedPlaces: SavedPlacesApi by lazy { retrofit.create(SavedPlacesApi::class.java) }
 
     val observations: ObservationsApi by lazy {
         retrofit.create(ObservationsApi::class.java)
@@ -223,6 +228,13 @@ object ApiClient {
         "\"(password|password_confirm|old_password|new_password|current_password|new_password_confirm|reset_code|access|refresh|id_token)\"" +
             "\\s*:\\s*\"(?:[^\"\\\\]|\\\\.)*\""
     )
+
+    // Partly AI-generated (Claude)
+    /**
+     * 이메일 인증 확인 본문의 `"code":"123456"`. 숫자 4~8자리만 잡는다 — 오류 본문의
+     * `"code":"invalid"` 같은 오류 코드는 디버깅에 필요해서 그대로 둔다.
+     */
+    private val VERIFY_CODE_FIELD = Regex("\"code\"\\s*:\\s*\"[0-9]{4,8}\"")
 
     // ---------------------------------------------------------------------
     // 타임아웃

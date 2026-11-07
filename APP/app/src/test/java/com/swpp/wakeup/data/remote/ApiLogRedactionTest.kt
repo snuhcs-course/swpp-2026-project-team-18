@@ -81,6 +81,15 @@ class ApiLogRedactionTest {
     }
 
     @Test
+    fun `이메일 인증 확인 코드의 숫자 값만 가리고 오류 코드는 그대로 둔다`() {
+        assertEquals("""{"code":"***"}""", ApiClient.redactSecrets("""{"code":"123456"}"""))
+        assertEquals("""{"code":"***"}""", ApiClient.redactSecrets("""{"code" : "0123"}"""))
+        val error = """{"error":{"code":"invalid_verify_code","message":"맞지 않음","details":{}}}"""
+        assertEquals(error, ApiClient.redactSecrets(error))
+        assertEquals("""{"code":"invalid"}""", ApiClient.redactSecrets("""{"code":"invalid"}"""))
+    }
+
+    @Test
     fun `토큰이 아닌 줄은 바꾸지 않는다`() {
         val line = """{"event_id":1,"lat":37.48,"lng":126.94,"refresh_at":"2026-11-03T00:00:00+09:00"}"""
 
