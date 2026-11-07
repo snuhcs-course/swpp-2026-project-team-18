@@ -2,7 +2,7 @@
 브랜치 `front-iter3`, 기준 `origin/main` = `3d39fc8`(10-31). 11-03 에 `front-iter3`(`c527cea`)를 main 에 합쳤다. main 은 `dbe38da`(머지 커밋, 부모 `3d39fc8`·`c527cea`)이고 트리는 `c527cea` 와 같다. 그 뒤 11-03 밤 작업(아래 "11-03 노션 남은 프론트 항목")은 `front-iter3` 에서 이어 갔고 아직 main 에 없다. 백엔드가 `todo.md` §2 에 넘긴 일과 팀 회의 내용을 앱에 넣었다. 항목 번호는 [figma-changes.md](figma-changes.md) 의 번호와 같다(1~22 는 아래 절 제목, 5b·5c·19b 는 만들지 않음). 서버에 아직 없는 부분은 [backend-requests.md](backend-requests.md) 에 요청으로 적었다.
 
 ## 요약
-- 단위 테스트: main 기준 **739건 → 1038건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml`, 최신 앱 커밋 `954d591` 의 실행 결과). 950건은 11-03 밤 끝(`d79fb67`)의 값이고, 11-06 저녁에 88건이 늘었다(975 → 984 → 987 → 1012 → 1018 → 1029 → 1030 → 1038, 아래 "11-06 task.md 프론트 할 일"). 877건은 `c527cea`(main 에 합친 시점)의 값이고, 11-03 밤에 70건이 늘었다(902 → 927 → 939 → 948 → 947 → 950).
+- 단위 테스트: main 기준 **739건 → 1041건**, 실패 0 (`APP\app\build\test-results\testDebugUnitTest\*.xml`, 최신 앱 커밋 `90f90b2` 의 실행 결과). 1038건은 11-06 저녁 `954d591` 의 값이고 11-07 에 3건이 늘었다(아래 "11-07 남은 오류 고침"). 950건은 11-03 밤 끝(`d79fb67`)의 값이고, 11-06 저녁에 88건이 늘었다(975 → 984 → 987 → 1012 → 1018 → 1029 → 1030 → 1038, 아래 "11-06 task.md 프론트 할 일"). 877건은 `c527cea`(main 에 합친 시점)의 값이고, 11-03 밤에 70건이 늘었다(902 → 927 → 939 → 948 → 947 → 950).
 - 린트: 오류 0 / 경고 63 (11-06 에 1개 늘었다. 아래 절 참조. 11-03 밤까지는 62 로 기준선과 같았다). 11-03 밤 커밋마다 `lintDebug` 를 돌렸다. S1 커밋에서 늘었던 경고 2개는 `LastEmailStore` 의 UseKtx 였고 `d79fb67` 에서 고쳤다(64 → 62).
 - 기기 테스트(`androidTest`)는 컴파일(`compileDebugAndroidTestKotlin`, `assembleDebugAndroidTest`)만 확인했다. 기기에서 돌린 기록은 없다.
 - 기준선(11-01, 손대지 않은 브랜치): 단위 739건, 린트 오류 0 / 경고 62, 백엔드 pytest 1684건 통과.
@@ -303,11 +303,58 @@
 - **m1 (B2) 첫 업로드 중 추가·삭제가 덮어써짐 — `495820a`**: 처음 `bulk` 업로드가 도는 동안(`savedHomesSyncJob` 이 활성이고 저장소가 아직 `synced` 가 아님) 집 추가·삭제·"기본으로"는 아무것도 하지 않고 "저장한 집을 서버에 올리는 중이에요. 잠시 뒤 다시 해 주세요"만 띄운다(`HomeViewModel.blockedByFirstUpload`). 판단은 순수 함수 `savedHomesFirstUploadRunning` 에 있다. B2 의 나머지는 바꾸지 않았다. 테스트 `SavedHomeSyncTest`(+1, 1029 → 1030).
 - **m2 (B4) 미룬 알람이 두 번 셈됨 — `954d591`**: `AlarmSchedule.firstAlarmAtMillis`(계획의 알람 시각, 기본 null, 예전 저장 JSON 은 null 로 읽힘)를 더했다. 미루기 사본은 순수 함수 `AlarmSchedule.snoozedTo` 가 만들고 두 번 미뤄도 처음 값을 지킨다. `alarmLogOf` 는 모든 종류에서 `alarm_at = firstAlarmAtMillis ?: alarmAtMillis` 를 보낸다. `AlarmSyncPlan` 이 미룬 알람을 지킬 때 이 값도 같이 지킨다. 알람이 울리는 시각, `MissedAlarms` 키, SCHEDULED 기록의 비교(`changedRegistrations`)는 그대로다. 테스트 `AlarmLogTest`(+6: 울림·미루기·끄기 기록이 모두 처음 시각, 미루지 않은 알람, 두 번 미룸, 예전 JSON, 저장 왕복), `AlarmSyncPlanTest`(+2). 합쳐서 8건(1030 → 1038). 에뮬레이터에서 다시 확인하지는 않았다(단위 테스트만).
 ### 열린 것
-- **m3 (Figma)**: F-50 의 `same_as_default` 오류는 프레임처럼 이름 칸 아래가 아니라 폼 아래의 기존 오류 줄(`HomeSetupState.error`)에 나온다.
+- ~~**m3 (Figma)**: F-50 의 `same_as_default` 오류가 이름 칸 아래가 아니라 폼 아래 오류 줄에 나왔다.~~ 고쳤다(11-07, `51a3b9c`). 아래 "11-07 남은 오류 고침 (E1-E4)".
 - **m4 (테스트)**: `HomeViewModel` 이 `Application` 을 요구해서 `syncSavedHomes`, `onAddEventClick`, `onCleared`, `logout`, 이메일 인증 흐름은 단위 테스트가 없다. 결정은 테스트된 순수 함수로 뺐고 에뮬레이터로 확인했다.
 - 기기 테스트(`androidTest`)는 이번에도 컴파일만 했다. 실기기 확인과 공용 서버 확인은 하지 않았다.
 - 에뮬레이터 확인 중 홈이 스크립트로 바꾼 계획을 앱을 다시 시작하기 전까지 보이지 않은 적이 있다(당겨서 새로고침 첫 시도). 테스트 준비 방식 때문일 수 있고 더 보지 않았다.
 - `backend-requests.md` 에 새로 적은 요청은 없다. 이번 필요는 모두 0.20.0 에 있다.
+## 11-07 남은 오류 고침 (E1-E4)
+11-06 작업(`6d6627b` ~ `43e6132`)에서 남은 오류를 `front-iter3` 에서 고쳤다. `backend/` 는 바꾸지 않았다. 서버 쪽 원인은 찾지 못해서 `backend-requests.md` 에 새로 적은 요청은 없다. 에뮬레이터는 로컬 서버(일회용 SQLite)에만 붙였고 공용 서버는 부르지 않았다.
+
+| 항목 | 결과 | 커밋 |
+| --- | --- | --- |
+| E1 CI 와 같은 실행 | 실패 없음 | 없음 |
+| E2 m3 `same_as_default` 위치 | 고침 | `51a3b9c` |
+| E3 가끔 실패하는 단위 테스트 | 재현 안 됨 | 없음 |
+| E4 에뮬레이터 확인 | 버그 1건 찾아 고침 | `90f90b2` |
+
+### E1. CI 와 같은 실행
+- GitHub CI 는 `main` 과 PR 에서만 돌아서 11-06 커밋은 CI 를 거치지 않았다. `90f90b2` 에서 같은 명령을 로컬로 돌렸다.
+- `android` 작업: `testDebugUnitTest jacocoDebugUnitTestReport lintDebug assembleDebug` 성공. 단위 테스트 1041건, 실패 0. 린트 오류 0, 경고 63. 줄 커버리지 합계 25.3%(4607/18211).
+- `android-integration` 작업: `assembleDebug assembleDebugAndroidTest` 성공. `com.swpp.wakeup.integration` 기기 테스트 34건, 실패 0(AVD `SWPP_APP`, API 36. CI 는 API 34). 줄 커버리지 합계 12.6%(2300/18211).
+- 백엔드 작업은 `backend/` 가 그대로라서 다시 돌리지 않았다.
+
+### E2. m3 `same_as_default` 를 이름 칸 아래로 — `51a3b9c`
+- **바뀐 것**: `HomeSetupState.labelError` 를 더했다. 순수 함수 `HomeSetupState.withAddFailure`(`ui/home/HomeSetupErrors.kt`)가 `same_as_default` 는 `labelError` 로, 나머지 실패(`saved_place_limit`, 네트워크 등)는 `error` 로 보낸다. `HomeSetupScreen` 은 `labelError` 를 ⑭ 이름 칸 아래에 빨간 글자로 그린다(태그 `home_setup_label_error`, 빨간 테두리 없음). 이름을 바꾸거나 다른 장소를 고르거나 저장을 시작하면 지운다. 쓰지 않게 된 `savedPlaceAddMessage` import 는 `HomeViewModel.kt` 에서 뺐다. Figma F-50(`528:105`)과 같아졌다.
+- **테스트**: `HomeSetupErrorsTest`(3: `same_as_default`, `saved_place_limit`, 네트워크). 고치기 전에는 함수가 없어 컴파일이 안 된다. 1038 → 1041.
+- **확인**: 단위 테스트와 화면 코드만 봤다. 에뮬레이터에서는 보지 않았다.
+
+### E3. 가끔 실패하는 단위 테스트
+- 11-06 `b-report-email` 단계에서 `testDebugUnitTest` 가 한 번 실패하고 다시 돌리니 통과했다. 실패한 테스트는 기록이 남지 않았다.
+- 전체 재컴파일 한 번(`--rerun-tasks`)과 `--rerun` 네 번, 모두 5번 돌렸다. 5번 모두 1041건, 실패 0, 파일 잠금 오류 없음.
+- 테스트 코드(`src/test`, `src/sharedTest`)에는 `LocalDate`·`LocalTime`·`LocalDateTime`·`ZonedDateTime`·`Instant` 의 `now`, `Calendar.getInstance`, `Random(`, `nanoTime` 이 없다. 시계를 읽는 곳은 `System.currentTimeMillis()` 뿐이고 며칠 또는 분 단위 여유가 있어 결함을 보이지 못했다.
+- 결론: 재현되지 않았고 고칠 결함도 없어서 테스트는 바꾸지 않았다. 11-06 실패는 테스트 전에 난 작업 오류, 아마 Windows 파일 잠금으로 본다. 오류 글이 남지 않아 증명하지는 못했다.
+
+### E4. 에뮬레이터에서 처음 확인한 것
+빌드 `51a3b9c`(고친 뒤 `90f90b2`)를 로컬 서버에 붙였다. AVD `SWPP_APP`(API 36)이다.
+- **A7 수정 오류**: 400 이면 스낵바와 도착지 아래 "출발지와 도착지는 50m 이상 떨어져 있어야 한다."가 뜨고 입력이 남았다. 서버를 끄면 스낵바와 [다시 시도], 버튼 위 "서버에 연결하지 못했어요…" 줄이 떴다. 서버를 켠 뒤 주 버튼으로 저장해 `PATCH` 200 을 봤다. 스낵바의 [다시 시도] 를 누르는 것까지는 못 봤다.
+- **A6 `route_failed`**: 일정을 만든 직후 스낵바가 **뜨지 않는 버그**를 찾아 고쳤다(아래). 고친 뒤 스낵바와 [다시 계산]이 뜨고, 결정 화면에 "경로 조회 실패" 카드와 [다시 계산]이 보였다. 멀리 있는 도착지(평창)는 다시 계산해도 정직하게 실패했고, 보통 도착지는 계획이 생겼다(`/recompute` 200). 스낵바의 [다시 계산]을 누르는 것은 못 봤다(스낵바가 사라진 뒤에 눌렀다. 코드 경로는 11-06 에 단위 테스트한 `openAlarmDecision` 과 같다).
+- **m2 미루기 횟수**: 서버 기록이 예정, 울림, 미룸, 울림, 끔 순이고 `alarm_at` 이 모두 같았다. 주간 리포트가 울린 알람 1번, 미루기 1번, 끄기까지 5분 35초로 나왔다(11-06 에는 2번 / 31초).
+- **B3 `pre_departure`**: 요청 본문에 `"context":"pre_departure"` 가 있고 `POST /api/routes/live` 200 이다. 서버 `ApiRequestLog` 에도 마지막 두 번이 `pre_departure` 다.
+- **A3 401 때 초안 유지**: 서버 비밀키를 바꿔 다시 띄우자 `POST /api/events` 401, 토큰 갱신 401 이 나고 로그인 화면으로 갔다. 다시 로그인하고 "일정 추가"를 누르니 "작성 중인 일정이 있어요. 이어서 쓸까요?"가 떴고 [이어서 쓰기]로 제목과 도착지가 돌아왔다.
+- **A5 200 재전송**: 확인하지 않았다. POST 는 다시 보내지 않고, `network delay` 를 걸면 읽기 시간 초과(60초)보다 연결 시간 초과(20초)가 먼저 나서 서버가 늦게 답하는 상황을 만들 수 없었다. `EventRepositoryTest` 가 200 → 성공을 덮는다.
+- **고친 버그 — 일정을 만들거나 고친 뒤 스낵바가 바로 사라짐 — `90f90b2`**: `MainActivity` 의 `LaunchedEffect(addState.done)` 가 `showSnackbar` 보다 먼저 `viewModel.resetAdd()` 를 불러 `done` 이 false 가 되었다. 키가 바뀌어 효과가 취소되면서 스낵바가 곧바로 사라졌고, [다시 계산] 을 누를 수 없었다. "일정을 추가했습니다"·"일정을 수정했습니다" 알림도 같은 이유로 안 보였다. 스낵바를 화면의 `scope` 에서 띄우도록 고쳤다. Compose 효과라서 JVM 테스트는 없다(`MainActivity` 를 덮는 테스트 틀이 없다). 에뮬레이터에서 고치기 전에는 안 뜨고 고친 뒤에는 뜨는 것을 봤다.
+
+### 11-07 게이트
+`90f90b2` 에서 `testDebugUnitTest lintDebug assembleDebug compileDebugAndroidTestKotlin` 성공. 단위 테스트 1041건, 실패 0. 린트 오류 0, 경고 63(그대로).
+
+### 11-07 에도 열린 것
+- A5 의 200 재전송 응답은 에뮬레이터로 못 봤다(단위 테스트만).
+- 스낵바의 [다시 시도], [다시 계산] 버튼을 누르는 것은 에뮬레이터로 못 봤다.
+- E2 의 이름 칸 아래 오류는 에뮬레이터로 보지 않았다.
+- 11-06 실패의 원인은 확정하지 못했다(E3).
+- m4(`HomeViewModel` 단위 테스트 없음)와 실기기·공용 서버 확인은 그대로 열려 있다.
+
 ## 정한 기본값
 코드로 확인한 값이다. 바꾸고 싶으면 괄호의 상수를 고친다.
 - 이동 중 경로 바꾸기 알림은 탑승 중이면 미룬다. 6 m/s(약 22 km/h) 이상으로 움직이면 2분 동안 탑승 중으로 본다(`RerouteAlert.RIDING_SPEED_MPS`, `RIDING_HOLD_MILLIS`). 남은 이동이 5분 이하이거나 목적지까지 400m 이하여도 알리지 않는다(`NEAR_ARRIVAL_MINUTES`, `NEAR_ARRIVAL_METERS`). 미룬 경로는 "알림 보냄"에 넣지 않아서 내린 뒤 다음 갱신에서 알린다.
