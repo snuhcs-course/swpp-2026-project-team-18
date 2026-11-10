@@ -16,6 +16,7 @@ import com.swpp.wakeup.data.remote.ProfileDto
 import com.swpp.wakeup.data.remote.ProfileUpdateRequest
 import com.swpp.wakeup.data.remote.RouteCandidateResponse
 import com.swpp.wakeup.data.remote.TagCreateRequest
+import com.swpp.wakeup.data.remote.TagUpdateRequest
 import com.swpp.wakeup.data.repository.EventRepository.HomeData
 import com.swpp.wakeup.data.repository.EventRepository.Result
 import com.swpp.wakeup.sensing.GeoPoint
@@ -460,6 +461,67 @@ class EventRepositoryTest {
         val result = EventRepository(api, FakeProfileApi()).createTag("x") as Result.Failure
         assertEquals(400, result.status)
         assertEquals("이름을 입력해야 한다.", result.fields["label"])
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `종류 이름 바꾸기는 key 경로에 다듬은 이름만 보낸다`() = runTest {
+        var sentKey: String? = null
+        var sent: TagUpdateRequest? = null
+        val renamed = fromJson<EventTagDto>(
+            """{"id":31,"key":"u0123456789","label":"동아리","default_tau":null,"penalty_shape":"linear","custom":true}"""
+        )
+        val api = object : FakeEventsApi() {
+            override suspend fun updateTag(key: String, body: TagUpdateRequest): Response<EventTagDto> =
+                ok(renamed).also { sentKey = key; sent = body }
+        }
+        val result = EventRepository(api, FakeProfileApi()).renameTag("u0123456789", "  동아리 ")
+        assertEquals(Result.Success(renamed), result)
+        assertEquals("u0123456789", sentKey)
+        assertEquals("""{"label":"동아리"}""", Gson().toJson(sent))
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `같은 이름으로 바꾸면 409 tag_duplicate 가 코드로 남는다`() = runTest {
+        val api = object : FakeEventsApi() {
+            override suspend fun updateTag(key: String, body: TagUpdateRequest) = httpError<EventTagDto>(
+                409,
+                """{"error":{"code":"tag_duplicate","message":"같은 이름의 종류가 이미 있다.","details":{}}}""",
+            )
+        }
+        val result = EventRepository(api, FakeProfileApi()).renameTag("u0123456789", "시험") as Result.Failure
+        assertEquals(409, result.status)
+        assertEquals("tag_duplicate", result.errorCode)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `종류 지우기는 204 와 이미 없는 404 를 성공으로 본다`() = runTest {
+        for (code in listOf(204, 404)) {
+            var sentKey: String? = null
+            val api = object : FakeEventsApi() {
+                override suspend fun deleteTag(key: String): Response<Unit> {
+                    sentKey = key
+                    return if (code == 204) Response.success(204, Unit)
+                    else httpError(404, """{"error":{"code":"not_found","message":"없는 종류다.","details":{}}}""")
+                }
+            }
+            val result = EventRepository(api, FakeProfileApi()).deleteTag("u0123456789")
+            assertEquals("HTTP $code", Result.Success(Unit), result)
+            assertEquals("u0123456789", sentKey)
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `종류 지우기가 서버 오류면 실패로 남는다`() = runTest {
+        val api = object : FakeEventsApi() {
+            override suspend fun deleteTag(key: String) = httpError<Unit>(500, "<html>oops</html>")
+        }
+        val result = EventRepository(api, FakeProfileApi()).deleteTag("u0123456789") as Result.Failure
+        assertEquals(500, result.status)
+        assertFalse(result.network)
     }
 
     // Partly AI-generated (Claude)

@@ -22,7 +22,9 @@ import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.data.remote.AlarmPlanDto
 import com.swpp.wakeup.data.remote.BlockObservationInput
 import com.swpp.wakeup.data.remote.EventTagDto
+import com.swpp.wakeup.ui.events.tagsRenamed
 import com.swpp.wakeup.ui.events.tagsWith
+import com.swpp.wakeup.ui.events.tagsWithout
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.ApiClient
@@ -1254,6 +1256,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 종류 목록은 계정마다 다르다. 다음 계정에 이 계정의 종류가 잠깐이라도 보이지 않게 비운다.
         _eventTags.value = emptyList()
         _tagAdd.value = TagAddState()
+        _tagEdit.value = TagEditState()
         // 순서가 있다. **토큰보다 먼저 지운다** — 지우기 판정이 "지금 로그인한
         // 계정" 을 보므로, 토큰이 먼저 사라지면 소유자를 모르는 상태가 되어
         // 아무것도 지울 수 없다.
@@ -1773,6 +1776,108 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 is EventRepository.Result.Failure ->
                     _tagAdd.update { it.copy(busy = false, error = tagAddErrorOf(result)) }
+            }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 내 종류 이름 바꾸기·지우기 대화상자(event-tags-api.md §5-5). 일정 추가·수정의 종류 드롭다운에서
+     * 내가 만든 종류 줄의 [편집] 으로 연다. 전역 종류는 서버가 고치지 못하게 하므로(404) 열지 않는다.
+     *
+     * @property key 고치는 종류. null 이면 닫혀 있다
+     * @property original 열 때의 이름. 바뀌지 않았으면 보내지 않고 닫는다
+     * @property confirmDelete [삭제] 를 한 번 눌러 "지울까요?" 를 묻는 중
+     * @property busy 보내는 중. 닫기·중복 전송을 막는다
+     * @property error 대화상자 안의 빨간 줄
+     */
+    data class TagEditState(
+        val key: String? = null,
+        val label: String = "",
+        val original: String = "",
+        val confirmDelete: Boolean = false,
+        val busy: Boolean = false,
+        val error: String? = null,
+    ) {
+        val open: Boolean get() = key != null
+    }
+
+    private val _tagEdit = MutableStateFlow(TagEditState())
+    val tagEdit: StateFlow<TagEditState> = _tagEdit.asStateFlow()
+
+    // Partly AI-generated (Claude)
+    fun openTagEdit(key: String) {
+        val tag = _eventTags.value.firstOrNull { it.key == key && it.custom == true } ?: return
+        _tagEdit.value = TagEditState(key = tag.key, label = tag.label, original = tag.label)
+    }
+
+    // Partly AI-generated (Claude)
+    fun onTagEditLabelChange(v: String) {
+        if (_tagEdit.value.busy) return
+        _tagEdit.update { it.copy(label = v.take(TAG_LABEL_MAX), error = null) }
+    }
+
+    // Partly AI-generated (Claude)
+    fun dismissTagEdit() {
+        if (_tagEdit.value.busy) return
+        _tagEdit.value = TagEditState()
+    }
+
+    // Partly AI-generated (Claude)
+    /** [삭제] 를 누르면 바로 지우지 않고 대화상자 안에서 한 번 더 묻는다. [ask] 가 false 면 이름 입력으로 돌아간다 */
+    fun askTagDelete(ask: Boolean = true) {
+        if (_tagEdit.value.busy) return
+        _tagEdit.update { it.copy(confirmDelete = ask, error = null) }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 이름을 바꿔 목록의 같은 자리에 끼운다. 다듬은 이름이 그대로면 보내지 않고 닫는다.
+     * 일정·알람은 그대로다(이름만 바뀌면 서버가 알람을 다시 섞지 않는다, event-tags-api.md §4).
+     */
+    fun submitTagRename() {
+        val current = _tagEdit.value
+        val key = current.key ?: return
+        if (current.busy || current.label.isBlank()) return
+        if (current.label.trim() == current.original) {
+            _tagEdit.value = TagEditState()
+            return
+        }
+        _tagEdit.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            when (val result = repository.renameTag(key, current.label)) {
+                is EventRepository.Result.Success -> {
+                    _eventTags.update { tagsRenamed(it, result.data) }
+                    _tagEdit.value = TagEditState()
+                    // 홈의 일정 줄에 붙은 종류 칩도 새 이름으로.
+                    refresh(silent = true)
+                }
+                is EventRepository.Result.Failure ->
+                    _tagEdit.update { it.copy(busy = false, error = tagEditErrorOf(result)) }
+            }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 종류를 지운다. 그 종류를 단 일정은 서버에서 종류 없음이 되고 알람이 프로필 기본 여유로 다시
+     * 맞춰지므로(event-tags-api.md §4) 홈을 다시 받는다. 지금 고른 종류였으면 "선택 안 함" 으로 돌린다.
+     */
+    fun confirmTagDelete() {
+        val current = _tagEdit.value
+        val key = current.key ?: return
+        if (current.busy) return
+        _tagEdit.update { it.copy(busy = true, error = null) }
+        viewModelScope.launch {
+            when (val result = repository.deleteTag(key)) {
+                is EventRepository.Result.Success -> {
+                    _eventTags.update { tagsWithout(it, key) }
+                    if (_add.value.tagKey == key) onAddTagChange(null)
+                    _tagEdit.value = TagEditState()
+                    refresh(silent = true)
+                }
+                is EventRepository.Result.Failure ->
+                    _tagEdit.update { it.copy(busy = false, error = tagEditErrorOf(result)) }
             }
         }
     }

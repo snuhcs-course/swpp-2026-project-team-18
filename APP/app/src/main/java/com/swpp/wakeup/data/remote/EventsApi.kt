@@ -107,6 +107,22 @@ interface EventsApi {
     @POST("api/events/tags")
     suspend fun createTag(@Body body: TagCreateRequest): Response<EventTagDto>
 
+    // Partly AI-generated (Claude)
+    /**
+     * 내 종류 이름 바꾸기(docs/iter3/event-tags-api.md §3). 200 고친 종류. 404 전역·남의 종류·없는 키,
+     * 409 `tag_duplicate`(보이는 다른 종류와 이름이 같다), 400 `invalid`(`details.label`).
+     */
+    @PATCH("api/events/tags/{key}")
+    suspend fun updateTag(@Path("key") key: String, @Body body: TagUpdateRequest): Response<EventTagDto>
+
+    // Partly AI-generated (Claude)
+    /**
+     * 내 종류 지우기. 204. 그 종류를 단 일정·반복 규칙은 종류 없음이 되고 알람은 프로필 기본 여유로
+     * 다시 맞춰진다(event-tags-api.md §4). 404 는 이미 없는 종류다.
+     */
+    @DELETE("api/events/tags/{key}")
+    suspend fun deleteTag(@Path("key") key: String): Response<Unit>
+
     /**
      * 장소 검색.
      *
@@ -596,6 +612,10 @@ data class EventTagDto(
 // Partly AI-generated (Claude)
 /** `POST /api/events/tags` 본문. `default_tau` 는 보내지 않아 서버가 프로필 기본을 쓴다. */
 data class TagCreateRequest(val label: String)
+
+// Partly AI-generated (Claude)
+/** `PATCH /api/events/tags/{key}` 본문. 이름만 바꾼다(τ 는 보내지 않아 그대로 둔다). */
+data class TagUpdateRequest(val label: String)
 
 /**
  * 알람 계획.

@@ -232,6 +232,7 @@ private fun MainHost(
     val emailVerify by viewModel.emailVerify.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
     val tagAdd by viewModel.tagAdd.collectAsStateWithLifecycle()
+    val tagEdit by viewModel.tagEdit.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
@@ -796,6 +797,13 @@ private fun MainHost(
                     onTagAddLabelChange = viewModel::onTagAddLabelChange,
                     onTagAddSubmit = viewModel::submitTagAdd,
                     onTagAddDismiss = viewModel::dismissTagAdd,
+                    tagEdit = tagEdit,
+                    onEditTag = viewModel::openTagEdit,
+                    onTagEditLabelChange = viewModel::onTagEditLabelChange,
+                    onTagRename = viewModel::submitTagRename,
+                    onTagAskDelete = viewModel::askTagDelete,
+                    onTagDelete = viewModel::confirmTagDelete,
+                    onTagEditDismiss = viewModel::dismissTagEdit,
                 )
 
                 AppRoute.RouteChoice -> RouteChoiceScreen(

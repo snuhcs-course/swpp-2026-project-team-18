@@ -134,3 +134,26 @@ internal fun tagAddErrorOf(failure: EventRepository.Result.Failure): String = wh
     failure.errorCode != null -> failure.message
     else -> SAVE_SERVER_LINE
 }
+
+// Partly AI-generated (Claude)
+internal const val TAG_DUPLICATE_LINE = "같은 이름의 종류가 이미 있어요"
+
+// Partly AI-generated (Claude)
+internal const val TAG_GONE_LINE = "이 종류를 찾지 못했어요. 다른 기기에서 지웠을 수 있어요"
+
+// Partly AI-generated (Claude)
+/**
+ * 내 종류 이름 바꾸기·지우기가 실패했을 때 대화상자에 보일 한 줄.
+ * 통신 실패 → 400(서버 문구) → 409 `tag_duplicate` → 404(지워진 종류) → 405(구버전 서버) → 429 → 그 밖.
+ */
+internal fun tagEditErrorOf(failure: EventRepository.Result.Failure): String = when {
+    failure.network -> SAVE_NETWORK_LINE
+    failure.status == 400 -> failure.fields["label"] ?: failure.message
+    failure.status == 409 && failure.errorCode == "tag_duplicate" -> TAG_DUPLICATE_LINE
+    failure.status == 404 -> TAG_GONE_LINE
+    failure.status == 405 -> SAVE_UNSUPPORTED_LINE
+    failure.status == 429 -> SAVE_THROTTLED_LINE
+    failure.status == 401 -> SAVE_AUTH_LINE
+    failure.errorCode != null -> failure.message
+    else -> SAVE_SERVER_LINE
+}

@@ -17,6 +17,7 @@ import com.swpp.wakeup.data.remote.EventDto
 import com.swpp.wakeup.data.remote.EventUpdateRequest
 import com.swpp.wakeup.data.remote.EventTagDto
 import com.swpp.wakeup.data.remote.TagCreateRequest
+import com.swpp.wakeup.data.remote.TagUpdateRequest
 import com.swpp.wakeup.data.remote.EventsApi
 import com.swpp.wakeup.data.remote.LiveRouteRequest
 import com.swpp.wakeup.data.remote.PlaceInput
@@ -662,6 +663,28 @@ class EventRepository(
         val response = api.createTag(TagCreateRequest(label.trim()))
         unwrap(response)?.let { Result.Success(it) }
             ?: failureFrom(response.code(), response.errorBody()?.string())
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 내 종류 이름을 바꾼다(event-tags-api.md §3). 이름은 다듬어서 보낸다. 404 는 전역·남의 종류이거나
+     * 다른 기기에서 지운 종류, 409 `tag_duplicate` 는 같은 이름이 이미 보이는 경우다.
+     */
+    suspend fun renameTag(key: String, label: String): Result<EventTagDto> = guard {
+        val response = api.updateTag(key, TagUpdateRequest(label.trim()))
+        unwrap(response)?.let { Result.Success(it) }
+            ?: failureFrom(response.code(), response.errorBody()?.string())
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 내 종류를 지운다. 204 가 성공이다. 404(이미 없는 종류)도 화면에서는 지운 것과 같으니 성공으로 본다 —
+     * 다른 기기에서 먼저 지웠으면 목록에서 빼기만 하면 된다.
+     */
+    suspend fun deleteTag(key: String): Result<Unit> = guard {
+        val response = api.deleteTag(key)
+        if (response.isSuccessful || response.code() == 404) Result.Success(Unit)
+        else failureFrom(response.code(), response.errorBody()?.string())
     }
 
     /**

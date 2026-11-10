@@ -21,6 +21,7 @@ import com.swpp.wakeup.data.remote.EventsApi
 import com.swpp.wakeup.data.remote.LiveRouteRequest
 import com.swpp.wakeup.data.remote.LiveRouteResponse
 import com.swpp.wakeup.data.remote.TagCreateRequest
+import com.swpp.wakeup.data.remote.TagUpdateRequest
 import com.swpp.wakeup.data.remote.LoginRequest
 import com.swpp.wakeup.data.remote.Paged
 import com.swpp.wakeup.data.remote.PasswordCheckRequest
@@ -276,6 +277,9 @@ open class FakeEventsApi : EventsApi {
     override suspend fun tags(): Response<List<EventTagDto>> = unexpected("tags")
     override suspend fun createTag(body: TagCreateRequest): Response<EventTagDto> =
         unexpected("createTag")
+    override suspend fun updateTag(key: String, body: TagUpdateRequest): Response<EventTagDto> =
+        unexpected("updateTag")
+    override suspend fun deleteTag(key: String): Response<Unit> = unexpected("deleteTag")
     override suspend fun searchPlaces(
         query: String,
         lat: Double?,

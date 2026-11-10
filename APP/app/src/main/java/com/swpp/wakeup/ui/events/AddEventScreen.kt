@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -78,6 +79,7 @@ internal fun tagOptionsOf(tags: List<com.swpp.wakeup.data.remote.EventTagDto>): 
             key = tag.key,
             label = tag.label,
             tau = tag.defaultTau?.let { "τ ${"%.2f".format(java.util.Locale.ROOT, it)}" } ?: "프로필 기본",
+            custom = tag.custom == true,
         )
     }
 
@@ -92,7 +94,29 @@ internal fun tagsWith(
 ): List<com.swpp.wakeup.data.remote.EventTagDto> =
     if (tags.any { it.key == created.key }) tags else tags + created
 
-internal data class TagOption(val key: String?, val label: String, val tau: String)
+// Partly AI-generated (Claude)
+/** 이름을 바꾼 종류를 같은 자리에 끼운다. 목록에 없으면(다른 화면에서 다시 받은 뒤) 그대로 둔다. */
+internal fun tagsRenamed(
+    tags: List<com.swpp.wakeup.data.remote.EventTagDto>,
+    renamed: com.swpp.wakeup.data.remote.EventTagDto,
+): List<com.swpp.wakeup.data.remote.EventTagDto> =
+    tags.map { if (it.key == renamed.key) renamed else it }
+
+// Partly AI-generated (Claude)
+/** 지운 종류를 목록에서 뺀다. */
+internal fun tagsWithout(
+    tags: List<com.swpp.wakeup.data.remote.EventTagDto>,
+    key: String,
+): List<com.swpp.wakeup.data.remote.EventTagDto> =
+    tags.filterNot { it.key == key }
+
+/** @property custom 내가 만든 종류. 드롭다운에서 [편집] 으로 이름 바꾸기·지우기를 열 수 있다 */
+internal data class TagOption(
+    val key: String?,
+    val label: String,
+    val tau: String,
+    val custom: Boolean = false,
+)
 
 private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 
@@ -159,6 +183,16 @@ fun AddEventScreen(
     onTagAddLabelChange: (String) -> Unit = {},
     onTagAddSubmit: () -> Unit = {},
     onTagAddDismiss: () -> Unit = {},
+    /** 내 종류 이름 바꾸기·지우기 대화상자. `open` 이 아니면 그리지 않는다 */
+    tagEdit: HomeViewModel.TagEditState = HomeViewModel.TagEditState(),
+    /** 드롭다운의 내 종류 줄 [편집]. 인자는 종류 key */
+    onEditTag: (String) -> Unit = {},
+    onTagEditLabelChange: (String) -> Unit = {},
+    onTagRename: () -> Unit = {},
+    /** true 면 "지울까요?" 를 묻고, false 면 이름 입력으로 돌아간다 */
+    onTagAskDelete: (Boolean) -> Unit = {},
+    onTagDelete: () -> Unit = {},
+    onTagEditDismiss: () -> Unit = {},
 ) {
     if (tagAdd.open) {
         TagAddDialog(
@@ -166,6 +200,16 @@ fun AddEventScreen(
             onLabelChange = onTagAddLabelChange,
             onSubmit = onTagAddSubmit,
             onDismiss = onTagAddDismiss,
+        )
+    }
+    if (tagEdit.open) {
+        TagEditDialog(
+            state = tagEdit,
+            onLabelChange = onTagEditLabelChange,
+            onRename = onTagRename,
+            onAskDelete = onTagAskDelete,
+            onDelete = onTagDelete,
+            onDismiss = onTagEditDismiss,
         )
     }
     // 일정 수정이면 같은 화면을 수정 모드로 쓴다(Figma ⑫ 변형 `488:9`).
@@ -393,6 +437,7 @@ fun AddEventScreen(
                 selected = state.tagKey,
                 onChange = onTagChange,
                 onAddTag = onAddTag,
+                onEditTag = onEditTag,
                 enabled = !state.submitting,
             )
             state.fieldErrors[AddField.TAG]?.let { EndpointError(it, tag = "tag_error") }
@@ -891,6 +936,8 @@ private fun TagDropdown(
     onChange: (String?) -> Unit,
     /** 맨 끝 "+ 추가" */
     onAddTag: () -> Unit,
+    /** 내가 만든 종류 줄의 [편집]. 인자는 종류 key */
+    onEditTag: (String) -> Unit,
     enabled: Boolean,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -977,6 +1024,22 @@ private fun TagDropdown(
                                     color = JitColor.TextSecondary,
                                     fontSize = 10.sp,
                                 )
+                                // 내가 만든 종류만 이름 바꾸기·지우기가 된다(전역 종류는 서버가 404).
+                                // 줄을 누르면 고르고, 이 버튼을 누르면 고르지 않고 대화상자만 연다.
+                                val editKey = option.key
+                                if (option.custom && editKey != null) {
+                                    Spacer(Modifier.width(4.dp))
+                                    TextButton(
+                                        onClick = {
+                                            expanded = false
+                                            onEditTag(editKey)
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp),
+                                        modifier = Modifier.testTag("tag_edit_$editKey"),
+                                    ) {
+                                        Text("편집", color = JitColor.Accent, fontSize = 11.sp)
+                                    }
+                                }
                             }
                         },
                     )

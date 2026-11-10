@@ -42,6 +42,8 @@
 ### B. 서버가 준비해 둔 것 연결
 - [x] **종류 직접 추가** (BE-21, 서버 0.19.0): "+ 추가" 를 누르면 이름 입력 → `POST /api/events/tags {label}` → 돌려받은 종류를 목록에 넣고 고른다. `default_tau` 가 null 이면 τ 칸에 "프로필 기본". [event-tags-api.md](docs/iter3/event-tags-api.md) 5절, 12-a 항목.
   - ✅ 구현(11-06, bdc392e): "+ 추가" → 이름 대화상자 → `POST /api/events/tags`, 받은 종류를 고르고 `default_tau` null 은 "프로필 기본". 같은 이름은 한 줄만 남는 것을 에뮬레이터에서 확인했다.
+- [x] **내 종류 이름 바꾸기·지우기** (iter4 A1, 서버 0.19.0): 종류 드롭다운에서 내가 만든 종류 줄에만 [편집]을 둔다. 대화상자에서 이름을 바꾸면 `PATCH /api/events/tags/{key} {label}`, [삭제] → "지울까요?" → `DELETE /api/events/tags/{key}`. 409 `tag_duplicate` 는 "같은 이름의 종류가 이미 있어요", 지울 때 404 는 이미 없는 종류라 성공으로 본다. 지운 종류를 고르고 있었으면 "선택 안 함" 으로 돌리고, 둘 다 홈을 다시 받는다(일정의 종류 칩·알람). Figma 관리 화면이 생기기 전까지 쓰는 지금 화면 안의 입구다. [event-tags-api.md](docs/iter3/event-tags-api.md) 5절 5번.
+  - ✅ 구현(11-10): 단위 테스트(`EventRepositoryTest`·`TagOptionsTest`·`TagEditErrorTest`)까지. 에뮬레이터·실기기 확인은 아직.
 - [x] **저장한 집 서버 동기화** (R3-2·R3-3, 서버 0.18.0): 기기의 집 목록(`SavedHomesStore`)을 `POST /api/saved-places/bulk/` 로 한 번 올리고, 이후 추가·수정·삭제·기본 집 바꾸기는 API 로. 일정 출발지가 저장한 집이면 `origin_place_id` 를 보낸다. [saved-places-api.md](docs/iter3/saved-places-api.md)
   - ✅ 구현(11-06, e024b4d): 기기 집 목록을 `bulk` 로 한 번 올리고 이후 추가·삭제·기본으로는 API, 출발지가 저장한 집이면 `origin_place_id`. 옛 빌드에서 덮어 설치해 `bulk` 200 과 `origin_place_id = 2` 를 확인했다. 첫 업로드 중 추가·삭제가 덮어써지던 틈은 495820a 에서 고쳤다.
 - [x] **출발 전 확인 표시** (R3-11 2번, 서버 0.18.0): 알람 끌 때·출발 10분 전 `POST /api/routes/live` 본문에 `"context": "pre_departure"` 를 싣는다. [reroute-api.md](docs/iter3/reroute-api.md) 4-1절
