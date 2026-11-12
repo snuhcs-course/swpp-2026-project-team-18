@@ -28,7 +28,8 @@ class SignupThrottleTest {
         try {
             context.startActivity(Intent(context, LoginActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-            ui.click(By.res("open_settings"), "home_list")
+            ui.click(By.res("tab_me"))
+            ui.click(By.res("me_settings"), "me_scroll")
             ui.click(By.text("로그아웃"), "settings_scroll")
             ui.click(By.text("회원가입"), "login_scroll")
             ui.input("signup_nickname", "QA 가입 제한", "signup_scroll")

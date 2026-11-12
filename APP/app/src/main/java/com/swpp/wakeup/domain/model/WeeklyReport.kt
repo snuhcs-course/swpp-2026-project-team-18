@@ -80,6 +80,16 @@ data class WeeklyReportView(
     val bufferCurrentLabel: String? = null,
     /** 기상 카드(⑧)와 날짜 줄(⑨). 서버 `wake` 가 null 이면 null */
     val wake: WakeView? = null,
+    /** 리포트 탭 첫 카드의 늦은 일정 줄(iter4 H2-2, Figma `546:1995`). 시작 순 */
+    val lateRows: List<LateRow> = emptyList(),
+    /** 리포트 탭 "정시 도착 확률" 카드(`546:2002`). 도착 기록이 없으면 null */
+    val probability: ProbabilityCompare? = null,
+    /** 리포트 탭 "준비 시간" 카드(`609:2119`). 이 주에 잰 준비가 없으면 null */
+    val prep: PrepCompare? = null,
+    /** 이 주에 서버가 바꾼 안전 버퍼의 합(분). 늘었으면(알람이 앞당겨짐) 양수, 조정이 없으면 0 */
+    val bufferChangeMinutes: Int = 0,
+    /** "안 감" 으로 표시해 이 주 계산에서 뺀 일정 수 */
+    val skippedCount: Int = 0,
 ) {
     val hasArrivals: Boolean get() = arrivedCount > 0
 
@@ -102,6 +112,51 @@ data class WeeklyReportView(
     val showLateDays: Boolean get() = lateDays.isNotEmpty()
     val showDeviations: Boolean get() = eventCount > 0 && deviations.isNotEmpty()
 }
+
+// Partly AI-generated (Claude)
+/**
+ * 리포트 탭 첫 카드의 늦은 일정 한 줄. 문구는 `ReportTabLogic` 이 만든다
+ * ("화요일 6분 늦었어요" / "9:00 자료구조 및 알고리즘").
+ */
+data class LateRow(
+    val date: LocalDate,
+    /** 서버 일정 id. 없으면 ⑨ 를 날짜로만 연다 */
+    val eventId: Long?,
+    /** 늦은 분(최소 1분). 여유를 못 읽으면 null */
+    val lateMinutes: Int?,
+    /** 일정 시작 "9:00"(기기 시간대). 못 읽으면 null */
+    val startClock: String?,
+    val title: String,
+)
+
+// Partly AI-generated (Claude)
+/**
+ * "앱이 말한 확률, 맞았을까요?" 카드의 값. 막대 두 개(예상 · 실제)와 판정 한 줄이다.
+ *
+ * 판정은 서버가 **그 주 일정만으로** 낸 캘리브레이션(`calibration.verdict`)이다. 표본이 부족하면
+ * 막대를 그리지 않는다 — 2번 중 1번을 "실제 50%" 로 보이면 앱이 크게 틀린 것처럼 읽힌다.
+ */
+data class ProbabilityCompare(
+    /** 앱이 말한 정시 도착 확률의 평균(%). 도착 기록이 있는 일정 중 확률이 있는 것만, 없으면 목표(τ) 평균 */
+    val promised: Int?,
+    /** 실제로 제시간에 온 비율(%) */
+    val actual: Int,
+    /** 서버 판정 `calibrated` / `overconfident` / `conservative` / `insufficient`. 구버전 서버면 null */
+    val verdict: String?,
+    /** 판정까지 더 다녀야 하는 횟수(최소 1). [verdict] 가 `insufficient` 일 때만 쓴다 */
+    val moreTrips: Int,
+)
+
+// Partly AI-generated (Claude)
+/** "준비 시간" 카드의 값. 계획한 준비와 실제 준비(블록 기록 합)를 둘 다 잰 아침만 센다. */
+data class PrepCompare(
+    /** 계획한 준비 시간 평균(분) */
+    val plannedMinutes: Int,
+    /** 실제 준비 시간 평균(분) */
+    val actualMinutes: Int,
+    /** 잰 아침 수 */
+    val count: Int,
+)
 
 /** 서버 요약 한 단락. [isAi] 면 "AI 요약 · 집계 수치만 사용함" 을 단다. */
 data class ReportSummary(val text: String, val isAi: Boolean)

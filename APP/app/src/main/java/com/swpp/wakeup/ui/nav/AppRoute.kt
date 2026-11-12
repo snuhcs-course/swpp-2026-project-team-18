@@ -1,5 +1,6 @@
 package com.swpp.wakeup.ui.nav
 
+import com.swpp.wakeup.ui.help.HelpTopic
 import java.time.LocalDate
 
 /**
@@ -12,11 +13,21 @@ import java.time.LocalDate
  * Figma ⑥~⑪ 이 붙으면 분기가 생긴다. 그때 Navigation Compose 로 옮긴다.
  * 옮기기 쉽게 경로를 sealed 타입으로 두고 이동은 전부
  * [com.swpp.wakeup.ui.home.HomeViewModel] 의 push/pop 을 지나게 했다.
+ *
+ * 하단 탭(iter4 H2-2)도 같은 방식이다. 탭마다 스택을 하나씩 두고([NavState.tabStacks]) 지금 탭의
+ * 스택만 [NavState.stack] 으로 보인다. 그래서 기존 push/pop 코드는 탭을 몰라도 된다.
  */
 sealed interface AppRoute {
 
     /** Figma ③ 홈 · 일정 목록 */
     data object Home : AppRoute
+
+    // Partly AI-generated (Claude)
+    /**
+     * 하단 탭 "이동"의 첫 화면(Figma `545:1080`). 다음 이동 카드와 "가는 길" 타임라인. 카드를 누르면
+     * ④ 알람 결정을 이 탭 안에서 연다(이동 중 진행 카드는 아직 ④ 에 있다).
+     */
+    data object Trip : AppRoute
 
     /** Figma ④ 알람 결정 */
     data class AlarmDecision(val eventId: Long) : AppRoute
@@ -44,7 +55,7 @@ sealed interface AppRoute {
     /**
      * Figma ⑭ 집 주소. 알람 계산의 출발지라서 없으면 계산이 안 된다.
      *
-     * 두 곳에서 들어온다 — 가입 직후 온보딩과 [Settings] 의 "집 주소 변경".
+     * 두 곳에서 들어온다 — 가입 직후 온보딩과 [Homes] 의 "기본 집" [변경].
      * 문구만 다르고 하는 일은 같아서 경로를 나누지 않았다.
      */
     data object HomeSetup : AppRoute
@@ -61,14 +72,24 @@ sealed interface AppRoute {
      */
     data object MapPick : AppRoute
 
+    // Partly AI-generated (Claude)
     /**
-     * Figma ⑯ 설정.
-     *
-     * 가입할 때 한 번 정한 값(집 주소·준비 시간)을 고칠 수 있는 유일한 곳이다.
-     * 예전에는 아바타를 누르면 읽기 전용 다이얼로그가 떴고, 그래서 집을 한 번
-     * 저장한 뒤에는 바꿀 길이 없었다.
+     * 내 정보 탭 첫 화면(iter4 H2-2, Figma `547:1244`). "내 아침 · 일정 · 도움 · 계정" 네 묶음의 입구다.
+     * 가입할 때 한 번 정한 값(집 주소 · 준비 시간)을 고치는 길도 여기서 시작한다.
+     */
+    data object Me : AppRoute
+
+    /**
+     * 설정(예전 Figma ⑯ 에서 계정 쪽만 남김). 로그인 연결 · 비밀번호 · 이메일 인증 · 로그아웃.
+     * 내 정보 탭 › "설정" 줄에서 연다.
      */
     data object Settings : AppRoute
+
+    /** 집 주소(기본 집 + 다른 집, 예전 ⑯ 의 집 칸 · `498:9`). 내 정보 탭 › "집 주소" 줄에서 연다 */
+    data object Homes : AppRoute
+
+    /** 알림 · 권한과 지금 상태(예전 ⑯ 의 진단 줄). 내 정보 탭 › "알림·권한" 줄에서 연다 */
+    data object Permissions : AppRoute
 
     /** Figma ⑯ 변형 "비밀번호 변경"(F-41). [Settings] 의 "비밀번호" 줄에서 들어온다 */
     data object ChangePassword : AppRoute
@@ -98,6 +119,22 @@ sealed interface AppRoute {
      * 건너뛰면 다시 묻지 않고, ⑯ 설정의 스위치로 켜고 끈다.
      */
     data object CalendarLink : AppRoute
+
+    // Partly AI-generated (Claude)
+    /**
+     * 첫 실행 안내 세 장(iter4 H2-4, Figma `545:1305` · `546:2214` · `547:2009`). 가입 직후 ⑱ 다음, 홈에
+     * 들어가기 전에 한 번 뜬다. [건너뛰기] 와 3장의 [시작하기] 는 홈으로 가고, 홈에 처음 들어가면 코치마크가
+     * 이어진다. 내 정보 › "처음 안내 다시 보기" 로 다시 연다.
+     */
+    data object Intro : AppRoute
+
+    // Partly AI-generated (Claude)
+    /**
+     * 도움말(iter4 H2-4, Figma `551:1820`). 내 정보 › 도움말, 홈 · 이동 · 리포트 오른쪽 위 ?, 화면 곳곳의 i 에서 연다.
+     * [expand] 는 펼친 채로 열 질문이다. null 이면 첫 질문(알람 시각)을 펼친다. 하단 탭은 숨긴다(Figma 프레임에
+     * 없고, 맨 아래 [처음 안내 다시 보기] 자리와 겹친다).
+     */
+    data class Help(val expand: HelpTopic? = null) : AppRoute
 
     /**
      * 아침 루틴 블록 **정의** 편집.
@@ -151,6 +188,36 @@ sealed interface AppRoute {
     data object MorningProgress : AppRoute
 }
 
+// Partly AI-generated (Claude)
+/**
+ * 하단 탭 네 개(iter4 H2-2, Figma `540:123` · `545:1080` · `546:1943` · `547:1244`).
+ *
+ * @property root 탭을 처음 열 때의 화면. 탭 안에서 더 들어간 화면은 그 탭의 스택에 쌓인다
+ */
+enum class AppTab(val label: String, val root: AppRoute) {
+    HOME("홈", AppRoute.Home),
+    TRIP("이동", AppRoute.Trip),
+    REPORT("리포트", AppRoute.WeeklyReport),
+    ME("내 정보", AppRoute.Me),
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 하단 탭 바를 보일 화면. 탭 첫 화면과 그 안에서 둘러보는 화면(④ 알람 결정, ⑨ 상세 리포트, 내 정보의
+ * 설정 · 집 주소 · 알림·권한)이다.
+ *
+ * 입력하는 화면(일정 추가·수정, 경로 선택, 지도, 집 주소, 온보딩, 비밀번호 등)과 아침 기록에서는 숨긴다.
+ * 아래에 저장 버튼이 있거나, 하던 일을 끝내야 다른 곳으로 가는 화면이다.
+ */
+val AppRoute.showsTabBar: Boolean
+    get() = when (this) {
+        AppRoute.Home, AppRoute.Trip, AppRoute.WeeklyReport, AppRoute.Me,
+        AppRoute.Settings, AppRoute.Homes, AppRoute.Permissions,
+        is AppRoute.AlarmDecision, is AppRoute.ReportDay,
+        -> true
+        else -> false
+    }
+
 /**
  * 화면 스택과 마지막 이동 방향.
  *
@@ -158,9 +225,71 @@ sealed interface AppRoute {
  * 때문이다. 파고들 때와 되돌아올 때 같은 방향으로 밀면 어색하다.
  */
 data class NavState(
+    /** 지금 탭의 스택. 기존 push/pop 은 모두 이것만 고친다 */
     val stack: List<AppRoute> = listOf(AppRoute.Home),
     val forward: Boolean = true,
+    /** 지금 보고 있는 하단 탭 (Partly AI-generated (Claude)) */
+    val tab: AppTab = AppTab.HOME,
+    /**
+     * 다른 탭에 두고 온 스택. 탭을 바꿀 때 지금 스택을 여기에 맡기고, 돌아오면 꺼낸다. 그래서 리포트에서
+     * 상세로 들어간 채 홈에 다녀와도 상세가 그대로 있다. 지금 탭의 값은 [stack] 이 진짜다.
+     */
+    val tabStacks: Map<AppTab, List<AppRoute>> = emptyMap(),
 ) {
     val current: AppRoute get() = stack.last()
     val canGoBack: Boolean get() = stack.size > 1
+
+    /** 하단 탭 바를 그릴지([showsTabBar]) */
+    val showsTabBar: Boolean get() = current.showsTabBar
+
+    /**
+     * 시스템 뒤로 가기를 앱이 받을지. 스택이 깊거나, 홈이 아닌 탭의 첫 화면이면 받는다(홈 탭으로 간다).
+     * 홈 탭의 첫 화면이면 받지 않아 앱이 닫힌다.
+     */
+    val handlesBack: Boolean get() = canGoBack || tab != AppTab.HOME
+
+    /** 모든 탭의 스택에 있는 화면. 다른 탭에 열어 둔 리포트를 새로 고칠 때 본다 */
+    val allRoutes: List<AppRoute>
+        get() = stack + tabStacks.filterKeys { it != tab }.values.flatten()
+
+    // Partly AI-generated (Claude)
+    /**
+     * [target] 탭으로 간다. 지금 스택은 맡겨 두고, [target] 에 두고 온 스택이 있으면 그대로 연다.
+     * 지금 탭을 다시 누르면 그 탭의 첫 화면으로 돌아간다.
+     */
+    fun selectTab(target: AppTab): NavState {
+        if (target == tab) {
+            return if (canGoBack) copy(stack = listOf(stack.first()), forward = false) else this
+        }
+        val saved = tabStacks + (tab to stack)
+        return copy(
+            stack = saved[target]?.takeIf { it.isNotEmpty() } ?: listOf(target.root),
+            forward = target.ordinal > tab.ordinal,
+            tab = target,
+            tabStacks = saved - target,
+        )
+    }
+
+    // Partly AI-generated (Claude)
+    /** 뒤로 가기. 스택이 깊으면 하나 빼고, 홈이 아닌 탭의 첫 화면이면 홈 탭으로 간다([handlesBack]) */
+    fun back(): NavState = when {
+        canGoBack -> copy(stack = stack.dropLast(1), forward = false)
+        tab != AppTab.HOME -> selectTab(AppTab.HOME).copy(forward = false)
+        else -> this
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 홈 탭의 첫 화면으로. 일정을 지운 뒤처럼 하던 일이 끝났을 때 쓴다. 지금 탭은 첫 화면으로 되돌려 두고
+     * (지운 일정의 화면이 남지 않게), 다른 탭에 두고 온 스택은 그대로 둔다.
+     */
+    fun home(): NavState {
+        val saved = if (tab == AppTab.HOME) tabStacks else tabStacks + (tab to listOf(tab.root))
+        return copy(
+            stack = listOf(AppRoute.Home),
+            forward = false,
+            tab = AppTab.HOME,
+            tabStacks = saved - AppTab.HOME,
+        )
+    }
 }

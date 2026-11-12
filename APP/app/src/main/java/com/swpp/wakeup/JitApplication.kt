@@ -7,6 +7,7 @@ import com.swpp.wakeup.alarm.AlarmScheduler
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.reminder.WeeklyReportReminder
 
 /**
  * 앱 진입점.
@@ -51,5 +52,13 @@ class JitApplication : Application() {
         // 실패해도 앱은 떠야 한다.
         runCatching { AlarmScheduler(this).rearm() }
             .onFailure { Log.e("JitApplication", "알람 재등록 실패", it) }
+
+        // Partly AI-generated (Claude)
+        // 일요일 낮 12시 주간 리포트 알림. 같은 시각을 덮어쓰므로 뜰 때마다 불러도 하나다.
+        // 채널은 미리 만든다 — 있어야 사용자가 기기 설정에서 이 알림만 끌 수 있다.
+        runCatching {
+            WeeklyReportReminder.ensureChannel(this)
+            WeeklyReportReminder.scheduleNext(this)
+        }.onFailure { Log.e("JitApplication", "주간 리포트 알림 예약 실패", it) }
     }
 }

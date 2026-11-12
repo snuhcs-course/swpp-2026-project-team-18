@@ -59,6 +59,9 @@ class PrefsScopeAuditTest {
             "앞 사용자의 이동 중 단계로 지금 계정의 추적이 출발을 건너뛴다",
         "data/local/SavedHomesStore.kt" to
             "앞 사용자의 집 좌표가 지금 계정의 출발지 목록에 보인다",
+        // Partly AI-generated (Claude) — iter4 H2-4
+        "data/local/FirstRunGuideStore.kt" to
+            "앞 사용자가 안내를 봤다는 표시 때문에 새 계정이 첫 실행 안내와 코치마크를 못 본다",
     )
 
     /**

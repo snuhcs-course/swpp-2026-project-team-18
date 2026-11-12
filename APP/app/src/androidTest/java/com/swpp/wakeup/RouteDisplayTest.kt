@@ -32,7 +32,7 @@ class RouteDisplayTest {
             context.startActivity(Intent(context, LoginActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
             ui.await(By.res("next_alarm"), timeout = 90_000)
-            ui.click(By.text("+  일정 추가"), "home_list")
+            ui.click(By.res("add_event"))
             ui.await(By.res("add_event_scroll"))
             ui.input("event_title", "경로 표시 검증")
             ui.click(By.res("place_query"), "add_event_scroll")

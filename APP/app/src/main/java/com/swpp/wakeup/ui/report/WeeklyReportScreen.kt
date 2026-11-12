@@ -2,11 +2,11 @@ package com.swpp.wakeup.ui.report
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,76 +21,73 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.swpp.wakeup.domain.model.CalibrationView
-import com.swpp.wakeup.domain.model.DayStatus
-import com.swpp.wakeup.domain.model.LateDayLine
-import com.swpp.wakeup.domain.model.ReportDay
-import com.swpp.wakeup.domain.model.ReportSummary
-import com.swpp.wakeup.domain.model.WakeView
+import com.swpp.wakeup.domain.model.LateRow
+import com.swpp.wakeup.domain.model.PrepCompare
+import com.swpp.wakeup.domain.model.ProbabilityCompare
 import com.swpp.wakeup.domain.model.WeeklyReportView
 import com.swpp.wakeup.ui.common.JitCard
-import com.swpp.wakeup.ui.common.JitChip
-import com.swpp.wakeup.ui.common.JitDotLabel
-import com.swpp.wakeup.ui.events.ScreenHeader
+import com.swpp.wakeup.ui.common.LineIcons
 import com.swpp.wakeup.ui.theme.JitColor
+import com.swpp.wakeup.ui.theme.JitRadius
 import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTheme
 import java.time.LocalDate
-import kotlin.math.abs
-import kotlin.math.min
 
 // Partly AI-generated (Claude)
 /**
- * 주간 리포트. Figma ⑧(`1:137`).
+ * 리포트 탭 첫 화면(iter4 H2-2 · H2-1, Figma `546:1943`). 예전 ⑧ 주간 리포트를 하단 탭으로 옮기고
+ * 숫자 · 용어보다 결론을 먼저 문장으로 말한다.
  *
- * 맨 위에 서버가 쓴 3~5문장 **주간 요약**을 두고, 그 아래에 근거 수치(정시율·평소
- * 도착·요일별 도착·지각한 날·계획 대비 평균·예측 검증)를 둔다. 요일 칸이나 지각한
- * 날을 누르면 ⑨ 상세 리포트로 간다([onOpenDay]).
+ * 위에서부터
+ * 1. 머리 "리포트" + ?(도움말, H2-4. [onHelpClick] 이 null 이면 숨김)
+ * 2. 주 선택 ‹ "9월 14일 ~ 20일" ›. 한 주는 월~일이고 이번 주에서는 › 가 꺼진다(서버 `has_next_week`).
+ * 3. 첫 카드(주황 테두리): "이번 주 5번 중 4번 제시간에 도착했어요" + 요일 점 + 늦은 일정 줄(→ ⑨)
+ * 4. 정시 도착 확률: 예상 · 실제 막대 + 판정 한 줄
+ * 5. 준비 시간: 예상 · 실제 막대 + "다음 알람부터 내 기록으로 맞춰요"
  *
- * ## 이 화면은 앱을 변호하지 않는다
+ * Figma 화면에 있는 이 다섯 가지만 그린다. 예전 ⑧ 의 요약 문단 · 타일 2개 · 요일 막대(분) · 예측 검증(90일),
+ * 그리고 아래에 이어 두었던 출발 · 이동 시간 · 기상 기록 · 여유 시간을 바꾼 이유 · 한 주 요약 카드는 뺐다
+ * (사용자 확인 11-11: Figma 와 다른 예전 화면이 남아 보임). 날마다의 자세한 기록은 ⑨ 에서 본다.
+ * 값은 모두 서버 주간 리포트에서 오고, 문구는 [ReportTabLogic] 이 만든다.
  *
- * - 결과를 모르는 아침 수를 감추지 않는다. 그 수가 크면 정시율 자체가 적은 표본에
- *   기댄 것이다.
- * - 가장 아슬아슬했던 날을 중간값과 함께 보여준다. 정시였어도 여유가 1분이면 운이
- *   좋았던 것이다.
- * - 측정하지 못한 값은 "측정 안 됨" 이다. 0 으로 그리지 않는다.
- *
- * [scrollState] 는 호출부(`MainHost`)가 들고 있다. ⑨ 로 갔다 돌아와도 보던 위치가
- * 남게 하려는 것이다 — 화면 전환이 이 컴포저블을 컴포지션에서 뺀다.
- *
- * 요일 칸은 360dp 화면에서 폭이 약 42dp 라 48dp 터치 기준보다 좁다. 7칸을 한 줄에
- * 두기 위한 한계이고, 같은 일정은 "지각한 날" 줄(높이 48dp 이상)로도 열 수 있다.
+ * [scrollState] 는 호출부(`MainHost`)가 들고 있다. ⑨ 로 갔다 돌아와도 보던 위치가 남게 하려는 것이다.
  */
 @Composable
 fun WeeklyReportScreen(
     report: WeeklyReportView?,
-    longTerm: CalibrationView?,
     loading: Boolean,
     error: String?,
-    onBack: () -> Unit,
     onPreviousWeek: () -> Unit,
     onNextWeek: () -> Unit,
     onRetry: () -> Unit,
     onOpenDay: (LocalDate, Long?) -> Unit,
     modifier: Modifier = Modifier,
     scrollState: ScrollState = rememberScrollState(),
+    today: LocalDate = LocalDate.now(),
+    onHelpClick: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -106,7 +102,7 @@ fun WeeklyReportScreen(
             ),
         verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
     ) {
-        ScreenHeader(title = "주간 리포트", onBack = onBack, enabled = !loading)
+        ReportHeader(onHelpClick)
 
         if (loading && report == null) {
             LoadingBlock()
@@ -120,68 +116,38 @@ fun WeeklyReportScreen(
 
         if (report == null) return@Column
 
-        WeekSwitcher(
-            rangeLabel = report.rangeLabel,
+        WeekSelector(
+            range = ReportTabLogic.range(report),
             previousEnabled = !loading,
             nextEnabled = !loading && report.canGoNext,
             onPrevious = onPreviousWeek,
             onNext = onNextWeek,
         )
 
-        report.summary?.let { SummaryCard(it, inProgress = report.inProgress) }
-
-        if (report.showTiles) Tiles(report)
-
-        // "안 감" 으로 뺀 일정 수. 타일이 없어도 보인다(Figma ⑧ `465:9`).
-        report.skippedNote?.let {
-            Text(
-                text = it,
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
-                modifier = Modifier.testTag("report_skipped"),
-            )
-        }
-
-        report.gapNotice?.let {
-            // 관측 공백이 결론을 흔들 만큼 크면 정시율을 앞세우지 않는다.
-            NoticeCard(dot = JitColor.Amber, title = it.title, body = it.body, caption = it.caption)
-        }
-
         // 로딩 중에는 누르지 못하게 한다. 새 주가 도착한 뒤 ⑨ 가 "찾지 못했음" 이 된다.
-        if (report.showDays) DaysCard(report, enabled = !loading, onOpenDay = onOpenDay)
-
-        if (report.showLateDays) LateDaysCard(report, enabled = !loading, onOpenDay = onOpenDay)
-
-        if (report.showDeviations) DeviationCard(report)
-        report.wake?.let { WakeCard(it) }
-
-        if (report.bufferNotes.isNotEmpty()) BufferCard(report)
-
-        longTerm?.let { VerdictCard(it) }
-    }
-}
-
-// Partly AI-generated (Claude)
-/**
- * 이 주에 서버가 안전 버퍼를 바꾼 이유(todo §2 "안전 버퍼 표시", Figma ⑧ `482:9`).
- * 버퍼를 사용자가 직접 정하는 입력은 없다(사용자 결정 10-28). 이유 문장은 서버 것을 그대로 쓴다.
- */
-@Composable
-private fun BufferCard(report: WeeklyReportView) {
-    JitCard(padding = 14.dp, gap = 6.dp, modifier = Modifier.testTag("report_buffer")) {
-        Text("안전 버퍼 조정 · 이번 주", color = JitColor.TextSecondary, fontSize = 11.sp)
-        report.bufferNotes.forEach {
-            Text(text = it, color = JitColor.TextPrimary, fontSize = 11.sp)
-        }
-        report.bufferCurrentLabel?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
-        }
+        HeadlineCard(report, today, enabled = !loading, onOpenDay = onOpenDay)
+        report.probability?.let { ProbabilityCard(it, report.bufferChangeMinutes, report.inProgress) }
+        report.prep?.let { PrepCard(it) }
     }
 }
 
 @Composable
-private fun WeekSwitcher(
-    rangeLabel: String,
+private fun ReportHeader(onHelpClick: (() -> Unit)?) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 36.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = "리포트", color = JitColor.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        onHelpClick?.let { help -> CircleButton(LineIcons.help, "도움말", "report_help", true, help) }
+    }
+}
+
+@Composable
+private fun WeekSelector(
+    range: String,
     previousEnabled: Boolean,
     nextEnabled: Boolean,
     onPrevious: () -> Unit,
@@ -192,67 +158,323 @@ private fun WeekSwitcher(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ArrowButton("‹", "지난 주 보기", "report_previous_week", previousEnabled, onPrevious)
+        CircleButton(LineIcons.chevronLeft, "지난 주 보기", "report_previous_week", previousEnabled, onPrevious)
         Text(
-            text = rangeLabel,
+            text = range,
             color = JitColor.TextPrimary,
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
+            modifier = Modifier.testTag("report_range"),
         )
-        ArrowButton("›", "다음 주 보기", "report_next_week", nextEnabled, onNext)
+        CircleButton(LineIcons.chevronRight, "다음 주 보기", "report_next_week", nextEnabled, onNext)
+    }
+}
+
+/** 36dp 둥근 버튼(Figma `btn 지난 주` · `btn 다음 주 (꺼짐)`). 꺼지면 35% 로 흐리게 */
+@Composable
+private fun CircleButton(icon: ImageVector, label: String, tag: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .testTag(tag)
+            .size(36.dp)
+            .alpha(if (enabled) 1f else 0.35f)
+            .clip(CircleShape)
+            .background(JitColor.Surface2)
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = JitColor.TextPrimary, modifier = Modifier.size(20.dp))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 첫 카드
+// ---------------------------------------------------------------------------
+
+/**
+ * "이번 주 5번 중 4번 제시간에 도착했어요" + 요일 점 + 늦은 일정 줄. 늦은 줄을 누르면 ⑨ 상세로 간다.
+ * 일정이 있는 날의 점도 누를 수 있다(예전 ⑧ 의 요일 칸과 같다).
+ */
+@Composable
+private fun HeadlineCard(
+    report: WeeklyReportView,
+    today: LocalDate,
+    enabled: Boolean,
+    onOpenDay: (LocalDate, Long?) -> Unit,
+) {
+    val shape = RoundedCornerShape(JitRadius.Card)
+    val headline = ReportTabLogic.headline(report, today)
+    Column(
+        modifier = Modifier
+            .testTag("report_week_card")
+            .fillMaxWidth()
+            .clip(shape)
+            .background(JitColor.Surface)
+            .border(1.dp, JitColor.Accent, shape)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = buildAnnotatedString {
+                append(headline.lead)
+                headline.highlight?.let { withStyle(SpanStyle(color = JitColor.Green)) { append(it) } }
+                append(headline.tail)
+            },
+            color = JitColor.TextPrimary,
+            fontSize = 20.sp,
+            lineHeight = 28.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.testTag("report_headline"),
+        )
+
+        val dots = ReportTabLogic.dots(report, today)
+        if (dots.isNotEmpty()) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                dots.forEachIndexed { index, dot ->
+                    DayDot(dot, index, enabled, onOpenDay, Modifier.weight(1f))
+                }
+            }
+        }
+
+        report.lateRows.forEach { row -> LateRowItem(row, enabled, onOpenDay) }
+
+        ReportTabLogic.captions(report).forEach {
+            Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp, lineHeight = 16.sp)
+        }
     }
 }
 
 @Composable
-private fun ArrowButton(
-    glyph: String,
-    label: String,
-    tag: String,
+private fun DayDot(
+    dot: ReportTabLogic.Dot,
+    index: Int,
     enabled: Boolean,
-    onClick: () -> Unit,
+    onOpenDay: (LocalDate, Long?) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Text(
-        text = glyph,
-        // 꺼진 화살표는 Track. TextSecondary 는 이 화면에서 읽히는 글자에 쓴다.
-        color = if (enabled) JitColor.TextPrimary else JitColor.Track,
-        fontSize = 20.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier
-            .testTag(tag)
-            .minimumInteractiveComponentSize()
+    val tap = if (dot.clickable) {
+        Modifier
             .clip(RoundedCornerShape(8.dp))
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = label, onClick = onClick)
-            .semantics { contentDescription = label }
-            .padding(horizontal = 14.dp, vertical = 4.dp),
-    )
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = "그날 상세 보기") {
+                onOpenDay(dot.date, dot.eventId)
+            }
+    } else {
+        Modifier
+    }
+    Column(
+        modifier = modifier
+            .testTag("report_day_$index")
+            .then(tap)
+            .semantics(mergeDescendants = true) { contentDescription = dot.description },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        // 낭독은 칸 전체의 설명이 맡는다.
+        Text(
+            text = dot.label,
+            color = JitColor.TextPrimary,
+            fontSize = 12.sp,
+            fontWeight = if (dot.isToday) FontWeight.Bold else FontWeight.Medium,
+            modifier = Modifier.clearAndSetSemantics {},
+        )
+        val circle = Modifier.size(16.dp).clip(CircleShape)
+        when (dot.kind) {
+            ReportTabLogic.DotKind.ON_TIME -> Box(circle.background(JitColor.Green))
+            ReportTabLogic.DotKind.LATE -> Box(circle.background(JitColor.Red))
+            ReportTabLogic.DotKind.UNOBSERVED -> Box(circle.background(JitColor.TextSecondary.copy(alpha = 0.45f)))
+            ReportTabLogic.DotKind.TODAY -> Box(circle.border(2.dp, JitColor.TextSecondary, CircleShape))
+            ReportTabLogic.DotKind.EMPTY -> Box(circle.border(2.dp, JitColor.Track, CircleShape))
+        }
+    }
 }
 
+/** 늦은 일정 한 줄(Figma `row 늦은 날 (버튼)`). 빨간 점 · "화요일 6분 늦었어요" / "9:00 자료구조 및 알고리즘" · › */
+@Composable
+private fun LateRowItem(row: LateRow, enabled: Boolean, onOpenDay: (LocalDate, Long?) -> Unit) {
+    val title = ReportTabLogic.lateTitle(row)
+    val sub = ReportTabLogic.lateSub(row)
+    Row(
+        modifier = Modifier
+            .testTag("report_late_${row.eventId ?: row.date}")
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(JitColor.Surface2)
+            .clickable(enabled = enabled, role = Role.Button, onClickLabel = "그날 상세 보기") {
+                onOpenDay(row.date, row.eventId)
+            }
+            .semantics(mergeDescendants = true) { contentDescription = "$title, $sub" }
+            .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(JitColor.Red))
+        Spacer(Modifier.width(10.dp))
+        Column(
+            modifier = Modifier.weight(1f).clearAndSetSemantics {},
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(text = title, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = sub,
+                color = JitColor.TextPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Icon(LineIcons.chevronRight, contentDescription = null, tint = JitColor.TextSecondary, modifier = Modifier.size(16.dp))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 정시 도착 확률 · 준비 시간
+// ---------------------------------------------------------------------------
+
 /**
- * 주간 요약. 서버가 쓴 문장을 그대로 보여준다.
- *
- * LLM 이 쓴 것이면 "AI 요약 · 집계 수치만 사용함" 을 단다 — 서버는 좌표·제목 없이
- * 집계값만 보내고, 숫자는 집계값에 있는 것만 통과시킨다.
+ * "앱이 말한 확률, 맞았을까요?"(Figma `card 앱이 말한 확률`). 예상 · 실제 막대 두 개와 판정 한 줄.
+ * 서버가 그 주 판정을 보류했으면(표본 부족) 막대 없이 "기록이 아직 적어요 · N번 더 다니면…" 만 쓴다.
  */
 @Composable
-private fun SummaryCard(summary: ReportSummary, inProgress: Boolean) {
-    JitCard(modifier = Modifier.testTag("report_summary"), padding = 16.dp, gap = 8.dp) {
+private fun ProbabilityCard(compare: ProbabilityCompare, bufferChangeMinutes: Int, inProgress: Boolean) {
+    JitCard(padding = 16.dp, gap = 12.dp, modifier = Modifier.testTag("report_probability")) {
+        Text("정시 도착 확률", color = JitColor.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        val promised = compare.promised
+        if (ReportTabLogic.showBars(compare) && promised != null) {
+            val actualColor = if (ReportTabLogic.probabilityWorse(compare)) JitColor.Amber else JitColor.Green
+            BarRow(
+                label = "예상",
+                value = "$promised%",
+                fraction = ReportTabLogic.percentFraction(promised),
+                fill = JitColor.TextSecondary,
+                valueColor = JitColor.TextPrimary,
+                tag = "report_promised",
+            )
+            BarRow(
+                label = "실제",
+                value = "${compare.actual}%",
+                fraction = ReportTabLogic.percentFraction(compare.actual),
+                fill = actualColor,
+                valueColor = actualColor,
+                tag = "report_actual",
+            )
+        }
+        val title = ReportTabLogic.verdictTitle(compare)
+        val body = ReportTabLogic.verdictBody(compare, bufferChangeMinutes, inProgress)
+        if (title != null || body.isNotEmpty()) {
+            Note(icon = LineIcons.alarm, bold = title, body = body, tag = "report_verdict")
+        }
+    }
+}
+
+/** "준비 시간"(Figma `card 준비 시간`). 계획한 준비와 실제 준비(블록 기록) 평균 */
+@Composable
+private fun PrepCard(prep: PrepCompare) {
+    JitCard(padding = 16.dp, gap = 12.dp, modifier = Modifier.testTag("report_prep")) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            JitDotLabel(text = "주간 요약", dotColor = JitColor.Accent, fontSize = 12)
-            when {
-                inProgress -> JitChip("진행 중", JitColor.Amber)
-                summary.isAi -> Text(
-                    text = "AI 요약 · 집계 수치만 사용함",
-                    color = JitColor.TextSecondary,
-                    fontSize = 10.sp,
-                )
-            }
+            Text("준비 시간", color = JitColor.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "아침 기록 ${prep.count}번",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        val actualColor = if (ReportTabLogic.prepLonger(prep.plannedMinutes, prep.actualMinutes)) {
+            JitColor.Amber
+        } else {
+            JitColor.Green
+        }
+        BarRow(
+            label = "예상",
+            value = "${prep.plannedMinutes}분",
+            fraction = ReportTabLogic.minutesFraction(prep.plannedMinutes, prep.actualMinutes),
+            fill = JitColor.TextSecondary,
+            valueColor = JitColor.TextPrimary,
+            tag = "report_prep_planned",
+        )
+        BarRow(
+            label = "실제",
+            value = "${prep.actualMinutes}분",
+            fraction = ReportTabLogic.minutesFraction(prep.actualMinutes, prep.plannedMinutes),
+            fill = actualColor,
+            valueColor = actualColor,
+            tag = "report_prep_actual",
+        )
+        Note(icon = LineIcons.check, bold = null, body = listOf(ReportTabLogic.PREP_NOTE), tag = "report_prep_note")
+    }
+}
+
+/** 라벨 · 막대 · 값 한 줄. 막대는 높이 10dp, 바탕 Track */
+@Composable
+private fun BarRow(label: String, value: String, fraction: Float, fill: Color, valueColor: Color, tag: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(tag)
+            .semantics(mergeDescendants = true) { contentDescription = "$label $value" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            color = JitColor.TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(36.dp).clearAndSetSemantics {},
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(10.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(JitColor.Track),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(fraction)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(fill),
+            )
         }
         Text(
-            text = summary.text,
+            text = value,
+            color = valueColor,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(48.dp).clearAndSetSemantics {},
+        )
+    }
+}
+
+/** 아이콘 + 굵은 첫 줄 + 보통 줄(Figma `note`) */
+@Composable
+private fun Note(icon: ImageVector, bold: String?, body: List<String>, tag: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().testTag(tag),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = JitColor.Accent,
+            modifier = Modifier.padding(top = 3.dp).size(14.dp),
+        )
+        Text(
+            text = buildAnnotatedString {
+                bold?.let { withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(it) } }
+                body.forEachIndexed { index, line ->
+                    if (bold != null || index > 0) append("\n")
+                    append(line)
+                }
+            },
             color = JitColor.TextPrimary,
             fontSize = 13.sp,
             lineHeight = 20.sp,
@@ -260,383 +482,21 @@ private fun SummaryCard(summary: ReportSummary, inProgress: Boolean) {
     }
 }
 
-@Composable
-private fun Tiles(report: WeeklyReportView) {
-    Row(
-        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Tile(
-            value = report.onTimeCountLabel,
-            valueColor = toneColor(report.onTimeTone),
-            label = report.onTimeLabel,
-            sub = report.onTimeSubLabel,
-            modifier = Modifier.weight(1f).fillMaxHeight().testTag("report_on_time_count"),
-        )
-        Tile(
-            value = report.slackValueLabel,
-            valueColor = toneColor(report.slackTone),
-            label = report.slackLabel,
-            sub = report.slackSubLabel,
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-        )
-    }
-}
-
-@Composable
-private fun Tile(
-    value: String,
-    valueColor: Color,
-    label: String,
-    sub: String?,
-    modifier: Modifier = Modifier,
-) {
-    JitCard(modifier = modifier, padding = 14.dp, gap = 3.dp) {
-        Text(text = value, color = valueColor, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Text(text = label, color = JitColor.TextSecondary, fontSize = 11.sp)
-        sub?.let { Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp) }
-    }
-}
-
-/**
- * 요일별 도착. 기준선 위는 일찍, 아래는 늦게 도착한 분이다.
- *
- * 대표값은 그날 가장 작은 여유다. 일정만 있고 도착 기록이 없는 날은 회색 점, 일정이
- * 없는 날은 비운다 — **0 으로 그리지 않는다**(완벽했던 것처럼 보인다).
- */
-@Composable
-private fun DaysCard(
-    report: WeeklyReportView,
-    enabled: Boolean,
-    onOpenDay: (LocalDate, Long?) -> Unit,
-) {
-    JitCard(padding = 14.dp, gap = 9.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("요일별 도착", color = JitColor.TextSecondary, fontSize = 11.sp)
-            Text(report.daysCoverageLabel, color = JitColor.TextSecondary, fontSize = 10.sp)
-        }
-
-        Row(modifier = Modifier.fillMaxWidth()) {
-            report.days.forEachIndexed { index, day ->
-                DayCell(
-                    day = day,
-                    index = index,
-                    enabled = enabled,
-                    onOpenDay = onOpenDay,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-
-        Text(
-            text = "위는 일찍, 아래는 늦게 도착한 분. 요일을 누르면 그날 상세를 봄",
-            color = JitColor.TextSecondary,
-            fontSize = 10.sp,
-        )
-    }
-}
-
-private val BAR_AREA = 64.dp
-private val BAR_HALF = 32.dp
-
-@Composable
-private fun DayCell(
-    day: ReportDay,
-    index: Int,
-    enabled: Boolean,
-    onOpenDay: (LocalDate, Long?) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val color = when (day.status) {
-        DayStatus.ON_TIME -> JitColor.Green
-        DayStatus.LATE -> JitColor.Red
-        else -> JitColor.TextSecondary
-    }
-    val tap = if (day.clickable) {
-        Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = "그날 상세 보기") {
-                onOpenDay(day.date, day.representative?.eventId)
-            }
-    } else {
-        Modifier
-    }
-
-    Column(
-        modifier = modifier
-            .testTag("report_day_$index")
-            .then(tap)
-            .semantics(mergeDescendants = true) { contentDescription = day.description },
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(modifier = Modifier.fillMaxWidth().height(BAR_AREA)) {
-            Box(
-                Modifier
-                    .align(Alignment.Center)
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(JitColor.Track)
-            )
-            val minutes = day.slackMinutes
-            when {
-                minutes != null -> {
-                    val height = (3 + 29 * min(abs(minutes), 30) / 30f).dp
-                    Box(
-                        Modifier
-                            .align(Alignment.TopCenter)
-                            // 정시는 기준선에 바닥을, 지각은 기준선에 머리를 댄다.
-                            .offset(y = if (minutes >= 0) BAR_HALF - height else BAR_HALF)
-                            .width(14.dp)
-                            .height(height)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(color)
-                    )
-                }
-
-                day.status == DayStatus.UNOBSERVED -> Box(
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .offset(y = BAR_HALF - 8.dp)
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(JitColor.TextSecondary)
-                )
-            }
-        }
-        Spacer(Modifier.height(5.dp))
-        // 낭독은 칸 전체의 설명이 맡는다. 글자 하나씩 따로 읽지 않게 숨긴다.
-        Text(
-            text = day.label,
-            color = if (day.status == DayStatus.NONE) JitColor.Track else JitColor.TextSecondary,
-            fontSize = 10.sp,
-            modifier = Modifier.clearAndSetSemantics {},
-        )
-        Text(
-            text = day.valueLabel,
-            color = color,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.clearAndSetSemantics {},
-        )
-    }
-}
-
-/** 지각한 날. 줄을 누르면 그 일정의 ⑨ 로 간다. */
-@Composable
-private fun LateDaysCard(
-    report: WeeklyReportView,
-    enabled: Boolean,
-    onOpenDay: (LocalDate, Long?) -> Unit,
-) {
-    JitCard(padding = 14.dp, gap = 4.dp) {
-        Text(
-            text = "지각한 날 · ${report.lateCount}건",
-            color = JitColor.TextSecondary,
-            fontSize = 11.sp,
-        )
-        report.lateDays.forEach { line -> LateDayRow(line, enabled, onOpenDay) }
-        if (report.hasUnknownCause) {
-            Text(
-                text = "\"원인 측정 못 함\"은 그 요인이 괜찮았다는 뜻이 아니라 기록이 없다는 뜻임",
-                color = JitColor.TextSecondary,
-                fontSize = 10.sp,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LateDayRow(
-    line: LateDayLine,
-    enabled: Boolean,
-    onOpenDay: (LocalDate, Long?) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .testTag("report_late_${line.eventId}")
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(enabled = enabled, role = Role.Button, onClickLabel = "그날 상세 보기") {
-                onOpenDay(line.date, line.eventId)
-            }
-            .semantics(mergeDescendants = true) { contentDescription = line.description },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(
-            modifier = Modifier.weight(1f).clearAndSetSemantics {},
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(
-                text = line.dateLabel,
-                color = JitColor.TextPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(text = line.causeTitle, color = JitColor.TextSecondary, fontSize = 11.sp)
-        }
-        Text(
-            text = line.lateLabel,
-            color = JitColor.Red,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.clearAndSetSemantics {},
-        )
-        Spacer(Modifier.width(6.dp))
-        // 장식이다. 줄 전체가 버튼이라 따로 읽지 않는다.
-        Text(
-            text = "›",
-            color = JitColor.TextSecondary,
-            fontSize = 14.sp,
-            modifier = Modifier.clearAndSetSemantics {},
-        )
-    }
-}
-
-@Composable
-private fun DeviationCard(report: WeeklyReportView) {
-    JitCard(padding = 14.dp, gap = 8.dp) {
-        Text("계획 대비 실제 · 이번 주 평균", color = JitColor.TextSecondary, fontSize = 11.sp)
-        report.deviations.forEach { line ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(line.label, color = JitColor.TextPrimary, fontSize = 12.sp)
-                ToneText(line.valueLabel, line.tone, fontSize = 12.sp)
-            }
-        }
-        report.learningLabel?.let {
-            HorizontalDivider(color = JitColor.Track)
-            JitDotLabel(text = "기록 반영", dotColor = JitColor.Blue, fontSize = 11)
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
-        }
-    }
-}
-
-// Partly AI-generated (Claude)
-/**
- * 기상 · 이번 주(Figma F-51 `529:40`). 서버 `wake` 가 있을 때만 그린다.
- * 울린 알람 수·미룬 횟수·끄기까지 걸린 시간(중간값)과 요일별 한 줄.
- * 끈 기록이 없으면 "기록 없음" 이다 — 0 으로 그리지 않는다.
- */
-@Composable
-private fun WakeCard(wake: WakeView) {
-    JitCard(padding = 14.dp, gap = 9.dp, modifier = Modifier.testTag("report_wake")) {
-        Text("기상 · 이번 주", color = JitColor.TextSecondary, fontSize = 11.sp)
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            WakeStat("울린 알람", wake.firedLabel, null, false, Modifier.weight(1f))
-            WakeStat("미루기", wake.snoozeLabel, wake.snoozeSubLabel, false, Modifier.weight(1f))
-            WakeStat("끄기까지 (중간값)", wake.medianLabel, null, wake.medianMissing, Modifier.weight(1.3f))
-        }
-        Row(modifier = Modifier.fillMaxWidth()) {
-            wake.days.forEachIndexed { index, day ->
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("report_wake_day_$index")
-                        .semantics(mergeDescendants = true) { contentDescription = day.description },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    // 낭독은 칸 전체의 설명이 맡는다. 글자 하나씩 따로 읽지 않게 숨긴다.
-                    Text(
-                        text = day.valueLabel.ifEmpty { " " },
-                        color = if (day.valueLabel == "—") JitColor.TextSecondary else JitColor.TextPrimary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.clearAndSetSemantics {},
-                    )
-                    Text(
-                        text = day.label,
-                        color = if (day.fired == 0) JitColor.Track else JitColor.TextSecondary,
-                        fontSize = 10.sp,
-                        modifier = Modifier.clearAndSetSemantics {},
-                    )
-                    Text(
-                        text = day.snoozeLabel.ifEmpty { " " },
-                        color = JitColor.Amber,
-                        fontSize = 9.sp,
-                        modifier = Modifier.clearAndSetSemantics {},
-                    )
-                }
-            }
-        }
-        Text(
-            text = "처음 울린 때부터 끌 때까지. 미뤄서 다시 울린 것도 한 알람으로 셈",
-            color = JitColor.TextSecondary,
-            fontSize = 9.sp,
-        )
-    }
-}
-@Composable
-private fun WakeStat(
-    label: String,
-    value: String,
-    sub: String?,
-    dim: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, color = JitColor.TextSecondary, fontSize = 10.sp)
-        Text(
-            text = value,
-            color = if (dim) JitColor.TextSecondary else JitColor.TextPrimary,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        sub?.let { Text(it, color = JitColor.TextSecondary, fontSize = 10.sp) }
-    }
-}/**
- * 예측 검증 · 최근 90일. 판정만 보여준다 — 구간별 표는 ⑨ 에 있다.
- *
- * 한 주는 표본이 적어 거의 늘 "표본 부족" 이라, 이 주 캘리브레이션 대신 90일을 쓴다.
- */
-@Composable
-private fun VerdictCard(view: CalibrationView) {
-    JitCard(
-        padding = 14.dp,
-        gap = 6.dp,
-        accented = view.verdict == CalibrationView.WIRE_OVERCONFIDENT,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("예측 검증 · 최근 90일", color = JitColor.TextSecondary, fontSize = 11.sp)
-            JitChip(view.verdictLabel, verdictColor(view.verdict))
-        }
-        Text(
-            text = view.verdictNote,
-            color = if (view.isTrustworthy) JitColor.TextPrimary else JitColor.TextSecondary,
-            fontSize = 12.sp,
-        )
-        view.action?.let { Text(text = "→ $it", color = JitColor.Accent, fontSize = 10.sp) }
-        Text(text = view.countsLabel, color = JitColor.TextSecondary, fontSize = 10.sp)
-    }
-}
-
 // ---------------------------------------------------------------------------
 
-@Preview(widthDp = 360, heightDp = 1500, showBackground = true, backgroundColor = 0xFF0E1320)
+@Preview(widthDp = 360, heightDp = 880, showBackground = true, backgroundColor = 0xFF0E1320)
 @Composable
 private fun WeeklyReportPreview() {
     JitTheme {
         WeeklyReportScreen(
             report = ReportPreviewData.exampleWeek,
-            longTerm = ReportPreviewData.longTerm,
             loading = false,
             error = null,
-            onBack = {},
             onPreviousWeek = {},
             onNextWeek = {},
             onRetry = {},
             onOpenDay = { _, _ -> },
+            today = LocalDate.of(2026, 10, 8),
         )
     }
 }
@@ -647,10 +507,8 @@ private fun WeeklyReportNoRecordsPreview() {
     JitTheme {
         WeeklyReportScreen(
             report = ReportPreviewData.unrecordedWeek,
-            longTerm = ReportPreviewData.thinLongTerm,
             loading = false,
             error = null,
-            onBack = {},
             onPreviousWeek = {},
             onNextWeek = {},
             onRetry = {},

@@ -643,6 +643,47 @@ class EventRepositoryTest {
         assertEquals(ProfileUpdateRequest(onboardingPrepMin = 40), sent)
     }
 
+    // Partly AI-generated (Claude) — iter4 H2-4
+    @Test
+    fun `안내를 본 기록은 고른 것만 지금 시각으로 보낸다`() = runTest {
+        val sent = mutableListOf<ProfileUpdateRequest>()
+        val api = object : FakeProfileApi() {
+            override suspend fun update(body: ProfileUpdateRequest) = ok(profile).also { sent += body }
+        }
+        val repo = EventRepository(FakeEventsApi(), api)
+        val now = java.time.Instant.parse("2026-11-11T04:12:30Z")
+
+        repo.markGuideSeen(intro = true, coachmark = false, now = now)
+        repo.markGuideSeen(intro = false, coachmark = true, now = now)
+
+        assertEquals(
+            listOf(
+                ProfileUpdateRequest(introSeenAt = "2026-11-11T04:12:30Z"),
+                ProfileUpdateRequest(coachmarkSeenAt = "2026-11-11T04:12:30Z"),
+            ),
+            sent,
+        )
+        // 보내는 JSON 에 준비 시간 · 집이 섞이면 서버가 알람을 다시 계산한다
+        assertEquals("""{"intro_seen_at":"2026-11-11T04:12:30Z"}""", Gson().toJson(sent.first()))
+    }
+
+    @Test
+    fun `서버가 안내를 본 시각을 주면 홈 데이터에 남고 모르면 안 본 것이다`() = runTest {
+        val seen = fromJson<ProfileDto>(
+            """{"has_home":true,"home_lat":37.48,"home_lng":126.95,"home_label":"집",
+                "onboarding_prep_min":25,"intro_seen_at":"2026-11-11T13:12:30+09:00","coachmark_seen_at":null}"""
+        )
+
+        val home = EventRepository(listApi(), profileApi(seen)).loadHome().data()
+        assertTrue(home.introSeen)
+        assertFalse(home.coachmarkSeen)
+
+        // 구버전 서버는 필드가 없다
+        val old = EventRepository(listApi(), profileApi()).loadHome().data()
+        assertFalse(old.introSeen)
+        assertFalse(old.coachmarkSeen)
+    }
+
     // --- 장소 ---------------------------------------------------------------
 
     @Test
@@ -779,5 +820,70 @@ class EventRepositoryTest {
         val result = EventRepository(api, FakeProfileApi()).recomputePlan(1)
 
         assertEquals(Result.Failure("경로 조회 한도를 넘었다."), result)
+    }
+    // --- 반복 일정 범위 (iter4 A2, Partly AI-generated (Claude)) -------------
+
+    @Test
+    fun `이후 일정 모두 삭제는 scope 를 붙여 보내고 이 일정만은 지금처럼 보낸다`() = runTest {
+        val calls = mutableListOf<String>()
+        val api = object : FakeEventsApi() {
+            override suspend fun delete(id: Long): Response<Unit> = ok(Unit).also { calls += "delete $id" }
+            override suspend fun deleteScoped(id: Long, scope: String): Response<Unit> =
+                ok(Unit).also { calls += "delete $id scope=$scope" }
+        }
+        val repository = EventRepository(api, FakeProfileApi())
+
+        assertEquals(Result.Success(Unit), repository.deleteEvent(7, EventScope.FOLLOWING))
+        assertEquals(Result.Success(Unit), repository.deleteEvent(7, EventScope.THIS))
+        assertEquals(Result.Success(Unit), repository.deleteEvent(7))
+
+        assertEquals(listOf("delete 7 scope=following", "delete 7", "delete 7"), calls)
+    }
+
+    @Test
+    fun `범위 수정 본문에 scope 와 바꾼 요일이 실린다`() = runTest {
+        val bodies = mutableListOf<String>()
+        val api = object : FakeEventsApi() {
+            override suspend fun patch(id: Long, body: okhttp3.RequestBody): Response<EventDto> {
+                val buffer = okio.Buffer()
+                body.writeTo(buffer)
+                bodies += buffer.readUtf8()
+                return ok(event(id, future(1)))
+            }
+        }
+        val repository = EventRepository(api, FakeProfileApi())
+        val patch = com.google.gson.JsonParser.parseString("""{"title":"수업"}""").asJsonObject
+
+        assertTrue(repository.updateEvent(3, patch, EventScope.FOLLOWING, setOf(4, 2)) is Result.Success)
+        assertTrue(repository.updateEvent(3, patch, EventScope.THIS) is Result.Success)
+
+        assertEquals(
+            listOf(
+                """{"title":"수업","scope":"following","repeat_weekdays":[2,4]}""",
+                """{"title":"수업"}""",
+            ),
+            bodies,
+        )
+    }
+
+    @Test
+    fun `반복 회차인지를 계획 화면에 넘긴다`() = runTest {
+        val start = future(1)
+        val recurring = fromJson<EventDto>(
+            """{"id":5,"title":"수업","start_at":"$start","source":"manual","recurrence_id":9,
+                "repeat_weekdays":[0,2],
+                "place":{"id":1,"name":"서울대","address":"관악로 1","lat":37.46,"lng":126.95},
+                "alarm_enabled":true,"alarm_on":true,
+                "alarm_plan":{"status":"ok","alarm_at":"${shiftHours(start, -2)}","prep_minutes":30,
+                "travel_minutes":40,"travel_mode":"지하철","route_summary":"2호선"}}"""
+        )
+        val single = event(6, start)
+        val api = object : FakeEventsApi() {
+            override suspend fun get(id: Long): Response<EventDto> = ok(if (id == 5L) recurring else single)
+        }
+        val repository = EventRepository(api, FakeProfileApi())
+
+        assertTrue((repository.loadPlan(5) as Result.Success).data.recurring)
+        assertFalse((repository.loadPlan(6) as Result.Success).data.recurring)
     }
 }

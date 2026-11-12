@@ -67,6 +67,14 @@ interface EventsApi {
     @DELETE("api/events/{id}")
     suspend fun delete(@Path("id") id: Long): Response<Unit>
 
+    // Partly AI-generated (Claude)
+    /**
+     * 반복 일정을 범위로 지운다(docs/iter4/recurrence-scope-api.md). `scope=following` 이면 이 회차부터
+     * 반복을 끝낸다. 그 회차만 지울 때는 [delete] 를 쓴다(지금 서버 동작과 같다).
+     */
+    @DELETE("api/events/{id}")
+    suspend fun deleteScoped(@Path("id") id: Long, @Query("scope") scope: String): Response<Unit>
+
     @POST("api/events/{id}/recompute")
     suspend fun recompute(@Path("id") id: Long): Response<EventDto>
 
@@ -994,6 +1002,12 @@ data class ProfileDto(
     @SerializedName("onboarding_prep_min") val onboardingPrepMin: Int?,
     val timezone: String?,
     @SerializedName("recomputed_plans") val recomputedPlans: Int? = null,
+    /**
+     * 이 계정이 첫 실행 안내 · 홈 코치마크를 본 시각(iter4 H2-4, docs/iter4/first-run-guide-api.md). 안 봤거나
+     * 서버가 이 필드를 모르면 null. (Partly AI-generated (Claude))
+     */
+    @SerializedName("intro_seen_at") val introSeenAt: String? = null,
+    @SerializedName("coachmark_seen_at") val coachmarkSeenAt: String? = null,
 )
 
 // --- 요청 -------------------------------------------------------------------
@@ -1064,4 +1078,7 @@ data class ProfileUpdateRequest(
     @SerializedName("home_lng") val homeLng: Double? = null,
     @SerializedName("home_label") val homeLabel: String? = null,
     @SerializedName("onboarding_prep_min") val onboardingPrepMin: Int? = null,
+    /** 안내 · 코치마크를 본 시각(ISO). null 이면 보내지 않는다(Gson 이 null 을 뺀다). (Partly AI-generated (Claude)) */
+    @SerializedName("intro_seen_at") val introSeenAt: String? = null,
+    @SerializedName("coachmark_seen_at") val coachmarkSeenAt: String? = null,
 )

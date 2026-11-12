@@ -14,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -23,7 +24,9 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
@@ -35,12 +38,15 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -54,6 +60,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.data.repository.RecurrenceScope
 import com.swpp.wakeup.domain.model.ArrivalOutlook
 import com.swpp.wakeup.domain.model.CheckpointBasis
 import com.swpp.wakeup.domain.model.FasterRoute
@@ -79,24 +86,44 @@ import com.swpp.wakeup.ui.events.AddResumeDialog
 import com.swpp.wakeup.ui.events.HomeSetupScreen
 import com.swpp.wakeup.ui.events.PrepOnboardingScreen
 import com.swpp.wakeup.ui.events.RouteChoiceScreen
+import com.swpp.wakeup.ui.help.HelpScreen
+import com.swpp.wakeup.ui.help.HelpTopic
 import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
+import com.swpp.wakeup.ui.me.MeTabScreen
+import com.swpp.wakeup.reminder.WeeklyReportReminder
 import com.swpp.wakeup.ui.morning.MorningProgressScreen
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.sensing.TripGeofence
 import com.swpp.wakeup.ui.nav.AppRoute
+import com.swpp.wakeup.ui.nav.AppTab
+import com.swpp.wakeup.ui.nav.AppTabBar
+import com.swpp.wakeup.ui.onboarding.CoachmarkLogic
+import com.swpp.wakeup.ui.onboarding.CoachmarkTargets
+import com.swpp.wakeup.ui.onboarding.HomeCoachmark
+import com.swpp.wakeup.ui.onboarding.IntroScreen
+import com.swpp.wakeup.ui.onboarding.LocalCoachmarkTargets
+import com.swpp.wakeup.ui.trip.TripTabLogic
+import com.swpp.wakeup.ui.trip.TripTabScreen
 import com.swpp.wakeup.ui.places.MapPickScreen
 import com.swpp.wakeup.ui.report.ReportDayScreen
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
 import com.swpp.wakeup.ui.settings.ChangePasswordScreen
 import com.swpp.wakeup.ui.settings.EmailVerifyScreen
+import com.swpp.wakeup.ui.settings.HomesScreen
+import com.swpp.wakeup.ui.settings.PermissionsScreen
 import com.swpp.wakeup.ui.settings.SettingsScreen
+import com.swpp.wakeup.ui.settings.openPermissionSettings
+import com.swpp.wakeup.ui.settings.rememberDevicePermissions
 import com.swpp.wakeup.ui.routines.BlockDraftSheet
 import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.ui.routines.RoutineEditorScreen
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitTheme
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 /**
  * 로그인 후 본 화면. Figma ③ 홈을 시작점으로 ④⑤⑫ 를 호스팅한다.
@@ -108,6 +135,7 @@ class MainActivity : ComponentActivity() {
 
     private var openMorning by mutableStateOf(false)
     private var openEventId by mutableStateOf<Long?>(null)
+    private var openReportWeek by mutableStateOf<LocalDate?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -128,6 +156,8 @@ class MainActivity : ComponentActivity() {
         openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
         // 경로 바꾸기 제안 알림을 눌러 온 경우. 그 일정의 알람 결정 화면으로 간다.
         openEventId = intent.openEventExtra()
+        // 일요일 주간 리포트 알림을 눌러 온 경우. 리포트 탭의 그 주로 간다.
+        openReportWeek = intent.reportWeekExtra()
 
         setContent {
             JitTheme {
@@ -143,6 +173,11 @@ class MainActivity : ComponentActivity() {
                         openEventId = null
                         intent.removeExtra(EXTRA_OPEN_EVENT)
                     },
+                    openReportWeek = openReportWeek,
+                    onReportOpened = {
+                        openReportWeek = null
+                        intent.removeExtra(EXTRA_OPEN_REPORT_WEEK)
+                    },
                     onLoggedOut = ::backToLogin,
                 )
             }
@@ -155,9 +190,13 @@ class MainActivity : ComponentActivity() {
         // 알람 해제는 CLEAR_TOP + SINGLE_TOP으로 이미 열린 홈을 재사용한다.
         openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
         openEventId = intent.openEventExtra()
+        openReportWeek = intent.reportWeekExtra()
     }
 
     private fun Intent.openEventExtra(): Long? = getLongExtra(EXTRA_OPEN_EVENT, -1L).takeIf { it > 0L }
+
+    private fun Intent.reportWeekExtra(): LocalDate? =
+        getStringExtra(EXTRA_OPEN_REPORT_WEEK)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
     private fun backToLogin() {
         startActivity(
@@ -200,6 +239,17 @@ class MainActivity : ComponentActivity() {
                 .putExtra(EXTRA_OPEN_EVENT, eventId)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        /** 리포트 탭에서 열 주(아무 날짜, "YYYY-MM-DD"). 서버가 그 날짜가 든 주로 답한다 */
+        const val EXTRA_OPEN_REPORT_WEEK = "open_report_week"
+
+        // Partly AI-generated (Claude)
+        /** 일요일 주간 리포트 알림에서 리포트 탭의 [week] 로. [morningIntent] 와 같은 이유로 홈을 재사용한다 */
+        fun reportIntent(context: android.content.Context, week: LocalDate): Intent =
+            Intent(context, MainActivity::class.java)
+                .putExtra(EXTRA_OPEN_REPORT_WEEK, week.toString())
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 }
 
@@ -212,6 +262,8 @@ private fun MainHost(
     onMorningOpened: () -> Unit,
     openEventId: Long?,
     onEventOpened: () -> Unit,
+    openReportWeek: LocalDate?,
+    onReportOpened: () -> Unit,
     onLoggedOut: () -> Unit,
 ) {
     val viewModel: HomeViewModel = viewModel()
@@ -225,6 +277,7 @@ private fun MainHost(
     val tripArrivals by viewModel.tripArrivals.collectAsStateWithLifecycle()
     val liveRouteSnapshot by viewModel.liveRoute.collectAsStateWithLifecycle()
     val checkpointState by viewModel.checkpoints.collectAsStateWithLifecycle()
+    val tripTab by viewModel.tripTab.collectAsStateWithLifecycle()
     val preDepartureState by viewModel.preDeparture.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val addResumePrompt by viewModel.addResumePrompt.collectAsStateWithLifecycle()
@@ -233,6 +286,7 @@ private fun MainHost(
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
     val tagAdd by viewModel.tagAdd.collectAsStateWithLifecycle()
     val tagEdit by viewModel.tagEdit.collectAsStateWithLifecycle()
+    val recurrenceScopeSupported by viewModel.recurrenceScopeSupported.collectAsStateWithLifecycle()
     val homeSetupState by viewModel.homeSetup.collectAsStateWithLifecycle()
     val prepOnboardingState by viewModel.prepOnboarding.collectAsStateWithLifecycle()
     val routeState by viewModel.routeChoice.collectAsStateWithLifecycle()
@@ -244,12 +298,16 @@ private fun MainHost(
     val reportState by viewModel.report.collectAsStateWithLifecycle()
     val morningSession by viewModel.morning.collectAsStateWithLifecycle()
     val trackingEventId by viewModel.trackingEventId.collectAsStateWithLifecycle()
+    val routineNames by viewModel.routineNames.collectAsStateWithLifecycle()
+    val homeCoachmarkPending by viewModel.homeCoachmark.collectAsStateWithLifecycle()
 
     // Partly AI-generated (Claude)
     // ⑧ 의 스크롤 위치. 화면 전환(AnimatedContent)이 ⑧ 을 컴포지션에서 빼므로 화면 안에
     // 두면 ⑨ 에서 돌아올 때마다 맨 위로 튄다. 여기 두고 넘긴다. 주가 바뀌거나 홈에서
     // 새로 열면 맨 위로 보낸다.
     val reportScroll = rememberScrollState()
+    // 내 정보 탭도 같은 이유로 여기 둔다. 집 주소 · 설정에서 돌아올 때 보던 자리가 남는다.
+    val meScroll = rememberScrollState()
     LaunchedEffect(reportState.weekly?.weekStart, reportState.openCount) {
         reportScroll.scrollTo(0)
     }
@@ -267,6 +325,8 @@ private fun MainHost(
      * 값들이 없어서 우리 화면에 별을 그릴 수 없다. 지어내는 대신 원본으로 보낸다.
      */
     val activityContext = LocalContext.current
+    // 알림·권한 › "주간 리포트 알림" 스위치. 기기에 저장한다(기본 켬). (Partly AI-generated (Claude))
+    var weeklyReminderOn by remember { mutableStateOf(WeeklyReportReminder.isEnabled(activityContext)) }
     val openPlaceUrl: (String) -> Unit = remember(activityContext) {
         { url ->
             // 브라우저가 없는 기기도 있다. 열지 못해도 앱이 죽어서는 안 된다.
@@ -337,7 +397,8 @@ private fun MainHost(
     // 닫고 경로 목록으로 돌아간다.
     val draftOpen = routineState.editing != null
     val routePreviewOpen = nav.current == AppRoute.RouteChoice && routeState?.previewKey != null
-    BackHandler(enabled = nav.canGoBack || draftOpen || routePreviewOpen) {
+    // 홈이 아닌 탭의 첫 화면에서 뒤로 가면 홈 탭으로 간다(iter4 H2-2, NavState.back).
+    BackHandler(enabled = nav.handlesBack || draftOpen || routePreviewOpen) {
         when {
             draftOpen -> viewModel.dismissBlockDraft()
             routePreviewOpen -> viewModel.closeRoutePreview()
@@ -480,6 +541,14 @@ private fun MainHost(
         }
     }
 
+    // 일요일 주간 리포트 알림을 눌렀다. 위와 같은 이유로 한 번만 연다. (Partly AI-generated (Claude))
+    LaunchedEffect(openReportWeek) {
+        openReportWeek?.let {
+            viewModel.openReportWeek(it)
+            onReportOpened()
+        }
+    }
+
     // 캘린더 권한은 **사용자가 가져오기를 누를 때만** 요청한다. 앱을 처음 열
     // 때 함께 묶어 요청하면 무엇에 쓰는지 모르는 상태로 거절하게 된다.
     val calendarPermissionLauncher = rememberLauncherForActivityResult(
@@ -528,6 +597,28 @@ private fun MainHost(
         )
     }
 
+    // Partly AI-generated (Claude)
+    // 홈 첫 방문 안내(코치마크, iter4 H2-4). 첫 실행 안내 뒤 홈 탭 첫 화면에 처음 들어가면 한 번 띄운다. 목록을
+    // 받은 뒤 화면 전환(280ms)이 끝나 요소가 제자리에 선 다음에 띄워야 구멍이 요소와 맞는다. 한 번 띄운 뒤에는
+    // 새로 고침으로 목록이 다시 돌아도 내리지 않는다.
+    val coachTargets = remember { CoachmarkTargets() }
+    val onHomeRoot = nav.tab == AppTab.HOME && nav.current == AppRoute.Home
+    val homeLoading by rememberUpdatedState(state.loading)
+    var coachmarkShown by remember { mutableStateOf(false) }
+    LaunchedEffect(homeCoachmarkPending, onHomeRoot) {
+        coachmarkShown = false
+        if (!homeCoachmarkPending || !onHomeRoot) return@LaunchedEffect
+        snapshotFlow { homeLoading }.first { !it }
+        delay(COACHMARK_DELAY_MS)
+        coachmarkShown = true
+    }
+    // 코치마크가 떠 있으면 뒤로 가기는 코치마크만 닫는다(아래 화면의 뒤로 가기보다 나중에 등록해 먼저 받는다).
+    BackHandler(enabled = coachmarkShown) { viewModel.dismissCoachmark() }
+
+    // 홈 · 탭 바가 코치마크에 자리를 알리고, 코치마크는 Scaffold 위(탭 바 위)에 겹친다. 두 감싸개 안의 Scaffold 는
+    // 들여쓰기를 바꾸지 않았다(바뀐 줄을 줄이려고).
+    CompositionLocalProvider(LocalCoachmarkTargets provides coachTargets) {
+    Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
     Scaffold(
         modifier = Modifier.semantics { testTagsAsResourceId = true },
         containerColor = JitColor.Bg,
@@ -535,28 +626,37 @@ private fun MainHost(
         // 않으므로, 빼면 키보드가 아래 칸을 덮고 스크롤로도 닿지 않는다.
         contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        // 하단 탭(iter4 H2-2). 탭 첫 화면과 둘러보는 화면에만 보인다(AppRoute.showsTabBar).
+        bottomBar = {
+            if (nav.showsTabBar) AppTabBar(selected = nav.tab, onSelect = viewModel::selectTab)
+        },
     ) { innerPadding ->
         AnimatedContent(
             targetState = nav,
             transitionSpec = {
-                // 파고들 때는 오른쪽에서, 돌아올 때는 왼쪽에서 들어온다.
-                val direction = if (targetState.forward) 1 else -1
-                val enter = slideInHorizontally(
-                    animationSpec = tween(280, easing = FastOutSlowInEasing),
-                ) { full -> direction * full / 5 } + fadeIn(tween(200))
-                val exit = slideOutHorizontally(
-                    animationSpec = tween(280, easing = FastOutSlowInEasing),
-                ) { full -> -direction * full / 5 } + fadeOut(tween(160))
-                enter togetherWith exit
+                if (initialState.tab != targetState.tab) {
+                    // 탭을 바꿀 때는 밀지 않고 겹쳐 바꾼다. 탭은 옆으로 이어진 화면이 아니다(iter4 H2-2).
+                    fadeIn(tween(180)) togetherWith fadeOut(tween(120))
+                } else {
+                    // 파고들 때는 오른쪽에서, 돌아올 때는 왼쪽에서 들어온다.
+                    val direction = if (targetState.forward) 1 else -1
+                    val enter = slideInHorizontally(
+                        animationSpec = tween(280, easing = FastOutSlowInEasing),
+                    ) { full -> direction * full / 5 } + fadeIn(tween(200))
+                    val exit = slideOutHorizontally(
+                        animationSpec = tween(280, easing = FastOutSlowInEasing),
+                    ) { full -> -direction * full / 5 } + fadeOut(tween(160))
+                    enter togetherWith exit
+                }
             },
             contentKey = { it.current.toString() },
             label = "main-nav",
         ) { target ->
             when (val route = target.current) {
+                // 홈 다시 그림(iter4 H2-2, Figma `540:123`). 리포트 · 아침 루틴 · 캘린더 가져오기 입구는
+                // 리포트 탭과 내 정보 탭으로 옮겼다. ? 는 도움말(H2-4)이다.
                 AppRoute.Home -> HomeScreen(
                     state = state,
-                    avatarInitials = viewModel.avatarInitials(),
-                    onAvatarClick = viewModel::openSettings,
                     onEventClick = { viewModel.openAlarmDecision(it.id) },
                     onAlarmToggle = viewModel::setAlarmEnabled,
                     onAddEventClick = viewModel::onAddEventClick,
@@ -564,15 +664,15 @@ private fun MainHost(
                         viewModel.resetHomeSetup()
                         viewModel.openHomeSetup()
                     },
-                    onRoutineClick = viewModel::openRoutineEditor,
-                    onCalendarClick = viewModel::openCalendarImport,
-                    onReportClick = viewModel::openReport,
                     onMorningClick = viewModel::openMorning,
                     onRetry = { viewModel.refresh() },
                     modifier = Modifier.padding(innerPadding),
+                    // [시각 바꾸기] 는 H2-3 바텀시트 자리다. 시트가 생기기 전에는 지금 알람 시각을 고르는
+                    // 화면(⑤ 지각 위험 고르기)으로 간다.
+                    onChangeAlarmTime = { viewModel.openRiskChoice(it.id) },
                     onMissedTrackClick = viewModel::startMissedAlarmTracking,
                     onMissedDismiss = viewModel::dismissMissedAlarm,
-                    onSkipToggle = viewModel::setSkipped,
+                    onHelpClick = { viewModel.openHelp() },
                     onSwitchRoute = { event ->
                         event.fasterRoute?.let { viewModel.applyFasterRoute(event.id, it.routeKey, it.alarmAtMillis) }
                     },
@@ -693,6 +793,14 @@ private fun MainHost(
                         onChangeRisk = { viewModel.openRiskChoice(route.eventId) },
                         onEditBlocks = { viewModel.openEventBlocks(route.eventId) },
                         onDelete = { viewModel.deleteEvent(route.eventId) },
+                        // 반복 회차면 "이 일정만 / 이후 일정 모두 삭제" 를 묻는다(iter4 A2). 서버가 모르면 묻지 않는다.
+                        deleteScopes = RecurrenceScope.deleteChoices(
+                            recurring = plan?.recurring == true,
+                            supported = recurrenceScopeSupported,
+                        ),
+                        onDeleteScoped = { viewModel.deleteEvent(route.eventId, it) },
+                        // 오른쪽 위 i · 확률 줄 → "정시 도착 확률이 뭐예요?" 시트, 확률이 없거나 다른 i → 도움말(H2-4)
+                        onHelp = { viewModel.openHelp(it) },
                         onRecompute = { viewModel.recomputePlan(route.eventId) },
                         recomputeBusy = state.recomputeBusyId == route.eventId,
                         modifier = Modifier.padding(innerPadding),
@@ -749,6 +857,7 @@ private fun MainHost(
                     error = risk.error?.takeIf { risk.eventId == route.eventId },
                     onRetry = { viewModel.loadRiskOptions(route.eventId) },
                     onContinue = { viewModel.saveRiskOption(route.eventId, it) },
+                    onHelp = { viewModel.openHelp(HelpTopic.RISK_LEVELS) },
                 )
 
                 // 일정 수정은 ⑫ 를 수정 모드로 다시 쓴다(addState.editingEventId).
@@ -804,6 +913,8 @@ private fun MainHost(
                     onTagAskDelete = viewModel::askTagDelete,
                     onTagDelete = viewModel::confirmTagDelete,
                     onTagEditDismiss = viewModel::dismissTagEdit,
+                    onSaveScope = viewModel::chooseSaveScope,
+                    onSaveScopeDismiss = viewModel::dismissSaveScope,
                 )
 
                 AppRoute.RouteChoice -> RouteChoiceScreen(
@@ -846,6 +957,19 @@ private fun MainHost(
                     modifier = Modifier.padding(innerPadding),
                 )
 
+                // Partly AI-generated (Claude) — 첫 실행 안내 세 장(iter4 H2-4). 건너뛰기 · 시작하기는 홈으로.
+                // 도움말(iter4 H2-4, Figma `551:1820`). i 로 왔으면 그 질문을 펼친 채로 연다.
+                is AppRoute.Help -> HelpScreen(
+                    expand = route.expand,
+                    onBack = viewModel::goBack,
+                    onReplayIntro = viewModel::replayIntro,
+                    modifier = Modifier.padding(innerPadding),
+                )
+                AppRoute.Intro -> IntroScreen(
+                    onFinish = viewModel::finishIntro,
+                    modifier = Modifier.padding(innerPadding),
+                )
+
                 AppRoute.CalendarLink -> CalendarLinkScreen(
                     link = calendarLinkState,
                     state = calendarOnboardingState,
@@ -874,6 +998,36 @@ private fun MainHost(
                     savedOnServer = state.savedHomesOnServer,
                 )
 
+                // 하단 탭 "이동" 의 첫 화면(iter4 H2-2, Figma `545:1080`). 지금부터 가장 가까운, 경로가 정해진
+                // 일정의 출발 시각과 가는 길. 계획은 ④ 와 따로 받는다(viewModel.tripTab).
+                AppRoute.Trip -> {
+                    val tripEvent = remember(state.sections) { TripTabLogic.pick(state.sections) }
+                    // 홈 목록이 바뀌어 알람·시작 시각이 달라지면 계획을 다시 받는다.
+                    val tripVersion = tripEvent?.let { (it.alarmAtEpochSecond ?: 0L) * 31 + it.startAtEpochSecond }
+                    LaunchedEffect(tripEvent?.id, tripVersion) {
+                        viewModel.loadTripPlan(tripEvent?.id, tripVersion)
+                    }
+                    val tripPlan = tripTab.plan?.takeIf { it.eventId == tripEvent?.id }
+                    TripTabScreen(
+                        event = tripEvent,
+                        hasEvents = state.totalCount > 0,
+                        today = state.today,
+                        trip = tripTab,
+                        segments = checkpointState
+                            ?.takeIf { it.eventId == tripEvent?.id && it.routeKey == tripPlan?.routeKey }
+                            ?.segments,
+                        inTransit = tripPlan?.let { viewModel.stageOf(it) } == TripStage.IN_TRANSIT,
+                        onOpenEvent = viewModel::openAlarmDecision,
+                        // ⑬-b 경로 바꾸기 화면이 일정에 붙기 전에는 일정 수정(⑫)의 경로 칸에서 바꾼다.
+                        onChangeRoute = viewModel::openEditEvent,
+                        onAddEvent = viewModel::onAddEventClick,
+                        onNeedSegments = viewModel::loadCheckpointsIfNeeded,
+                        onRetry = { viewModel.loadTripPlan(tripEvent?.id, tripVersion, force = true) },
+                        modifier = Modifier.padding(innerPadding),
+                        onHelpClick = { viewModel.openHelp() },
+                    )
+                }
+
                 AppRoute.ChangePassword -> ChangePasswordScreen(
                     state = passwordChange,
                     onCurrentChange = viewModel::onCurrentPasswordChange,
@@ -891,15 +1045,52 @@ private fun MainHost(
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                 )
-                AppRoute.Settings -> SettingsScreen(
+                // Partly AI-generated (Claude)
+                // 하단 탭 "내 정보" 의 첫 화면(iter4 H2-2, Figma `547:1244`). 도움 묶음은 도움말 · 처음 안내 다시 보기(H2-4).
+                AppRoute.Me -> MeTabScreen(
                     state = state,
-                    avatarInitials = viewModel.avatarInitials(),
-                    locationGranted = LocationPermissions.granted(context),
+                    routineNames = routineNames,
+                    calendarLink = calendarLinkState,
+                    permissions = rememberDevicePermissions(),
+                    onHomes = viewModel::openHomes,
+                    onPrep = viewModel::openPrepOnboarding,
+                    onRoutine = viewModel::openRoutineEditor,
+                    onCalendar = viewModel::openCalendarImport,
+                    onPermissions = viewModel::openPermissions,
+                    onSettings = viewModel::openMeSettings,
+                    modifier = Modifier.padding(innerPadding),
+                    scrollState = meScroll,
+                    onHelp = { viewModel.openHelp() },
+                    onReplayIntro = viewModel::replayIntro,
+                )
+                AppRoute.Homes -> HomesScreen(
+                    state = state,
                     onChangeHome = {
                         viewModel.resetHomeSetup()
                         viewModel.openHomeSetup()
                     },
-                    onChangePrep = viewModel::openPrepOnboarding,
+                    // 기기에만 둔 다른 집(Figma ⑯ 변형 `498:9` ①)
+                    onAddExtraHome = viewModel::openExtraHomeSetup,
+                    onMakeHomeDefault = viewModel::makeSavedHomeDefault,
+                    onRemoveHome = viewModel::removeSavedHome,
+                    onBack = viewModel::goBack,
+                    modifier = Modifier.padding(innerPadding),
+                )
+                AppRoute.Permissions -> PermissionsScreen(
+                    state = state,
+                    permissions = rememberDevicePermissions(),
+                    onOpenSettings = { kind -> openPermissionSettings(activityContext, kind) },
+                    weeklyReminder = weeklyReminderOn,
+                    onWeeklyReminderChange = { on ->
+                        WeeklyReportReminder.setEnabled(activityContext, on)
+                        weeklyReminderOn = on
+                    },
+                    onBack = viewModel::goBack,
+                    modifier = Modifier.padding(innerPadding),
+                )
+                // 내 정보 › 설정(로그인 연결 · 비밀번호 · 로그아웃)
+                AppRoute.Settings -> SettingsScreen(
+                    state = state,
                     onLogout = {
                         viewModel.logout()
                         onLoggedOut()
@@ -925,16 +1116,8 @@ private fun MainHost(
                     onChangePassword = viewModel::openChangePassword,
                     onVerifyEmail = viewModel::startEmailVerify,
                     emailVerifySending = emailVerify.sending,
-                    // 기기에만 둔 다른 집(Figma ⑯ 변형 `498:9` ①)
-                    onAddExtraHome = viewModel::openExtraHomeSetup,
-                    onMakeHomeDefault = viewModel::makeSavedHomeDefault,
-                    onRemoveHome = viewModel::removeSavedHome,
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
-                    calendarLink = calendarLinkState,
-                    onCalendarToggle = viewModel::setCalendarLinked,
-                    onRequestCalendarPermission = requestCalendarPermission,
-                    calendarHelp = calendarHelp,
                     // 빌드에 박힌 값이 아니라 실제로 쓰는 주소를 보여준다.
                     // 에뮬레이터면 10.0.2.2 로 바뀌어 있다.
                     devInfo = if (BuildConfig.DEV_TOOLS) {
@@ -982,18 +1165,18 @@ private fun MainHost(
                     help = calendarHelp,
                 )
 
+                // 하단 탭 "리포트" 의 첫 화면(iter4 H2-2, Figma `546:1943`). ? 는 도움말(H2-4).
                 AppRoute.WeeklyReport -> WeeklyReportScreen(
                     report = reportState.weekly,
-                    longTerm = reportState.longTerm,
                     loading = reportState.loading,
                     error = reportState.error,
-                    onBack = viewModel::goBack,
                     onPreviousWeek = { viewModel.shiftReportWeek(-1) },
                     onNextWeek = { viewModel.shiftReportWeek(1) },
                     onRetry = { viewModel.loadReport(reportState.week) },
                     onOpenDay = viewModel::openReportDay,
                     modifier = Modifier.padding(innerPadding),
                     scrollState = reportScroll,
+                    onHelpClick = { viewModel.openHelp() },
                 )
 
                 // Partly AI-generated (Claude)
@@ -1024,7 +1207,24 @@ private fun MainHost(
         }
     }
 
+    // 탭 바까지 덮어야 하므로 Scaffold 위에 그린다.
+    AnimatedVisibility(
+        visible = coachmarkShown && homeCoachmarkPending && onHomeRoot,
+        enter = fadeIn(tween(220)),
+        exit = fadeOut(tween(160)),
+    ) {
+        HomeCoachmark(
+            targets = coachTargets,
+            card = CoachmarkLogic.cardTarget(hasNextAlarm = state.nextAlarm != null, isEmpty = state.isEmpty),
+            onDismiss = viewModel::dismissCoachmark,
+        )
+    }
+    }
+    }
 }
+
+/** 홈에 들어와 목록을 받은 뒤 코치마크를 띄우기까지. 화면 전환(280ms)이 끝나 요소가 제자리에 서도록 기다린다 */
+private const val COACHMARK_DELAY_MS = 450L
 
 /**
  * 루틴 블록 화면 호스트.

@@ -83,8 +83,17 @@ object HomeList {
                 effectiveAlarmMillis(e, nowMillis, device)?.takeIf { it > nowMillis }?.let { e to it }
             }
         val pick = candidates.minByOrNull { it.second }?.first
+        // 미룬 알람이면 카드가 쓰는 시각 값(표시·12시간제·epoch)을 모두 미룬 시각으로 바꾼다.
         val next = pick?.let { e ->
-            snoozeOf(e, nowMillis, device)?.let { e.copy(alarmAt = it.alarmLabel) } ?: e
+            snoozeOf(e, nowMillis, device)?.let { s ->
+                val local = Instant.ofEpochMilli(s.alarmAtMillis).atZone(zone)
+                e.copy(
+                    alarmAt = s.alarmLabel,
+                    alarmClock = local.format(CLOCK_12_FORMAT),
+                    alarmMeridiem = if (local.hour < 12) "AM" else "PM",
+                    alarmAtEpochSecond = s.alarmAtMillis / 1000,
+                )
+            } ?: e
         }
 
         val boundaries = buildList {
@@ -143,6 +152,7 @@ object HomeList {
     }
 
     private val DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("M월 d일")
+    private val CLOCK_12_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm")
     private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 }
 

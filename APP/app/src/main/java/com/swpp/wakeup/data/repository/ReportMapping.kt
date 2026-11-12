@@ -14,9 +14,12 @@ import com.swpp.wakeup.domain.model.DayStatus
 import com.swpp.wakeup.domain.model.DeviationLine
 import com.swpp.wakeup.domain.model.GapNotice
 import com.swpp.wakeup.domain.model.LateDayLine
+import com.swpp.wakeup.domain.model.LateRow
 import com.swpp.wakeup.domain.model.MorningOutcome
 import com.swpp.wakeup.domain.model.OutcomeResult
 import com.swpp.wakeup.domain.model.PlanActualRow
+import com.swpp.wakeup.domain.model.PrepCompare
+import com.swpp.wakeup.domain.model.ProbabilityCompare
 import com.swpp.wakeup.domain.model.ReportDay
 import com.swpp.wakeup.domain.model.ReportSummary
 import com.swpp.wakeup.domain.model.RowKind
@@ -164,6 +167,74 @@ internal fun WeeklyReportDto.toView(zone: ZoneId = ZoneId.systemDefault()): Week
         bufferNotes = bufferNotes,
         bufferCurrentLabel = bufferCurrentLabel(bufferNotes),
         wake = wake.toWakeView(),
+        lateRows = placed.filter { it.morning.result == OutcomeResult.LATE }.map { it.toLateRow(zone) },
+        probability = probabilityCompare(),
+        prep = prepCompare(),
+        bufferChangeMinutes = buffer?.adjustments.orEmpty()
+            .mapNotNull { adjustment ->
+                val now = adjustment.minutes ?: return@mapNotNull null
+                val before = adjustment.previousMinutes ?: return@mapNotNull null
+                now - before
+            }
+            .sum(),
+        skippedCount = skippedCount.coerceAtLeast(0),
+    )
+}
+
+// Partly AI-generated (Claude)
+/** 리포트 탭 첫 카드의 늦은 일정 줄. 제목이 비면 "일정" 이다. */
+private fun Placed.toLateRow(zone: ZoneId): LateRow = LateRow(
+    date = date,
+    eventId = dto.event,
+    lateMinutes = dto.slackMinutes?.let(::lateMinutes),
+    startClock = clock(dto.startAt, zone),
+    title = dto.title?.trim()?.takeIf { it.isNotEmpty() } ?: "일정",
+)
+
+// Partly AI-generated (Claude)
+/**
+ * "앱이 말한 확률" 카드. 도착 기록이 없으면 null.
+ *
+ * - 예상: 도착 기록이 있는 일정에서 앱이 보여 준 정시 도착 확률(`on_time_probability`)의 평균.
+ *   그 값이 하나도 없으면(구버전 서버) 서버 목표(`target_rate`, 쓴 τ 의 평균)를 쓴다.
+ * - 실제: 서버 정시율(`on_time_rate`).
+ * - 판정: 서버가 그 주 일정만으로 낸 캘리브레이션. 표본이 부족하면 판정까지 남은 횟수를 센다 —
+ *   가장 큰 τ 구간이 서버 기준 표본 수(`min_samples_for_reliable`)에 닿기까지다.
+ */
+private fun WeeklyReportDto.probabilityCompare(): ProbabilityCompare? {
+    if (arrivedCount <= 0) return null
+    val actual = percent(onTimeRate) ?: return null
+    val said = outcomes.orEmpty()
+        .filter { it.result == OutcomeDto.RESULT_ON_TIME || it.result == OutcomeDto.RESULT_LATE }
+        .mapNotNull { it.onTimeProbability?.coerceIn(0, 100) }
+    val promised = if (said.isNotEmpty()) halfUp(said.average()) else percent(targetRate)
+    val week = calibration
+    val largest = week?.buckets.orEmpty().maxOfOrNull { it.total } ?: 0
+    return ProbabilityCompare(
+        promised = promised,
+        actual = actual,
+        verdict = week?.verdict,
+        moreTrips = ((week?.minSamples ?: 3) - largest).coerceAtLeast(1),
+    )
+}
+
+// Partly AI-generated (Claude)
+/**
+ * "준비 시간" 카드. 계획한 준비와 실제 준비(블록 기록 합)가 둘 다 있는 아침만 평균을 낸다.
+ * 집에서 출발하지 않는 일정(`prep_applies == false`)은 준비가 없으니 뺀다. 하나도 없으면 null.
+ */
+private fun WeeklyReportDto.prepCompare(): PrepCompare? {
+    val pairs = outcomes.orEmpty().mapNotNull { outcome ->
+        if (outcome.prepApplies == false) return@mapNotNull null
+        val planned = outcome.planned?.prepMinutes ?: return@mapNotNull null
+        val actual = outcome.actual?.prepMinutes ?: return@mapNotNull null
+        planned to actual
+    }
+    if (pairs.isEmpty()) return null
+    return PrepCompare(
+        plannedMinutes = halfUp(pairs.map { it.first }.average()),
+        actualMinutes = halfUp(pairs.map { it.second }.average()),
+        count = pairs.size,
     )
 }
 

@@ -11,6 +11,9 @@ import com.swpp.wakeup.BuildConfig
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.local.CalendarLinkStore
+import com.swpp.wakeup.data.local.FirstRunGuideStore
+import com.swpp.wakeup.ui.help.HelpTopic
+import com.swpp.wakeup.ui.onboarding.GuideSeenRules
 import com.swpp.wakeup.data.local.LocalStores
 import com.swpp.wakeup.data.local.LiveRouteStore
 import com.swpp.wakeup.data.local.MorningSessionStore
@@ -22,6 +25,8 @@ import androidx.compose.ui.geometry.Offset
 import com.swpp.wakeup.data.remote.AlarmPlanDto
 import com.swpp.wakeup.data.remote.BlockObservationInput
 import com.swpp.wakeup.data.remote.EventTagDto
+import com.swpp.wakeup.data.repository.EventScope
+import com.swpp.wakeup.data.repository.RecurrenceScope
 import com.swpp.wakeup.ui.events.tagsRenamed
 import com.swpp.wakeup.ui.events.tagsWith
 import com.swpp.wakeup.ui.events.tagsWithout
@@ -90,6 +95,7 @@ import com.swpp.wakeup.domain.model.RouteChoice
 import com.swpp.wakeup.domain.model.RiskOptionsView
 import com.swpp.wakeup.domain.model.UpcomingEvent
 import com.swpp.wakeup.ui.nav.AppRoute
+import com.swpp.wakeup.ui.nav.AppTab
 import com.swpp.wakeup.ui.nav.NavState
 import com.swpp.wakeup.ui.settings.EmailVerifyState
 import com.swpp.wakeup.ui.settings.PasswordChangeState
@@ -302,15 +308,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val missedAlarm: MissedAlarmNotice? = null,
     ) {
         val isEmpty: Boolean get() = !loading && error == null && totalCount == 0
-        val todayLine: String
-            get() {
-                val count = sections
-                    .firstOrNull { it.events.firstOrNull()?.startDate == today }
-                    ?.events?.size ?: 0
-                val date = today.format(DateTimeFormatter.ofPattern("M월 d일"))
-                val day = listOf("월", "화", "수", "목", "금", "토", "일")[today.dayOfWeek.value - 1]
-                return "$date $day · 오늘 ${count}개"
-            }
     }
 
     // Partly AI-generated (Claude)
@@ -683,6 +680,30 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _calendarOnboarding = MutableStateFlow(CalendarOnboardingState())
     val calendarOnboarding: StateFlow<CalendarOnboardingState> = _calendarOnboarding.asStateFlow()
 
+    // Partly AI-generated (Claude)
+    /**
+     * 첫 실행 안내(iter4 H2-4)를 이 세션에서 이미 밀어 넣었는지. [calendarOnboardingAsked] 와 같은 이유로 둔다 —
+     * 저장소의 [FirstRunGuideStore.introShown] 은 안내를 마칠 때 켜진다. `init` 위에 두는 이유도 같다.
+     */
+    private var introOnboardingAsked = false
+
+    /**
+     * 첫 실행 안내 · 홈 코치마크를 이 기기에서 봤는지. 정본은 계정(서버)이고 이것은 오프라인 · 구버전 서버 대비다.
+     * 둘을 합치는 규칙은 [GuideSeenRules].
+     */
+    private val firstRunGuideStore = FirstRunGuideStore(application)
+
+    /** 기기에서 본 것을 서버에 올리기를 이 세션에서 이미 시도했는가. 구버전 서버에 홈을 받을 때마다 보내지 않게 */
+    private var guideUploadTried = false
+
+    private val _homeCoachmark = MutableStateFlow(firstRunGuideStore.coachmarkPending())
+
+    /**
+     * 홈 첫 방문 안내(코치마크, Figma `549:1845`)를 띄울 차례인가. 첫 실행 안내를 띄울 때 켜지고 코치마크를 닫으면
+     * 꺼진다. 실제로 그리는 것은 홈 탭 첫 화면이 보이고 목록을 받은 뒤다(`MainActivity`).
+     */
+    val homeCoachmark: StateFlow<Boolean> = _homeCoachmark.asStateFlow()
+
     // --- 홈 목록 새로고침 (todo P0 "다가오는 일정 갱신") ---------------------
     //
     // 아래 선언은 모두 `init` 위에 둔다. `init` 이 [refresh]·[renderHome]·
@@ -731,6 +752,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 지금 추적 중인 일정. 아침 기록 화면이 "저절로 끝남" 을 말해도 되는지 본다 */
     val trackingEventId: StateFlow<Long?> = TripLiveState.trackingEventId
+
+    // Partly AI-generated (Claude)
+    private val _recurrenceScopeSupported = MutableStateFlow(false)
+
+    /**
+     * 서버가 반복 일정 범위 수정·삭제를 받는가(iter4 A2, [RecurrenceScope.SINCE_SERVER]). 알람 결정 화면의
+     * 삭제가 "이 일정만 / 이후 일정 모두" 를 물을지 정한다. 모르면 false 라 지금처럼 그 회차만 지운다.
+     *
+     * **`init` 보다 앞에 둔다.** `init` 의 `refresh()` 가 이 값을 읽는다.
+     */
+    val recurrenceScopeSupported: StateFlow<Boolean> = _recurrenceScopeSupported.asStateFlow()
+
+    /** 진행 중인 서버 버전 확인. 홈을 여러 번 불러와도 `/api/health` 를 겹쳐 부르지 않는다. `init` 보다 앞에 둔다 */
+    private var recurrenceScopeJob: Job? = null
 
     init {
         // 화면보다 오래 사는 서비스가 저장한 최신 성공 결과를 먼저 복원한다.
@@ -792,6 +827,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun refresh(silent: Boolean = false) {
         if (_state.value.alarmUpdatingId != null || _state.value.skipUpdatingId != null) return
+        // 반복 일정 범위 수정을 받는 서버인지 한 번 알아 둔다(iter4 A2). 알면 다시 묻지 않는다.
+        if (ServerWarmup.serverVersion == null || !_recurrenceScopeSupported.value) refreshRecurrenceScope()
         lastRefreshStartedElapsed = SystemClock.elapsedRealtime()
         val gen = ++homeLoadGeneration
         val quiet = silent && homeData != null
@@ -850,6 +887,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         renderHome()
         maybeAskOnboarding(data)
+        syncGuideSeen(data)
         syncAlarms(data.schedules, fromCache = data.fromCache)
         if (!data.fromCache) {
             reconcileArrivals(
@@ -1118,8 +1156,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 _plan.value = result.plan
             }
             afterSave()
-            val stack = _nav.value.stack
-            if (stack.any { it == AppRoute.WeeklyReport || it is AppRoute.ReportDay }) {
+            // 리포트가 다른 탭에 열려 있어도 새로 고친다(하단 탭, iter4 H2-2).
+            if (_nav.value.allRoutes.any { it == AppRoute.WeeklyReport || it is AppRoute.ReportDay }) {
                 reportNavigator.reload()
             }
 
@@ -1636,6 +1674,56 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+    // Partly AI-generated (Claude)
+    /**
+     * 이동 탭(iter4 H2-2, Figma `545:1080`)이 보여 주는 일정의 계획. ④ 의 [plan] 과 따로 둔다 — 탭을
+     * 오가도 서로 지우지 않고, 지도 상태([routeMap])도 건드리지 않는다.
+     *
+     * @property version 이 계획을 받을 때의 일정 값(알람·시작 시각). 홈 목록에서 값이 바뀌면 다시 받는다
+     */
+    data class TripTabState(
+        val eventId: Long? = null,
+        val version: Long? = null,
+        val plan: AlarmPlanView? = null,
+        val loading: Boolean = false,
+        val failed: Boolean = false,
+    )
+    private val _tripTab = MutableStateFlow(TripTabState())
+    val tripTab: StateFlow<TripTabState> = _tripTab.asStateFlow()
+    private var tripTabJob: Job? = null
+
+    /**
+     * 이동 탭이 [eventId] 의 계획을 보여 주게 한다. 같은 일정·같은 [version] 을 이미 받았거나 받는 중이면
+     * 아무것도 하지 않는다. [force] 면 실패한 뒤 다시 받는다. null 이면 비운다.
+     */
+    fun loadTripPlan(eventId: Long?, version: Long?, force: Boolean = false) {
+        val current = _tripTab.value
+        if (eventId == null) {
+            tripTabJob?.cancel()
+            _tripTab.value = TripTabState()
+            return
+        }
+        if (!force && current.eventId == eventId && current.version == version &&
+            (current.loading || current.plan != null)
+        ) {
+            return
+        }
+        // 같은 일정을 다시 받는 동안에는 보던 계획을 그대로 둔다(카드가 깜빡이지 않게).
+        val keep = current.plan?.takeIf { it.eventId == eventId }
+        _tripTab.value = TripTabState(eventId = eventId, version = version, plan = keep, loading = true)
+        tripTabJob?.cancel()
+        tripTabJob = viewModelScope.launch {
+            val result = repository.loadPlan(eventId)
+            _tripTab.update {
+                if (it.eventId != eventId || it.version != version) return@update it
+                when (result) {
+                    is EventRepository.Result.Success -> it.copy(plan = result.data, loading = false, failed = false)
+                    is EventRepository.Result.Failure -> it.copy(loading = false, failed = it.plan == null)
+                }
+            }
+        }
+    }
+
     private val _risk = MutableStateFlow(RiskState())
     val risk: StateFlow<RiskState> = _risk.asStateFlow()
     private var riskJob: Job? = null
@@ -1882,13 +1970,158 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 설정 화면. 가입할 때 정한 집 주소·준비 시간·캘린더 연동을 여기서 고친다 */
-    fun openSettings() {
-        _nav.update { it.copy(stack = it.stack + AppRoute.Settings, forward = true) }
-        // "로그인 연결" 에 쓸 로그인 방법. 설정을 열 때마다 새로 받는다(다른 기기에서 바꿨을 수 있다).
-        loadLoginMethods()
+    // Partly AI-generated (Claude)
+    /**
+     * 내 정보 탭 첫 화면(Figma `547:1244`)의 줄 값. 탭에 들어올 때마다 새로 받는다 — 다른 기기에서 집을
+     * 바꿨거나 기기 캘린더가 바뀌었을 수 있다.
+     */
+    private fun loadMeTab() {
         loadCalendarSources()
         syncSavedHomes()
+        loadRoutineNames()
+    }
+
+    // Partly AI-generated (Claude)
+    /** 내 정보 › 설정. "로그인 연결" 에 쓸 로그인 방법을 열 때마다 새로 받는다(다른 기기에서 바꿨을 수 있다) */
+    fun openMeSettings() {
+        _nav.update { it.copy(stack = it.stack + AppRoute.Settings, forward = true) }
+        loadLoginMethods()
+    }
+
+    /** 내 정보 › 집 주소. 다른 집 목록을 서버와 맞춘다 */
+    fun openHomes() {
+        _nav.update { it.copy(stack = it.stack + AppRoute.Homes, forward = true) }
+        syncSavedHomes()
+    }
+
+    /** 내 정보 › 알림·권한. 권한은 화면이 기기에서 바로 읽는다 */
+    fun openPermissions() {
+        _nav.update { it.copy(stack = it.stack + AppRoute.Permissions, forward = true) }
+    }
+
+    // --- 첫 실행 안내 · 홈 코치마크 (iter4 H2-4) ---------------------------
+    // Partly AI-generated (Claude)
+
+    /** 내 정보 › "처음 안내 다시 보기". 안내 세 장을 다시 열고, 마치면 홈에서 코치마크도 다시 띄운다 */
+    fun replayIntro() {
+        if (_nav.value.current == AppRoute.Intro) return
+        showCoachmarkNext()
+        _nav.update { it.copy(stack = it.stack + AppRoute.Intro, forward = true) }
+    }
+
+    /**
+     * 도움말(Figma `551:1820`). [topic] 이 있으면 그 질문을 펼친 채로 연다(화면 곳곳의 i). 지금 탭 위에 쌓아서 뒤로
+     * 가기가 연 자리로 돌아간다. 도움말 위에서 다시 부르면 쌓지 않고 바꾼다.
+     */
+    fun openHelp(topic: HelpTopic? = null) {
+        val route = AppRoute.Help(topic)
+        _nav.update { nav ->
+            val base = if (nav.current is AppRoute.Help) nav.stack.dropLast(1) else nav.stack
+            nav.copy(stack = base + route, forward = true)
+        }
+    }
+
+    /**
+     * 안내의 [건너뛰기] · 3장의 [시작하기] · 1장에서 뒤로. 어느 장에서든 홈 탭 첫 화면으로 간다(Figma `545:1305`).
+     *
+     * 가입 흐름에서는 안내가 홈 바로 위에 있어 하나 빼면 홈이다. 내 정보에서 다시 본 경우에는 내 정보 탭을 첫
+     * 화면으로 돌려 두고 홈 탭으로 간다 — 코치마크는 홈 탭 첫 화면에서만 뜬다.
+     */
+    fun finishIntro() {
+        firstRunGuideStore.markIntroShown()
+        // 계정에 남긴다(팀 결정 11-11). 다시 보기로 연 경우처럼 계정이 이미 알면 보내지 않는다.
+        if (homeData?.introSeen != true) uploadGuideSeen(GuideSeenRules.Upload(intro = true, coachmark = false))
+        val before = _nav.value
+        _nav.update { nav ->
+            val popped = if (nav.current == AppRoute.Intro) nav.back() else nav
+            if (popped.tab == AppTab.HOME && popped.current == AppRoute.Home) popped else popped.home()
+        }
+        afterTabChange(before)
+    }
+
+    /** 코치마크의 [알겠어요] · 아무 곳이나 누름. 이 계정에서는 다시 띄우지 않는다([처음 안내 다시 보기] 는 예외) */
+    fun dismissCoachmark() {
+        firstRunGuideStore.markCoachmarkDone()
+        _homeCoachmark.value = false
+        if (homeData?.coachmarkSeen != true) uploadGuideSeen(GuideSeenRules.Upload(intro = false, coachmark = true))
+    }
+
+    private fun guideLocal() = GuideSeenRules.Local(
+        introShown = firstRunGuideStore.introShown(),
+        coachmarkPending = firstRunGuideStore.coachmarkPending(),
+        coachmarkDone = firstRunGuideStore.coachmarkDone(),
+    )
+
+    /**
+     * 서버에서 받은 홈으로 코치마크 차례를 맞추고, 기기에서만 본 것을 계정에 올린다. 캐시로 그린 홈은 쓰지 않는다 —
+     * 캐시에 값이 없을 뿐인데 "안 봤다" 로 읽으면 안 된다.
+     */
+    private fun syncGuideSeen(data: EventRepository.HomeData) {
+        if (data.fromCache) return
+        val local = guideLocal()
+        val account = GuideSeenRules.Account(introSeen = data.introSeen, coachmarkSeen = data.coachmarkSeen)
+        if (!_homeCoachmark.value && GuideSeenRules.showCoachmark(local, account)) _homeCoachmark.value = true
+        if (guideUploadTried) return
+        val upload = GuideSeenRules.toUpload(local, account)
+        if (upload.isEmpty) return
+        guideUploadTried = true
+        uploadGuideSeen(upload)
+    }
+
+    /** 계정에 "봤음" 을 남긴다. 실패해도 기기 기록이 있어 이 기기에서는 다시 뜨지 않고, 다음에 홈을 받을 때 다시 올린다 */
+    private fun uploadGuideSeen(upload: GuideSeenRules.Upload) {
+        if (upload.isEmpty) return
+        viewModelScope.launch {
+            when (val result = repository.markGuideSeen(intro = upload.intro, coachmark = upload.coachmark)) {
+                is EventRepository.Result.Success -> {
+                    homeData = homeData?.copy(
+                        introSeen = result.data.introSeenAt != null,
+                        coachmarkSeen = result.data.coachmarkSeenAt != null,
+                    )
+                }
+                is EventRepository.Result.Failure -> {
+                    guideUploadTried = false
+                    Log.w(TAG, "안내 본 기록을 올리지 못했다: ${result.message}")
+                }
+            }
+        }
+    }
+
+    private fun showCoachmarkNext() {
+        firstRunGuideStore.setCoachmarkPending(true)
+        _homeCoachmark.value = true
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 하단 탭을 누른다(iter4 H2-2). 두고 온 스택이 있으면 그대로 열고, 같은 탭을 다시 누르면 첫 화면으로.
+     * 탭 첫 화면이 처음 보이면 그 화면이 쓸 값을 받는다([afterTabChange]).
+     */
+    fun selectTab(tab: AppTab) {
+        val before = _nav.value
+        _nav.update { it.selectTab(tab) }
+        afterTabChange(before)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 탭을 바꾼 뒤 새로 보이는 화면을 맞춘다.
+     *
+     * - ④ 알람 결정: 계획(`_plan`)은 하나뿐이다. 다른 탭에서 다른 일정을 열었으면 이 일정 것으로 다시 받는다.
+     * - 내 정보: 첫 화면이면 캘린더·집 목록·루틴 이름을, 두고 온 설정이면 로그인 방법을 새로 받는다.
+     * - ⑧ 리포트: 한 번도 안 열었으면 받는다. 이미 받았으면 보던 주를 그대로 둔다.
+     */
+    private fun afterTabChange(before: NavState) {
+        val after = _nav.value
+        if (after.tab == before.tab && after.current == before.current) return
+        when (val route = after.current) {
+            is AppRoute.AlarmDecision -> if (_plan.value?.eventId != route.eventId) loadPlan(route.eventId)
+            AppRoute.Me -> if (before.current != AppRoute.Me) loadMeTab()
+            AppRoute.Settings -> if (before.current != AppRoute.Settings) loadLoginMethods()
+            AppRoute.Homes -> if (before.current != AppRoute.Homes) syncSavedHomes()
+            AppRoute.WeeklyReport -> if (report.value.openCount == 0) reportNavigator.open()
+            else -> Unit
+        }
     }
 
     fun openHomeSetup() {
@@ -2104,9 +2337,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val error: String? = null,
         val weekly: WeeklyReportView? = null,
         val longTerm: CalibrationView? = null,
-        /** 보고 있는 주. null 이면 지난 주 */
+        /** 보고 있는 주(받은 뒤에는 그 주 월요일). 처음 열기 전에는 null — 열면 오늘이 든 주를 부른다 */
         val week: LocalDate? = null,
-        /** 홈에서 리포트를 연 횟수. 바뀌면 ⑧ 이 맨 위로 스크롤한다(⑨ 에서 돌아올 때는 그대로) */
+        /** 리포트 탭을 연 횟수. 바뀌면 화면이 맨 위로 스크롤한다(⑨ 에서 돌아올 때는 그대로) */
         val openCount: Int = 0,
     ) {
         val hasData: Boolean get() = weekly != null
@@ -2125,13 +2358,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     )
     val report: StateFlow<ReportState> = reportNavigator.state
 
-    // Partly AI-generated (Claude)
-    /** ⑧ 을 연다. 마지막으로 본 주를 다시 연다(처음은 지난 주). */
-    fun openReport() {
-        _nav.update { it.copy(stack = it.stack + AppRoute.WeeklyReport, forward = true) }
-        reportNavigator.open()
-    }
-
     // AI-generated (Claude)
     /** ⑨ 상세 리포트. ⑧ 이 이미 받은 주간 응답을 보므로 새로 부르지 않는다. */
     fun openReportDay(date: LocalDate, eventId: Long?) {
@@ -2146,7 +2372,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // Partly AI-generated (Claude)
     /**
-     * 한 주 앞뒤로 이동한다. 기준은 보고 있는 주, 없으면 지난 주다.
+     * 일요일 주간 리포트 알림을 눌렀다. 리포트 탭의 첫 화면(⑧)으로 가서 [week] 가 든 주를 연다. 리포트 탭에
+     * ⑨ 를 두고 왔어도 첫 화면으로 간다.
+     */
+    fun openReportWeek(week: LocalDate) {
+        // 먼저 연다 — openCount 가 오른 뒤라 afterTabChange 가 이번 주로 다시 부르지 않는다.
+        reportNavigator.openWeek(week)
+        val before = _nav.value
+        _nav.update { nav ->
+            val report = nav.selectTab(AppTab.REPORT)
+            if (report.current == AppRoute.WeeklyReport) report else report.selectTab(AppTab.REPORT)
+        }
+        afterTabChange(before)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 한 주 앞뒤로 이동한다. 기준은 보고 있는 주, 없으면 이번 주다.
      *
      * 다음 주로는 서버가 허락할 때만 간다(`has_next_week`). 이번 주까지 가고 미래
      * 주는 못 간다 — 화면이 "›" 를 끄지만 여기서도 막는다.
@@ -2304,7 +2546,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _calendarLink.update {
             it.copy(permission = if (granted) CalendarPermission.GRANTED else CalendarPermission.DENIED)
         }
-        val importOpen = AppRoute.CalendarImport in _nav.value.stack
+        val importOpen = AppRoute.CalendarImport in _nav.value.allRoutes
         if (granted) {
             loadCalendarSources()
             if (importOpen) loadCalendarCandidates()
@@ -2360,7 +2602,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onCalendarScreenResumed() {
         val current = _nav.value.current
-        if (current != AppRoute.Settings && current != AppRoute.CalendarLink &&
+        if (current != AppRoute.Me && current != AppRoute.CalendarLink &&
             current != AppRoute.CalendarImport
         ) return
         val granted = DeviceCalendar.hasPermission(getApplication())
@@ -2464,6 +2706,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _routine = MutableStateFlow(RoutineEditorState())
     val routine: StateFlow<RoutineEditorState> = _routine.asStateFlow()
+
+    // Partly AI-generated (Claude)
+    /**
+     * 내 정보 탭 "아침 루틴" 줄에 쓸 블록 이름(순서대로). 아직 못 받았으면 null.
+     * [routine] 과 따로 둔다 — 일정별 체크 화면(⑥)도 [routine] 을 쓰므로 거기 덮어쓰면 그 화면이 바뀐다.
+     */
+    private val _routineNames = MutableStateFlow<List<String>?>(null)
+    val routineNames: StateFlow<List<String>?> = _routineNames.asStateFlow()
+
+    private fun loadRoutineNames() {
+        viewModelScope.launch {
+            val result = routines.blocks()
+            // 받지 못하면 예전 값을 둔다. 줄은 값이 없으면 무엇을 하는 곳인지만 말한다.
+            if (result is RoutineRepository.RoutineResult.Success) {
+                _routineNames.value = result.data.sortedBy { it.order }.map { it.name }
+            }
+        }
+    }
 
     /**
      * 블록 **정의** 편집 화면을 연다.
@@ -3375,14 +3635,22 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             riskJob?.cancel()
             _risk.value = RiskState()
         }
-        _nav.update {
-            if (!it.canGoBack) it
-            else it.copy(stack = it.stack.dropLast(1), forward = false)
+        // 스택이 깊으면 하나 빼고, 홈이 아닌 탭의 첫 화면이면 홈 탭으로 간다(iter4 H2-2).
+        val before = _nav.value
+        _nav.update { it.back() }
+        when {
+            _nav.value.tab != before.tab -> afterTabChange(before)
+            // 루틴 · 캘린더 가져오기에서 돌아왔으면 줄 값이 바뀌었을 수 있다. 집 · 준비 시간은 상태가 바로 바뀐다.
+            _nav.value.current == AppRoute.Me && before.current != AppRoute.Me -> {
+                loadCalendarSources()
+                loadRoutineNames()
+            }
         }
     }
 
+    /** 홈 탭의 첫 화면으로([NavState.home]). 지금 탭은 첫 화면으로 되돌리고 다른 탭은 그대로 둔다 */
     fun goHome() {
-        _nav.update { NavState(stack = listOf(AppRoute.Home), forward = false) }
+        _nav.update { it.home() }
     }
 
     private fun loadPlan(eventId: Long) {
@@ -3922,13 +4190,32 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val editingEventId: Long? = null,
         /** 고치기 전 값. 바뀐 필드만 보내려고 들고 있다([EventEditPatch]) */
         val editBase: EventEditValues? = null,
-        /** 반복 일정의 한 회차를 고치는 중. 요일은 고칠 수 없고 이 회차만 바뀐다 */
+        /**
+         * 반복 일정의 한 회차를 고치는 중. 서버가 범위 수정을 받으면([scopeSupported]) 저장할 때
+         * "이 일정만 / 이후 일정 모두" 를 묻고 요일도 고칠 수 있다. 아니면 지금처럼 이 회차만 바뀐다.
+         */
         val recurring: Boolean = false,
+        /** 고치기 전 반복 요일(0 = 월 … 6 = 일). 요일을 바꿨는지 비교한다(iter4 A2) */
+        val baseWeekdays: Set<Int> = emptySet(),
+        /** 서버가 반복 일정 범위 수정을 받는가([RecurrenceScope.supported]). 수정 화면을 열 때 정한다 */
+        val scopeSupported: Boolean = false,
+        /** 저장을 눌러 "이 일정만 / 이후 일정 모두" 시트를 띄운 상태 */
+        val scopePrompt: Boolean = false,
         /** 저장 뒤 화면이 띄울 한 줄. null 이면 "일정을 추가했습니다" */
         val doneMessage: String? = null,
     ) {
         val canSubmit: Boolean get() = !submitting && title.isNotBlank()
         val isEditing: Boolean get() = editingEventId != null
+
+        /** 반복 회차를 고치면서 요일을 바꿨는가. 바꿨으면 "이후 일정 모두" 로만 저장한다 */
+        val weekdaysChanged: Boolean get() = recurring && repeatWeekdays != baseWeekdays
+
+        /** 수정 화면의 반복(요일) 칸을 열 것인가. 범위 수정을 받는 서버의 반복 회차에서만 연다 */
+        val canEditWeekdays: Boolean get() = isEditing && recurring && scopeSupported
+
+        /** 저장 시트의 선택지. 비어 있으면 시트 없이 바로 저장한다 */
+        val saveScopeChoices: List<EventScope>
+            get() = if (isEditing) RecurrenceScope.saveChoices(recurring, scopeSupported, weekdaysChanged) else emptyList()
 
         /**
          * 경로를 고를 수 있는 조건. 출발지와 도착지가 **둘 다** 있어야 한다.
@@ -4019,6 +4306,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _add.update { it.copy(hour = h, minute = m, fieldErrors = it.fieldErrors - AddField.TIME) }
     fun onAddRepeatDayToggle(day: Int) = _add.update {
         val days = it.repeatWeekdays
+        // 반복 회차를 고칠 때는 요일을 모두 끌 수 없다. 반복 끝내기는 삭제의 "이후 일정 모두" 로 한다.
+        if (it.isEditing && it.recurring && days == setOf(day)) return@update it
         it.copy(
             repeatWeekdays = if (day in days) days - day else days + day,
             fieldErrors = it.fieldErrors - AddField.TIME,
@@ -4325,12 +4614,38 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // Partly AI-generated (Claude)
     /**
+     * 서버 버전으로 범위 수정을 받는지 확인한다. 로그인 화면을 거치지 않고 앱을 열면 버전을 아직 모르므로
+     * `/api/health` 를 한 번 부른다(1분 안에 확인했으면 부르지 않는다, [ServerWarmup.ensureAwake]).
+     */
+    private suspend fun checkRecurrenceScope(): Boolean {
+        if (ServerWarmup.serverVersion == null) ServerWarmup.ensureAwake()
+        return RecurrenceScope.supported(ServerWarmup.serverVersion).also { _recurrenceScopeSupported.value = it }
+    }
+
+    // Partly AI-generated (Claude)
+    /** 홈을 불러올 때 부른다([refresh]). 알람 결정 화면의 삭제가 범위를 물을지 미리 정한다 */
+    fun refreshRecurrenceScope() {
+        if (recurrenceScopeJob?.isActive == true) return
+        recurrenceScopeJob = viewModelScope.launch { checkRecurrenceScope() }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
      * 일정 수정 화면을 연다(todo §2 "알람 결정 후 수정 UI", event-edit-api.md). ⑫ 를 수정 모드로
      * 다시 쓴다. 서버의 지금 값을 채워 두고 저장할 때 바뀐 필드만 보낸다.
      */
     fun openEditEvent(eventId: Long) {
         if (_add.value.submitting) return
         viewModelScope.launch {
+            // 반복 일정의 범위 수정은 서버 버전을 보고 연다(iter4 A2). 보통 홈을 불러올 때 이미 확인했다.
+            // 아직 모르면 일정 불러오기를 기다리게 하지 않고 따로 확인해 나중에 연다(서버가 깨는 데 수십 초).
+            // 확인이 화면보다 먼저 끝나면 아래에서 화면을 만들 때 그 값을 읽는다.
+            if (ServerWarmup.serverVersion == null) {
+                viewModelScope.launch {
+                    val ok = checkRecurrenceScope()
+                    _add.update { if (it.editingEventId == eventId) it.copy(scopeSupported = ok) else it }
+                }
+            }
             when (val loaded = repository.loadEvent(eventId)) {
                 is EventRepository.Result.Failure -> notify("일정을 불러오지 못했습니다. ${loaded.message}")
                 is EventRepository.Result.Success -> {
@@ -4367,6 +4682,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         editingEventId = eventId,
                         editBase = base,
                         recurring = dto.recurrenceId != null,
+                        repeatWeekdays = dto.repeatWeekdays.orEmpty().toSet(),
+                        baseWeekdays = dto.repeatWeekdays.orEmpty().toSet(),
+                        scopeSupported = RecurrenceScope.supported(ServerWarmup.serverVersion),
                     )
                     _routeChoice.value = null
                     loadEventTags()
@@ -4377,10 +4695,75 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Partly AI-generated (Claude)
-    /** 수정 저장. 바뀐 필드만 보내고, 저장되면 이 화면의 계획과 홈·기기 알람을 다시 맞춘다. */
-    private fun submitEdit(current: AddState, startAt: OffsetDateTime) {
+    /**
+     * 수정 저장. 바뀐 필드만 보내고, 저장되면 이 화면의 계획과 홈·기기 알람을 다시 맞춘다.
+     *
+     * 반복 회차는 먼저 "이 일정만 / 이후 일정 모두" 를 묻는다([AddState.saveScopeChoices]). 고르면
+     * [chooseSaveScope] 가 [scope] 를 붙여 다시 부른다. 바뀐 것이 없으면 묻지 않고 닫는다.
+     */
+    private fun submitEdit(current: AddState, startAt: OffsetDateTime, scope: EventScope? = null) {
         val eventId = current.editingEventId ?: return
-        val base = current.editBase ?: return
+        val patch = editPatchOf(current, startAt) ?: return
+        if (patch.size() == 0 && !current.weekdaysChanged) {
+            _add.update { it.copy(done = true, doneMessage = "바뀐 항목이 없음") }
+            return
+        }
+        val choices = current.saveScopeChoices
+        if (scope == null && choices.isNotEmpty()) {
+            _add.update { it.copy(scopePrompt = true) }
+            return
+        }
+        // 요일은 "이후 일정 모두" 일 때만 보낸다. 시트가 바꾼 요일과 "이 일정만" 을 함께 내놓지 않는다.
+        val weekdays = current.repeatWeekdays.takeIf { scope == EventScope.FOLLOWING && current.weekdaysChanged }
+        _add.update { it.copy(submitting = true, scopePrompt = false, error = null, fieldErrors = emptyMap()) }
+        viewModelScope.launch {
+            when (val result = repository.updateEvent(eventId, patch, scope, weekdays)) {
+                is EventRepository.Result.Success -> {
+                    if (result.data.plan != null) {
+                        ++planLoadGeneration
+                        _plan.value = result.data.plan
+                    }
+                    // 계산하지 못한 계획이면 결정 화면(저장 뒤 돌아가는 곳)의 "다시 계산" 으로 이어진다(A6·A7).
+                    val failed = result.data.plan?.status == AlarmPlanDto.STATUS_ROUTE_FAILED
+                    _add.update {
+                        it.copy(
+                            submitting = false,
+                            done = true,
+                            doneMessage = when {
+                                failed -> EDIT_ROUTE_FAILED_MESSAGE
+                                scope == EventScope.FOLLOWING -> "이후 반복 일정까지 수정했어요"
+                                else -> "일정을 수정했습니다"
+                            },
+                        )
+                    }
+                    // 다른 날로 옮기면 그날 다른 일정의 켬/끔도 바뀐다(event-edit-api.md §4). 이후 일정 모두를
+                    // 고쳤으면 다른 회차도 바뀌었으므로 목록과 기기 알람을 통째로 다시 맞춘다.
+                    refresh()
+                }
+
+                is EventRepository.Result.Failure -> onSaveFailed(result, editing = true)
+            }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /** 저장 시트에서 고른 범위로 저장한다. 고른 것이 지금 선택지에 없으면(요일을 바꿨는데 "이 일정만") 무시한다 */
+    fun chooseSaveScope(scope: EventScope) {
+        val current = _add.value
+        if (!current.scopePrompt || current.submitting || scope !in current.saveScopeChoices) return
+        submitEdit(current, startAtOf(current), scope)
+    }
+
+    // Partly AI-generated (Claude)
+    /** 저장 시트를 닫는다. 입력은 그대로 둔다 */
+    fun dismissSaveScope() {
+        _add.update { it.copy(scopePrompt = false) }
+    }
+
+    // Partly AI-generated (Claude)
+    /** 수정 화면 값으로 `PATCH` 본문을 만든다(바뀐 필드만). 수정 중이 아니면 null */
+    private fun editPatchOf(current: AddState, startAt: OffsetDateTime): com.google.gson.JsonObject? {
+        val base = current.editBase ?: return null
         val edited = EventEditValues(
             title = current.title,
             startAt = startAt,
@@ -4393,35 +4776,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             includePrep = createIncludePrep(current.includePrep, current.origin != null, current.originPlaceId),
             originPlaceId = current.originPlaceId.takeIf { current.origin != null },
         )
-        val patch = EventEditPatch.build(base, edited)
-        if (patch.size() == 0) {
-            _add.update { it.copy(done = true, doneMessage = "바뀐 항목이 없음") }
-            return
-        }
-        _add.update { it.copy(submitting = true, error = null, fieldErrors = emptyMap()) }
-        viewModelScope.launch {
-            when (val result = repository.updateEvent(eventId, patch)) {
-                is EventRepository.Result.Success -> {
-                    if (result.data.plan != null) {
-                        ++planLoadGeneration
-                        _plan.value = result.data.plan
-                    }
-                    // 계산하지 못한 계획이면 결정 화면(저장 뒤 돌아가는 곳)의 "다시 계산" 으로 이어진다(A6·A7).
-                    val failed = result.data.plan?.status == AlarmPlanDto.STATUS_ROUTE_FAILED
-                    _add.update {
-                        it.copy(
-                            submitting = false,
-                            done = true,
-                            doneMessage = if (failed) EDIT_ROUTE_FAILED_MESSAGE else "일정을 수정했습니다",
-                        )
-                    }
-                    // 다른 날로 옮기면 그날 다른 일정의 켬/끔도 바뀐다(event-edit-api.md §4).
-                    refresh()
-                }
-
-                is EventRepository.Result.Failure -> onSaveFailed(result, editing = true)
-            }
-        }
+        return EventEditPatch.build(base, edited)
     }
 
     // Partly AI-generated (Claude)
@@ -4481,17 +4836,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         sort = sort,
     )
 
+    /** 화면의 날짜·시각을 기기 시간대의 시작 시각으로 */
+    private fun startAtOf(current: AddState): OffsetDateTime = OffsetDateTime.of(
+        current.date,
+        java.time.LocalTime.of(current.hour, current.minute),
+        ZoneId.systemDefault().rules.getOffset(
+            current.date.atTime(current.hour, current.minute)
+        ),
+    )
+
     fun submitAdd() {
         val current = _add.value
         if (!current.canSubmit) return
 
-        val startAt = OffsetDateTime.of(
-            current.date,
-            java.time.LocalTime.of(current.hour, current.minute),
-            ZoneId.systemDefault().rules.getOffset(
-                current.date.atTime(current.hour, current.minute)
-            ),
-        )
+        val startAt = startAtOf(current)
 
         if (current.isEditing) {
             submitEdit(current, startAt)
@@ -4535,9 +4893,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun deleteEvent(id: Long) {
+    /** 일정을 지운다. 반복 일정에서 [EventScope.FOLLOWING] 을 고르면 이 회차부터 반복을 끝낸다(iter4 A2) */
+    fun deleteEvent(id: Long, scope: EventScope? = null) {
         viewModelScope.launch {
-            when (val result = repository.deleteEvent(id)) {
+            when (val result = repository.deleteEvent(id, scope)) {
                 is EventRepository.Result.Success -> {
                     goHome()
                     refresh()
@@ -4664,8 +5023,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             askHome = !data.hasHome && !homeOnboardingAsked,
             askPrep = data.onboardingPrepMin == null && !prepOnboardingAsked,
             askCalendar = !calendarOnboardingAsked && !calendarLinkStore.wasAsked(),
+            askIntro = !introOnboardingAsked && !GuideSeenRules.introSeen(
+                guideLocal(),
+                GuideSeenRules.Account(introSeen = data.introSeen, coachmarkSeen = data.coachmarkSeen),
+            ),
         )
         if (pending.isEmpty()) return
+        if (AppRoute.Intro in pending) {
+            introOnboardingAsked = true
+            // 코치마크는 안내를 띄울 때 예약한다. 안내를 넘기다 앱을 꺼도 다음에 홈에 들어오면 뜬다.
+            showCoachmarkNext()
+        }
         if (AppRoute.PrepOnboarding in pending) prepOnboardingAsked = true
         if (AppRoute.HomeSetup in pending) homeOnboardingAsked = true
         if (AppRoute.CalendarLink in pending) {

@@ -12,8 +12,8 @@ import org.junit.Test
  */
 class OnboardingQueueTest {
 
-    private fun visible(askHome: Boolean, askPrep: Boolean, askCalendar: Boolean) =
-        OnboardingQueue.pushOrder(askHome, askPrep, askCalendar).reversed()
+    private fun visible(askHome: Boolean, askPrep: Boolean, askCalendar: Boolean, askIntro: Boolean = false) =
+        OnboardingQueue.pushOrder(askHome, askPrep, askCalendar, askIntro).reversed()
 
     @Test
     fun `가입 직후에는 집 주소, 준비 시간, 캘린더 연동 순이다`() {
@@ -42,6 +42,31 @@ class OnboardingQueueTest {
         assertEquals(
             listOf(AppRoute.HomeSetup, AppRoute.PrepOnboarding),
             visible(askHome = true, askPrep = true, askCalendar = false),
+        )
+    }
+
+    @Test
+    fun `첫 실행 안내는 캘린더 연동 다음, 홈 바로 앞이다`() {
+        // iter4 H2-4(Figma 545:1305): ⑭ → ⑮ → ⑱ → 첫 실행 안내 → 홈
+        assertEquals(
+            listOf(AppRoute.HomeSetup, AppRoute.PrepOnboarding, AppRoute.CalendarLink, AppRoute.Intro),
+            visible(askHome = true, askPrep = true, askCalendar = true, askIntro = true),
+        )
+        assertEquals(
+            "⑱ 을 이미 본 기기여도 안내는 따로 뜬다",
+            listOf(AppRoute.PrepOnboarding, AppRoute.Intro),
+            visible(askHome = false, askPrep = true, askCalendar = false, askIntro = true),
+        )
+    }
+
+    @Test
+    fun `가입을 마친 사용자에게는 첫 실행 안내를 띄우지 않는다`() {
+        // 업데이트로 안내가 생겨도 이미 쓰던 사용자를 막지 않는다. 내 정보 › 처음 안내 다시 보기로 본다.
+        assertTrue(visible(askHome = false, askPrep = false, askCalendar = true, askIntro = true).isEmpty())
+        assertEquals(
+            "이미 본 기기에서는 다시 넣지 않는다",
+            listOf(AppRoute.HomeSetup, AppRoute.PrepOnboarding, AppRoute.CalendarLink),
+            visible(askHome = true, askPrep = true, askCalendar = true, askIntro = false),
         )
     }
 }

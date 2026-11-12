@@ -94,6 +94,9 @@ object LocalStores {
         // Partly AI-generated (Claude) — ⑱ 캘린더 연동. 앞 사용자가 고른 캘린더다.
         runCatching { CalendarLinkStore(app).wipe() }
             .onFailure { Log.w(TAG, "캘린더 연동 삭제 실패", it) }
+        // Partly AI-generated (Claude) — 첫 실행 안내 · 홈 코치마크를 봤는지(H2-4)
+        runCatching { FirstRunGuideStore(app).wipe() }
+            .onFailure { Log.w(TAG, "첫 실행 안내 기록 삭제 실패", it) }
         TripLiveState.clear()
     }
 }

@@ -169,6 +169,14 @@
         </receiver>
 
         <!--
+          일요일 낮 12시 주간 리포트 알림(iter4 H2-2). AlarmManager 가 깨우면 워커로 넘긴다.
+          exported=false — 우리 예약에서만 온다.
+        -->
+        <receiver
+            android:name=".reminder.WeeklyReportReminderReceiver"
+            android:exported="false" />
+
+        <!--
           도착 결과 알림의 "확인". 알림만 치우므로 화면을 띄우지 않는다.
           exported=false — 우리 알림에서만 온다.
         -->

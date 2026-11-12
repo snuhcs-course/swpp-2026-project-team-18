@@ -162,7 +162,7 @@ fun RoutineEditorScreen(
                 loading = state.saving,
             )
             Text(
-                text = "체크는 이 일정에만 적용됨. 기본값을 바꾸려면 아침 루틴 설정에서 고침",
+                text = "체크는 이 일정에만 적용됨. 기본값을 바꾸려면 내 정보 › 아침 루틴에서 고침",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )

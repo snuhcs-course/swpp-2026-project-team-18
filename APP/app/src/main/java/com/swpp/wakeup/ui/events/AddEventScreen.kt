@@ -52,7 +52,7 @@ import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.JitPickerValue
 import com.swpp.wakeup.ui.common.JitPrimaryButton
 import com.swpp.wakeup.ui.common.JitTextField
-import com.swpp.wakeup.ui.common.JitTimePickerDialog
+import com.swpp.wakeup.ui.common.JitTimeWheelSheet
 import com.swpp.wakeup.ui.common.PlacePicker
 import com.swpp.wakeup.ui.home.AddField
 import com.swpp.wakeup.ui.home.HomeViewModel
@@ -128,9 +128,8 @@ private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
  * 돌려주고 알람 시각이 나오지 않는다. 그래서 장소 검색을 폼 가운데 두고
  * 비워두면 어떻게 되는지 화면에서 미리 알린다.
  *
- * 날짜는 달력 팝업, 시각은 시계 다이얼 팝업으로 고른다(Material3 `DatePicker`,
- * `TimePicker`). 두 피커 모두 기본 색이 밝아 어두운 팔레트와 충돌하므로 색을
- * 앱 팔레트로 지정해서 쓴다.
+ * 날짜는 달력 팝업(Material3 `DatePicker`, 기본 색이 밝아 앱 팔레트로 칠함), 시각은
+ * 휠 바텀시트([JitTimeWheelSheet], iter4 H2-5 · 아이폰처럼 오전/오후 · 시 · 분 열을 굴림)로 고른다.
  */
 @Composable
 fun AddEventScreen(
@@ -193,7 +192,19 @@ fun AddEventScreen(
     onTagAskDelete: (Boolean) -> Unit = {},
     onTagDelete: () -> Unit = {},
     onTagEditDismiss: () -> Unit = {},
+    /** 반복 회차 저장 시트(iter4 A2)에서 고른 범위. 시트는 [HomeViewModel.AddState.scopePrompt] 일 때만 뜬다 */
+    onSaveScope: (com.swpp.wakeup.data.repository.EventScope) -> Unit = {},
+    onSaveScopeDismiss: () -> Unit = {},
 ) {
+    if (state.scopePrompt) {
+        RecurrenceScopeSheet(
+            action = ScopeAction.SAVE,
+            choices = state.saveScopeChoices,
+            weekdaysChanged = state.weekdaysChanged,
+            onChoose = onSaveScope,
+            onDismiss = onSaveScopeDismiss,
+        )
+    }
     if (tagAdd.open) {
         TagAddDialog(
             state = tagAdd,
@@ -236,13 +247,10 @@ fun AddEventScreen(
         ScreenHeader(title = if (editing) "일정 수정" else "일정 추가", onBack = onBack, enabled = !state.submitting)
 
         if (editing) {
-            // 반복 회차는 그 회차만 바뀐다. 반복 규칙은 만들 때만 정한다(event-edit-api.md §5).
+            // 반복 회차는 저장할 때 범위를 고른다(iter4 A2). 범위 수정을 모르는 서버면 지금처럼 그 회차만
+            // 바뀌고 요일은 고칠 수 없다(event-edit-api.md §5).
             Text(
-                text = if (state.recurring) {
-                    "반복 일정의 이 회차만 바뀜. 요일은 고칠 수 없음"
-                } else {
-                    "바꾼 항목만 저장함. 장소·출발지를 바꾸면 경로를 다시 고름"
-                },
+                text = editNoteOf(state),
                 color = JitColor.TextSecondary,
                 fontSize = 11.sp,
                 modifier = Modifier.testTag("edit_note"),
@@ -275,8 +283,9 @@ fun AddEventScreen(
         }
 
         DateRow(state.date, onDateChange, enabled = !state.submitting)
-        // Figma 순서: 날짜 → 반복 → 시작 시각. 수정에서는 반복을 고칠 수 없어 숨긴다.
-        if (!editing) RepeatRow(state.repeatWeekdays, onRepeatDayToggle, enabled)
+        // Figma 순서: 날짜 → 반복 → 시작 시각. 수정에서는 반복 회차이고 서버가 "이후 일정 모두" 를 받을 때만
+        // 요일을 고칠 수 있다. 바꾸면 저장 시트에 "이후 일정 모두 저장" 만 남는다(iter4 A2).
+        if (!editing || state.canEditWeekdays) RepeatRow(state.repeatWeekdays, onRepeatDayToggle, enabled)
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             TimeRow(state.hour, state.minute, onTimeChange, enabled = !state.submitting)
             state.fieldErrors[AddField.TIME]?.let { EndpointError(it, tag = "time_error") }
@@ -628,29 +637,37 @@ fun HomeSetupScreen(
 // Partly AI-generated (Claude)
 /**
  * 하위 화면 머리. [trailing] 이 있으면 오른쪽 끝에 붙인다(상세 리포트의 "10월 6일").
+ * [action] 은 오른쪽 끝의 버튼이다(④ 의 i, iter4 H2-4).
  */
 @Composable
 internal fun ScreenHeader(
     title: String,
-    onBack: () -> Unit,
+    /** null 이면 "‹" 를 그리지 않는다. 하단 탭의 첫 화면(리포트·내 정보)이다 */
+    onBack: (() -> Unit)?,
     enabled: Boolean = true,
     trailing: String? = null,
+    action: (@Composable () -> Unit)? = null,
 ) {
     Row(
-        modifier = if (trailing != null) Modifier.fillMaxWidth() else Modifier,
+        modifier = if (trailing != null || action != null) Modifier.fillMaxWidth() else Modifier,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = "‹",
-            color = JitColor.TextPrimary,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(enabled = enabled, onClick = onBack)
-                .padding(horizontal = 10.dp, vertical = 2.dp),
-        )
-        Spacer(Modifier.width(4.dp))
+        if (onBack != null) {
+            Text(
+                text = "‹",
+                color = JitColor.TextPrimary,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = enabled, onClick = onBack)
+                    .padding(horizontal = 10.dp, vertical = 2.dp),
+            )
+            Spacer(Modifier.width(4.dp))
+        } else {
+            // 화살표 자리 대신 제목을 화면 여백에 맞춘다.
+            Spacer(Modifier.width(4.dp))
+        }
         Text(
             text = title,
             color = JitColor.TextSecondary,
@@ -660,6 +677,10 @@ internal fun ScreenHeader(
         if (trailing != null) {
             Spacer(Modifier.weight(1f))
             Text(text = trailing, color = JitColor.TextSecondary, fontSize = 13.sp)
+        }
+        if (action != null) {
+            if (trailing == null) Spacer(Modifier.weight(1f))
+            action()
         }
     }
 }
@@ -748,16 +769,24 @@ private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enable
     }
 
     if (picking) {
-        // 다이얼은 준비 시간 화면과 같은 공용 부품이다. 여기서는 12시간제(오전/오후 토글).
-        JitTimePickerDialog(
+        // 시계 다이얼 대신 휠(iter4 H2-5, Figma `545:670`). 1분 단위, [확인] 만 반영한다.
+        JitTimeWheelSheet(
             title = "시작 시각",
             initialHour = hour,
             initialMinute = minute,
-            is24Hour = false,
+            minuteStep = 1,
             onConfirm = { h, m -> onChange(h, m); picking = false },
             onDismiss = { picking = false },
         )
     }
+}
+
+// Partly AI-generated (Claude)
+/** 수정 화면 맨 위 안내. 반복 회차는 저장할 때 범위를 고를 수 있는지에 따라 다르다(iter4 A2) */
+internal fun editNoteOf(state: HomeViewModel.AddState): String = when {
+    !state.recurring -> "바꾼 항목만 저장함. 장소·출발지를 바꾸면 경로를 다시 고름"
+    state.scopeSupported -> "저장할 때 이 일정만 / 이후 일정 모두 중에 고를 수 있어요. 요일을 바꾸면 이후 일정에 적용돼요"
+    else -> "반복 일정의 이 회차만 바뀜. 요일은 고칠 수 없음"
 }
 
 // Partly AI-generated (Claude)

@@ -70,7 +70,7 @@ class ReportWeekNavigatorTest {
         val fake = FakeReports()
         val nav = navigator(fake)
         fake.answer = { ReportResult.Success(week(oct5)) }
-        nav.open()
+        nav.load(oct5)
         advanceUntilIdle()
         assertEquals(oct5, nav.state.value.weekly?.weekStart)
 
@@ -91,7 +91,7 @@ class ReportWeekNavigatorTest {
         fake.answer = { ReportResult.Success(week(oct12, hasNext = false)) }
         nav.shift(1)
         advanceUntilIdle()
-        assertEquals(listOf(null, sep28, oct12), fake.requested)
+        assertEquals(listOf<LocalDate?>(oct5, sep28, oct12), fake.requested)
         assertNull(nav.state.value.error)
     }
 
@@ -130,27 +130,56 @@ class ReportWeekNavigatorTest {
         assertEquals(oct5, nav.state.value.weekly?.weekStart)
     }
 
+    // Partly AI-generated (Claude)
     @Test
-    fun `홈에서 열 때마다 openCount 가 오르고 마지막으로 본 주를 다시 연다`() = runTest {
+    fun `탭을 열 때마다 openCount 가 오르고 처음은 오늘이 든 주, 다음부터는 마지막으로 본 주를 연다`() = runTest {
         val fake = FakeReports()
         val nav = navigator(fake)
-        fake.answer = { requested -> ReportResult.Success(week(requested ?: oct5)) }
+        // 서버처럼 그 날짜가 든 주의 월요일로 답한다.
+        fake.answer = { requested ->
+            val day = requested ?: LocalDate.of(2026, 10, 7)
+            ReportResult.Success(week(day.minusDays(day.dayOfWeek.value - 1L)))
+        }
 
         assertEquals(0, nav.state.value.openCount)
         nav.open()
         advanceUntilIdle()
         assertEquals(1, nav.state.value.openCount)
-        assertEquals("처음은 서버 기본값(지난 주)", listOf<LocalDate?>(null), fake.requested)
+        assertEquals("처음은 오늘(10월 14일)이 든 주", listOf<LocalDate?>(LocalDate.of(2026, 10, 14)), fake.requested)
+        assertEquals(oct12, nav.state.value.weekly?.weekStart)
+        assertEquals("보고 있는 주는 서버가 정한 월요일", oct12, nav.state.value.week)
 
         nav.shift(-1)
         advanceUntilIdle()
         assertEquals("주 이동은 openCount 를 바꾸지 않는다", 1, nav.state.value.openCount)
+        assertEquals(oct5, fake.requested.last())
 
         nav.open()
         advanceUntilIdle()
         assertEquals(2, nav.state.value.openCount)
-        assertEquals("마지막으로 본 주를 다시 연다", sep28, fake.requested.last())
-        assertEquals(sep28, nav.state.value.weekly?.weekStart)
+        assertEquals("마지막으로 본 주를 다시 연다", oct5, fake.requested.last())
+        assertEquals(oct5, nav.state.value.weekly?.weekStart)
+    }
+
+    // Partly AI-generated (Claude)
+    @Test
+    fun `알림에서 연 주는 맨 위로 보내고 보던 주 대신 그 주를 연다`() = runTest {
+        val fake = FakeReports()
+        val nav = navigator(fake)
+        fake.answer = { requested ->
+            val day = requested ?: LocalDate.of(2026, 10, 7)
+            ReportResult.Success(week(day.minusDays(day.dayOfWeek.value - 1L)))
+        }
+        nav.load(sep28)
+        advanceUntilIdle()
+
+        // 일요일 알림은 그날 날짜를 준다. 서버가 그 주의 월요일로 답한다.
+        nav.openWeek(LocalDate.of(2026, 10, 18))
+        advanceUntilIdle()
+        assertEquals("탭을 여는 것처럼 openCount 가 오른다", 1, nav.state.value.openCount)
+        assertEquals(LocalDate.of(2026, 10, 18), fake.requested.last())
+        assertEquals(oct12, nav.state.value.weekly?.weekStart)
+        assertEquals(oct12, nav.state.value.week)
     }
 
     // Partly AI-generated (Claude)

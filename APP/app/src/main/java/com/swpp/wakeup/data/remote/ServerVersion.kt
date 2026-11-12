@@ -39,6 +39,19 @@ object ServerVersion {
         return compare(server, app) < 0
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 서버가 [required] 이상인가. 기능이 들어온 서버 버전을 확인할 때 쓴다(예: 반복 일정 범위 수정).
+     *
+     * 판정할 수 없으면 **false** 다. [isServerBehind] 와 반대 방향이다 — 모르는 서버에 새 기능을
+     * 보내면 서버가 조용히 무시해 사용자가 고른 것과 다르게 저장된다. 그래서 확인된 때만 연다.
+     */
+    fun isAtLeast(serverVersion: String?, required: String): Boolean {
+        val server = parse(serverVersion) ?: return false
+        val need = parse(required) ?: return false
+        return compare(server, need) >= 0
+    }
+
     /**
      * `"0.3.0"` → `[0, 3, 0]`. 읽을 수 없으면 null.
      *

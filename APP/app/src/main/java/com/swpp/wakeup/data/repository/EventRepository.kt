@@ -65,6 +65,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.Response
 import java.io.IOException
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -146,6 +147,12 @@ class EventRepository(
          * 사라진다. 추정기는 null 일 때만 30 으로 떨어진다.
          */
         val onboardingPrepMin: Int?,
+        /**
+         * 이 계정이 첫 실행 안내 · 홈 코치마크를 봤는가(서버 `intro_seen_at` · `coachmark_seen_at`, iter4 H2-4).
+         * 서버가 이 필드를 모르면 false 다. 기기 기록과 합치는 규칙은 `GuideSeenRules`. (Partly AI-generated (Claude))
+         */
+        val introSeen: Boolean = false,
+        val coachmarkSeen: Boolean = false,
         /**
          * 실제로 `AlarmManager` 에 등록할 목록.
          *
@@ -274,6 +281,8 @@ class EventRepository(
             homeLat = profile.homeLat,
             homeLng = profile.homeLng,
             onboardingPrepMin = profile.onboardingPrepMin?.takeIf { it > 0 },
+            introSeen = profile.introSeenAt != null,
+            coachmarkSeen = profile.coachmarkSeenAt != null,
             schedules = events.mapNotNull { it.toSchedule(zone, profile) },
             fromCache = fromCache,
             ageLabel = ageLabel,
@@ -607,8 +616,16 @@ class EventRepository(
         Result.Success(body.result)
     }
 
-    suspend fun deleteEvent(id: Long): Result<Unit> = guard {
-        val response = api.delete(id)
+    /**
+     * 일정을 지운다. 반복 일정에 [EventScope.FOLLOWING] 이면 이 회차부터 반복을 끝낸다(iter4 A2).
+     * null·[EventScope.THIS] 는 지금처럼 그 회차(날짜)만 지운다.
+     */
+    suspend fun deleteEvent(id: Long, scope: EventScope? = null): Result<Unit> = guard {
+        val response = if (scope == EventScope.FOLLOWING) {
+            api.deleteScoped(id, EventScope.FOLLOWING.wire)
+        } else {
+            api.delete(id)
+        }
         if (response.isSuccessful) {
             // 캐시에서도 지운다. 남겨 두면 다음 오프라인 조회에서 지운 일정이
             // 되살아나고, 사용자는 삭제가 안 된 것으로 읽는다.
@@ -731,6 +748,26 @@ class EventRepository(
             ?: Result.Failure(MESSAGE_UNKNOWN)
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 첫 실행 안내 · 홈 코치마크를 이 계정이 봤다고 남긴다(iter4 H2-4, docs/iter4/first-run-guide-api.md).
+     * 고른 것만 [now] 로 보낸다. 서버가 필드를 모르는 구버전이면 무시하고 200 이다 — 그래도 기기 기록이 있어
+     * 같은 기기에서는 다시 뜨지 않는다. 알람은 다시 계산되지 않는다.
+     */
+    suspend fun markGuideSeen(
+        intro: Boolean,
+        coachmark: Boolean,
+        now: Instant = Instant.now(),
+    ): Result<ProfileDto> = guard {
+        val stamp = now.toString()
+        val body = ProfileUpdateRequest(
+            introSeenAt = stamp.takeIf { intro },
+            coachmarkSeenAt = stamp.takeIf { coachmark },
+        )
+        unwrap(profileApi.update(body))?.let { Result.Success(it) }
+            ?: Result.Failure(MESSAGE_UNKNOWN)
+    }
+
     /**
      * 알람 결정 화면(Figma ④)이 필요한 상세.
      *
@@ -755,9 +792,17 @@ class EventRepository(
     /**
      * 일정을 고친다(`PATCH /api/events/{id}`, event-edit-api.md). [patch] 는 [EventEditPatch] 가 만든
      * 바뀐 필드뿐이다. 필드 오류(가까운 출발·도착 등)는 [Result.Failure.fields] 로 돌려준다.
+     *
+     * 반복 일정이면 [scope]·[weekdays] 를 함께 싣는다([RecurrenceScope.withScope], iter4 A2).
+     * 둘 다 null 이면 지금 본문 그대로다.
      */
-    suspend fun updateEvent(eventId: Long, patch: com.google.gson.JsonObject): Result<EditResult> = guard {
-        val body = patch.toString().toRequestBody(JSON_MEDIA)
+    suspend fun updateEvent(
+        eventId: Long,
+        patch: com.google.gson.JsonObject,
+        scope: EventScope? = null,
+        weekdays: Set<Int>? = null,
+    ): Result<EditResult> = guard {
+        val body = RecurrenceScope.withScope(patch, scope, weekdays).toString().toRequestBody(JSON_MEDIA)
         val response = api.patch(eventId, body)
         val dto = unwrap(response)
             ?: return@guard failureFrom(response.code(), response.errorBody()?.string())
@@ -1605,6 +1650,7 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         altFasterMinutes = plan.altFasterMinutes?.takeIf { it > 0 },
         skipped = skipped,
         routeBasis = routeBasis,
+        recurring = recurrenceId != null,
     )
 }
 

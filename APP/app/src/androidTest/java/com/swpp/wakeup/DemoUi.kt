@@ -1,5 +1,6 @@
 package com.swpp.wakeup
 
+import android.graphics.Rect
 import android.os.SystemClock
 import android.util.Log
 import androidx.test.uiautomator.By
@@ -39,7 +40,11 @@ internal class DemoUi(private val device: UiDevice) {
                 device.findObject(selector)?.let { node ->
                     val bounds = node.visibleBounds
                     val viewport = scroll?.let { device.findObject(By.res(it))?.visibleBounds }
-                    if (bounds.height() > 0 && (viewport == null ||
+                    // 홈 목록 위에 떠 있는 [+ 일정 추가](iter4 H2-2)에 가린 노드를 누르면 그 버튼이 눌린다.
+                    // 가려졌으면 보이는 자리로 더 스크롤한다.
+                    val covered = scroll != null && device.findObject(By.res(FLOATING_BUTTON))
+                        ?.visibleBounds?.let { Rect.intersects(it, bounds) } == true
+                    if (bounds.height() > 0 && !covered && (viewport == null ||
                         (bounds.top >= viewport.top + 20 && bounds.bottom <= viewport.bottom - 20))) {
                         return action(node)
                     }
@@ -65,12 +70,35 @@ internal class DemoUi(private val device: UiDevice) {
         throw AssertionError("화면 요소를 찾지 못함: $selector")
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 시각 휠 시트(iter4 H2-5)에서 [time]("21:02")을 고른다. [확인] 은 부르는 쪽이 누른다.
+     * 열마다 지금 값(열 설명 "시 9" 의 끝 낱말)에서 가까운 쪽으로, 흐린 위아래 줄을 눌러 한두 칸씩 옮긴다.
+     * 끌어서 굴리면 손 떼는 속도에 따라 몇 칸 더 굴러가므로 누르기로 고른다.
+     */
     fun pickTime(time: String, onDialReady: () -> Unit = {}) {
         val (hour, minute) = time.split(":").map(String::toInt)
-        click(By.text(Pattern.compile(if (hour >= 12) "PM|오후" else "AM|오전")))
-        val clockHour = if (hour % 12 == 0) 12 else hour % 12
-        click(By.desc(Pattern.compile("$clockHour (hours?|o'clock)|${clockHour}시")))
-        dragMinute(minute, onDialReady)
+        await(By.res("wheel_hour"))
+        onDialReady()
+        wheelTo("wheel_ampm", if (hour >= 12) "오후" else "오전", listOf("오전", "오후"), loop = false)
+        wheelTo("wheel_hour", (if (hour % 12 == 0) 12 else hour % 12).toString(), (1..12).map(Int::toString), loop = true)
+        wheelTo("wheel_minute", "%02d".format(minute), (0..59).map { "%02d".format(it) }, loop = true)
+    }
+
+    private fun wheelTo(column: String, target: String, values: List<String>, loop: Boolean) {
+        repeat(40) {
+            val current = withNode(By.res(column)) { it.contentDescription.orEmpty().substringAfterLast(' ') }
+            if (current == target) return
+            val from = values.indexOf(current)
+            var delta = values.indexOf(target) - from
+            if (loop && delta > values.size / 2) delta -= values.size
+            if (loop && delta < -values.size / 2) delta += values.size
+            val next = values[(from + delta.coerceIn(-2, 2)).mod(values.size)]
+            withNode(By.res(column)) { col -> col.findObject(By.text(next)).click() }
+            device.waitForIdle()
+            Thread.sleep(250) // 굴러가는 애니메이션이 끝나 설명이 바뀔 때까지
+        }
+        throw AssertionError("휠 $column 을 $target 로 옮기지 못함")
     }
 
     fun dragMinute(minute: Int, onDialReady: () -> Unit = {}) {
@@ -107,3 +135,6 @@ internal class DemoUi(private val device: UiDevice) {
         }
     }
 }
+
+/** 목록 위에 떠 있어 아래 노드를 가리는 버튼(홈 [+ 일정 추가]) */
+private const val FLOATING_BUTTON = "add_event"

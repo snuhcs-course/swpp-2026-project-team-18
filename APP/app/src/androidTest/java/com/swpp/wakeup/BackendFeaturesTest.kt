@@ -62,7 +62,7 @@ class BackendFeaturesTest {
         var addedId: Long? = null
         try {
             launch()
-            ui.click(By.text("+  일정 추가"), "home_list")
+            ui.click(By.res("add_event"))
             ui.input("event_title", "QA 집 도착")
             pickStart()
             // Close the default destination search before opening the origin search.
@@ -165,7 +165,7 @@ class BackendFeaturesTest {
         val store = ScheduledAlarmStore(context)
         try {
             launch()
-            ui.click(By.text("+  일정 추가"), "home_list")
+            ui.click(By.res("add_event"))
             ui.input("event_title", title)
             pickStart()
             for (day in days) {

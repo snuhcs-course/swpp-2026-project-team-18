@@ -77,34 +77,48 @@ class PublicSetupTest {
                 click(By.res("prep_submit"))
                 // 가입 직후 온보딩 끝에 캘린더 연동 화면이 한 번 뜬다. 이 흐름은 캘린더를 쓰지 않는다.
                 click(By.res("calendar_link_skip"), timeout = 90_000)
+                // 이어서 첫 실행 안내 세 장(iter4 H2-4). 1장에서 [다음] 을 한 번 눌러 넘김을 보고 건너뛴다.
+                find(By.text("도착 시각만 알려 주세요"), timeout = 90_000)
+                click(By.res("intro_next"))
+                find(By.text("알람 시각은 직접 바꿀 수 있어요"))
+                capture("03_intro")
+                click(By.res("intro_skip"))
+                // 홈에 처음 들어가면 코치마크가 한 번 뜬다. 닫아야 아래 탭을 누를 수 있다.
+                find(By.res("home_coachmark"), timeout = 90_000)
+                capture("03_home_coachmark")
+                click(By.res("coachmark_done"))
+                until("코치마크가 닫힘", 10_000) { !device.hasObject(By.res("home_coachmark")) }
                 find(By.res("home_list"), timeout = 90_000)
-                click(By.res("open_settings"), "home_list")
-                find(By.text(durationText(prep)), "settings_scroll")
-                click(By.text("평소 준비 시간"), "settings_scroll")
+                // 준비 시간 줄은 내 정보 탭 첫 화면에 있다(iter4 H2-2, Figma `547:1244`).
+                click(By.res("tab_me"))
+                find(By.textContains("평소 ${durationText(prep)}"), "me_scroll")
+                click(By.res("me_prep"), "me_scroll")
                 assertPrepValue(durationText(prep))
                 pickDuration(changedPrep)
                 click(By.res("prep_submit"))
-                find(By.res("settings_scroll"), timeout = 90_000)
-                find(By.text(durationText(changedPrep)), "settings_scroll", 90_000)
-                click(By.text("평소 준비 시간"), "settings_scroll")
+                find(By.res("me_scroll"), timeout = 90_000)
+                find(By.textContains("평소 ${durationText(changedPrep)}"), "me_scroll", 90_000)
+                click(By.res("me_prep"), "me_scroll")
                 assertPrepValue(durationText(changedPrep))
-                // 설정에서 연 화면에는 "나중에 입력" 이 없다. 뒤로 = 저장하지 않고 닫기.
-                assertFalse("설정에서 연 화면에 나중에 입력이 있음", device.hasObject(By.text("나중에 입력")))
+                // 내 정보에서 연 화면에는 "나중에 입력" 이 없다. 뒤로 = 저장하지 않고 닫기.
+                assertFalse("내 정보에서 연 화면에 나중에 입력이 있음", device.hasObject(By.text("나중에 입력")))
                 pickDuration(prep)
                 device.pressBack()
-                find(By.res("settings_scroll"))
-                find(By.text(durationText(changedPrep)), "settings_scroll")
-                click(By.text("평소 준비 시간"), "settings_scroll")
+                find(By.res("me_scroll"))
+                find(By.textContains("평소 ${durationText(changedPrep)}"), "me_scroll")
+                click(By.res("me_prep"), "me_scroll")
                 assertPrepValue(durationText(changedPrep))
                 pickDuration(prep)
                 click(By.res("prep_submit"))
-                find(By.res("settings_scroll"), timeout = 90_000)
-                find(By.text(durationText(prep)), "settings_scroll", 90_000)
+                find(By.res("me_scroll"), timeout = 90_000)
+                find(By.textContains("평소 ${durationText(prep)}"), "me_scroll", 90_000)
                 capture("03_prep_settings")
                 device.pressBack()
             }
             step("04_create_routines") {
-                click(By.text("아침 루틴 설정"), "home_list")
+                // 아침 루틴 입구는 내 정보 탭에 있다(iter4 H2-2).
+                click(By.res("tab_me"))
+                click(By.res("me_routine"), "me_scroll")
                 val blocks = config.getJSONArray("blocks")
                 for (i in 0 until blocks.length()) {
                     click(By.res("routine_new"), "routine_scroll")
@@ -114,17 +128,18 @@ class PublicSetupTest {
                     click(By.res("block_save"), "block_draft_scroll")
                     find(By.text(blocks.getString(i)).clazz("android.widget.TextView"), "routine_scroll", timeout = 90_000)
                 }
-                device.pressBack()
+                device.pressBack() // 루틴 → 내 정보
+                device.pressBack() // 내 정보 → 홈 탭
             }
             step("05_add_event_and_route") {
-                click(By.text("+  일정 추가"), "home_list")
+                click(By.res("add_event"))
                 input("event_title", config.getString("event_title"))
                 click(By.res("event_date"))
                 val date = LocalDate.parse(config.getString("event_date"))
                 if (YearMonth.from(date) != YearMonth.now()) click(By.desc(Pattern.compile("Change to next month|다음 달.*")))
                 click(By.textContains(date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(Locale.getDefault()))))
                 click(By.text("확인"))
-                // 기본 9시와 같은 시각·오전/오후·경계 분도 같은 다이얼로 확인한다.
+                // 기본 9시와 같은 시각·오전/오후·경계 분도 같은 휠로 확인한다.
                 for (time in listOf("21:02", "09:00", "12:30", "00:59", config.getString("event_time"))) {
                     click(By.res("event_time"))
                     pickTime(time)
@@ -176,19 +191,23 @@ class PublicSetupTest {
             step("07_relogin_and_persistence") {
                 launch()
                 find(By.res("next_alarm"), timeout = 90_000) // 토큰으로 자동 로그인.
-                click(By.res("open_settings"), "home_list")
-                find(By.text(config.getString("home_query")), "settings_scroll")
-                find(By.text(durationText(config.getInt("prep_minutes"))), "settings_scroll")
+                click(By.res("tab_me"))
+                find(By.textContains(config.getString("home_query")), "me_scroll")
+                find(By.textContains("평소 ${durationText(config.getInt("prep_minutes"))}"), "me_scroll")
+                // 로그아웃은 내 정보 › 설정 안에 있다.
+                click(By.res("me_settings"), "me_scroll")
                 click(By.text("로그아웃"), "settings_scroll")
                 input("login_email", config.getString("email"), timeout = 90_000)
                 input("login_password", config.getString("password"))
                 click(By.res("login_submit"), "login_scroll")
                 find(By.res("next_alarm"), timeout = 90_000)
-                click(By.text("아침 루틴 설정"), "home_list")
+                click(By.res("tab_me"))
+                click(By.res("me_routine"), "me_scroll")
                 val blocks = config.getJSONArray("blocks")
                 for (i in 0 until blocks.length())
                     find(By.text(blocks.getString(i)).clazz("android.widget.TextView"), "routine_scroll")
-                device.pressBack()
+                device.pressBack() // 루틴 → 내 정보
+                device.pressBack() // 내 정보 → 홈 탭
                 find(By.res("next_alarm"), "home_list")
             }
             step("08_alarm_switch") {

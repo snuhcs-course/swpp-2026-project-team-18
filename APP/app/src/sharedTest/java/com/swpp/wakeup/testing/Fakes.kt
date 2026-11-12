@@ -263,6 +263,7 @@ open class FakeEventsApi : EventsApi {
         unexpected("update")
 
     override suspend fun delete(id: Long): Response<Unit> = unexpected("delete")
+    override suspend fun deleteScoped(id: Long, scope: String): Response<Unit> = unexpected("deleteScoped")
     override suspend fun recompute(id: Long): Response<EventDto> = unexpected("recompute")
     override suspend fun patch(id: Long, body: okhttp3.RequestBody): Response<EventDto> = unexpected("patch")
     override suspend fun reroute(

@@ -28,8 +28,8 @@ import com.swpp.wakeup.ui.theme.JitRadius
 /**
  * 시계 다이얼 팝업(Material3 `TimePicker`). 시를 고르면 분 다이얼로 넘어간다.
  *
- * 일정 추가의 시작 시각(12시간제)과 준비 시간([JitDurationPickerDialog], 24시간제)이
- * 같이 쓴다. 다이얼을 두 벌 두면 색·버튼이 화면마다 달라진다.
+ * 지금은 준비 시간([JitDurationPickerDialog], 24시간제)만 쓴다. 일정 시작 시각은 휠
+ * ([JitTimeWheelSheet], iter4 H2-5)로 바꿨다. 준비 시간도 휠(⑮-a)로 바꾸면 지운다.
  *
  * 기본 색이 밝아 어두운 팔레트와 충돌하므로 앱 팔레트로 칠한다. 내부 값은 0~23 시
  * 그대로다(`TimePickerState.hour`). 상태가 스냅숏이라 [confirmEnabled]·[supporting] 은

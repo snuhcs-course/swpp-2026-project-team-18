@@ -29,6 +29,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -39,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swpp.wakeup.data.repository.EventScope
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.ConfidenceView
 import com.swpp.wakeup.domain.model.PlanRow
@@ -47,7 +52,14 @@ import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.common.JitChip
 import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.JitPrimaryButton
+import com.swpp.wakeup.ui.events.RecurrenceScopeSheet
+import com.swpp.wakeup.ui.events.ScopeAction
 import com.swpp.wakeup.ui.events.ScreenHeader
+import com.swpp.wakeup.ui.help.HelpTopic
+import com.swpp.wakeup.ui.help.InfoButton
+import com.swpp.wakeup.ui.help.OnTimeProbabilitySheet
+import com.swpp.wakeup.ui.help.OnTimeSheetSpec
+import com.swpp.wakeup.ui.help.OnTimeSheetText
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
 import com.swpp.wakeup.ui.theme.JitSpace
@@ -127,7 +139,57 @@ fun AlarmDecisionScreen(
     fasterRouteBusy: Boolean = false,
     /** [이 경로로 바꾸기] (알람 전) */
     onSwitchFasterRoute: (FasterRouteOffer) -> Unit = {},
+    /**
+     * 반복 일정 삭제 범위(iter4 A2, [com.swpp.wakeup.data.repository.RecurrenceScope.deleteChoices]). 비어 있으면
+     * 묻지 않고 [onDelete] 를 부른다(반복이 아니거나 서버가 범위 삭제를 모름).
+     */
+    deleteScopes: List<EventScope> = emptyList(),
+    /** 삭제 시트에서 고른 범위로 지운다 */
+    onDeleteScoped: (EventScope) -> Unit = {},
+    /**
+     * 도움말을 그 항목을 펼친 채로 연다(iter4 H2-4). null 이면 i 를 그리지 않는다. 오른쪽 위 i 와 확률 줄은 확률이
+     * 있으면 "정시 도착 확률이 뭐예요?" 시트를, 없으면 도움말의 그 질문을 연다. "계산 방법" 의 i 는 알람 시각 질문이다
+     */
+    onHelp: ((HelpTopic) -> Unit)? = null,
 ) {
+    var askDeleteScope by rememberSaveable { mutableStateOf(false) }
+    // Partly AI-generated (Claude) — i 시트(Figma `548:1798`)
+    var showOnTime by rememberSaveable { mutableStateOf(false) }
+    val onTimeSpec = plan?.let(::onTimeSpecOf)
+    if (showOnTime && plan != null && onTimeSpec != null) {
+        OnTimeProbabilitySheet(
+            spec = onTimeSpec,
+            tone = probabilityColor(plan),
+            // [알람 시각 바꾸기] 는 H2-3 시트 자리다. 시트가 생기기 전에는 ⑤ 지각 위험 고르기로 간다.
+            onChangeTime = if (plan.isComputed && !plan.skipped) {
+                {
+                    showOnTime = false
+                    onChangeRisk()
+                }
+            } else null,
+            onDismiss = { showOnTime = false },
+        )
+    }
+    val openProbability: (() -> Unit)? = onHelp?.let { help ->
+        {
+            if (onTimeSpec != null) {
+                showOnTime = true
+            } else {
+                help(HelpTopic.ON_TIME_PROBABILITY)
+            }
+        }
+    }
+    if (askDeleteScope && deleteScopes.isNotEmpty()) {
+        RecurrenceScopeSheet(
+            action = ScopeAction.DELETE,
+            choices = deleteScopes,
+            onChoose = { scope ->
+                askDeleteScope = false
+                onDeleteScoped(scope)
+            },
+            onDismiss = { askDeleteScope = false },
+        )
+    }
     Column(
         modifier = modifier
             .testTag("plan_scroll")
@@ -142,7 +204,13 @@ fun AlarmDecisionScreen(
             ),
         verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
     ) {
-        ScreenHeader(title = "알람 결정", onBack = onBack)
+        ScreenHeader(
+            title = "알람 결정",
+            onBack = onBack,
+            action = openProbability?.let { open ->
+                { InfoButton(contentDescription = "정시 도착 확률이 뭐예요?", tag = "plan_info", onClick = open) }
+            },
+        )
 
         if (plan == null) {
             LoadingBlock()
@@ -198,15 +266,15 @@ fun AlarmDecisionScreen(
         if (plan.isComputed) {
             // 안 간 일정의 알람은 울리지 않는다. 근거는 남기되 흐리게 둔다(Figma ④ 변형).
             if (plan.skipped) {
-                Box(Modifier.alpha(SKIPPED_ALPHA)) { RecommendedAlarmCard(plan) }
+                Box(Modifier.alpha(SKIPPED_ALPHA)) { RecommendedAlarmCard(plan, openProbability) }
             } else {
-                RecommendedAlarmCard(plan)
+                RecommendedAlarmCard(plan, openProbability)
             }
             // 알람이 울리기 전에만 나온다(Figma ④ 변형 `512:30`). 그 뒤에는 일정에 저장한 경로를 바꾸지 않는다.
             fasterRoute?.takeIf { !plan.skipped && it.isOpen(System.currentTimeMillis()) }?.let {
                 FasterRouteCard(offer = it, busy = fasterRouteBusy, onSwitch = { onSwitchFasterRoute(it) })
             }
-            BreakdownCard(plan)
+            BreakdownCard(plan, onInfo = onHelp?.let { help -> { help(HelpTopic.ALARM_TIME) } })
 
             // 계산 근거 바로 아래에 "지금 어디쯤" 을 둔다. 같은 여정을 계획과
             // 실제 두 면에서 보여 주는 것이고, 순서가 바뀌면 진행률이 어느
@@ -326,7 +394,10 @@ fun AlarmDecisionScreen(
                 modifier = Modifier
                     .testTag("event_delete")
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onDelete)
+                    .clickable {
+                        // 반복 회차면 "이 일정만 / 이후 일정 모두" 를 먼저 묻는다(iter4 A2).
+                        if (deleteScopes.isNotEmpty()) askDeleteScope = true else onDelete()
+                    }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
@@ -367,7 +438,7 @@ private fun SkippedCard(onUnskip: () -> Unit, enabled: Boolean) {
 private const val SKIPPED_ALPHA = 0.45f
 
 @Composable
-private fun RecommendedAlarmCard(plan: AlarmPlanView) {
+private fun RecommendedAlarmCard(plan: AlarmPlanView, onProbabilityClick: (() -> Unit)? = null) {
     JitCard(padding = 18.dp, gap = 8.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -403,7 +474,7 @@ private fun RecommendedAlarmCard(plan: AlarmPlanView) {
         // 이 카드는 알람 시각과 정시 확률만 둔다(todo §2 "적용 알람 정보 줄이기", Figma ④ `1:18`).
         // 경로 기준·계산 시각·경로 대체 경고는 "계산 방법" 으로 옮겼다. 도착 예정은 그 카드의
         // 합계 줄에 이미 있다.
-        ProbabilityRow(plan)
+        ProbabilityRow(plan, onProbabilityClick)
     }
 }
 
@@ -414,11 +485,18 @@ private fun RecommendedAlarmCard(plan: AlarmPlanView) {
  * 하려는 것이고, 무엇이 있어야 값이 생기는지 알려 준다. 숫자는 만들지 않는다.
  */
 @Composable
-private fun ProbabilityRow(plan: AlarmPlanView) {
+private fun ProbabilityRow(plan: AlarmPlanView, onClick: (() -> Unit)? = null) {
     val confidence = plan.confidence
+    // 누르면 "정시 도착 확률이 뭐예요?"(iter4 H2-4). 확률이 없으면 도움말의 그 질문
+    val tapModifier = if (onClick != null) {
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .testTag("plan_probability")
+    } else Modifier
 
     if (confidence.isUnavailable) {
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(modifier = tapModifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
             JitDotLabel(
                 text = confidence.headline,
                 dotColor = JitColor.TextSecondary,
@@ -440,8 +518,8 @@ private fun ProbabilityRow(plan: AlarmPlanView) {
 
     // 목표치(τ)를 넘겼는지로 색을 정한다. 90% 고정으로 비교하면 τ=0.99 를
     // 고른 사용자에게 95% 를 초록으로 보여주게 된다 — 목표 미달인데 안심시킨다.
-    val color = if (confidence.meets(plan.tauUsed)) JitColor.Green else JitColor.Amber
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+    val color = probabilityColor(plan)
+    Column(modifier = tapModifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         JitDotLabel(
             text = confidence.headline,
             dotColor = color,
@@ -459,11 +537,43 @@ private fun ProbabilityRow(plan: AlarmPlanView) {
     }
 }
 
-/** Figma "이렇게 계산했음" — 값마다 출처를 붙인다. */
+/** 확률 색. 목표치(τ)를 넘겼으면 초록, 아니면 주황. 줄과 i 시트가 같은 색을 쓴다 */
+private fun probabilityColor(plan: AlarmPlanView): Color =
+    if (plan.confidence.meets(plan.tauUsed)) JitColor.Green else JitColor.Amber
+
+// Partly AI-generated (Claude)
+/** i 시트에 넣을 값. 확률이 없으면 null(시트 대신 도움말을 연다) */
+private fun onTimeSpecOf(plan: AlarmPlanView): OnTimeSheetSpec? {
+    val percent = plan.confidence.percent ?: return null
+    val alarm = plan.alarmAtMillis?.let { OnTimeSheetText.clock(it) }
+        ?: plan.alarmAt?.let { listOfNotNull(koreanMeridiem(plan.meridiem), it).joinToString(" ") }
+        ?: return null
+    val start = plan.startAtMillis?.let { OnTimeSheetText.clock(it) } ?: "일정 시작"
+    return OnTimeSheetSpec(percent = percent, alarmLabel = alarm, startLabel = start)
+}
+
+private fun koreanMeridiem(ampm: String): String? = when (ampm) {
+    "AM" -> "오전"
+    "PM" -> "오후"
+    else -> null
+}
+
+/** Figma "이렇게 계산했음" — 값마다 출처를 붙인다. [onInfo] 는 제목 옆 i(도움말 › 알람 시각) */
 @Composable
-private fun BreakdownCard(plan: AlarmPlanView) {
+private fun BreakdownCard(plan: AlarmPlanView, onInfo: (() -> Unit)? = null) {
     JitCard(padding = 14.dp, gap = 9.dp) {
-        Text("계산 방법", color = JitColor.TextSecondary, fontSize = 11.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("계산 방법", color = JitColor.TextSecondary, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            onInfo?.let {
+                InfoButton(
+                    contentDescription = "알람 시각은 어떻게 정해지나요?",
+                    tag = "plan_breakdown_info",
+                    onClick = it,
+                    size = 24,
+                    iconSize = 14,
+                )
+            }
+        }
         // 어느 경로를 기준으로 계산했는지. 알람 시각만 보면 "왜 이 시각인가" 의
         // 절반(이동 시간)이 어디서 왔는지 알 수 없다. 문장은 앱이 경로 key 로 만든다([RouteBasis]).
         plan.routeBasis?.let {

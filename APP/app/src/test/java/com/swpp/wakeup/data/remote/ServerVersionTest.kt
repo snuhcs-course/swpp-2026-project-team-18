@@ -113,4 +113,23 @@ class ServerVersionTest {
         val message = ServerVersion.behindMessage(null, null)
         assertTrue(message.contains("알 수 없음"))
     }
+    // --- 기능 기준 버전 (Partly AI-generated (Claude)) -----------------------
+
+    @Test
+    fun `기준 버전 이상인지 숫자로 비교한다`() {
+        assertTrue(ServerVersion.isAtLeast("0.21.0", "0.21.0"))
+        assertTrue(ServerVersion.isAtLeast("0.21", "0.21.0"))
+        assertTrue(ServerVersion.isAtLeast("0.100.0", "0.21.0"))
+        assertFalse(ServerVersion.isAtLeast("0.20.0", "0.21.0"))
+        // 문자열 비교였다면 "0.3.0" > "0.21.0" 이 된다.
+        assertFalse(ServerVersion.isAtLeast("0.3.0", "0.21.0"))
+    }
+
+    @Test
+    fun `버전을 모르면 기준에 못 미친 것으로 본다`() {
+        // 모르는 서버에 새 기능을 열면, 서버가 조용히 무시할 때 사용자가 속는다.
+        assertFalse(ServerVersion.isAtLeast(null, "0.21.0"))
+        assertFalse(ServerVersion.isAtLeast("unknown", "0.21.0"))
+        assertFalse(ServerVersion.isAtLeast("0.21.0", "x"))
+    }
 }

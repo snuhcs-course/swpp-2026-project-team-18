@@ -107,6 +107,20 @@ class HomeListTest {
         assertEquals("미룬 알람이 울리는 순간 다시 그린다", now + 3 * minute, v.nextChangeMillis)
     }
 
+    // Partly AI-generated (Claude)
+    @Test
+    fun `미룬 알람은 카드의 큰 시각과 남은 시간도 미룬 시각으로 바꾼다`() {
+        val snoozed = event(1, startAt = now + 6 * 60 * minute, alarmAt = now - 2 * minute)
+        // 13:03 으로 미룸(device 라벨은 24시간제)
+        val at = now + 5 * 60 * minute + 3 * minute
+
+        val next = view(snoozed, device = mapOf(1L to device(1, at, "13:03"))).nextAlarm
+
+        assertEquals("1:03", next?.alarmClock)
+        assertEquals("PM", next?.alarmMeridiem)
+        assertEquals(at, next?.alarmAtMillis)
+    }
+
     @Test
     fun `안 감 일정과 꺼진 알람은 다음 알람이 아니다`() {
         val skipped = event(1, startAt = now + 60 * minute, skipped = true)

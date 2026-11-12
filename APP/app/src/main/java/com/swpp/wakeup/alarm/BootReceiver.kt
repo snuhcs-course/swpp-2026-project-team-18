@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.swpp.wakeup.reminder.WeeklyReportReminder
 
 /**
  * 재부팅·앱 교체·시각 변경 후 알람을 다시 등록한다.
@@ -15,6 +16,8 @@ import android.util.Log
  * `TIME_SET`·`TIMEZONE_CHANGED` 도 받는다. 알람은 절대 시각(epoch)으로
  * 등록되므로 시간대가 바뀌면 사용자가 기대하는 벽시계 시각과 어긋난다.
  * 저장된 값으로 다시 등록해 맞춘다.
+ *
+ * 일요일 주간 리포트 알림([WeeklyReportReminder])도 같은 이유로 여기서 다시 건다.
  */
 class BootReceiver : BroadcastReceiver() {
 
@@ -28,6 +31,8 @@ class BootReceiver : BroadcastReceiver() {
         AlarmNotifications.ensureChannels(context)
         val restored = AlarmScheduler(context).restoreAll()
         Log.i(TAG, "$action → 알람 ${restored}건 재등록")
+        // 주간 리포트 알림도 다시 건다. 시간대가 바뀌면 그 시간대의 일요일 12:00 으로 맞춘다. (Partly AI-generated (Claude))
+        WeeklyReportReminder.scheduleNext(context)
     }
 
     private companion object {

@@ -42,6 +42,7 @@ import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.JitPrimaryButton
 import com.swpp.wakeup.ui.common.JitProgressBar
 import com.swpp.wakeup.ui.events.ScreenHeader
+import com.swpp.wakeup.ui.help.InfoButton
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitSpace
 import com.swpp.wakeup.ui.theme.JitTheme
@@ -59,11 +60,17 @@ fun RiskChoiceScreen(
     saving: Boolean = false,
     error: String? = null,
     onRetry: () -> Unit = {},
+    /** 오른쪽 위 i. 도움말 › "여유 있게·보통·빠듯하게는 뭐가 달라요?" 를 펼쳐 연다(iter4 H2-4). null 이면 없다 */
+    onHelp: (() -> Unit)? = null,
 ) {
+    // Partly AI-generated (Claude)
+    val action: (@Composable () -> Unit)? = onHelp?.let { help ->
+        { InfoButton(contentDescription = "단계는 뭐가 달라요?", tag = "risk_info", onClick = help) }
+    }
     if (!loading && riskOptions != null && riskOptions.options.isNotEmpty()) {
-        RiskChooser(riskOptions, onBack, onContinue, modifier, saving, error, plan?.tauUsed)
+        RiskChooser(riskOptions, onBack, onContinue, modifier, saving, error, plan?.tauUsed, action)
     } else {
-        RiskEmptyState(plan, onBack, modifier, loading, error, riskOptions?.unavailableReason, onRetry)
+        RiskEmptyState(plan, onBack, modifier, loading, error, riskOptions?.unavailableReason, onRetry, action)
     }
 }
 
@@ -78,6 +85,7 @@ private fun RiskChooser(
     saving: Boolean = false,
     error: String? = null,
     currentTau: Double? = null,
+    headerAction: (@Composable () -> Unit)? = null,
 ) {
     // 고른 옵션은 화면 상태다. 저장은 "계속하기" 를 눌렀을 때 한다(B-5).
     var selectedKey by rememberSaveable(riskOptions) {
@@ -99,7 +107,7 @@ private fun RiskChooser(
             ),
         verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
     ) {
-        ScreenHeader(title = "지각 위험", onBack = onBack)
+        ScreenHeader(title = "지각 위험", onBack = onBack, action = headerAction)
 
         Text(
             text = "얼마나 안전하게 갈까?",
@@ -326,6 +334,7 @@ private fun RiskEmptyState(
     error: String?,
     unavailableReason: String?,
     onRetry: () -> Unit,
+    headerAction: (@Composable () -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -341,7 +350,7 @@ private fun RiskEmptyState(
             ),
         verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
     ) {
-        ScreenHeader(title = "지각 위험", onBack = onBack)
+        ScreenHeader(title = "지각 위험", onBack = onBack, action = headerAction)
 
         Text(
             text = "얼마나 안전하게 갈까?",

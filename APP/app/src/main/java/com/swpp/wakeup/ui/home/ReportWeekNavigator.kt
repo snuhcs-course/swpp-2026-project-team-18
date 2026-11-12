@@ -13,7 +13,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 /**
- * ⑧ 주간 리포트의 상태와 주 이동 규칙. [HomeViewModel] 이 들고, 화면 스택은 그쪽이 민다.
+ * 리포트 탭(예전 ⑧ 주간 리포트)의 상태와 주 이동 규칙. [HomeViewModel] 이 들고, 화면 스택은 그쪽이 민다.
  *
  * `AndroidViewModel` 은 `Application` 이 있어야 만들 수 있어 JVM 단위 테스트가 닿지
  * 않는다(`HomeViewModelInitOrderTest` 머리말). 그래서 규칙을 여기 두고 저장소 대신 함수를
@@ -22,6 +22,8 @@ import java.time.LocalDate
  * - 불러오기에 실패하면 **보이던 주로 되돌린다.** 요청한 주에 머물면 화면의 주와 "›"
  *   판정이 서로 다른 주를 가리켜, 다시 누르면 미래 주까지 갈 수 있다.
  * - 다음 주로는 서버가 허락할 때만 간다(`has_next_week`). 화면이 "›" 를 끄지만 여기서도 막는다.
+ * - 처음 열면 **오늘이 든 주**(월~일)를 부른다(iter4 H2-2, Figma `546:1943`). 서버 기본값(지난 주)에
+ *   기대지 않고 날짜를 넘긴다. 받은 뒤에는 서버가 정한 그 주 월요일을 "보고 있는 주" 로 둔다.
  * - 홈에서 열 때마다 [HomeViewModel.ReportState.openCount] 를 올린다. ⑧ 이 그 값으로 맨 위로
  *   스크롤한다(⑨ 에서 돌아올 때는 그대로).
  */
@@ -37,10 +39,10 @@ internal class ReportWeekNavigator(
     private val _state = MutableStateFlow(HomeViewModel.ReportState())
     val state: StateFlow<HomeViewModel.ReportState> = _state.asStateFlow()
 
-    /** 홈에서 연다. 마지막으로 본 주를 다시 연다(처음은 null — 서버 기본값인 지난 주). */
+    /** 탭에서 연다. 마지막으로 본 주를 다시 열고, 처음이면 오늘이 든 주를 연다. */
     fun open() {
         _state.update { it.copy(openCount = it.openCount + 1) }
-        load(_state.value.week)
+        load(_state.value.week ?: today())
     }
 
     /** 마지막으로 시작한 불러오기. 늦게 끝난 옛 응답이 새 응답을 덮지 못하게 한다 */
@@ -56,7 +58,7 @@ internal class ReportWeekNavigator(
             if (gen != loadGeneration) return@launch
             when (result) {
                 is ReportResult.Success -> _state.update {
-                    it.copy(loading = false, error = null, weekly = result.data)
+                    it.copy(loading = false, error = null, weekly = result.data, week = result.data.weekStart ?: week)
                 }
 
                 is ReportResult.Failure -> _state.update {
@@ -77,14 +79,21 @@ internal class ReportWeekNavigator(
         }
     }
 
+    // Partly AI-generated (Claude)
+    /** 일요일 주간 리포트 알림에서 [week] 를 연다. 탭을 처음 여는 것처럼 [HomeViewModel.ReportState.openCount] 를 올려 맨 위로 보낸다 */
+    fun openWeek(week: LocalDate) {
+        _state.update { it.copy(openCount = it.openCount + 1) }
+        load(week)
+    }
+
     /** 보고 있는 주를 다시 불러온다. "안 감" 표시 뒤에 쓴다 */
     fun reload() = load(_state.value.week)
 
-    /** 한 주 앞뒤로 이동한다. 기준은 보고 있는 주, 없으면 지난 주다. */
+    /** 한 주 앞뒤로 이동한다. 기준은 보고 있는 주, 없으면 이번 주다. */
     fun shift(weeks: Long) {
         val current = _state.value
         if (weeks > 0 && current.weekly?.canGoNext == false) return
-        val base = current.week ?: current.weekly?.weekStart ?: today().minusWeeks(1)
+        val base = current.week ?: current.weekly?.weekStart ?: today()
         load(base.plusWeeks(weeks))
     }
 }
