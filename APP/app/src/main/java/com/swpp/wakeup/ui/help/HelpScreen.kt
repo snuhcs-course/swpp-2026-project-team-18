@@ -52,6 +52,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swpp.wakeup.domain.model.Inquiry
 import com.swpp.wakeup.ui.common.LineIcons
 import com.swpp.wakeup.ui.events.ScreenHeader
 import com.swpp.wakeup.ui.theme.JitColor
@@ -66,7 +67,9 @@ import com.swpp.wakeup.ui.theme.JitTheme
  * 질문은 아코디언이다 — 하나만 펼치고, 펼친 질문은 주황 테두리 카드 하나, 접힌 질문은 이어지는 것끼리 카드 하나에
  * 구분선으로 묶는다. 처음에는 [expand](i 로 왔을 때) 또는 첫 질문을 펼친다. 문구와 규칙은 [HelpFaq].
  *
- * @param onContact [문의하기]. 연락할 곳이 정해지기 전에는 null 이라 그리지 않는다
+ * @param onSendInquiry [문의하기] 시트([ContactSheet])가 글을 서버로 보낼 때 부른다. null 이면 버튼을 그리지 않는다
+ * @param contactEmail 문의 시트의 "답 받을 이메일" 에 미리 채울 값(로그인 이메일)
+ * @param onInquirySent 문의를 보낸 뒤(스낵바)
  */
 @Composable
 internal fun HelpScreen(
@@ -74,8 +77,23 @@ internal fun HelpScreen(
     onBack: () -> Unit,
     onReplayIntro: () -> Unit,
     modifier: Modifier = Modifier,
-    onContact: (() -> Unit)? = null,
+    onSendInquiry: (suspend (message: String, email: String) -> Inquiry.Outcome)? = null,
+    contactEmail: String? = null,
+    onInquirySent: () -> Unit = {},
 ) {
+    var contactOpen by rememberSaveable { mutableStateOf(false) }
+    if (contactOpen && onSendInquiry != null) {
+        ContactSheet(
+            defaultEmail = contactEmail,
+            onSend = onSendInquiry,
+            onSent = {
+                contactOpen = false
+                onInquirySent()
+            },
+            onDismiss = { contactOpen = false },
+        )
+    }
+
     var query by rememberSaveable { mutableStateOf("") }
     var expanded by rememberSaveable { mutableStateOf<HelpTopic?>(HelpFaq.initialExpanded(expand)) }
     val results = remember(query) { HelpFaq.search(query) }
@@ -160,14 +178,14 @@ internal fun HelpScreen(
                 content = JitColor.TextPrimary,
                 onClick = onReplayIntro,
             )
-            onContact?.let {
+            if (onSendInquiry != null) {
                 SmallButton(
                     icon = LineIcons.help,
                     label = "문의하기",
                     tag = "help_contact",
                     container = Color.Transparent,
                     content = JitColor.Accent,
-                    onClick = it,
+                    onClick = { contactOpen = true },
                 )
             }
         }
@@ -465,7 +483,7 @@ private fun Modifier.clip16(): Modifier = this.then(Modifier.clip(RoundedCornerS
 @Composable
 private fun HelpScreenPreview() {
     JitTheme {
-        HelpScreen(expand = null, onBack = {}, onReplayIntro = {}, onContact = {})
+        HelpScreen(expand = null, onBack = {}, onReplayIntro = {}, onSendInquiry = { _, _ -> Inquiry.Outcome.DONE })
     }
 }
 

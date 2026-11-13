@@ -53,8 +53,8 @@ class PrepOnboardingStateTest {
 
     // AI-generated (Claude)
     @Test
-    fun `다이얼 범위는 5분에서 4시간이다`() {
-        // 다이얼(시:분)의 경계. 0:04 ✗, 0:05 ✓, 4:00 ✓, 4:01 ✗, 23:00 ✗
+    fun `휠 범위는 5분에서 4시간이다`() {
+        // 휠(시간 · 분)의 경계. 0:04 ✗, 0:05 ✓, 4:00 ✓, 4:01 ✗, 23:00 ✗
         val range = HomeViewModel.PrepOnboardingState().range
         assertEquals(5..240, range)
         assertNull(state("${0 * 60 + 4}").parsed)

@@ -50,7 +50,7 @@ class NavStateTest {
 
     @Test
     fun `지금 탭을 다시 누르면 그 탭의 첫 화면으로 간다`() {
-        val deep = NavState().push(AppRoute.AlarmDecision(1)).push(AppRoute.RiskChoice(1))
+        val deep = NavState().push(AppRoute.AlarmDecision(1)).push(AppRoute.EventBlocks(1))
         val top = deep.selectTab(AppTab.HOME)
         assertEquals(listOf(AppRoute.Home), top.stack)
         assertFalse(top.forward)
@@ -111,7 +111,7 @@ class NavStateTest {
         }
         listOf(AppRoute.AddEvent, AppRoute.EditEvent(1), AppRoute.RouteChoice, AppRoute.MapPick,
             AppRoute.HomeSetup, AppRoute.PrepOnboarding, AppRoute.CalendarLink, AppRoute.ChangePassword,
-            AppRoute.VerifyEmail, AppRoute.RiskChoice(1), AppRoute.MorningProgress, AppRoute.RoutineEditor,
+            AppRoute.VerifyEmail, AppRoute.MorningProgress, AppRoute.RoutineEditor,
             AppRoute.EventBlocks(1), AppRoute.CalendarImport, AppRoute.Intro, AppRoute.Help(),
             AppRoute.Help(com.swpp.wakeup.ui.help.HelpTopic.CALENDAR)).forEach {
             assertFalse("$it", it.showsTabBar)

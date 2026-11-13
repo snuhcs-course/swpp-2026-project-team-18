@@ -77,6 +77,8 @@ fun SignupScreen(
     waking: Boolean = false,
     passwordCheck: com.swpp.wakeup.data.remote.PasswordCheckResponse? = null,
     passwordCheckError: String? = null,
+    /** 서버가 400 으로 거절한 닉네임의 이유. 닉네임 칸 아래에 붙는다(iter4 H2-11) */
+    nicknameError: String? = null,
 ) {
     Column(
         modifier = modifier
@@ -124,12 +126,13 @@ fun SignupScreen(
             fontSize = 13.sp
         )
 
-        JitTextField(
+        // 칸 아래 안내 · 글자 수 · 오류 이유(iter4 H2-11, Figma `549:2029`)
+        NicknameField(
             label = stringResource(R.string.auth_nickname),
-            inputTag = "signup_nickname",
             value = nickname,
             onValueChange = onNicknameChange,
-            enabled = !loading
+            enabled = !loading,
+            serverError = nicknameError,
         )
 
         EmailField(
@@ -189,8 +192,9 @@ fun SignupScreen(
             enabled = !loading
         )
 
+        // 가입 요청이 거절되면 버튼 바로 위 빨간 카드(Figma `549:2094`). 꺼진 버튼은 Track 바탕 · 회색 글자(JitPrimaryButton)
         if (error != null) {
-            ErrorText(error)
+            SignupErrorCard(error)
         }
 
         // 잠든 서버를 깨우는 동안. 버튼만 돌고 있으면 앱이 멈춘 줄 안다.

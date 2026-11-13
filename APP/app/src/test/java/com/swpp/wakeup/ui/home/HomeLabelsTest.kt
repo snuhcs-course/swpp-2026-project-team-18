@@ -132,4 +132,11 @@ class HomeLabelsTest {
         assertEquals("알람 없음", HomeLabels.rowAlarmLabel(event(alarmClock = null, planStatus = "no_home")))
         assertEquals("알람 없음", HomeLabels.rowAlarmLabel(event(planStatus = "route_failed")))
     }
+
+    @Test
+    fun `홈 다음 알람 카드 넷째 줄은 장소와 제목만 쓴다`() {
+        assertEquals("302동 105호 · 자료구조 및 알고리즘", HomeLabels.heroPlaceTitleLine("302동 105호", "자료구조 및 알고리즘"))
+        assertEquals("자료구조 및 알고리즘", HomeLabels.heroPlaceTitleLine(null, "자료구조 및 알고리즘"))
+        assertEquals("자료구조 및 알고리즘", HomeLabels.heroPlaceTitleLine(" ", "자료구조 및 알고리즘"))
+    }
 }

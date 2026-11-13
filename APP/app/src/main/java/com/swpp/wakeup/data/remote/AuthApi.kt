@@ -70,6 +70,14 @@ interface AuthApi {
     @POST("api/auth/me/logout-all")
     suspend fun logoutAll(): Response<LogoutAllResponse>
 
+    // Partly AI-generated (Claude)
+    /**
+     * 쌓인 기록 초기화(제안 계약 BE-RESET, `docs/iter4/learning-reset-api.md`). Bearer 필요, 본문 없음.
+     * 200 `{"deleted": {...}}`. 서버에 아직 없으면 404/405.
+     */
+    @POST("api/auth/me/learning/reset")
+    suspend fun resetLearning(): Response<LearningResetResponse>
+
     // --- 소셜 로그인 (docs/iter3/social-login-api.md) — Partly AI-generated (Claude) ---
 
     /**
@@ -100,6 +108,9 @@ interface AuthApi {
 }
 
 data class LogoutAllResponse(val revoked: Int? = null)
+
+/** 지운 건수(종류 → 건수). 화면에는 쓰지 않고 로그로만 남긴다. 서버가 주지 않아도 된다 */
+data class LearningResetResponse(val deleted: Map<String, Int>? = null)
 
 // Partly AI-generated (Claude)
 data class PasswordResetRequest(val email: String)

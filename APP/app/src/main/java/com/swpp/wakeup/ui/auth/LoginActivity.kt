@@ -283,6 +283,7 @@ private fun AuthHost(
                     passwordCheckError = state.passwordCheckError,
                     loading = state.loading,
                     error = state.error,
+                    nicknameError = state.nicknameError,
                     canSubmit = state.canSubmitSignup,
                     onEmailChange = viewModel::onEmailChange,
                     onNicknameChange = viewModel::onNicknameChange,

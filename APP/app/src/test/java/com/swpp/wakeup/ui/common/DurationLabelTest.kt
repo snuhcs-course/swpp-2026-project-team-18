@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * 준비 시간 표기. 다이얼(시:분)·설정 행·저장 스낵바가 같은 표기를 쓴다.
+ * 준비 시간 표기. 준비 시간 화면 · 휠 · 설정 행 · 저장 스낵바가 같은 표기를 쓴다.
  * 범위 안내 "5분~4시간 사이로 고름" 도 이 함수로 만든다.
  */
 class DurationLabelTest {

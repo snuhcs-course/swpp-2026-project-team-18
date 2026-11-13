@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -138,6 +139,41 @@ internal fun JitTimeWheel(
     val hour12 = TimeWheelMath.hour12(hour24)
     val minuteIndex = minutes.indexOf("%02d".format(TimeWheelMath.snapMinute(minute, minuteStep))).coerceAtLeast(0)
 
+    WheelBox(modifier) {
+        WheelColumn(
+            values = TimeWheelMath.MERIDIEMS,
+            selected = if (pm) 1 else 0,
+            loop = false,
+            label = "오전 오후",
+            tag = "wheel_ampm",
+            onSelect = { index -> onChange(TimeWheelMath.hour24(index == 1, hour12), minute) },
+        )
+        WheelColumn(
+            values = TimeWheelMath.HOURS,
+            selected = hour12 - 1,
+            loop = true,
+            label = "시",
+            tag = "wheel_hour",
+            onSelect = { index -> onChange(TimeWheelMath.hour24(pm, index + 1), minute) },
+        )
+        Text(":", color = JitColor.TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        WheelColumn(
+            values = minutes,
+            selected = minuteIndex,
+            loop = true,
+            label = "분",
+            tag = "wheel_minute",
+            onSelect = { index -> onChange(hour24, minutes[index].toInt()) },
+        )
+    }
+}
+
+/**
+ * 휠 열들을 담는 틀: 높이 180(줄 다섯) · 가운데 띠(Figma `band`, 높이 40 · 둥근 12) · 열 사이 8.
+ * 시각 휠과 준비 시간 휠([JitDurationWheelSheet])이 같이 쓴다.
+ */
+@Composable
+internal fun WheelBox(modifier: Modifier = Modifier, columns: @Composable RowScope.() -> Unit) {
     // 굴러가는 동안 남은 끌기가 바텀시트로 넘어가 시트가 내려가지 않게 휠 안에서 끝낸다.
     val keepScrollInside = remember {
         object : NestedScrollConnection {
@@ -153,7 +189,6 @@ internal fun JitTimeWheel(
             .nestedScroll(keepScrollInside),
         contentAlignment = Alignment.Center,
     ) {
-        // 가운데 띠(Figma `band`, 높이 40 · 둥근 12)
         Box(
             Modifier
                 .fillMaxWidth()
@@ -164,33 +199,8 @@ internal fun JitTimeWheel(
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically,
-        ) {
-            WheelColumn(
-                values = TimeWheelMath.MERIDIEMS,
-                selected = if (pm) 1 else 0,
-                loop = false,
-                label = "오전 오후",
-                tag = "wheel_ampm",
-                onSelect = { index -> onChange(TimeWheelMath.hour24(index == 1, hour12), minute) },
-            )
-            WheelColumn(
-                values = TimeWheelMath.HOURS,
-                selected = hour12 - 1,
-                loop = true,
-                label = "시",
-                tag = "wheel_hour",
-                onSelect = { index -> onChange(TimeWheelMath.hour24(pm, index + 1), minute) },
-            )
-            Text(":", color = JitColor.TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            WheelColumn(
-                values = minutes,
-                selected = minuteIndex,
-                loop = true,
-                label = "분",
-                tag = "wheel_minute",
-                onSelect = { index -> onChange(hour24, minutes[index].toInt()) },
-            )
-        }
+            content = columns,
+        )
     }
 }
 
@@ -202,7 +212,7 @@ internal fun JitTimeWheel(
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun WheelColumn(
+internal fun WheelColumn(
     values: List<String>,
     selected: Int,
     loop: Boolean,
@@ -313,36 +323,13 @@ internal fun JitTimeWheelSheet(
     var minute by rememberSaveable { mutableIntStateOf(TimeWheelMath.snapMinute(initialMinute, minuteStep)) }
     val (meridiem, clock) = TimeWheelMath.readout(hour, minute)
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        containerColor = JitColor.Surface,
-        scrimColor = JitColor.Bg.copy(alpha = 0.6f),
-        dragHandle = {
-            Box(
-                Modifier
-                    .padding(top = 10.dp)
-                    .size(width = 36.dp, height = 4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(JitColor.Track),
-            )
-        },
-        modifier = Modifier.testTag("time_wheel_sheet"),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(
-                text = title,
-                color = JitColor.TextPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.height(36.dp).padding(top = 8.dp),
-            )
+    WheelSheetFrame(
+        title = title,
+        tag = "time_wheel_sheet",
+        guide = TimeWheelMath.guide(minuteStep),
+        onConfirm = { onConfirm(hour, minute) },
+        onDismiss = onDismiss,
+        readout = {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -365,17 +352,84 @@ internal fun JitTimeWheelSheet(
                     fontWeight = FontWeight.Bold,
                 )
             }
-            JitTimeWheel(
-                hour24 = hour,
-                minute = minute,
-                minuteStep = minuteStep,
-                onChange = { h, m ->
-                    hour = h
-                    minute = m
-                },
+        },
+    ) {
+        JitTimeWheel(
+            hour24 = hour,
+            minute = minute,
+            minuteStep = minuteStep,
+            onChange = { h, m ->
+                hour = h
+                minute = m
+            },
+        )
+    }
+}
+
+/**
+ * 휠 시트의 틀(Figma `sheet 시작 시각` · `sheet 준비 시간`): 손잡이 · 제목(오른쪽에 [subtitle]) · 고른 값 큰 글자 ·
+ * 휠 · 안내 한 줄 · [취소] [확인]. [확인] 만 [onConfirm] 을 부른다. [취소] · 바깥 누르기 · 아래로 밀기 · 뒤로 가기는
+ * [onDismiss] 만 부른다.
+ *
+ * @param confirmEnabled 꺼지면 [확인] 이 흐려지고 눌리지 않는다(준비 시간: 값이 없을 때 한 번 굴리기 전)
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun WheelSheetFrame(
+    title: String,
+    tag: String,
+    guide: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    readout: @Composable () -> Unit,
+    subtitle: String? = null,
+    confirmEnabled: Boolean = true,
+    wheel: @Composable () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        containerColor = JitColor.Surface,
+        scrimColor = JitColor.Bg.copy(alpha = 0.6f),
+        dragHandle = {
+            Box(
+                Modifier
+                    .padding(top = 10.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(JitColor.Track),
             )
+        },
+        modifier = Modifier.testTag(tag),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(36.dp)
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = title,
+                    color = JitColor.TextPrimary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (subtitle != null) {
+                    Text(text = subtitle, color = JitColor.TextSecondary, fontSize = 12.sp)
+                }
+            }
+            readout()
+            wheel()
             Text(
-                text = TimeWheelMath.guide(minuteStep),
+                text = guide,
                 color = JitColor.TextSecondary,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
@@ -395,7 +449,8 @@ internal fun JitTimeWheelSheet(
                     container = JitColor.Accent,
                     content = JitColor.Bg,
                     tag = "wheel_confirm",
-                    onClick = { onConfirm(hour, minute) },
+                    onClick = onConfirm,
+                    enabled = confirmEnabled,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -405,23 +460,30 @@ internal fun JitTimeWheelSheet(
 
 /** 시트 아래 두 버튼(Figma `cta 취소` · `cta 확인`, 높이 50 · 둥근 14) */
 @Composable
-private fun SheetButton(
+internal fun SheetButton(
     label: String,
     container: Color,
     content: Color,
     tag: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     Box(
         modifier = modifier
             .testTag(tag)
             .height(50.dp)
             .clip(RoundedCornerShape(JitRadius.Button))
-            .background(container)
-            .clickable(role = Role.Button, onClick = onClick),
+            // 꺼진 [확인] 은 [취소] 와 같은 색이면 구분되지 않는다. Track 으로 흐리게(JitPrimaryButton 과 같다).
+            .background(if (enabled) container else JitColor.Track)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = content, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(
+            label,
+            color = if (enabled) content else JitColor.TextSecondary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+        )
     }
 }

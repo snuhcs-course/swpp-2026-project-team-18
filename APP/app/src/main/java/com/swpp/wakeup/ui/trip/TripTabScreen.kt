@@ -53,6 +53,7 @@ import com.swpp.wakeup.ui.common.JitChip
 import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.LineIcons
 import com.swpp.wakeup.ui.events.SegmentPalette
+import com.swpp.wakeup.ui.home.PendingProbabilityChip
 import com.swpp.wakeup.ui.home.HomeLabels
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.home.riskColor
@@ -216,7 +217,7 @@ private fun NextTripCard(event: UpcomingEvent, plan: AlarmPlanView, today: Local
                     contentColor = tone,
                     container = tone.copy(alpha = 0.15f),
                 )
-            }
+            } ?: PendingProbabilityChip(onClick = null, tag = "trip_probability_pending")
         }
 
         Row(verticalAlignment = Alignment.Bottom) {

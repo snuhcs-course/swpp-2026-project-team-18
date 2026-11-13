@@ -26,8 +26,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -38,6 +40,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.SpanStyle
@@ -46,7 +49,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.ui.common.JitPrimaryButton
@@ -151,10 +156,19 @@ private fun IntroPage(index: Int) {
                 .background(JitColor.Surface),
             contentAlignment = Alignment.Center,
         ) {
-            when (index) {
-                0 -> BackwardTimeline()
-                1 -> ChangeTimeIllustration()
-                else -> LearningIllustration()
+            // 그림은 Figma 의 324×340 판을 그대로 옮긴 것이라 글자 크기 설정을 따라 커지면 판 밖으로 잘린다.
+            // 그래서 그림 안에서는 글자 배율을 1 로 고정하고, Material 기본 줄 높이(24sp)가 작은 글자에 붙어
+            // 줄마다 높아지는 것을 막는다(줄 높이는 글자마다 Figma 값으로 적는다).
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density.density, fontScale = 1f),
+                LocalTextStyle provides LocalTextStyle.current.copy(lineHeight = TextUnit.Unspecified),
+            ) {
+                when (index) {
+                    0 -> BackwardTimeline()
+                    1 -> ChangeTimeIllustration()
+                    else -> LearningIllustration()
+                }
             }
         }
         Spacer(Modifier.height(12.dp + 20.dp))
@@ -337,31 +351,32 @@ private fun MiniAlarmCard() {
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(20.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(JitColor.Accent))
-                Text("다음 알람 · 오늘", color = JitColor.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                Text("다음 알람 · 오늘", color = JitColor.TextSecondary, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
                 MiniTag("추천", JitColor.Accent, JitColor.Accent.copy(alpha = 0.18f))
             }
             MiniTag("정시 도착 확률 90%", JitColor.Green, JitColor.Green.copy(alpha = 0.15f))
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f)) {
-                Text("오전", Modifier.alignByBaseline(), color = JitColor.Accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("오전", Modifier.alignByBaseline(), color = JitColor.Accent, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(5.dp))
-                Text("7:40", Modifier.alignByBaseline(), color = JitColor.Accent, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Text("7:40", Modifier.alignByBaseline(), color = JitColor.Accent, fontSize = 34.sp, lineHeight = 44.sp, fontWeight = FontWeight.Bold)
             }
             MiniChangeTimeButton()
         }
-        Text("1시간 28분 뒤 · 9:00 일정", color = JitColor.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text("1시간 28분 뒤 · 9:00 일정", color = JitColor.TextSecondary, fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         Text(
             "302동 105호 · 9:00 자료구조 및 알고리즘",
             color = JitColor.TextSecondary,
             fontSize = 10.sp,
+            lineHeight = 14.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
@@ -387,7 +402,7 @@ private fun MiniChangeTimeButton() {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(imageVector = LineIcons.pencil, contentDescription = null, tint = JitColor.TextPrimary, modifier = Modifier.size(16.dp))
-        Text("시각 바꾸기", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text("시각 바꾸기", color = JitColor.TextPrimary, fontSize = 13.sp, lineHeight = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
@@ -405,8 +420,8 @@ private fun MiniPicker() {
             Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(JitColor.Track))
         }
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 10.dp, bottom = 2.dp)) {
-            Text("알람 시각", Modifier.weight(1f), color = JitColor.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-            Text("정시 도착 확률", color = JitColor.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text("알람 시각", Modifier.weight(1f), color = JitColor.TextSecondary, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Medium)
+            Text("정시 도착 확률", color = JitColor.TextSecondary, fontSize = 11.sp, lineHeight = 13.sp, fontWeight = FontWeight.Medium)
         }
         PickerRow(time = "오전 7:40", percent = "90%", tone = JitColor.Green, recommended = true)
         PickerRow(time = "오전 7:50", percent = "81%", tone = JitColor.Amber, selected = true)
@@ -433,6 +448,7 @@ private fun PickerRow(time: String, percent: String, tone: Color, recommended: B
                 text = time,
                 color = if (selected) JitColor.TextPrimary else JitColor.TextSecondary,
                 fontSize = if (selected) 16.sp else 14.sp,
+                lineHeight = if (selected) 20.sp else 17.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             )
             if (recommended) MiniTag("추천", JitColor.TextSecondary, JitColor.Surface2)
@@ -443,6 +459,7 @@ private fun PickerRow(time: String, percent: String, tone: Color, recommended: B
                 text = percent,
                 color = tone,
                 fontSize = if (selected) 15.sp else 13.sp,
+                lineHeight = if (selected) 19.sp else 16.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -458,7 +475,7 @@ private fun MiniTag(label: String, content: Color, container: Color) {
             .background(container)
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
-        Text(label, color = content, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+        Text(label, color = content, fontSize = 10.sp, lineHeight = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
     }
 }
 

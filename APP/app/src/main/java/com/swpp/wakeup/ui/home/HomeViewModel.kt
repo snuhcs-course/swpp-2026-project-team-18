@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.alarm.AlarmLogQueue
 import com.swpp.wakeup.alarm.AlarmScheduler
+import android.os.Build
 import com.swpp.wakeup.BuildConfig
 import com.swpp.wakeup.background.JitWork
 import com.swpp.wakeup.calendar.DeviceCalendar
@@ -33,6 +34,7 @@ import com.swpp.wakeup.ui.events.tagsWithout
 import com.swpp.wakeup.data.remote.PlaceSearchItem
 import com.swpp.wakeup.data.remote.PlaceSearchResponse
 import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.data.remote.InquiryRequest
 import com.swpp.wakeup.data.remote.ServerVersion
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.repository.ArrivalRepository
@@ -44,7 +46,10 @@ import com.swpp.wakeup.data.repository.ReportRepository
 import com.swpp.wakeup.data.repository.RoutineRepository
 import com.swpp.wakeup.data.repository.ServerLogout
 import com.swpp.wakeup.domain.model.AlarmPlanView
+import com.swpp.wakeup.domain.model.AlarmTimeChoice
 import com.swpp.wakeup.domain.model.ArrivalLedger
+import com.swpp.wakeup.domain.model.Inquiry
+import com.swpp.wakeup.domain.model.LearningReset
 import com.swpp.wakeup.domain.model.SavedHome
 import com.swpp.wakeup.domain.model.SavedHomes
 import com.swpp.wakeup.domain.model.SAVED_HOMES_UPLOADING_NOTICE
@@ -229,6 +234,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val notice: HomeNotice? = null,
         /** 모든 기기 로그아웃을 서버에 요청하는 중 */
         val logoutAllBusy: Boolean = false,
+        /** 내 정보 › "기록 초기화" 확인 창이 떠 있다 */
+        val learningResetPrompt: Boolean = false,
+        /** 기록 초기화를 서버에 요청하는 중. 확인 창의 버튼을 막는다 */
+        val learningResetBusy: Boolean = false,
         /** "다시 계산" 을 부른 일정. 계산 중 버튼을 막는다(A6) */
         val recomputeBusyId: Long? = null,
 
@@ -1346,6 +1355,57 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- 기록 초기화 (제안 계약 BE-RESET) — Partly AI-generated (Claude) -------------------
+
+    /** 내 정보 › "기록 초기화". 바로 지우지 않고 확인 창을 띄운다 */
+    fun askLearningReset() {
+        _state.update { it.copy(learningResetPrompt = true) }
+    }
+
+    fun dismissLearningReset() {
+        _state.update { if (it.learningResetBusy) it else it.copy(learningResetPrompt = false) }
+    }
+
+    /**
+     * 쌓인 기록을 서버에서 지운다([LearningReset]). 기록은 서버에 있어 **서버가 받아야 지워진다** — 닿지 않거나
+     * 아직 API 가 없으면 아무것도 바꾸지 않고 그렇게 알린다. 지워지면 알람 계획이 처음 기준으로 다시 잡히므로
+     * 목록과 리포트를 다시 받는다.
+     */
+    fun confirmLearningReset() {
+        if (_state.value.learningResetBusy) return
+        _state.update { it.copy(learningResetBusy = true) }
+        viewModelScope.launch {
+            val response = runCatching { withContext(Dispatchers.IO) { ApiClient.auth.resetLearning() } }
+            val outcome = LearningReset.outcome(response.getOrNull()?.code())
+            Log.i(TAG, "기록 초기화: $outcome, 지운 건수 ${response.getOrNull()?.body()?.deleted}")
+            _state.update { it.copy(learningResetBusy = false, learningResetPrompt = false) }
+            notify(LearningReset.message(outcome))
+            if (outcome == LearningReset.Outcome.DONE) refresh(silent = true)
+        }
+    }
+
+    // --- 문의하기 (제안 계약 BE-H4b) — Partly AI-generated (Claude) ---------------------
+
+    /**
+     * 도움말 › [문의하기] 의 글을 서버로 보낸다([Inquiry]). 예외를 밖으로 던지지 않고 결과로 돌려준다 — 실패하면
+     * 시트가 적은 글을 그대로 둔 채 이유를 보인다. 앱 버전과 기기 종류를 함께 보낸다(개인을 가리키는 값은 없다).
+     */
+    suspend fun sendInquiry(message: String, email: String): Inquiry.Outcome {
+        val body = InquiryRequest(
+            message = message,
+            replyEmail = email,
+            appVersion = BuildConfig.VERSION_NAME,
+            device = "${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE}",
+        )
+        val response = runCatching { withContext(Dispatchers.IO) { ApiClient.support.sendInquiry(body) } }
+        val outcome = Inquiry.outcome(response.getOrNull()?.code())
+        Log.i(TAG, "문의 보내기: $outcome")
+        return outcome
+    }
+
+    /** 문의를 보낸 뒤의 한 줄 안내 */
+    fun onInquirySent() = notify(Inquiry.DONE)
+
     // --- 비밀번호 변경 (제안 계약 R3-9, Figma F-41) — Partly AI-generated (Claude) -----
 
     private val _passwordChange = MutableStateFlow(PasswordChangeState())
@@ -1621,18 +1681,35 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         openAlarmDecision(eventId)
     }
 
-    fun openRiskChoice(eventId: Long) {
-        if (_nav.value.current == AppRoute.RiskChoice(eventId)) return
-        _risk.value = RiskState()
-        _nav.update { it.copy(stack = it.stack + AppRoute.RiskChoice(eventId), forward = true) }
+    /**
+     * 알람 시각 바꾸기 바텀시트(iter4 H2-3, Figma `546:1595`)를 연다. 화면을 쌓지 않는다 —
+     * ⑤ 지각 위험 화면을 이 시트가 대신한다.
+     */
+    fun openAlarmTimeSheet(eventId: Long) {
+        if (_alarmTimeSheet.value.eventId == eventId) return
+        _alarmTimeSheet.value = AlarmTimeSheetState(eventId = eventId, loading = true)
         loadRiskOptions(eventId)
+        loadSheetPlan(eventId)
     }
 
-    data class RiskState(
+    fun dismissAlarmTimeSheet() {
+        ++riskGeneration
+        riskJob?.cancel()
+        _alarmTimeSheet.value = AlarmTimeSheetState()
+    }
+
+    /**
+     * 시트가 그리는 값.
+     *
+     * @property plan 그 일정의 계획(시작 시각 · 적용 τ · 지금 알람). 홈에서 열면 ④ 를 거치지 않으므로
+     *   시트가 따로 받는다. ④ 가 보던 계획([plan])은 건드리지 않는다
+     */
+    data class AlarmTimeSheetState(
         val eventId: Long? = null,
+        val plan: AlarmPlanView? = null,
+        val options: RiskOptionsView? = null,
         val loading: Boolean = false,
         val saving: Boolean = false,
-        val options: RiskOptionsView? = null,
         val error: String? = null,
     )
 
@@ -1724,39 +1801,61 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val _risk = MutableStateFlow(RiskState())
-    val risk: StateFlow<RiskState> = _risk.asStateFlow()
+    private val _alarmTimeSheet = MutableStateFlow(AlarmTimeSheetState())
+    val alarmTimeSheet: StateFlow<AlarmTimeSheetState> = _alarmTimeSheet.asStateFlow()
     private var riskJob: Job? = null
     private var riskGeneration = 0
 
+    /** 시트의 "빠르게 고르기" 세 칸(`GET /api/events/{id}/risk-options`, B-5) */
     fun loadRiskOptions(eventId: Long) {
-        if (_risk.value.saving) return
+        if (_alarmTimeSheet.value.saving) return
         riskJob?.cancel()
         val generation = ++riskGeneration
-        _risk.value = RiskState(eventId = eventId, loading = true)
+        _alarmTimeSheet.update { it.copy(eventId = eventId, loading = true, error = null) }
         riskJob = viewModelScope.launch {
             val result = repository.loadRiskOptions(eventId)
-            if (generation != riskGeneration || _nav.value.current != AppRoute.RiskChoice(eventId)) return@launch
-            _risk.value = when (result) {
-                is EventRepository.Result.Success -> RiskState(eventId, options = result.data)
-                is EventRepository.Result.Failure -> RiskState(eventId, error = result.message)
+            if (generation != riskGeneration || _alarmTimeSheet.value.eventId != eventId) return@launch
+            _alarmTimeSheet.update {
+                when (result) {
+                    is EventRepository.Result.Success ->
+                        it.copy(options = result.data, loading = false, error = null)
+
+                    is EventRepository.Result.Failure ->
+                        it.copy(loading = false, error = result.message)
+                }
             }
         }
     }
 
-    fun saveRiskOption(eventId: Long, key: String) {
-        val state = _risk.value
-        if (_nav.value.current != AppRoute.RiskChoice(eventId)
-            || state.eventId != eventId || state.loading || state.saving) return
+    /** 시트가 쓸 계획. ④ 에서 열었으면 이미 받아 둔 것을 그대로 쓴다 */
+    private fun loadSheetPlan(eventId: Long) {
+        val known = _plan.value?.takeIf { it.eventId == eventId }
+        if (known != null) {
+            _alarmTimeSheet.update { if (it.eventId == eventId) it.copy(plan = known) else it }
+            return
+        }
+        val generation = riskGeneration
+        viewModelScope.launch {
+            val result = repository.loadPlan(eventId)
+            if (generation != riskGeneration) return@launch
+            if (result is EventRepository.Result.Success) {
+                _alarmTimeSheet.update { if (it.eventId == eventId) it.copy(plan = result.data) else it }
+            }
+        }
+    }
+
+    /** 고른 칸의 τ 를 저장한다(`PATCH`, B-5). 성공하면 시트를 닫는다 */
+    fun saveAlarmTimeOption(eventId: Long, key: String) {
+        val state = _alarmTimeSheet.value
+        if (state.eventId != eventId || state.loading || state.saving) return
         val selected = state.options?.option(key) ?: return
         val generation = riskGeneration
-        _risk.update { it.copy(saving = true, error = null) }
+        _alarmTimeSheet.update { it.copy(saving = true, error = null) }
         viewModelScope.launch {
             val error = when (val saved = repository.saveRiskOption(eventId, selected.tau)) {
                 is EventRepository.Result.Failure -> saved.message
                 is EventRepository.Result.Success -> {
-                    if (_nav.value.current == AppRoute.RiskChoice(eventId)
-                        || _nav.value.current == AppRoute.AlarmDecision(eventId)) {
+                    if (_nav.value.current == AppRoute.AlarmDecision(eventId)) {
                         ++planLoadGeneration // Ignore an older in-flight detail request.
                         _plan.value = saved.data
                     }
@@ -1773,9 +1872,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-            if (generation != riskGeneration || _nav.value.current != AppRoute.RiskChoice(eventId)) return@launch
-            _risk.update { it.copy(saving = false, error = error) }
-            if (error == null) goBack()
+            if (generation != riskGeneration || _alarmTimeSheet.value.eventId != eventId) return@launch
+            if (error == null) {
+                _alarmTimeSheet.value = AlarmTimeSheetState()
+                val label = AlarmTimeChoice.minutesOfDay(selected.alarmAt, selected.meridiem)
+                    ?.let { AlarmTimeChoice.clockLabel(it) }
+                notify(label?.let { "$it 알람으로 바꿨어요" } ?: "알람 시각을 바꿨어요")
+            } else {
+                _alarmTimeSheet.update { it.copy(saving = false, error = error) }
+            }
         }
     }
 
@@ -3630,11 +3735,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun goBack() {
-        if (_nav.value.current is AppRoute.RiskChoice) {
-            ++riskGeneration
-            riskJob?.cancel()
-            _risk.value = RiskState()
-        }
         // 스택이 깊으면 하나 빼고, 홈이 아닌 탭의 첫 화면이면 홈 탭으로 간다(iter4 H2-2).
         val before = _nav.value
         _nav.update { it.back() }
@@ -4915,8 +5015,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      *
      * **[minutes] 를 비워 둔 채 시작한다.** "30" 을 미리 채우면 대부분이 그대로
      * 저장하고 넘어가서 묻는 의미가 없어진다. 지금까지 전원이 30분이던 이유가
-     * 정확히 그것이다. 시계 다이얼은 값이 없으면 0:00 에서 열린다 — 제안값이 아니고,
-     * 범위 밖이라 그대로 확인할 수 없다. 값은 반드시 사용자가 고른 것이어야 한다.
+     * 정확히 그것이다. 값이 없으면 −/+ 가 꺼져 있고, 휠은 0시간 5분에서 열리지만 한 번
+     * 굴리기 전엔 [확인] 이 꺼져 있다(iter4 ⑮-a). 값은 반드시 사용자가 고른 것이어야 한다.
      *
      * (Partly AI-generated (Claude): [fromSettings], [range])
      */
@@ -4931,7 +5031,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          */
         val fromSettings: Boolean = false,
     ) {
-        /** 다이얼이 받아들이는 범위(분). R-6 으로 서버와 맞출 때까지 앱 상수다. */
+        /** 휠 · −/+ 가 받아들이는 범위(분). R-6 으로 서버와 맞출 때까지 앱 상수다. */
         val range: IntRange get() = PREP_MIN..PREP_MAX
 
         /** 범위를 벗어난 값은 없는 것으로 본다. 5분 미만·4시간 초과는 입력 실수다. */
@@ -4960,7 +5060,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _prepOnboarding.value = PrepOnboardingState()
     }
 
-    /** 다이얼에서 고른 합계(분)를 받는다. 범위 판정은 [PrepOnboardingState.parsed] 가 한다. */
+    /** −/+ · 칩 · 휠에서 고른 합계(분)를 받는다. 범위 판정은 [PrepOnboardingState.parsed] 가 한다. */
     fun onPrepOnboardingChange(v: String) =
         _prepOnboarding.update { it.copy(minutes = v.filter(Char::isDigit).take(3), error = null) }
 

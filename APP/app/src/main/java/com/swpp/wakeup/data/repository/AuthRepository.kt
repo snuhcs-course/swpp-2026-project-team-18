@@ -48,7 +48,11 @@ class AuthRepository(
 
     sealed interface AuthResult {
         data class Success(val user: UserDto) : AuthResult
-        data class Failure(val message: String) : AuthResult
+        /**
+         * @param fields 칸별 이유(400 `details`, 예 `nickname`). 가입만 채운다 — 화면이 칸 아래에 붙인다
+         *   (iter4 H2-11). Partly AI-generated (Claude)
+         */
+        data class Failure(val message: String, val fields: Map<String, String> = emptyMap()) : AuthResult
     }
 
     // Partly AI-generated (Claude)
@@ -103,7 +107,7 @@ class AuthRepository(
         password: String,
         passwordConfirm: String,
         termsAgreed: Boolean,
-    ): AuthResult = call {
+    ): AuthResult = call(withFields = true) {
         api.register(
             RegisterRequest(
                 email = email.trim(),
@@ -309,6 +313,8 @@ class AuthRepository(
      */
     private suspend fun call(
         errorMessage: ((Int, ApiErrorBody?) -> String)? = null,
+        /** 400 `details` 의 칸별 이유를 [AuthResult.Failure.fields] 에 싣는다(가입) */
+        withFields: Boolean = false,
         block: suspend () -> retrofit2.Response<com.swpp.wakeup.data.remote.AuthResponse>,
     ): AuthResult {
         return try {
@@ -317,8 +323,12 @@ class AuthRepository(
             if (!response.isSuccessful && errorMessage != null) {
                 AuthResult.Failure(errorMessage(response.code(), errorBodyOf(response.errorBody()?.string())))
             } else if (!response.isSuccessful || body == null) {
-                val serverMessage = ApiClient.parseErrorMessage(response.errorBody()?.string())
-                AuthResult.Failure(serverMessage ?: defaultMessage(response.code()))
+                val raw = response.errorBody()?.string()
+                val serverMessage = ApiClient.parseErrorMessage(raw)
+                AuthResult.Failure(
+                    message = serverMessage ?: defaultMessage(response.code()),
+                    fields = if (withFields && !response.isSuccessful) ApiClient.parseErrorFields(raw) else emptyMap(),
+                )
             } else {
                 store(body)
             }

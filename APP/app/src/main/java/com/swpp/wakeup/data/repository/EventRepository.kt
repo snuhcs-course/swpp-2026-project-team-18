@@ -36,6 +36,7 @@ import com.swpp.wakeup.data.remote.SwitchSuggestionDto
 import com.swpp.wakeup.domain.model.RerouteAlert
 import com.swpp.wakeup.domain.model.SwitchSuggestion
 import com.swpp.wakeup.domain.model.AlarmPlanView
+import com.swpp.wakeup.domain.model.AlarmTimeChoice
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ConfidenceView
 import com.swpp.wakeup.domain.model.FasterRoute
@@ -1516,7 +1517,7 @@ internal fun travelSourceNote(source: String?, sampleCount: Int? = null): String
  * 결정됨" 이라고 쓰면 틀린다.
  */
 internal fun tauSourceLabel(tauOverride: Double?, tagLabel: String?): String = when {
-    tauOverride != null -> "직접 고른 값"
+    tauOverride != null -> AlarmTimeChoice.MANUAL_TAU_SOURCE
     !tagLabel.isNullOrBlank() -> "$tagLabel 일정 기본값"
     else -> "기본값"
 }

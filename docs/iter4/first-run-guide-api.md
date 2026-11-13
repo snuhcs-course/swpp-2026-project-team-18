@@ -6,8 +6,8 @@
 있는지 서버에 둔다(팀 결정 11-11). 기기에만 두면 다른 기기로 로그인하거나 앱을 다시 깔 때마다 같은 안내가
 다시 뜬다.
 
-서버 구현: `accounts.Profile.intro_seen_at` · `coachmark_seen_at`(마이그레이션 `0008_profile_guide_seen`),
-`ProfileSerializer` · 테스트: `apps/accounts/tests/test_api.py::TestGuideSeen`
+서버: **아직 없음 — 백엔드에 요청(iter4 BE-H4)**. 필요한 것은 `accounts.Profile.intro_seen_at` ·
+`coachmark_seen_at`(새 마이그레이션)과 `ProfileSerializer` 의 두 필드다. 그 전까지 앱은 기기 기록으로 판단한다(2절).
 
 앱 구현: `data/local/FirstRunGuideStore.kt`, `ui/onboarding/GuideSeenRules.kt`,
 `EventRepository.markGuideSeen`, `HomeViewModel.finishIntro/dismissCoachmark/syncGuideSeen` ·

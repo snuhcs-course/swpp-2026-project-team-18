@@ -188,6 +188,7 @@ fun HomeScreen(
                         onClick = { onEventClick(next) },
                         onChangeTime = onChangeAlarmTime?.let { change -> { change(next) } },
                         onProbabilityClick = { onTimeFor = next.id },
+                        onProbabilityPendingClick = onHelpClick,
                         switchBusy = state.switchRouteBusyId == next.id,
                         onSwitchRoute = { onSwitchRoute(next) },
                     )
@@ -539,6 +540,8 @@ private fun NextAlarmCard(
     onClick: () -> Unit,
     onChangeTime: (() -> Unit)?,
     onProbabilityClick: (() -> Unit)? = null,
+    /** 확률이 아직 없을 때의 회색 칩을 누르면(도움말) */
+    onProbabilityPendingClick: (() -> Unit)? = null,
     switchBusy: Boolean = false,
     onSwitchRoute: () -> Unit = {},
 ) {
@@ -588,7 +591,7 @@ private fun NextAlarmCard(
                             } else Modifier
                         ),
                 )
-            }
+            } ?: PendingProbabilityChip(onClick = onProbabilityPendingClick, tag = "next_alarm_probability_pending")
         }
 
         Row(
@@ -639,7 +642,7 @@ private fun NextAlarmCard(
                     Spacer(Modifier.width(4.dp))
                 }
                 Text(
-                    text = HomeLabels.heroPlaceLine(event.placeName, start, event.title),
+                    text = HomeLabels.heroPlaceTitleLine(event.placeName, event.title),
                     color = JitColor.TextSecondary,
                     fontSize = 12.sp,
                     maxLines = 1,
@@ -912,6 +915,31 @@ private fun AddEventFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Text(text = "일정 추가", color = JitColor.Bg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
+
+// Partly AI-generated (Claude)
+/**
+ * 서버가 아직 정시 도착 확률을 주지 않을 때(준비 · 이동 기록이 쌓이기 전, `on_time_probability = null`) 칩 자리에
+ * 두는 회색 칩. 자리를 비워 두면 기능이 없는 것처럼 보인다. 숫자를 지어내지는 않는다. 홈 · 이동 탭이 함께 쓴다.
+ */
+@Composable
+internal fun PendingProbabilityChip(onClick: (() -> Unit)?, tag: String) {
+    JitChip(
+        label = PENDING_PROBABILITY_LABEL,
+        contentColor = JitColor.TextSecondary,
+        container = JitColor.Surface2,
+        modifier = Modifier
+            .testTag(tag)
+            .then(
+                if (onClick != null) {
+                    Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(role = Role.Button, onClickLabel = "정시 도착 확률이 뭐예요?", onClick = onClick)
+                } else Modifier
+            ),
+    )
+}
+
+internal const val PENDING_PROBABILITY_LABEL = "정시 도착 확률 계산 전"
 
 // Partly AI-generated (Claude)
 /** 확률 칩 → i 시트에 넣을 값. 확률이나 알람 시각이 없으면 null */

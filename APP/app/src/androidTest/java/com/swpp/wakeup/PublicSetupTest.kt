@@ -69,7 +69,7 @@ class PublicSetupTest {
             }
             // Partly AI-generated (Claude)
             step("03_prep_setup") {
-                // 준비 시간은 시계 다이얼(24시간제, 시:분 = 걸리는 시간)로만 고른다(Phase A, A4).
+                // 준비 시간은 카드를 눌러 휠(시간 · 분)로 고른다(iter4 ⑮-a). −/+ · 칩은 UI 테스트(PrepOnboardingScreenTest)에서 본다.
                 val prep = config.getInt("prep_minutes")
                 val changedPrep = if (prep == 15) 30 else 15
                 assertPrepValue("—") // 값을 미리 채우지 않는다.
@@ -268,23 +268,24 @@ class PublicSetupTest {
 
     // AI-generated (Claude)
     /**
-     * 준비 시간 다이얼(24시간제, 시:분 = 걸리는 시간)에서 [minutes] 를 고르고 확인한다.
-     * 오전/오후 버튼이 없고 시 설명은 0~23 이다("0 hours" / "0시").
+     * 준비 시간 카드를 눌러 휠(iter4 ⑮-a, 시간 · 분 두 열)에서 [minutes] 를 고르고 확인한다.
+     * 값이 없을 때 휠은 0시간 5분에서 열리고 한 번 굴리기 전엔 [확인] 이 꺼져 있다 — 5분은 고를 수 없다.
      */
     private fun pickDuration(minutes: Int) {
         click(By.res("prep_value"))
-        val hour = minutes / 60
-        click(By.desc(Pattern.compile("$hour (hours?|o'clock)|${hour}시(간)?")))
-        dragMinute(minutes % 60, "03_duration_picker")
-        find(By.text("총 ${durationText(minutes)}"))
-        click(By.text("확인"))
+        find(By.res("wheel_prep_hour"))
+        capture("03_duration_picker")
+        ui.wheelTo("wheel_prep_hour", "${minutes / 60}시간", (0..4).map { "${it}시간" }, loop = false)
+        ui.wheelTo("wheel_prep_minute", "${minutes % 60}분", (0..59).map { "${it}분" }, loop = false)
+        find(By.res("wheel_readout").desc(durationText(minutes)))
+        click(By.res("wheel_confirm"))
     }
 
     // AI-generated (Claude)
-    /** 준비 시간 칸의 표시값. 값이 없으면 "—" 다. */
+    /** 준비 시간 카드의 값 글자. 값이 없으면 "—" 다. */
     private fun assertPrepValue(display: String) {
         assertTrue("준비 시간 표시가 $display 가 아님",
-            ui.withNode(By.res("prep_value")) { it.findObject(By.text(display)) != null })
+            ui.withNode(By.res("prep_display")) { it.text == display })
     }
 
     // AI-generated (Claude)
@@ -294,9 +295,6 @@ class PublicSetupTest {
         minutes % 60 == 0 -> "${minutes / 60}시간"
         else -> "${minutes / 60}시간 ${minutes % 60}분"
     }
-
-    /** 분 다이얼에서 [minute] 를 1분 단위로 고른다. 시는 이미 고른 상태다. */
-    private fun dragMinute(minute: Int, shot: String) = ui.dragMinute(minute) { capture(shot) }
 
     private fun until(label: String, timeout: Long = 30_000, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeout

@@ -12,6 +12,7 @@ import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.data.remote.PasswordCheckResponse
 import com.swpp.wakeup.data.repository.AuthRepository
 import com.swpp.wakeup.domain.model.EmailRule
+import com.swpp.wakeup.domain.model.NicknameRule
 import com.swpp.wakeup.domain.model.SocialLogin
 import com.swpp.wakeup.domain.model.SocialNotice
 import com.swpp.wakeup.domain.model.SocialProvider
@@ -95,6 +96,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val loading: Boolean = false,
         /** 서버가 준 메시지를 그대로 담는다. */
         val error: String? = null,
+        /** 가입 400 의 `details.nickname`. 닉네임 칸 아래에 붙이고, 닉네임을 고치면 지운다(iter4 H2-11) */
+        val nicknameError: String? = null,
         /** 로그인·가입이 끝나 다음 화면으로 넘어가야 하는 상태. */
         val authenticatedNickname: String? = null,
 
@@ -140,9 +143,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val passwordsMatch: Boolean
             get() = passwordConfirm.isNotEmpty() && password == passwordConfirm
 
-        /** 서버 비밀번호 검사·확인 일치·약관 동의가 모두 필요하다. */
+        /** 이메일 형식 · 닉네임 1~20자 · 서버 비밀번호 검사 · 확인 일치 · 약관 동의가 모두 필요하다. */
         val canSubmitSignup: Boolean
-            get() = !loading && EmailRule.isValid(email) && nickname.isNotBlank() &&
+            get() = !loading && EmailRule.isValid(email) && NicknameRule.isValid(nickname) &&
                 password.isNotBlank() && passwordsMatch && termsAgreed && passwordCheck?.valid == true
 
         /** 재설정 코드 받기: 이메일 형식이 맞아야 켜진다 */
@@ -175,7 +178,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun onNicknameChange(value: String) = _state.update { it.copy(nickname = value, error = null) }
+    fun onNicknameChange(value: String) = _state.update { it.copy(nickname = value, error = null, nicknameError = null) }
     fun onPasswordConfirmChange(value: String) =
         _state.update { it.copy(passwordConfirm = value, error = null) }
     // AI-generated (Claude)
@@ -418,7 +421,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun submit(block: suspend () -> AuthRepository.AuthResult) {
-        _state.update { it.copy(loading = true, error = null, waking = false, socialNotice = null) }
+        _state.update { it.copy(loading = true, error = null, nicknameError = null, waking = false, socialNotice = null) }
         viewModelScope.launch {
             // 쓰기 요청 앞에서 서버를 깨운다. 로그인은 POST 라서
             // ColdStartRetryInterceptor 가 재시도해 주지 않는다 - 재시도하면
@@ -450,8 +453,15 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     // 타임아웃으로 실패했으면 "깨어 있다" 는 기록을 지운다.
                     // 그러지 않으면 다음 시도에서 깨우기를 건너뛴다.
                     ServerWarmup.invalidate()
+                    val nicknameReason = result.fields["nickname"]
                     _state.update {
-                        it.copy(loading = false, waking = false, error = result.message)
+                        it.copy(
+                            loading = false,
+                            waking = false,
+                            // 닉네임 때문이면 카드에 무엇 때문인지 같이 쓴다(Figma `549:2094`). 이유는 칸 아래에도 붙는다.
+                            error = if (nicknameReason != null) "가입하지 못했어요. $nicknameReason" else result.message,
+                            nicknameError = nicknameReason,
+                        )
                     }
                 }
             }

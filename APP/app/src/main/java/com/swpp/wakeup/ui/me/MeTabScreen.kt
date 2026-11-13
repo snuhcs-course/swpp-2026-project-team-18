@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.CalendarLinkState
+import com.swpp.wakeup.domain.model.LearningReset
 import com.swpp.wakeup.ui.common.LineIcons
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
@@ -51,6 +52,7 @@ import com.swpp.wakeup.ui.theme.JitSpace
  * @param routineNames 아침 루틴 블록 이름(순서대로). 아직 못 받았으면 null
  * @param onHelp "도움말". 도움말 화면(H2-4)이 생기기 전에는 null 이라 "도움" 묶음을 그리지 않는다
  * @param onReplayIntro "처음 안내 다시 보기". 위와 같다
+ * @param onResetLearning "기록 초기화". 확인 창을 띄운다(지우는 것은 창에서 한 번 더 누른 뒤). null 이면 줄이 없다
  */
 @Composable
 internal fun MeTabScreen(
@@ -68,6 +70,7 @@ internal fun MeTabScreen(
     scrollState: ScrollState = rememberScrollState(),
     onHelp: (() -> Unit)? = null,
     onReplayIntro: (() -> Unit)? = null,
+    onResetLearning: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -126,6 +129,13 @@ internal fun MeTabScreen(
                 LineIcons.settings, "설정",
                 MeTabLogic.Value(MeTabLogic.settings(state.loginMethods)), "me_settings", onSettings,
             )
+            onResetLearning?.let {
+                RowDivider()
+                MeRow(
+                    LineIcons.rotateCcw, LearningReset.ROW_TITLE,
+                    MeTabLogic.Value(LearningReset.ROW_VALUE), "me_reset_learning", it,
+                )
+            }
         }
     }
 }

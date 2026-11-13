@@ -61,6 +61,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.swpp.wakeup.calendar.DeviceCalendar
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.data.repository.RecurrenceScope
+import com.swpp.wakeup.domain.model.AlarmTimeChoice
 import com.swpp.wakeup.domain.model.ArrivalOutlook
 import com.swpp.wakeup.domain.model.CheckpointBasis
 import com.swpp.wakeup.domain.model.FasterRoute
@@ -79,7 +80,7 @@ import com.swpp.wakeup.ui.calendar.CalendarHelpActions
 import com.swpp.wakeup.ui.calendar.CalendarImportScreen
 import com.swpp.wakeup.ui.calendar.CalendarLinkScreen
 import com.swpp.wakeup.ui.common.durationLabel
-import com.swpp.wakeup.ui.alarm.RiskChoiceScreen
+import com.swpp.wakeup.ui.alarm.AlarmTimeSheet
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.ui.events.AddEventScreen
 import com.swpp.wakeup.ui.events.AddResumeDialog
@@ -90,6 +91,7 @@ import com.swpp.wakeup.ui.help.HelpScreen
 import com.swpp.wakeup.ui.help.HelpTopic
 import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
+import com.swpp.wakeup.ui.me.LearningResetDialog
 import com.swpp.wakeup.ui.me.MeTabScreen
 import com.swpp.wakeup.reminder.WeeklyReportReminder
 import com.swpp.wakeup.ui.morning.MorningProgressScreen
@@ -123,7 +125,9 @@ import com.swpp.wakeup.ui.theme.JitTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
 
 /**
  * 로그인 후 본 화면. Figma ③ 홈을 시작점으로 ④⑤⑫ 를 호스팅한다.
@@ -270,7 +274,7 @@ private fun MainHost(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val nav by viewModel.nav.collectAsStateWithLifecycle()
     val plan by viewModel.plan.collectAsStateWithLifecycle()
-    val risk by viewModel.risk.collectAsStateWithLifecycle()
+    val alarmTimeSheet by viewModel.alarmTimeSheet.collectAsStateWithLifecycle()
     val routeMap by viewModel.routeMap.collectAsStateWithLifecycle()
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
@@ -446,6 +450,46 @@ private fun MainHost(
         viewModel.consumeAddFailureNotice(notice.id)
     }
 
+    // 내 정보 › "기록 초기화" 확인 창. 지우는 동안에는 닫히지 않는다.
+    if (state.learningResetPrompt) {
+        LearningResetDialog(
+            busy = state.learningResetBusy,
+            onConfirm = viewModel::confirmLearningReset,
+            onDismiss = viewModel::dismissLearningReset,
+        )
+    }
+
+    // 알람 시각 바꾸기 바텀시트(iter4 H2-3, Figma `546:1595`). ⑤ 지각 위험 화면을 대신한다.
+    alarmTimeSheet.eventId?.let { sheetEventId ->
+        val sheetPlan = alarmTimeSheet.plan?.takeIf { it.eventId == sheetEventId }
+        AlarmTimeSheet(
+            subtitle = sheetPlan?.let { p ->
+                listOfNotNull(
+                    p.eventTitle.takeIf { it.isNotBlank() },
+                    // 장소는 건물·호수까지만. 뒤의 지번 주소는 시트 제목 줄에 길다.
+                    p.eventPlace.substringBefore(" · ").takeIf { it.isNotBlank() },
+                ).joinToString(" · ")
+            },
+            options = alarmTimeSheet.options,
+            onConfirm = { viewModel.saveAlarmTimeOption(sheetEventId, it) },
+            onDismiss = viewModel::dismissAlarmTimeSheet,
+            recommendedKey = AlarmTimeChoice.recommendedKey(
+                alarmTimeSheet.options?.selectedKey,
+                sheetPlan?.tauSourceLabel,
+            ),
+            goalTau = sheetPlan?.tauUsed,
+            initialMinutesOfDay = sheetPlan?.let { p ->
+                p.alarmAt?.let { AlarmTimeChoice.minutesOfDay(it, p.meridiem) }
+            },
+            startMinutesOfDay = sheetPlan?.startAtMillis?.let { minutesOfDay(it) },
+            loading = alarmTimeSheet.loading,
+            saving = alarmTimeSheet.saving,
+            error = alarmTimeSheet.error,
+            onRetry = { viewModel.loadRiskOptions(sheetEventId) },
+            onHelp = { viewModel.openHelp(HelpTopic.RISK_LEVELS) },
+        )
+    }
+
     // 쓰다 만 일정이 있을 때 "일정 추가" 를 누르면 이어 쓸지 묻는다(A4).
     if (addResumePrompt) {
         AddResumeDialog(
@@ -473,7 +517,7 @@ private fun MainHost(
             viewModel.goBack()
             viewModel.resetPrepOnboarding()
             if (saved != null) {
-                // "1시간 5분" 처럼 다이얼과 같은 표기. "분"·"간" 모두 받침이 있어 "으로" 고정.
+                // "1시간 5분" 처럼 화면 · 휠과 같은 표기. "분"·"간" 모두 받침이 있어 "으로" 고정.
                 snackbarHostState.showSnackbar("평소 준비 시간을 ${durationLabel(saved)}으로 저장했습니다")
             }
         }
@@ -667,9 +711,8 @@ private fun MainHost(
                     onMorningClick = viewModel::openMorning,
                     onRetry = { viewModel.refresh() },
                     modifier = Modifier.padding(innerPadding),
-                    // [시각 바꾸기] 는 H2-3 바텀시트 자리다. 시트가 생기기 전에는 지금 알람 시각을 고르는
-                    // 화면(⑤ 지각 위험 고르기)으로 간다.
-                    onChangeAlarmTime = { viewModel.openRiskChoice(it.id) },
+                    // [시각 바꾸기] → 알람 시각 바꾸기 바텀시트(H2-3).
+                    onChangeAlarmTime = { viewModel.openAlarmTimeSheet(it.id) },
                     onMissedTrackClick = viewModel::startMissedAlarmTracking,
                     onMissedDismiss = viewModel::dismissMissedAlarm,
                     onHelpClick = { viewModel.openHelp() },
@@ -790,7 +833,7 @@ private fun MainHost(
                     AlarmDecisionScreen(
                         plan = plan,
                         onBack = viewModel::goBack,
-                        onChangeRisk = { viewModel.openRiskChoice(route.eventId) },
+                        onChangeRisk = { viewModel.openAlarmTimeSheet(route.eventId) },
                         onEditBlocks = { viewModel.openEventBlocks(route.eventId) },
                         onDelete = { viewModel.deleteEvent(route.eventId) },
                         // 반복 회차면 "이 일정만 / 이후 일정 모두 삭제" 를 묻는다(iter4 A2). 서버가 모르면 묻지 않는다.
@@ -846,19 +889,6 @@ private fun MainHost(
                         },
                     )
                 }
-
-                is AppRoute.RiskChoice -> RiskChoiceScreen(
-                    plan = plan?.takeIf { it.eventId == route.eventId },
-                    onBack = viewModel::goBack,
-                    modifier = Modifier.padding(innerPadding),
-                    riskOptions = risk.options?.takeIf { risk.eventId == route.eventId },
-                    loading = risk.eventId != route.eventId || risk.loading,
-                    saving = risk.eventId == route.eventId && risk.saving,
-                    error = risk.error?.takeIf { risk.eventId == route.eventId },
-                    onRetry = { viewModel.loadRiskOptions(route.eventId) },
-                    onContinue = { viewModel.saveRiskOption(route.eventId, it) },
-                    onHelp = { viewModel.openHelp(HelpTopic.RISK_LEVELS) },
-                )
 
                 // 일정 수정은 ⑫ 를 수정 모드로 다시 쓴다(addState.editingEventId).
                 AppRoute.AddEvent, is AppRoute.EditEvent -> AddEventScreen(
@@ -955,6 +985,8 @@ private fun MainHost(
                     onSubmit = viewModel::submitPrepOnboarding,
                     onSkip = viewModel::skipPrepOnboarding,
                     modifier = Modifier.padding(innerPadding),
+                    // [항목으로 나눠 적기] → 아침 루틴. 돌아오면 고르던 준비 시간 화면이 그대로 있다.
+                    onSplit = viewModel::openRoutineEditor,
                 )
 
                 // Partly AI-generated (Claude) — 첫 실행 안내 세 장(iter4 H2-4). 건너뛰기 · 시작하기는 홈으로.
@@ -964,6 +996,9 @@ private fun MainHost(
                     onBack = viewModel::goBack,
                     onReplayIntro = viewModel::replayIntro,
                     modifier = Modifier.padding(innerPadding),
+                    onSendInquiry = viewModel::sendInquiry,
+                    contactEmail = state.accountEmail,
+                    onInquirySent = viewModel::onInquirySent,
                 )
                 AppRoute.Intro -> IntroScreen(
                     onFinish = viewModel::finishIntro,
@@ -1062,6 +1097,7 @@ private fun MainHost(
                     scrollState = meScroll,
                     onHelp = { viewModel.openHelp() },
                     onReplayIntro = viewModel::replayIntro,
+                    onResetLearning = viewModel::askLearningReset,
                 )
                 AppRoute.Homes -> HomesScreen(
                     state = state,
@@ -1273,3 +1309,7 @@ private fun RoutineHost(
         modifier = modifier,
     )
 }
+
+/** 밀리초 시각을 그날의 분(0~1439)으로. 알람 시각 바꾸기 시트가 남은 시간을 셀 때 쓴다 */
+private fun minutesOfDay(millis: Long): Int =
+    Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).let { it.hour * 60 + it.minute }

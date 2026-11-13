@@ -20,6 +20,15 @@ class SignupContractTest {
         assertTrue(state().canSubmitSignup)
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `닉네임은 앞뒤 공백을 빼고 1~20자여야 가입할 수 있다`() {
+        assertTrue(state().copy(nickname = "가".repeat(20)).canSubmitSignup)
+        assertTrue(state().copy(nickname = "  ${"가".repeat(20)}  ").canSubmitSignup)
+        assertFalse(state().copy(nickname = "가".repeat(21)).canSubmitSignup)
+        assertFalse(state().copy(nickname = "   ").canSubmitSignup)
+    }
+
     @Test
     fun `이메일 형식이 틀리면 가입을 막는다`() {
         assertFalse(state().copy(email = "jinho@snu").canSubmitSignup)

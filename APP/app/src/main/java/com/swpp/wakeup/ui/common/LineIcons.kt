@@ -37,6 +37,19 @@ object LineIcons {
 
     val plus: ImageVector by lazy { icon("Plus", "M5 12h14", "M12 5v14") }
 
+    /** 입력 오류 · 가입 실패 카드의 느낌표 (Partly AI-generated (Claude)) */
+    val alert: ImageVector by lazy {
+        icon("AlertCircle", "M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0", "M12 8v4", "M12 16h.01")
+    }
+
+    /** 내 정보 › 기록 초기화 (Partly AI-generated (Claude)) */
+    val rotateCcw: ImageVector by lazy {
+        icon("RotateCcw", "M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5")
+    }
+
+    /** 준비 시간 −5분 (Partly AI-generated (Claude)) */
+    val minus: ImageVector by lazy { icon("Minus", "M5 12h14") }
+
     val pencil: ImageVector by lazy {
         icon(
             "Pencil",

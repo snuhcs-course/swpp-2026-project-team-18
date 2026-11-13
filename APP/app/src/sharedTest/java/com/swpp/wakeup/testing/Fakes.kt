@@ -196,6 +196,9 @@ open class FakeAuthApi : AuthApi {
     override suspend fun logout(body: RefreshRequest): Response<Unit> = unexpected("logout")
     override suspend fun logoutAll(): Response<com.swpp.wakeup.data.remote.LogoutAllResponse> =
         unexpected("logoutAll")
+    // 기록 초기화(BE-RESET). 서버가 아직 없는 것처럼 404 가 기본이다.
+    override suspend fun resetLearning(): Response<com.swpp.wakeup.data.remote.LearningResetResponse> =
+        httpError(404)
     override suspend fun socialLogin(
         provider: String,
         body: com.swpp.wakeup.data.remote.SocialLoginRequest,

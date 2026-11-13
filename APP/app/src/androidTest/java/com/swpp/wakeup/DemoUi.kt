@@ -8,7 +8,6 @@ import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
-import java.util.regex.Pattern
 
 /** 화면 갱신 시 요소 조회부터 읽기·클릭까지 새 노드로 다시 수행한다. */
 internal class DemoUi(private val device: UiDevice) {
@@ -85,7 +84,11 @@ internal class DemoUi(private val device: UiDevice) {
         wheelTo("wheel_minute", "%02d".format(minute), (0..59).map { "%02d".format(it) }, loop = true)
     }
 
-    private fun wheelTo(column: String, target: String, values: List<String>, loop: Boolean) {
+    /**
+     * 휠 열 [column] 을 [target] 으로 옮긴다. [values] 는 그 열의 값 전체(차례대로)다. 끝이 있는 열은 값이
+     * 줄어 있어도(준비 시간 0시간 → 5~59분) 전체 목록을 넘기면 된다 — 지금 값과 목표의 거리만 쓴다.
+     */
+    fun wheelTo(column: String, target: String, values: List<String>, loop: Boolean) {
         repeat(40) {
             val current = withNode(By.res(column)) { it.contentDescription.orEmpty().substringAfterLast(' ') }
             if (current == target) return
@@ -99,27 +102,6 @@ internal class DemoUi(private val device: UiDevice) {
             Thread.sleep(250) // 굴러가는 애니메이션이 끝나 설명이 바뀔 때까지
         }
         throw AssertionError("휠 $column 을 $target 로 옮기지 못함")
-    }
-
-    fun dragMinute(minute: Int, onDialReady: () -> Unit = {}) {
-        // 현재 시각과 같으면 상단 시 표시를 누를 수 있으므로 분 선택을 명시한다.
-        click(By.desc(Pattern.compile("Select minutes|분 선택")))
-        onDialReady()
-        val zero = By.desc(Pattern.compile("0 minutes?|0분"))
-        val thirty = By.desc(Pattern.compile("30 minutes?|30분"))
-        await(zero)
-        await(thirty)
-        // 상단 분 표시도 같은 설명을 쓴다. 아래쪽 다이얼의 숫자를 기준으로 잡는다.
-        val top = withNode(zero) { device.findObjects(zero).maxBy { it.visibleCenter.y }.visibleCenter }
-        val bottom = withNode(thirty) { device.findObjects(thirty).maxBy { it.visibleCenter.y }.visibleCenter }
-        val x = (top.x + bottom.x) / 2.0
-        val y = (top.y + bottom.y) / 2.0
-        val radius = (bottom.y - top.y) / 2.0
-        val angle = Math.PI * 2 * minute / 60
-        // 탭은 5분 단위로 반올림된다. 드래그는 1분 단위로 선택한다.
-        device.swipe(x.toInt(), y.toInt(), (x + radius * kotlin.math.sin(angle)).toInt(),
-            (y - radius * kotlin.math.cos(angle)).toInt(), 30)
-        device.waitForIdle()
     }
 
     private fun hideKeyboard() {

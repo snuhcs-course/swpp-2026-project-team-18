@@ -3,6 +3,7 @@ package com.swpp.wakeup.integration
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -80,7 +81,7 @@ class SignupScreenTest {
                     error = s.error,
                     canSubmit = s.canSubmitSignup,
                     onEmailChange = { v -> state.value = state.value.copy(email = v) },
-                    onNicknameChange = { v -> state.value = state.value.copy(nickname = v) },
+                    onNicknameChange = { v -> state.value = state.value.copy(nickname = v, nicknameError = null) },
                     onPasswordChange = { v -> state.value = state.value.copy(password = v) },
                     onPasswordConfirmChange = { v -> state.value = state.value.copy(passwordConfirm = v) },
                     onTermsAgreedChange = { v -> state.value = state.value.copy(termsAgreed = v) },
@@ -88,6 +89,7 @@ class SignupScreenTest {
                     onBackToLoginClick = { backs++ },
                     passwordCheck = s.passwordCheck,
                     passwordCheckError = s.passwordCheckError,
+                    nicknameError = s.nicknameError,
                 )
             }
         }
@@ -159,6 +161,46 @@ class SignupScreenTest {
 
         compose.onNodeWithText("이미 가입된 이메일이다.").performScrollTo()
         submit().assertIsEnabled()
+    }
+
+    // --- 닉네임 칸 (iter4 H2-11, Figma `549:2029`) — AI-generated (Claude) ------------------
+
+    @Test
+    fun `닉네임 칸 아래에 안내와 글자 수가 보인다`() {
+        show(almostReady.copy(nickname = "자료구조 수연"))
+
+        compose.onNodeWithTag("signup_nickname_hint").assertTextEquals("다른 사람에게 보이는 이름이에요 · 20자까지")
+        compose.onNodeWithTag("signup_nickname_count").assertTextEquals("7/20")
+    }
+
+    @Test
+    fun `20자를 넘기면 바로 이유가 보이고 가입이 꺼진다`() {
+        show(almostReady.copy(termsAgreed = true))
+        submit().assertIsEnabled()
+
+        compose.onNodeWithTag("signup_nickname").performTextReplacement("자료구조 듣는 서울대 20학번 김진호입니다")
+
+        compose.onNodeWithTag("signup_nickname_error").assertTextEquals("닉네임은 20자까지 쓸 수 있어요")
+        compose.onNodeWithTag("signup_nickname_count").assertTextEquals("23/20")
+        submit().assertIsNotEnabled()
+    }
+
+    @Test
+    fun `서버가 닉네임을 거절하면 칸 아래와 카드에 이유가 보이고 고치면 칸의 이유가 사라진다`() {
+        show(
+            almostReady.copy(
+                termsAgreed = true,
+                nicknameError = "쓸 수 없는 닉네임이에요",
+                error = "가입하지 못했어요. 쓸 수 없는 닉네임이에요",
+            ),
+        )
+        compose.onNodeWithTag("signup_nickname_error").assertTextEquals("쓸 수 없는 닉네임이에요")
+        compose.onNodeWithTag("signup_error").performScrollTo().assertExists()
+
+        compose.onNodeWithTag("signup_nickname").performTextReplacement("수연")
+
+        compose.onNodeWithTag("signup_nickname_error").assertDoesNotExist()
+        compose.onNodeWithTag("signup_nickname_hint").assertExists()
     }
 
     @Test

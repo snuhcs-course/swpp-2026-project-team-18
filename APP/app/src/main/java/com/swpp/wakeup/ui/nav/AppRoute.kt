@@ -32,9 +32,6 @@ sealed interface AppRoute {
     /** Figma ④ 알람 결정 */
     data class AlarmDecision(val eventId: Long) : AppRoute
 
-    /** Figma ⑤ 리스크 선택 */
-    data class RiskChoice(val eventId: Long) : AppRoute
-
     /** Figma ⑫ 일정 추가 */
     data object AddEvent : AppRoute
 

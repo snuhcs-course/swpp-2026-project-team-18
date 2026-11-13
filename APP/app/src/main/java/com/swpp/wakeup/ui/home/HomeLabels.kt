@@ -92,7 +92,14 @@ internal object HomeLabels {
     /** 카드 셋째 줄. "1시간 28분 뒤 · 9:00 일정" */
     fun heroWhenLine(until: String, startClock: String): String = "$until · $startClock 일정"
 
-    /** 카드 넷째 줄. "302동 105호 · 9:00 자료구조 및 알고리즘". 장소가 없으면 시각과 제목만 */
+    /**
+     * 홈 다음 알람 카드 넷째 줄. "302동 105호 · 자료구조 및 알고리즘". 장소가 없으면 제목만.
+     * 시작 시각은 바로 윗줄("… · 9:00 일정")에 있어 여기서는 뺀다(사용자 요청 11-12).
+     */
+    fun heroPlaceTitleLine(placeName: String?, title: String): String =
+        listOfNotNull(placeName?.takeIf { it.isNotBlank() }, title).joinToString(" · ")
+
+    /** 이동 탭 카드 넷째 줄. "302동 105호 · 9:00 자료구조 및 알고리즘". 장소가 없으면 시각과 제목만 */
     fun heroPlaceLine(placeName: String?, startClock: String, title: String): String =
         listOfNotNull(placeName, "$startClock $title").joinToString(" · ")
 

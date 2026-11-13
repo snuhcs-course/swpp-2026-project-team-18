@@ -739,7 +739,7 @@ private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enable
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text("시작 시각", color = JitColor.TextSecondary, fontSize = 11.sp)
-            // 오전/오후는 다이얼을 열지 않고도 바로 바꿀 수 있게 세그먼트로 둔다.
+            // 오전/오후는 휠을 열지 않고도 바로 바꿀 수 있게 세그먼트로 둔다.
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf(false, true).forEach { pm ->
                     val on = (hour >= 12) == pm

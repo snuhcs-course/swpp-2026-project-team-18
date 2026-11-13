@@ -136,6 +136,8 @@ object ApiClient {
 
     val auth: AuthApi by lazy { retrofit.create(AuthApi::class.java) }
 
+    val support: SupportApi by lazy { retrofit.create(SupportApi::class.java) }
+
     val events: EventsApi by lazy { retrofit.create(EventsApi::class.java) }
 
     val profile: ProfileApi by lazy { retrofit.create(ProfileApi::class.java) }

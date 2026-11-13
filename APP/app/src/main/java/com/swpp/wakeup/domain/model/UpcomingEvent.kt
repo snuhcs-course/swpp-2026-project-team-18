@@ -63,17 +63,17 @@ data class UpcomingEvent(
     val alarmAtMillis: Long? get() = alarmAtEpochSecond?.times(1000)
 
     /**
-     * 확률을 위험 등급으로 바꾼다. 색은 화면이 정하고 경계값만 여기서 관리한다.
+     * 확률을 위험 등급으로 바꾼다. 색은 화면이 정하고 경계는 [ProbabilityRule] 이 소유한다 —
+     * 앱 어디서나 같은 확률이 같은 색이어야 한다(iter4 H2-3).
      *
      * 확률이 없으면 [Risk.UNKNOWN] 이다. 등급을 억지로 정하지 않는다.
-     * 경계는 back-spec 의 τ 기본값 0.90 을 기준으로 잡았다.
      */
     val risk: Risk
-        get() = when {
-            onTimeProbability == null -> Risk.UNKNOWN
-            onTimeProbability >= 90 -> Risk.SAFE
-            onTimeProbability >= 75 -> Risk.WARN
-            else -> Risk.DANGER
+        get() = when (ProbabilityRule.tone(onTimeProbability)) {
+            ProbabilityTone.GOOD -> Risk.SAFE
+            ProbabilityTone.WARN -> Risk.WARN
+            ProbabilityTone.BAD -> Risk.DANGER
+            ProbabilityTone.UNKNOWN -> Risk.UNKNOWN
         }
 
     enum class Risk { SAFE, WARN, DANGER, UNKNOWN }

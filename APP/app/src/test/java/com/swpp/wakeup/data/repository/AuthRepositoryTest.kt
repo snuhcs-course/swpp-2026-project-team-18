@@ -207,6 +207,28 @@ class AuthRepositoryTest {
         assertTrue("가입도 성공하면 바로 로그인 상태다", tokenStore.isLoggedIn)
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `가입이 400 이면 칸별 이유를 함께 돌려준다`() = runTest {
+        val api = object : FakeAuthApi() {
+            override suspend fun register(body: RegisterRequest) = httpError<AuthResponse>(
+                400,
+                """{"error":{"code":"invalid","message":"이 필드의 글자 수가 20 이하인지 확인하십시오.",
+                    "details":{"nickname":["이 필드의 글자 수가 20 이하인지 확인하십시오."]}}}""",
+            )
+        }
+
+        val result = repository(api).register("me@snu.ac.kr", "가".repeat(21), "pw12345678", "pw12345678", true)
+
+        assertEquals(
+            AuthResult.Failure(
+                message = "이 필드의 글자 수가 20 이하인지 확인하십시오.",
+                fields = mapOf("nickname" to "이 필드의 글자 수가 20 이하인지 확인하십시오."),
+            ),
+            result,
+        )
+    }
+
     // --- 비밀번호 검사 ------------------------------------------------------
 
     @Test

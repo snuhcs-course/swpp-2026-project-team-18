@@ -49,6 +49,7 @@ import com.swpp.wakeup.domain.model.ConfidenceView
 import com.swpp.wakeup.domain.model.PlanRow
 import com.swpp.wakeup.domain.model.PrepBlockLine
 import com.swpp.wakeup.ui.common.JitCard
+import com.swpp.wakeup.ui.common.probabilityColor
 import com.swpp.wakeup.ui.common.JitChip
 import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.JitPrimaryButton
@@ -159,7 +160,7 @@ fun AlarmDecisionScreen(
     if (showOnTime && plan != null && onTimeSpec != null) {
         OnTimeProbabilitySheet(
             spec = onTimeSpec,
-            tone = probabilityColor(plan),
+            tone = planProbabilityColor(plan),
             // [알람 시각 바꾸기] 는 H2-3 시트 자리다. 시트가 생기기 전에는 ⑤ 지각 위험 고르기로 간다.
             onChangeTime = if (plan.isComputed && !plan.skipped) {
                 {
@@ -518,7 +519,7 @@ private fun ProbabilityRow(plan: AlarmPlanView, onClick: (() -> Unit)? = null) {
 
     // 목표치(τ)를 넘겼는지로 색을 정한다. 90% 고정으로 비교하면 τ=0.99 를
     // 고른 사용자에게 95% 를 초록으로 보여주게 된다 — 목표 미달인데 안심시킨다.
-    val color = probabilityColor(plan)
+    val color = planProbabilityColor(plan)
     Column(modifier = tapModifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
         JitDotLabel(
             text = confidence.headline,
@@ -537,9 +538,9 @@ private fun ProbabilityRow(plan: AlarmPlanView, onClick: (() -> Unit)? = null) {
     }
 }
 
-/** 확률 색. 목표치(τ)를 넘겼으면 초록, 아니면 주황. 줄과 i 시트가 같은 색을 쓴다 */
-private fun probabilityColor(plan: AlarmPlanView): Color =
-    if (plan.confidence.meets(plan.tauUsed)) JitColor.Green else JitColor.Amber
+/** 확률 색. 앱 공통 규칙([ProbabilityRule])을 그대로 쓴다. 줄과 i 시트가 같은 색을 쓴다 */
+private fun planProbabilityColor(plan: AlarmPlanView): Color =
+    probabilityColor(plan.confidence.percent, plan.tauUsed)
 
 // Partly AI-generated (Claude)
 /** i 시트에 넣을 값. 확률이 없으면 null(시트 대신 도움말을 연다) */

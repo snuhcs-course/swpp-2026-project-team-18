@@ -23,7 +23,7 @@ class MeTabLogicTest {
     }
 
     @Test
-    fun `준비 시간은 다이얼과 같은 표기`() {
+    fun `준비 시간은 휠과 같은 표기`() {
         assertEquals(value("일어나서 집을 나서기까지 · 평소 35분"), MeTabLogic.prep(35))
         assertEquals(value("일어나서 집을 나서기까지 · 평소 1시간 5분"), MeTabLogic.prep(65))
         assertTrue(MeTabLogic.prep(null).warn)
