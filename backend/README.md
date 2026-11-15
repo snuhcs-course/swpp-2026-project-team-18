@@ -66,6 +66,7 @@ curl http://127.0.0.1:8000/api/health
 | 준비 시간 범위 · 가입 제한 · 이동 표본 수 | [account-ranges](../docs/iter2/account-ranges-and-travel-counts.md) |
 | 주간 반복 | [weekly-recurrence](../docs/iter2/weekly-recurrence.md) |
 | 저장한 집 이름 겹침(409 `saved_place_label_duplicate`, bulk 는 " 2" 붙임) · 리포트 문장 해요체 | [saved-place-labels-and-report-tone](../docs/iter4/server-saved-place-labels-and-report-tone.md) |
+| 로그인 잠금(5회 · 15분) · 첫 실행 안내 본 시각 | [server-login-lock](../docs/iter4/server-login-lock.md) · [server-first-run-guide](../docs/iter4/server-first-run-guide.md) |
 
 - **가입·비밀번호:** `POST /api/auth/password/check`는 조건 미충족도 200이고 결과를 `messages`에 담는다.
   가입에는 `terms_agreed: true`가 필요하고 IP당 10회/시간으로 제한한다.
