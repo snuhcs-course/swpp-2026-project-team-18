@@ -31,13 +31,13 @@ def build_risk_options(event) -> dict:
     }
     plan = getattr(event, "alarm_plan", None)
     if plan is None or plan.status != AlarmPlan.Status.OK:
-        result["unavailable_reason"] = "알람 계획을 계산한 뒤 선택지를 볼 수 있습니다."
+        result["unavailable_reason"] = "알람 계획을 계산한 뒤 선택지를 볼 수 있어요."
         return result
 
     # Never fall back to older raw values when the latest revision no longer matches the plan.
     revision = history.reusable_revision(event, plan)
     if revision is None:
-        result["unavailable_reason"] = "저장된 경로 원값이 없습니다. 알람을 다시 계산해 주세요."
+        result["unavailable_reason"] = "저장된 경로 정보가 없어요. 알람을 다시 계산해 주세요."
         return result
 
     # 실제 알람과 같은 버퍼여야 선택지의 알람 시각이 "이걸 고르면 이렇게 울린다" 가 된다.
@@ -50,7 +50,7 @@ def build_risk_options(event) -> dict:
     }, buffer_minutes=buffer.minutes)
     total = estimators.total_distribution(prep, travel)
     if total.quantile(.99) <= total.quantile(.5) + 1e-9:
-        result["unavailable_reason"] = "소요시간의 변동 폭을 아직 몰라 위험별 선택지를 계산할 수 없습니다."
+        result["unavailable_reason"] = "소요 시간의 변동 폭을 아직 몰라 여유별 선택지를 계산할 수 없어요."
         return result
 
     for key, label, option_tau in OPTIONS:

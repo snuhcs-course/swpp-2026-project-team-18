@@ -64,12 +64,13 @@ def test_missing_plan_and_raw_snapshot_are_explicit(context):
     client, event = context
     data = get_options(client, event)
     assert data["options"] == []
-    assert data["unavailable_reason"]
+    # 앱이 그대로 보여 주는 문장이라 해요체다(BE-R1).
+    assert data["unavailable_reason"] == "알람 계획을 계산한 뒤 선택지를 볼 수 있어요."
     services.compute_and_store(event)
     PlanRevision.objects.filter(event=event).update(route_minutes_raw=None)
     data = get_options(client, event)
     assert data["options"] == []
-    assert data["unavailable_reason"]
+    assert data["unavailable_reason"] == "저장된 경로 정보가 없어요. 알람을 다시 계산해 주세요."
 
 
 def test_no_variability_is_empty_and_never_fetches_route(context, monkeypatch):
@@ -81,7 +82,7 @@ def test_no_variability_is_empty_and_never_fetches_route(context, monkeypatch):
     data = get_options(client, event)
     assert data["options"] == []
     assert data["distribution"] is None
-    assert data["unavailable_reason"]
+    assert data["unavailable_reason"].endswith("계산할 수 없어요.")
     upstream.assert_not_called()
 
 

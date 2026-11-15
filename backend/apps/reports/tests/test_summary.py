@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import statistics
 import urllib.error
 from datetime import timedelta
@@ -161,11 +162,15 @@ def example_report(**kw) -> dict:
     return make_report(rows, previous=previous, deviation=deviation, **kw)
 
 
+# 해요체 문장 끝(BE-R1). "…했어요." 와 "…걸렸어요(3번 기록)." 둘 다 된다.
+HAEYO_END = re.compile(r"요(?:\([^)]*\))?\.$")
+
+
 EXAMPLE_TEXT = (
     "이 주 일정 7건 중 도착을 기록한 6번에서 5번 정시 도착해 정시율 83%로 목표 90%에 "
-    "못 미쳤음. 지각 1번은 이동이 계획보다 오래 걸린 것 때문이었고 화요일에 10분 늦었음. "
-    "지난주 60%보다 23%p 올랐음. 이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 "
-    "보거나 몇 분 일찍 나서 볼 것."
+    "못 미쳤어요. 지각 1번은 이동이 계획보다 오래 걸린 것 때문이었고 화요일에 10분 늦었어요. "
+    "지난주 60%보다 23%p 올랐어요. 이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 "
+    "보거나 몇 분 일찍 나서 보세요."
 )
 
 
@@ -253,76 +258,76 @@ TEMPLATE_CASES = {
     "example": (example_report(), EXAMPLE_TEXT),
     "empty": (
         make_report([]),
-        "이 주에는 지난 일정이 없음. 일정을 추가해 두면 다음 주부터 알람과 함께 기록이 쌓임.",
+        "이 주에는 지난 일정이 없어요. 일정을 추가해 두면 다음 주부터 알람과 함께 기록이 쌓여요.",
     ),
     "no_arrivals": (
         make_report([unseen(0), unseen(2), unseen(4)]),
-        "이 주 일정 3건 모두 도착 기록이 없어 정시 여부를 채점하지 못했음. "
-        "위치 권한을 켜 두고 알람을 해제한 뒤 이동하면 출발·도착이 자동으로 기록됨.",
+        "이 주 일정 3건 모두 도착 기록이 없어 정시 여부를 채점하지 못했어요. "
+        "위치 권한을 켜 두고 알람을 해제한 뒤 이동하면 출발·도착이 자동으로 기록돼요.",
     ),
     "no_arrivals_without_alarms": (
         make_report([unseen(0, alarm_on=False), unseen(1, alarm_on=False)]),
-        "이 주 일정 2건 모두 도착 기록이 없어 정시 여부를 채점하지 못했음. "
-        "출발·도착은 알람을 해제한 뒤에만 기록되니 기록할 일정은 알람을 켜 둘 것.",
+        "이 주 일정 2건 모두 도착 기록이 없어 정시 여부를 채점하지 못했어요. "
+        "출발·도착은 알람을 해제한 뒤에만 기록되니 기록할 일정은 알람을 켜 두세요.",
     ),
     "thin": (
         make_report([on_time(8.0, 0), late(-4.0, "unknown", 1)]),
-        "이 주 도착을 기록한 2번 중 1번 정시 도착했지만 기록이 적어 비율로 판단하기는 이름. "
-        "지각 1번은 기록이 부족해 원인을 나누지 못했음. "
-        "원인을 나누려면 출발 시각이 필요하니 집을 나서기 전에 알람을 해제해 둘 것.",
+        "이 주 도착을 기록한 2번 중 1번 정시 도착했지만 기록이 적어 비율로 판단하기는 일러요. "
+        "지각 1번은 기록이 부족해 원인을 나누지 못했어요. "
+        "원인을 나누려면 출발 시각이 필요하니 집을 나서기 전에 알람을 해제해 두세요.",
     ),
     "no_late_tight": (
         make_report([on_time(3.2, 0), on_time(8.0, 1), on_time(12.0, 2)]),
-        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했음. "
-        "지각은 없었지만 가장 아슬아슬한 날은 3분 전에 도착했음. "
-        "아슬아슬한 날이 있었으니 지금처럼 출발 시각을 지키는 것이 좋음.",
+        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했어요. "
+        "지각은 없었지만 가장 아슬아슬한 날은 3분 전에 도착했어요. "
+        "아슬아슬한 날이 있었으니 지금처럼 출발 시각을 지키면 좋아요.",
     ),
     "no_late_exact": (
         make_report([on_time(0.2, 0), on_time(8.0, 1), on_time(12.0, 2)]),
-        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했음. "
-        "지각은 없었지만 가장 아슬아슬한 날은 일정 시작에 딱 맞춰 도착했음. "
-        "아슬아슬한 날이 있었으니 지금처럼 출발 시각을 지키는 것이 좋음.",
+        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했어요. "
+        "지각은 없었지만 가장 아슬아슬한 날은 일정 시작에 딱 맞춰 도착했어요. "
+        "아슬아슬한 날이 있었으니 지금처럼 출발 시각을 지키면 좋아요.",
     ),
     "no_late_comfortable": (
         make_report([on_time(7.0, 0), on_time(8.0, 1), on_time(12.0, 2)]),
-        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했음. "
-        "지각은 없었음. 지금 설정을 그대로 유지해도 좋음.",
+        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했어요. "
+        "지각은 없었어요. 지금 설정을 그대로 유지해도 좋아요.",
     ),
     "no_target": (
         make_report([on_time(7.0, 0), on_time(8.0, 1), on_time(12.0, 2)], target_rate=None),
-        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%였음. "
-        "지각은 없었음. 지금 설정을 그대로 유지해도 좋음.",
+        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%였어요. "
+        "지각은 없었어요. 지금 설정을 그대로 유지해도 좋아요.",
     ),
     "cause_travel": (
         three_arrivals_with_late("travel_over", {"travel_over": 8.0, "depart_late": 0.0}),
-        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤음. "
-        "지각 1번은 이동이 계획보다 오래 걸린 것 때문이었고 수요일에 5분 늦었음. "
-        "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 볼 것.",
+        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤어요. "
+        "지각 1번은 이동이 계획보다 오래 걸린 것 때문이었고 수요일에 5분 늦었어요. "
+        "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 보세요.",
     ),
     "cause_depart": (
         three_arrivals_with_late("depart_late", {"depart_late": 6.0}),
-        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤음. "
-        "지각 1번은 집에서 늦게 나선 것 때문이었고 수요일에 5분 늦었음. "
-        "다음 주에는 지금보다 6분 먼저 문을 나서 볼 것.",
+        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤어요. "
+        "지각 1번은 집에서 늦게 나선 것 때문이었고 수요일에 5분 늦었어요. "
+        "다음 주에는 지금보다 6분 먼저 문을 나서 보세요.",
     ),
     "cause_depart_small": (
         three_arrivals_with_late("depart_late", {"depart_late": 0.4}),
-        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤음. "
-        "지각 1번은 집에서 늦게 나선 것 때문이었고 수요일에 5분 늦었음. "
-        "다음 주에는 알람이 정한 출발 시각을 지켜 볼 것.",
+        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤어요. "
+        "지각 1번은 집에서 늦게 나선 것 때문이었고 수요일에 5분 늦었어요. "
+        "다음 주에는 알람이 정한 출발 시각을 지켜 보세요.",
     ),
     "cause_prep": (
         three_arrivals_with_late("prep_over", {"prep_over": 7.0}),
-        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤음. "
-        "지각 1번은 준비가 길어진 것 때문이었고 수요일에 5분 늦었음. "
-        "오래 걸린 준비 항목의 시간 범위를 루틴에서 늘려 두면 알람이 그만큼 앞당겨짐.",
+        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤어요. "
+        "지각 1번은 준비가 길어진 것 때문이었고 수요일에 5분 늦었어요. "
+        "오래 걸린 준비 항목의 시간 범위를 루틴에서 늘려 두면 알람이 그만큼 앞당겨져요.",
     ),
     "cause_tight": (
         three_arrivals_with_late("plan_too_tight", {"prep_over": -1.0, "depart_late": 0.0,
                                                     "travel_over": -2.0}),
-        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤음. "
-        "지각 1번은 계획의 여유가 부족했던 것 때문이었고 수요일에 5분 늦었음. "
-        "계획대로 움직여도 늦은 날이 있었으니 평소 준비 시간을 넉넉히 잡아 알람을 앞당겨 볼 것.",
+        "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤어요. "
+        "지각 1번은 계획의 여유가 부족했던 것 때문이었고 수요일에 5분 늦었어요. "
+        "계획대로 움직여도 늦은 날이 있었으니 평소 준비 시간을 넉넉히 잡아 알람을 앞당겨 보세요.",
     ),
     "several_lates_mixed": (
         make_report([
@@ -331,10 +336,10 @@ TEMPLATE_CASES = {
             late(-3.0, "depart_late", 2, deviation={**no_deviation(), "depart_late": 3.0}),
             on_time(4.0, 3),
         ]),
-        "이 주 도착을 기록한 4번 중 1번 정시 도착해 정시율 25%로 목표 90%에 못 미쳤음. "
+        "이 주 도착을 기록한 4번 중 1번 정시 도착해 정시율 25%로 목표 90%에 못 미쳤어요. "
         "지각 3번 중 2번은 이동이 계획보다 오래 걸린 것 때문이었고 가장 많이 늦은 날은 "
-        "화요일 12분이었음. "
-        "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 볼 것.",
+        "화요일 12분이었어요. "
+        "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 보세요.",
     ),
     "several_lates_same": (
         make_report([
@@ -342,33 +347,33 @@ TEMPLATE_CASES = {
             late(-12.0, "travel_over", 1, deviation={**no_deviation(), "travel_over": 14.0}),
             on_time(4.0, 3),
         ]),
-        "이 주 도착을 기록한 3번 중 1번 정시 도착해 정시율 33%로 목표 90%에 못 미쳤음. "
+        "이 주 도착을 기록한 3번 중 1번 정시 도착해 정시율 33%로 목표 90%에 못 미쳤어요. "
         "지각 2번은 모두 이동이 계획보다 오래 걸린 것 때문이었고 가장 많이 늦은 날은 "
-        "화요일 12분이었음. "
-        "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 볼 것.",
+        "화요일 12분이었어요. "
+        "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 보세요.",
     ),
     "in_progress": (
         make_report([on_time(5.0, 0)], week_complete=False),
-        "진행 중인 주라 지금까지 기록만 요약함. "
-        "이 주 도착을 기록한 1번 중 1번 정시 도착했지만 기록이 적어 비율로 판단하기는 이름. "
-        "지각은 없었음. 지금 설정을 그대로 유지해도 좋음.",
+        "진행 중인 주라 지금까지 기록만 요약했어요. "
+        "이 주 도착을 기록한 1번 중 1번 정시 도착했지만 기록이 적어 비율로 판단하기는 일러요. "
+        "지각은 없었어요. 지금 설정을 그대로 유지해도 좋아요.",
     ),
     "trend_down": (
         make_report(
             [on_time(5.0, 0), on_time(6.0, 1), late(-3.0, "unknown", 2), late(-4.0, "unknown", 3)],
             previous={"on_time_rate": 0.725, "on_time_rate_change_pp": -23},
         ),
-        "이 주 도착을 기록한 4번 중 2번 정시 도착해 정시율 50%로 목표 90%에 못 미쳤음. "
-        "지각 2번은 기록이 부족해 원인을 나누지 못했음. 지난주 73%보다 23%p 내렸음. "
-        "원인을 나누려면 출발 시각이 필요하니 집을 나서기 전에 알람을 해제해 둘 것.",
+        "이 주 도착을 기록한 4번 중 2번 정시 도착해 정시율 50%로 목표 90%에 못 미쳤어요. "
+        "지각 2번은 기록이 부족해 원인을 나누지 못했어요. 지난주 73%보다 23%p 내렸어요. "
+        "원인을 나누려면 출발 시각이 필요하니 집을 나서기 전에 알람을 해제해 두세요.",
     ),
     "trend_flat": (
         make_report(
             [on_time(7.0, 0), on_time(8.0, 1), on_time(12.0, 2)],
             previous={"on_time_rate": 1.0, "on_time_rate_change_pp": 0},
         ),
-        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했음. "
-        "지각은 없었음. 지난주와 정시율이 같았음. 지금 설정을 그대로 유지해도 좋음.",
+        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했어요. "
+        "지각은 없었어요. 지난주와 정시율이 같았어요. 지금 설정을 그대로 유지해도 좋아요.",
     ),
     "travel_mean_wins_ties": (
         make_report(
@@ -376,9 +381,9 @@ TEMPLATE_CASES = {
             deviation={"prep_over": stat(), "depart_late": stat(3, 4.0, 1.0),
                        "travel_over": stat(3, 4.0, 2.0)},
         ),
-        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했음. "
-        "지각은 없었음. 이동은 계획보다 평균 4분 더 걸렸음(3번 기록). "
-        "지금 설정을 그대로 유지해도 좋음.",
+        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했어요. "
+        "지각은 없었어요. 이동은 계획보다 평균 4분 더 걸렸어요(3번 기록). "
+        "지금 설정을 그대로 유지해도 좋아요.",
     ),
     "depart_mean": (
         make_report(
@@ -386,9 +391,9 @@ TEMPLATE_CASES = {
             deviation={"prep_over": stat(2, 3.0, 0.0), "depart_late": stat(3, 5.0, 1.0),
                        "travel_over": stat(3, 3.0, 2.0)},
         ),
-        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했음. "
-        "지각은 없었음. 출발은 계획보다 평균 5분 늦었음(3번 기록). "
-        "지금 설정을 그대로 유지해도 좋음.",
+        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했어요. "
+        "지각은 없었어요. 출발은 계획보다 평균 5분 늦었어요(3번 기록). "
+        "지금 설정을 그대로 유지해도 좋아요.",
     ),
     "travel_spread": (
         make_report(
@@ -396,9 +401,9 @@ TEMPLATE_CASES = {
             deviation={"prep_over": stat(), "depart_late": stat(),
                        "travel_over": stat(3, 1.0, 6.0)},
         ),
-        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했음. "
-        "지각은 없었음. 이동 시간 편차가 6분으로 큰 편이었음. "
-        "지금 설정을 그대로 유지해도 좋음.",
+        "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했어요. "
+        "지각은 없었어요. 이동 시간 편차가 6분으로 큰 편이었어요. "
+        "지금 설정을 그대로 유지해도 좋아요.",
     ),
 }
 
@@ -422,6 +427,44 @@ class TestTemplate:
 
     def test_sample_facts_template_passes(self):
         assert summary.check_text(summary.render_template(SAMPLE_FACTS), SAMPLE_FACTS) is None
+
+    # Partly AI-generated (Claude)
+    @pytest.mark.parametrize("name", sorted(TEMPLATE_CASES))
+    def test_every_sentence_is_haeyo(self, name):
+        """BE-R1. 모든 문장이 해요체("~요." 또는 "~요(괄호)." )로 끝난다. "~음·~함·~것" 이 남지 않는다."""
+        report, _ = TEMPLATE_CASES[name]
+        for sentence in re.split(r"(?<=\.)\s+", text_for(report)):
+            assert HAEYO_END.search(sentence), sentence
+
+    def test_fallback_is_haeyo(self):
+        for sentence in re.split(r"(?<=\.)\s+", summary.FALLBACK):
+            assert HAEYO_END.search(sentence), sentence
+
+    def test_prompt_asks_for_haeyo_and_is_versioned(self):
+        assert "해요체" in summary.SYSTEM_PROMPT
+        assert "'~함', '~음', '~임' 으로 끝낸다" not in summary.SYSTEM_PROMPT
+        assert summary.PROMPT_VERSION == 3
+
+    def test_longest_template_fits_the_length_check(self):
+        """해요체는 문장마다 1~2자 길다. 가장 긴 조합(진행 중 머리말 + 5문장, 큰 수)도
+        [summary.MAX_CHARS] 안이라 상한을 올리지 않는다."""
+        facts = {key: None for key in summary.FACT_KEYS}
+        facts.update(
+            week_complete=False, events=99, arrived=98, unobserved=1, on_time=90, late=8,
+            on_time_pct=92, target_pct=90, target_met=False, thin_data=False,
+            median_slack_min=10, tightest_slack_min=-120, late_max_min=120,
+            late_max_weekday="수", late_causes={"이동 초과": 5, "준비 초과": 3},
+            top_cause="이동 초과", top_cause_count=5, top_cause_mean_min=120,
+            prep_over_n=2, prep_over_mean_min=3, depart_late_n=2, depart_late_mean_min=3,
+            travel_over_n=20, travel_over_mean_min=120, travel_over_sd_min=30,
+            prev_on_time_pct=None, on_time_change_pp=None, alarm_events=99,
+            unobserved_with_alarm=1,
+        )
+        facts["suggestion"] = summary._suggestion(facts)
+        text = summary.render_template(facts)
+        assert text.count(".") == 5, text
+        assert len(text) <= summary.MAX_CHARS - 150, len(text)
+        assert summary.check_text(text, facts) is None
 
 
 # ---------------------------------------------------------------------------
@@ -460,10 +503,10 @@ class TestCheckText:
 
     def test_number_words_inside_a_word_are_fine(self):
         """"충분한 시간" 의 "한 시간" 은 수가 아니다."""
-        text = f"{EXAMPLE_TEXT} 충분한 시간을 두고 나서면 됨."
+        text = f"{EXAMPLE_TEXT} 충분한 시간을 두고 나서면 돼요."
         assert summary.check_text(text, self.facts()) is None
 
-    @pytest.mark.parametrize("extra", ["원인을 세분화해 보면 됨.", "기록을 세분해 보면 됨."])
+    @pytest.mark.parametrize("extra", ["원인을 세분화해 보면 돼요.", "기록을 세분해 보면 돼요."])
     def test_subdivide_is_not_a_number_word(self, extra):
         """"세분화" 의 "세분" 은 "세 분" 이 아니다(R3-8)."""
         assert summary.check_text(f"{EXAMPLE_TEXT} {extra}", self.facts()) is None
@@ -478,11 +521,11 @@ class TestCheckText:
         풀어 주지 않는다). 그래서 프롬프트가 지각 0 표현을 정해 준다 — 그 말은 통과한다."""
         facts = summary.build_facts(TEMPLATE_CASES["no_late_comfortable"][0])
         text = summary.render_template(facts)
-        assert "지각은 없었음" in text
-        assert "'지각은 없었음'" in summary.SYSTEM_PROMPT
+        assert "지각은 없었어요" in text
+        assert "'지각은 없었어요'" in summary.SYSTEM_PROMPT
         assert "'한 번도'" in summary.SYSTEM_PROMPT
         assert summary.check_text(text, facts) is None
-        idiom = text.replace("지각은 없었음", "한 번도 늦지 않았음")
+        idiom = text.replace("지각은 없었어요", "한 번도 늦지 않았음")
         assert summary.check_text(idiom, facts) == "number_word"
 
     @pytest.mark.parametrize("extra", ["10월 7일 기록임.", "9시 수업이었음.", "8:15 에 나섰음."])
@@ -517,7 +560,7 @@ def user(django_user_model):
 def with_suffix(request) -> str:
     """보낸 집계값으로 만든 템플릿 + 숫자 없는 꼬리. 검사를 늘 통과한다."""
     facts = json.loads(json.loads(request.data.decode("utf-8"))["messages"][1]["content"])
-    return summary.render_template(facts) + " 다음 주도 지금처럼 하면 됨."
+    return summary.render_template(facts) + " 다음 주도 지금처럼 하면 돼요."
 
 
 class RecordingCache:
@@ -549,7 +592,7 @@ class TestSummaryFor:
 
         text, source = summary.summary_for(user, report)
         assert source == summary.SOURCE_LLM
-        assert text == EXAMPLE_TEXT + " 다음 주도 지금처럼 하면 됨."
+        assert text == EXAMPLE_TEXT + " 다음 주도 지금처럼 하면 돼요."
         row = WeeklySummary.objects.get(user=user)
         assert row.week_start.isoformat() == report["week_start"]
         assert row.text == text
@@ -850,7 +893,7 @@ class TestApiWithFakeLlm:
 
         assert res.status_code == 200
         assert res.data["summary_source"] == summary.SOURCE_LLM
-        assert res.data["summary"].endswith("다음 주도 지금처럼 하면 됨.")
+        assert res.data["summary"].endswith("다음 주도 지금처럼 하면 돼요.")
         sent = fake_llm.sent()["messages"][1]["content"]
         assert SECRET_TITLE not in sent and "관악로" not in sent and "37.46" not in sent
 
