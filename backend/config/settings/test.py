@@ -121,3 +121,5 @@ LOGGING = {
 EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
 # 문의 알림 주소도 `.env` 를 따르지 않는다. 받는 주소를 확인하는 테스트는 `settings` 픽스처로 넣는다.
 SUPPORT_INBOX_EMAILS: list[str] = []
+# 알림 메일은 스레드 없이 커밋 직후 바로 보낸다(결과가 정해진다).
+SUPPORT_NOTIFY_IN_BACKGROUND = False

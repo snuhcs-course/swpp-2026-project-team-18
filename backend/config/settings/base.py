@@ -270,6 +270,9 @@ SUPPORT_INBOX_EMAILS = [
     for address in (os.getenv("SUPPORT_INBOX_EMAILS") or "").split(",")
     if address.strip()
 ]
+# 문의 알림 메일을 응답 뒤 데몬 스레드에서 보낸다(SMTP 가 느려도 요청이 기다리지 않는다).
+# 테스트는 끄고 커밋 직후 같은 스레드에서 보낸다. (Partly AI-generated (Claude))
+SUPPORT_NOTIFY_IN_BACKGROUND = True
 
 from datetime import timedelta  # noqa: E402
 
