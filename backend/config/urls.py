@@ -58,4 +58,6 @@ urlpatterns = [
     # back-spec.md 5.8 주간 리포트·캘리브레이션.
     # 모델이 없다 — 요청 시점에 기존 관측에서 계산한다(apps/reports/services.py).
     path("api/", include("apps.reports.urls")),
+    # 앱 안 문의하기(iter4 BE-H4b, docs/iter4/server-inquiry.md). (Partly AI-generated (Claude))
+    path("api/support/", include("apps.support.urls")),
 ]

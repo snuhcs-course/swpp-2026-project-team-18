@@ -112,6 +112,9 @@ THROTTLED_PATHS = {
     "/api/auth/me/email/verify/confirm": "6자리 코드 추측 방지",
     "/api/observations/batch": "쓰기 폭주 방지",
     "/api/routines/observations/batch": "쓰기 폭주 방지",
+    # Partly AI-generated (Claude)
+    "/api/auth/me/learning/reset": "기록 전체 삭제 · 알람 재계산 반복 방지",
+    "/api/support/inquiries": "문의 한 건마다 팀 메일 발송",
 }
 
 

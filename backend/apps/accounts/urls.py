@@ -11,6 +11,7 @@ from .views import (
     PasswordCheckView,
     RegisterView,
 )
+from .views_learning import LearningResetView
 from .views_password import (
     EmailVerifyConfirmView,
     EmailVerifyView,
@@ -42,6 +43,8 @@ urlpatterns = [
     path("logout", LogoutView.as_view(), name="logout"),
     path("me", MeView.as_view(), name="me"),
     path("me/logout-all", LogoutAllView.as_view(), name="logout_all"),
+    # 쌓인 기록 초기화(iter4 BE-RESET, docs/iter4/server-learning-reset.md). (Partly AI-generated (Claude))
+    path("me/learning/reset", LearningResetView.as_view(), name="learning_reset"),
     path("social/<str:provider>", SocialLoginView.as_view(), name="social_login"),
     # 연결은 로그인한 사용자의 것이라 `me` 아래에 둔다. 공개 경로(`social/`)와 접두가 겹치지 않는다.
     path("me/social/<str:provider>", SocialLinkView.as_view(), name="social_link"),

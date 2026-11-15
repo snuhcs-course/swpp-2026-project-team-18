@@ -182,6 +182,8 @@ class TestEveryAdminOpens:
             "planrevision", "alarmlog", "llmcall", "apirequestlog",
             "eventrecurrence", "bufferadjustment", "socialaccount", "emailcode", "savedplace",
             "usertravelprofile", "tripreroute",
+            # 문의는 앱의 [문의하기]로만 온다(apps/support/admin.py). (Partly AI-generated (Claude))
+            "inquiry",
         }
         broken = []
         for model in registered_models():
