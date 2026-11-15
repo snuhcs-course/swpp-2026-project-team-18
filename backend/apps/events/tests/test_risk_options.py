@@ -65,12 +65,13 @@ def test_missing_plan_and_raw_snapshot_are_explicit(context):
     data = get_options(client, event)
     assert data["options"] == []
     # 앱이 그대로 보여 주는 문장이라 해요체다(BE-R1).
-    assert data["unavailable_reason"] == "알람 계획을 계산한 뒤 선택지를 볼 수 있어요."
+    assert data["unavailable_reason"] == "알람이 아직 계산되지 않아 고를 수 있는 알람 시각을 보여 드릴 수 없어요."
     services.compute_and_store(event)
     PlanRevision.objects.filter(event=event).update(route_minutes_raw=None)
     data = get_options(client, event)
     assert data["options"] == []
-    assert data["unavailable_reason"] == "저장된 경로 정보가 없어요. 알람을 다시 계산해 주세요."
+    # 시트에는 [다시 시도] 만 있다. 할 수 없는 "다시 계산" 을 시키지 않는다(BE-R1 T-4).
+    assert data["unavailable_reason"] == "저장된 경로 정보가 없어 고를 수 있는 알람 시각을 아직 계산할 수 없어요."
 
 
 def test_no_variability_is_empty_and_never_fetches_route(context, monkeypatch):
@@ -82,7 +83,11 @@ def test_no_variability_is_empty_and_never_fetches_route(context, monkeypatch):
     data = get_options(client, event)
     assert data["options"] == []
     assert data["distribution"] is None
-    assert data["unavailable_reason"].endswith("계산할 수 없어요.")
+    assert data["unavailable_reason"] == (
+        "걸리는 시간이 얼마나 달라지는지 아직 몰라 고를 수 있는 알람 시각을 계산할 수 없어요."
+    )
+    # 위험 단계를 "여유" 로 부르지 않는다 — 화면의 "여유 시간" 은 버퍼다(BE-R1 T-4).
+    assert "여유" not in data["unavailable_reason"]
     upstream.assert_not_called()
 
 
@@ -232,3 +237,4 @@ def test_raw_route_change_refreshes_preview_even_if_rounded_decision_is_identica
     assert new_distribution != old_distribution
     assert event.plan_revisions.first().route_minutes_raw == 21
     assert event.plan_revisions.count() == 2
+

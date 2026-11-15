@@ -81,7 +81,8 @@ class AlarmPlanSerializer(serializers.Serializer):
     """
 
     status = serializers.CharField()
-    status_label = serializers.CharField(source="get_status_display")
+    # 앱이 그대로 보이는 해요체 문구(`AlarmPlan.STATUS_LABELS`). 분기는 `status` 로 한다.
+    status_label = serializers.CharField()
     alarm_at = serializers.DateTimeField(allow_null=True)
     depart_by = serializers.DateTimeField(allow_null=True)
     arrive_at = serializers.DateTimeField(allow_null=True)
