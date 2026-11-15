@@ -239,7 +239,8 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
 
     @staticmethod
     def _preset_chosen(write, event):
-        # 빠르게 고르기 세 칸(τ)을 골랐으면 직접 정한 시각을 지우고 그 시각을 확인한다(H2-3).
+        # 빠르게 고르기 세 칸(τ)을 골랐으면 직접 정한 시각과 제안을 지운다(H2-3). 확인으로 치지는 않는다 —
+        # 지금 앱은 확인을 보내지 않으므로, 확인은 새 시트의 `POST …/alarm/confirm` 으로만 한다(리뷰 H3-4).
         # "이후 일정 모두" 로 골랐을 때도 이 회차에 같은 규칙을 쓴다. 덮어쓴 이후 회차는
         # `split_following` 이 직접 정한 시각·확인을 모두 지운다(리뷰 A2-7). (Partly AI-generated (Claude))
         if "tau_override" in write.validated_data and recurrence.in_window(event):
