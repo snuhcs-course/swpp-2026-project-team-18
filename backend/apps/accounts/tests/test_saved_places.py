@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from rest_framework.test import APIClient
 
+from apps.accounts import saved_places
 from apps.accounts.models import SavedPlace
 from apps.events.models import Event, Place
 from apps.planning import prep_observations, services
@@ -134,6 +135,135 @@ class TestBulk:
         res = client.post("/api/saved-places/bulk/", {"items": items}, format="json").json()
         assert len(res["results"]) == 5
         assert [s["reason"] for s in res["skipped"]] == ["limit", "limit"]
+
+
+# Partly AI-generated (Claude)
+class TestLabelKey:
+    """BE-H9 이름 비교 규칙. docs/iter4/server-saved-place-labels-and-report-tone.md"""
+
+    @pytest.mark.parametrize("a, b", [
+        ("본가", " 본가 "), ("우리  집", "우리 집"), ("Home", "home"), ("ＨＯＭＥ", "home"),
+        ("자취방\t", "자취방"),
+    ])
+    def test_same(self, a, b):
+        assert saved_places.label_key(a) == saved_places.label_key(b)
+
+    @pytest.mark.parametrize("a, b", [("본가2", "본가 2"), ("본가", "본가집"), ("집", "우리 집")])
+    def test_different(self, a, b):
+        assert saved_places.label_key(a) != saved_places.label_key(b)
+
+    def test_unique_label_stays_within_the_column(self):
+        rows = [SavedPlace(pk=1, label="가" * 40)]
+        label = saved_places.unique_label("가" * 40, rows)
+        assert label == "가" * 38 + " 2" and len(label) == saved_places.LABEL_MAX
+
+
+@pytest.mark.integration
+class TestLabelDuplicate:
+    """BE-H9. "집"이나 다른 저장한 집과 같은 이름은 409 `saved_place_label_duplicate`."""
+
+    def assert_label_error(self, res, reserved=False):
+        assert res.status_code == 409, res.json()
+        error = res.json()["error"]
+        assert error["code"] == "saved_place_label_duplicate"
+        expected = (saved_places.LABEL_RESERVED_MESSAGE if reserved
+                    else saved_places.LABEL_DUPLICATE_MESSAGE)
+        assert error["details"] == {"label": [expected]}
+        assert error["message"] == expected
+
+    @pytest.mark.parametrize("label", ["집", " 집 "])
+    def test_create_reserved_name(self, client, label):
+        res = client.post("/api/saved-places/", item(label, PARENTS), format="json")
+        self.assert_label_error(res, reserved=True)
+        assert SavedPlace.objects.count() == 0
+
+    @pytest.mark.parametrize("label", ["본가", "  본가", "본가  "])
+    def test_create_same_name_elsewhere(self, client, label):
+        client.post("/api/saved-places/", item("본가", PARENTS), format="json")
+        res = client.post("/api/saved-places/", item(label, STUDIO), format="json")
+        self.assert_label_error(res)
+        assert SavedPlace.objects.count() == 1
+
+    def test_inner_spaces_and_case_are_ignored(self, client):
+        client.post("/api/saved-places/", item("Mom  House", PARENTS), format="json")
+        res = client.post("/api/saved-places/", item("mom house", STUDIO), format="json")
+        self.assert_label_error(res)
+
+    def test_same_spot_with_its_own_name_is_fine(self, client):
+        """같은 자리(50m)는 그 행을 고치는 것이라 자기 이름과는 겹치지 않는다."""
+        first = client.post("/api/saved-places/", item("본가", PARENTS, "u-1"), format="json").json()
+        near = (PARENTS[0] + 0.0002, PARENTS[1])
+        again = client.post("/api/saved-places/", item("본가", near), format="json")
+        assert again.status_code == 200 and again.json()["id"] == first["id"]
+        # 같은 client_uuid 로 다시 보내도 통과한다(재시도).
+        retry = client.post("/api/saved-places/", item("본가", PARENTS, "u-1"), format="json")
+        assert retry.status_code == 200
+
+    def test_same_spot_taking_another_rows_name_is_refused(self, client):
+        client.post("/api/saved-places/", item("본가", PARENTS), format="json")
+        client.post("/api/saved-places/", item("자취방", STUDIO), format="json")
+        near = (STUDIO[0] + 0.0002, STUDIO[1])
+        res = client.post("/api/saved-places/", item("본가", near), format="json")
+        self.assert_label_error(res)
+        assert sorted(SavedPlace.objects.values_list("label", flat=True)) == ["본가", "자취방"]
+
+    def test_patch_rules(self, client):
+        client.post("/api/saved-places/", item("본가", PARENTS), format="json")
+        pk = client.post("/api/saved-places/", item("자취방", STUDIO), format="json").json()["id"]
+        self.assert_label_error(
+            client.patch(f"/api/saved-places/{pk}/", {"label": "본가 "}, format="json"))
+        self.assert_label_error(
+            client.patch(f"/api/saved-places/{pk}/", {"label": "집"}, format="json"), reserved=True)
+        # 자기 이름(공백·대소문자만 다름)과 다른 칸만 고치는 것은 된다.
+        assert client.patch(f"/api/saved-places/{pk}/", {"label": " 자취방"}, format="json").status_code == 200
+        assert client.patch(f"/api/saved-places/{pk}/", {"address": "성수동"}, format="json").status_code == 200
+        assert client.patch(f"/api/saved-places/{pk}/", {"label": "원룸"}, format="json").json()["label"] == "원룸"
+
+    def test_patch_keeps_an_old_duplicate_name(self, client, user):
+        """BE-H9 전에 생긴 같은 이름 행도 이름을 바꾸지 않는 수정은 된다."""
+        a = SavedPlace.objects.create(user=user, label="본가", lat=PARENTS[0], lng=PARENTS[1])
+        SavedPlace.objects.create(user=user, label="본가", lat=STUDIO[0], lng=STUDIO[1])
+        res = client.patch(f"/api/saved-places/{a.pk}/", {"label": "본가", "name": "엄마"}, format="json")
+        assert res.status_code == 200
+
+    def test_other_users_names_do_not_count(self, client, django_user_model):
+        stranger = django_user_model.objects.create_user(email="s2@example.com", password="x", nickname="s")
+        SavedPlace.objects.create(user=stranger, label="본가", lat=PARENTS[0], lng=PARENTS[1])
+        assert client.post("/api/saved-places/", item("본가", PARENTS), format="json").status_code == 201
+
+    def test_bulk_renames_instead_of_failing(self, client):
+        """첫 업로드는 막지 않는다. 겹치면 " 2" 를 붙이고 `renamed` 에 알린다."""
+        far = (37.40, 127.10)
+        body = {"items": [
+            item("본가", PARENTS, "u-1"),
+            item(" 본가", STUDIO, "u-2"),   # 같은 요청 안의 겹침
+            item("집", far, "u-3"),         # 기본 집 이름(자리는 기본 집과 멂)
+        ]}
+        res = client.post("/api/saved-places/bulk/", body, format="json")
+        assert res.status_code == 200
+        data = res.json()
+        assert [r["label"] for r in data["results"]] == ["본가", "본가 2", "집 2"]
+        assert data["skipped"] == []
+        assert data["renamed"] == [
+            {"client_uuid": "u-2", "label": "본가 2", "requested_label": "본가"},
+            {"client_uuid": "u-3", "label": "집 2", "requested_label": "집"},
+        ]
+        # 같은 기기 목록을 다시 보내도 늘지 않고, 이미 바꾼 이름도 그대로다.
+        again = client.post("/api/saved-places/bulk/", body, format="json").json()
+        assert [r["label"] for r in again["results"]] == ["본가", "본가 2", "집 2"]
+        assert SavedPlace.objects.count() == 3
+
+    def test_bulk_against_existing_rows(self, client):
+        client.post("/api/saved-places/", item("본가", PARENTS), format="json")
+        client.post("/api/saved-places/", item("본가 2", STUDIO), format="json")
+        res = client.post("/api/saved-places/bulk/", {"items": [item("본가", (37.40, 127.10), "u-9")]},
+                          format="json").json()
+        assert res["renamed"] == [{"client_uuid": "u-9", "label": "본가 3", "requested_label": "본가"}]
+
+    def test_bulk_without_conflicts_has_empty_renamed(self, client):
+        res = client.post("/api/saved-places/bulk/", {"items": [item("본가", PARENTS, "u-1")]},
+                          format="json").json()
+        assert res["renamed"] == []
 
 
 @pytest.mark.integration

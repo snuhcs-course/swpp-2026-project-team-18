@@ -254,20 +254,20 @@ def record(user, decision: Decision) -> BufferAdjustment:
 
 
 def reason_text(adjustment: BufferAdjustment) -> str:
-    """리포트에 쓰는 조정 이유. 리포트 요약과 같은 '~음' 체다."""
+    """리포트에 쓰는 조정 이유. 리포트 요약과 같은 해요체다(BE-R1)."""
     from apps.reports.services import half_up
 
     change = f"버퍼를 {adjustment.previous_minutes}분에서 {adjustment.minutes}분으로"
     if adjustment.reason == BufferAdjustment.Reason.LATE_MORE_THAN_PROMISED:
         return (
-            f"최근 {adjustment.sample_count}번 중 {adjustment.late_count}번 늦었음. "
-            f"알람이 약속한 정시 확률로는 {adjustment.expected_late:.1f}번 정도였음. "
+            f"최근 {adjustment.sample_count}번 중 {adjustment.late_count}번 늦었어요. "
+            f"알람이 약속한 정시 확률로는 {adjustment.expected_late:.1f}번 정도였어요. "
             f"늦은 시간의 중앙값 {half_up(adjustment.median_late_minutes or 0)}분을 보고 "
-            f"{change} 늘림."
+            f"{change} 늘렸어요."
         )
     return (
-        f"최근 {adjustment.sample_count}번 모두 계획한 도착 시각보다 먼저 도착했음"
+        f"최근 {adjustment.sample_count}번 모두 계획한 도착 시각보다 먼저 도착했어요"
         f"(가장 빠듯했을 때도 {half_up(adjustment.tightest_slack_minutes)}분 일찍 도착). "
-        f"{change} 줄임."
+        f"{change} 줄였어요."
     )
 

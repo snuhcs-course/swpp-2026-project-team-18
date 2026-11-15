@@ -68,7 +68,8 @@ SOURCE_TEMPLATE = "template"
 
 # 프롬프트를 고치면 올린다. 해시가 바뀌어 저장된 문장을 다시 만든다.
 # 2: 지각 0 표현("지각은 없었음")과 한글 수 관용구 금지를 더함.
-PROMPT_VERSION = 2
+# 3: 문장 끝을 해요체("~했어요", "~예요")로 바꿈(BE-R1). 템플릿·제안 문장도 함께 바꿨다.
+PROMPT_VERSION = 3
 
 # LLM 을 부르는 가장 오래된 주. 비용 상한이고, 리포트의 90일 범위와도 맞다.
 LLM_MAX_WEEKS_BACK = 12
@@ -127,7 +128,7 @@ CAUSE_DEVIATION_KEYS = {
 }
 
 # 템플릿에서 예외가 나면 쓰는 문장. 수치를 말하지 않는다.
-FALLBACK = "이 주 기록을 문장으로 정리하지 못했음. 아래 수치를 확인할 것."
+FALLBACK = "이 주 기록을 문장으로 정리하지 못했어요. 아래 수치를 확인해 주세요."
 
 # LLM 에 보내는 키. 테스트가 이 집합을 그대로 단언한다 — 키를 더할 때마다
 # 개인정보가 섞이지 않는지 리뷰에서 다시 보게 하려는 것이다.
@@ -166,10 +167,10 @@ FACT_KEYS = (
 
 SYSTEM_PROMPT = """너는 알람 앱의 주간 리포트를 쓰는 도우미다. 사용자 메시지의 JSON 은 한 사용자의 한 주 기록을 집계한 값이다. 이 값만 근거로 한국어 요약 한 문단을 쓴다.
 1. 3~4문장, 300자 이내. 제목·목록·마크다운·이모지 없이 평문 한 문단.
-2. 문장은 '~함', '~음', '~임' 으로 끝낸다.
-3. 숫자는 JSON 에 있는 값만 그대로 쓰고 모두 아라비아 숫자로 쓴다('두 번' 이 아니라 '2번'). '한 번도'·'한번 더' 처럼 한글 수가 든 관용구도 쓰지 않는다. late 가 0 이면 '지각은 없었음' 이라고 쓴다. 새로 계산하거나 날짜·시각을 만들지 않는다.
+2. 친근한 해요체로 쓴다. 문장은 '~했어요', '~였어요', '~예요', '~해 보세요' 처럼 끝낸다. '~함'·'~음'·'~임'·'~다' 로 끝내지 않는다.
+3. 숫자는 JSON 에 있는 값만 그대로 쓰고 모두 아라비아 숫자로 쓴다('두 번' 이 아니라 '2번'). '한 번도'·'한번 더' 처럼 한글 수가 든 관용구도 쓰지 않는다. late 가 0 이면 '지각은 없었어요' 라고 쓴다. 새로 계산하거나 날짜·시각을 만들지 않는다.
 4. *_slack_min 은 일정 시작보다 일찍 도착한 분(음수면 늦은 분), *_mean_min 은 계획보다 더 걸리거나 늦은 분(음수면 덜 걸리거나 일찍)이다. late_max_min 은 가장 많이 늦은 분(양수), on_time_change_pp 는 지난주 대비 정시율 차이(%p), unobserved 는 도착 기록이 없는 일정 수, alarm_events 는 알람이 켜진 일정 수, top_cause 는 가장 많은 지각 원인이고 top_cause_count 는 그 건수, suggestion 은 마지막 문장의 근거다.
-5. null 은 기록이 없다는 뜻이다. 0 으로 읽지 말고 언급하지 않거나 '기록이 없음' 이라고만 쓴다.
+5. null 은 기록이 없다는 뜻이다. 0 으로 읽지 말고 언급하지 않거나 '기록이 없어요' 라고만 쓴다.
 6. 순서: 정시율과 목표 → 지각과 주원인 → 지난주 대비 변화나 계획 대비 차이 중 하나 → 마지막 문장은 suggestion 의 뜻을 바꾸지 않고 다듬은 제안 하나.
 7. '학습' 이라는 낱말을 쓰지 않는다. 사용자를 탓하지 않는다. 없는 앱 기능을 말하지 않는다."""
 
@@ -325,30 +326,30 @@ def _suggestion(facts: dict) -> str:
     tightest = facts["tightest_slack_min"]
 
     if facts["events"] == 0:
-        return "일정을 추가해 두면 다음 주부터 알람과 함께 기록이 쌓임."
+        return "일정을 추가해 두면 다음 주부터 알람과 함께 기록이 쌓여요."
     alarm_events = facts["alarm_events"]
     missing = facts["unobserved_with_alarm"]
     if (facts["arrived"] == 0 and missing > 0) or (alarm_events > 0 and missing * 2 >= alarm_events):
-        return "위치 권한을 켜 두고 알람을 해제한 뒤 이동하면 출발·도착이 자동으로 기록됨."
+        return "위치 권한을 켜 두고 알람을 해제한 뒤 이동하면 출발·도착이 자동으로 기록돼요."
     if facts["arrived"] == 0:
         # 기록이 없는 일정이 전부 알람이 없던 일정이다.
-        return "출발·도착은 알람을 해제한 뒤에만 기록되니 기록할 일정은 알람을 켜 둘 것."
+        return "출발·도착은 알람을 해제한 뒤에만 기록되니 기록할 일정은 알람을 켜 두세요."
     if late > 0 and top == "늦은 출발":
         mean = facts["top_cause_mean_min"]
         if mean is not None and mean >= 1:
-            return f"다음 주에는 지금보다 {mean}분 먼저 문을 나서 볼 것."
-        return "다음 주에는 알람이 정한 출발 시각을 지켜 볼 것."
+            return f"다음 주에는 지금보다 {mean}분 먼저 문을 나서 보세요."
+        return "다음 주에는 알람이 정한 출발 시각을 지켜 보세요."
     if late > 0 and top == "준비 초과":
-        return "오래 걸린 준비 항목의 시간 범위를 루틴에서 늘려 두면 알람이 그만큼 앞당겨짐."
+        return "오래 걸린 준비 항목의 시간 범위를 루틴에서 늘려 두면 알람이 그만큼 앞당겨져요."
     if late > 0 and top == "이동 초과":
-        return "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 볼 것."
+        return "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 보세요."
     if late > 0 and top == "계획 여유 부족":
-        return "계획대로 움직여도 늦은 날이 있었으니 평소 준비 시간을 넉넉히 잡아 알람을 앞당겨 볼 것."
+        return "계획대로 움직여도 늦은 날이 있었으니 평소 준비 시간을 넉넉히 잡아 알람을 앞당겨 보세요."
     if late > 0:
-        return "원인을 나누려면 출발 시각이 필요하니 집을 나서기 전에 알람을 해제해 둘 것."
+        return "원인을 나누려면 출발 시각이 필요하니 집을 나서기 전에 알람을 해제해 두세요."
     if tightest is not None and tightest < 5:
-        return "아슬아슬한 날이 있었으니 지금처럼 출발 시각을 지키는 것이 좋음."
-    return "지금 설정을 그대로 유지해도 좋음."
+        return "아슬아슬한 날이 있었으니 지금처럼 출발 시각을 지키면 좋아요."
+    return "지금 설정을 그대로 유지해도 좋아요."
 
 
 # ---------------------------------------------------------------------------
@@ -370,20 +371,20 @@ def render_template(facts: dict) -> str:
     sentences.append(facts["suggestion"])
 
     if not facts["week_complete"]:
-        sentences.insert(0, "진행 중인 주라 지금까지 기록만 요약함.")
+        sentences.insert(0, "진행 중인 주라 지금까지 기록만 요약했어요.")
     return " ".join(sentences)
 
 
 def _overview(facts: dict) -> str:
     events, arrived, on_time = facts["events"], facts["arrived"], facts["on_time"]
     if events == 0:
-        return "이 주에는 지난 일정이 없음."
+        return "이 주에는 지난 일정이 없어요."
     if arrived == 0:
-        return f"이 주 일정 {events}건 모두 도착 기록이 없어 정시 여부를 채점하지 못했음."
+        return f"이 주 일정 {events}건 모두 도착 기록이 없어 정시 여부를 채점하지 못했어요."
     if facts["thin_data"]:
         return (
             f"이 주 도착을 기록한 {arrived}번 중 {on_time}번 정시 도착했지만 "
-            "기록이 적어 비율로 판단하기는 이름."
+            "기록이 적어 비율로 판단하기는 일러요."
         )
 
     head = (
@@ -393,11 +394,11 @@ def _overview(facts: dict) -> str:
     )
     met, target = facts["target_met"], facts["target_pct"]
     if met is True:
-        tail = f"로 목표 {target}%를 달성했음."
+        tail = f"로 목표 {target}%를 달성했어요."
     elif met is False:
-        tail = f"로 목표 {target}%에 못 미쳤음."
+        tail = f"로 목표 {target}%에 못 미쳤어요."
     else:
-        tail = "였음."
+        tail = "였어요."
     return f"이 주 {head} {on_time}번 정시 도착해 정시율 {facts['on_time_pct']}%{tail}"
 
 
@@ -407,22 +408,22 @@ def _lateness(facts: dict) -> str:
         tightest = facts["tightest_slack_min"]
         if tightest is not None and tightest < 5:
             if tightest == 0:
-                return "지각은 없었지만 가장 아슬아슬한 날은 일정 시작에 딱 맞춰 도착했음."
-            return f"지각은 없었지만 가장 아슬아슬한 날은 {tightest}분 전에 도착했음."
-        return "지각은 없었음."
+                return "지각은 없었지만 가장 아슬아슬한 날은 일정 시작에 딱 맞춰 도착했어요."
+            return f"지각은 없었지만 가장 아슬아슬한 날은 {tightest}분 전에 도착했어요."
+        return "지각은 없었어요."
 
     top = facts["top_cause"]
     if top is None or top == CAUSE_UNKNOWN:
-        return f"지각 {late}번은 기록이 부족해 원인을 나누지 못했음."
+        return f"지각 {late}번은 기록이 부족해 원인을 나누지 못했어요."
 
     reason = CAUSE_REASONS[top]
     count = facts["top_cause_count"]
     worst, weekday = facts["late_max_min"], facts["late_max_weekday"]
     if late == 1:
         when = f"{weekday}요일에 " if weekday else ""
-        return f"지각 1번은 {reason} 때문이었고 {when}{worst}분 늦었음."
-    most = f"가장 많이 늦은 날은 {weekday}요일 {worst}분이었음." if weekday else (
-        f"가장 많이 늦은 것은 {worst}분이었음."
+        return f"지각 1번은 {reason} 때문이었고 {when}{worst}분 늦었어요."
+    most = f"가장 많이 늦은 날은 {weekday}요일 {worst}분이었어요." if weekday else (
+        f"가장 많이 늦은 것은 {worst}분이었어요."
     )
     if late == count:
         return f"지각 {late}번은 모두 {reason} 때문이었고 {most}"
@@ -435,16 +436,16 @@ def _one_more(facts: dict) -> str | None:
     if change is not None:
         previous = facts["prev_on_time_pct"]
         if change > 0:
-            return f"지난주 {previous}%보다 {change}%p 올랐음."
+            return f"지난주 {previous}%보다 {change}%p 올랐어요."
         if change < 0:
-            return f"지난주 {previous}%보다 {abs(change)}%p 내렸음."
-        return "지난주와 정시율이 같았음."
+            return f"지난주 {previous}%보다 {abs(change)}%p 내렸어요."
+        return "지난주와 정시율이 같았어요."
 
     # 2번 이상 쟀고 평균 3분 이상 늘어난 것 중 가장 큰 것. 동률은 이동 → 출발 → 준비.
     candidates = [
-        ("travel_over", "이동은 계획보다 평균 {m}분 더 걸렸음({n}번 기록)."),
-        ("depart_late", "출발은 계획보다 평균 {m}분 늦었음({n}번 기록)."),
-        ("prep_over", "준비는 계획보다 평균 {m}분 더 걸렸음({n}번 기록)."),
+        ("travel_over", "이동은 계획보다 평균 {m}분 더 걸렸어요({n}번 기록)."),
+        ("depart_late", "출발은 계획보다 평균 {m}분 늦었어요({n}번 기록)."),
+        ("prep_over", "준비는 계획보다 평균 {m}분 더 걸렸어요({n}번 기록)."),
     ]
     best = None
     for key, sentence in candidates:
@@ -456,7 +457,7 @@ def _one_more(facts: dict) -> str | None:
 
     sd = facts["travel_over_sd_min"]
     if sd is not None and sd >= 5 and facts["travel_over_n"] >= 3:
-        return f"이동 시간 편차가 {sd}분으로 큰 편이었음."
+        return f"이동 시간 편차가 {sd}분으로 큰 편이었어요."
     return None
 
 
