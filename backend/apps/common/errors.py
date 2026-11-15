@@ -95,6 +95,12 @@ def api_exception_handler(exc, context):
         message = str(detail)
         details = {}
 
+    # 예외가 `extra_details`(dict)를 들고 있으면 문자열로 바꾸지 않고 `details` 에 더한다. 숫자·시각을
+    # 그대로 싣는다(로그인 잠금의 `remaining_attempts` 등, iter4 BE-A3). (Partly AI-generated (Claude))
+    extra = getattr(exc, "extra_details", None)
+    if isinstance(extra, dict):
+        details = {**details, **extra}
+
     response.data = {
         "error": {
             "code": code,

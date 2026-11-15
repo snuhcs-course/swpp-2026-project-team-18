@@ -36,6 +36,8 @@ class ProfileView(RetrieveUpdateAPIView):
         profile = serializer.save()
 
         after = (profile.home_lat, profile.home_lng, profile.onboarding_prep_min)
+        # 안내를 본 시각(`intro_seen_at`·`coachmark_seen_at`, BE-H4)·τ·시간대만 바꾼 PATCH 는 다시 계산하지
+        # 않는다(`recomputed_plans: 0`). 앱이 안내를 닫을 때마다 부른다. (Partly AI-generated (Claude))
 
         recomputed = 0
         if before != after:

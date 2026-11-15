@@ -5,17 +5,24 @@ back-spec.md 5.1 인증. 요청·응답은 snake_case JSON 이다.
 
 from __future__ import annotations
 
+import math
+from datetime import timedelta
+
 from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
-from rest_framework import serializers
+from rest_framework import exceptions, serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 # 집도 출발지다. 일정의 `origin_*` 과 같은 범위 규칙을 써야 한다.
 from apps.events.geo import in_service_area
 
+from . import login_lock
 from .models import Profile, User
+
+# 앱(`AuthRepository.login`)은 401 에서 이 문구를 그대로 보인다.
+LOGIN_FAILED_MESSAGE = "이메일 또는 비밀번호가 올바르지 않다."
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -124,6 +131,50 @@ class PasswordCheckSerializer(serializers.Serializer):
     )
 
 
+# Partly AI-generated (Claude)
+class LoginFailed(exceptions.AuthenticationFailed):
+    """틀린 이메일·비밀번호. 전과 같은 401 `authentication_failed` 에 `details.remaining_attempts` 를 더한다."""
+
+    default_detail = LOGIN_FAILED_MESSAGE
+
+    def __init__(self, remaining: int):
+        super().__init__(LOGIN_FAILED_MESSAGE)
+        # `common.errors` 가 `details` 에 그대로(숫자로) 싣는다.
+        self.extra_details = {"remaining_attempts": remaining}
+
+
+class AccountLocked(exceptions.APIException):
+    """잠긴 이메일. 비밀번호가 맞아도 423 `account_locked` + `Retry-After`.
+
+    429 가 아니라 423 인 이유 — 429 는 이미 스로틀(`throttled`, IP·사용자 단위 "요청이 많음")에 쓴다.
+    앱의 다른 화면은 429 를 코드와 관계없이 "요청이 많음" 으로 바꾼다(`AuthRepository.passwordFlowMessage`).
+    로그인을 그 규칙에 태우면 잠금 해제 시각이 사라진다. 지금 앱의 로그인은 상태 코드와 관계없이
+    `error.message` 를 보이므로 423 도 아래 문구가 그대로 뜬다. 근거는 `docs/iter4/server-login-lock.md`.
+    """
+
+    status_code = 423
+    default_code = "account_locked"
+    default_detail = "비밀번호를 여러 번 틀려서 잠시 로그인할 수 없어요."
+
+    def __init__(self, attempt: login_lock.Attempt):
+        now = timezone.now()
+        seconds = attempt.retry_after_seconds(now)
+        minutes = max(1, math.ceil(seconds / 60))
+        super().__init__(
+            f"비밀번호를 {login_lock.max_failures()}번 틀려서 로그인할 수 없어요. "
+            f"{minutes}분 뒤에 다시 해 주세요. 비밀번호를 재설정하면 바로 풀려요."
+        )
+        # 초 단위로 올림한다. 내리면 앱이 그 시각에 다시 눌러도 1초 모자라 또 잠김이 뜬다.
+        locked_until = attempt.locked_until
+        if locked_until.microsecond:
+            locked_until = (locked_until + timedelta(seconds=1)).replace(microsecond=0)
+        self.wait = seconds  # DRF 가 `Retry-After` 헤더로 싣는다
+        self.extra_details = {
+            "locked_until": serializers.DateTimeField().to_representation(locked_until),
+            "retry_after_seconds": seconds,
+        }
+
+
 class LoginSerializer(TokenObtainPairSerializer):
     """이메일·비밀번호 로그인.
 
@@ -135,7 +186,7 @@ class LoginSerializer(TokenObtainPairSerializer):
     """
 
     default_error_messages = {
-        "no_active_account": "이메일 또는 비밀번호가 올바르지 않다.",
+        "no_active_account": LOGIN_FAILED_MESSAGE,
     }
 
     def validate(self, attrs):
@@ -155,9 +206,21 @@ class LoginSerializer(TokenObtainPairSerializer):
         """
         field = self.username_field  # USERNAME_FIELD 가 email 이다
         if isinstance(attrs.get(field), str):
-            attrs[field] = attrs[field].strip().lower()
+            attrs[field] = login_lock.normalize(attrs[field])
 
-        data = super().validate(attrs)
+        # 연속 5번 틀리면 15분 잠금(iter4 BE-A3). 시도를 먼저 센 뒤 비밀번호를 본다 — 이유는
+        # `login_lock` 문서. 없는 이메일도 같은 길을 탄다(계정이 있는지 드러나지 않게).
+        email = attrs[field]
+        attempt = login_lock.begin(email)
+        if attempt.was_locked:
+            raise AccountLocked(attempt)
+        try:
+            data = super().validate(attrs)
+        except exceptions.AuthenticationFailed:
+            if attempt.locked_until is not None:
+                raise AccountLocked(attempt) from None
+            raise LoginFailed(attempt.remaining) from None
+        login_lock.succeed(email)
         data["user"] = UserSerializer(self.user).data
         return data
 
@@ -182,6 +245,9 @@ class ProfileSerializer(serializers.ModelSerializer):
             "onboarding_prep_min",
             "shadow_started_at",
             "timezone",
+            # 첫 실행 안내 · 홈 코치마크를 본 시각(iter4 BE-H4). `null` 을 보내면 지운다.
+            "intro_seen_at",
+            "coachmark_seen_at",
         )
         read_only_fields = ("shadow_started_at",)
         extra_kwargs = {

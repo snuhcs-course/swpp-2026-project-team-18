@@ -29,7 +29,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from . import codes, tokens
+from . import codes, login_lock, tokens
 from .models import EmailCode, User
 from .serializers import UserSerializer
 from .social import PLACEHOLDER_DOMAIN
@@ -220,6 +220,8 @@ class PasswordResetConfirmView(PublicView):
         user.set_password(data["new_password"])
         user.save(update_fields=["password"])
         tokens.revoke_all(user)
+        # 로그인 잠금(BE-A3)을 푼다. 메일을 받은 본인이 비밀번호를 바꿨다.
+        login_lock.clear(user.email)
         return Response({**_token_pair(user), "user": UserSerializer(user).data})
 
 
