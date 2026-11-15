@@ -182,6 +182,16 @@ CACHES = {
         "TIMEOUT": 25 * 60 * 60,
         "OPTIONS": {"MAX_ENTRIES": 400},
     },
+    # Partly AI-generated (Claude)
+    # DRF 스로틀 기록(iter4 X-1). 전에는 `default`(지도 이미지, 300개 상한)에 함께 있어서 지도
+    # 몇 장이 들어오면 무작위 1/3 퇴출에 스로틀 기록도 휩쓸렸다 — 비밀번호 찾기 "5/hour" 가 0 부터
+    # 다시 셌다. 키는 (통 × 사용자 또는 IP) 하나에 작은 타임스탬프 목록 하나이고, 만료는 키마다
+    # 스로틀 기간이다. 워커 둘이 같은 디렉터리를 본다. 재배포하면 비워진다(한 시간짜리 한도라 괜찮다).
+    "throttle": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": os.getenv("DJANGO_THROTTLE_CACHE_DIR", "/tmp/jit-throttle"),
+        "OPTIONS": {"MAX_ENTRIES": 5000},
+    },
 }
 
 # ---------------------------------------------------------------------------

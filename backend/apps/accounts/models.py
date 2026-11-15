@@ -313,6 +313,8 @@ class LoginAttempt(models.Model):
     재시작하면 사라지기 때문이다 — 그러면 재배포가 잠금을 풀어 버린다.
 
     로그인에 성공하거나 비밀번호 재설정을 마치면 행을 지운다. admin 에서 행을 지우면 잠금이 풀린다.
+    효력이 없는 행(잠금 시간이 지난 행)은 하루 한 번 보존 정리(`apps.common.retention`)가 지운다.
+    254자를 넘는 이메일은 `sha256:<hex>` 로 줄여 넣는다(`login_lock.key`).
     """
 
     email = models.CharField("이메일(정규화)", max_length=254, unique=True)

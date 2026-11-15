@@ -142,6 +142,64 @@ class TestThrottleRatesAreDefined:
             assert scope in rates, f"{scope} 가 DEFAULT_THROTTLE_RATES 에 없다"
 
 
+class TestThrottlesUseTheirOwnCache:
+    """iter4 X-1. 모든 DRF 스로틀이 `CACHES["throttle"]` 을 쓴다(`apps.common.apps`).
+
+    (Partly AI-generated (Claude))
+    """
+
+    def test_every_throttle_class_resolves_to_the_throttle_alias(self):
+        from django.core.cache import caches
+        from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
+
+        from apps.accounts.views_password import PasswordResetEmailThrottle
+        from apps.events.views import RouteLiveThrottle
+
+        for cls in (SimpleRateThrottle, ScopedRateThrottle, RouteLiveThrottle,
+                    PasswordResetEmailThrottle):
+            assert cls.cache._alias == "throttle", cls
+            # 프록시가 가리키는 실제 캐시가 `caches["throttle"]` 이다.
+            assert cls.cache._connections[cls.cache._alias] is caches["throttle"]
+
+    def test_tests_and_dev_share_the_default_locmem_store(self, settings):
+        """개발 · 테스트는 `default` 와 같은 LocMem 저장소라 `cache.clear()` 가 스로틀도 비운다."""
+        assert "locmem" in settings.CACHES["throttle"]["BACKEND"].lower()
+        assert settings.CACHES["throttle"]["LOCATION"] == settings.CACHES["default"]["LOCATION"]
+
+    def test_history_is_written_to_the_throttle_cache(self, monkeypatch):
+        from django.core.cache import cache, caches
+        from django.test import override_settings
+        from rest_framework.test import APIRequestFactory
+        from rest_framework.throttling import ScopedRateThrottle
+
+        separate = {
+            **settings_caches(),
+            "throttle": {
+                "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                "LOCATION": "jit-throttle-test",
+            },
+        }
+        with override_settings(CACHES=separate):
+            monkeypatch.setattr(ScopedRateThrottle, "THROTTLE_RATES", {"login": "5/hour"})
+            throttle = ScopedRateThrottle()
+            view = type("V", (), {"throttle_scope": "login"})()
+            request = APIRequestFactory().post("/api/auth/token")
+            request.user = None
+            assert throttle.allow_request(request, view)
+            key = throttle.key
+            try:
+                assert caches["throttle"].get(key)
+                assert cache.get(key) is None
+            finally:
+                caches["throttle"].clear()
+
+
+def settings_caches() -> dict:
+    from django.conf import settings
+
+    return dict(settings.CACHES)
+
+
 class TestTimezone:
     def test_stores_utc_and_displays_kst(self, settings):
         """시각은 UTC 로 저장하고 KST 로 보여준다. 둘이 섞이면 9시간 어긋난다."""
@@ -218,6 +276,20 @@ class TestProductionCacheIsSharedBetweenWorkers:
         )
         assert budget_cache["TIMEOUT"] > 24 * 60 * 60
         assert budget_cache["OPTIONS"]["MAX_ENTRIES"] > 0
+
+    # Partly AI-generated (Claude)
+    def test_throttle_cache_is_shared_and_isolated_from_images(self, prod):
+        """iter4 X-1. 스로틀 기록이 지도 이미지(300개 상한)와 함께 퇴출되면 "5/hour" 가 0 부터
+        다시 센다. 따로 두고, 워커가 함께 보고, 넉넉한 상한을 둔다."""
+        throttle = prod.CACHES["throttle"]
+        assert "locmem" not in throttle["BACKEND"].lower()
+        others = {
+            config["LOCATION"] for alias, config in prod.CACHES.items() if alias != "throttle"
+        }
+        assert throttle["LOCATION"] not in others
+        assert throttle["OPTIONS"]["MAX_ENTRIES"] >= 10 * prod.CACHES["default"]["OPTIONS"][
+            "MAX_ENTRIES"
+        ]
 
     def test_importing_prod_does_not_mutate_shared_middleware(self, prod):
         """`from .base import *` 는 **같은 리스트 객체**를 가져온다.

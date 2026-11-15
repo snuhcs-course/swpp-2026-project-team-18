@@ -5,6 +5,11 @@
 | --- | --- | --- |
 | API 요청 기록 | `API_REQUEST_LOG_RETENTION_DAYS`(기본 30일) | 가장 크다. 학습 값은 다른 표에 있다 |
 | LLM 호출 | `LLM_CALL_RETENTION_DAYS`(기본 90일) | 상한은 오늘 행만 센다. 나머지는 비용 확인용 |
+| 로그인 실패 기록 | 잠금 시간(`LOGIN_LOCK_SECONDS`, 15분) | 마지막 시도에서 그만큼 지난 행은 효력이 없다(iter4 A3-2) |
+
+로그인 실패 기록은 없는 이메일(남의 주소 · 오타)로도 생기고, 성공 · 재설정이 없으면 남는다. 효력이
+없는 행(잠겨 있지 않고 마지막 시도가 잠금 시간보다 오래됨)을 지워 표가 자라지 않게 하고 남의 이메일을
+오래 두지 않는다. 지워도 동작은 같다 — `login_lock.begin` 은 그런 행을 0 부터 센다.
 
 학습 재료(일정·계획·계획 이력·관측·알람 기록·블록 관측·주간 요약)는 지우지 않는다.
 
@@ -37,7 +42,7 @@ def purge(*, now=None, request_days: int | None = None, llm_days: int | None = N
     if llm_days is None:
         llm_days = int(getattr(settings, "LLM_CALL_RETENTION_DAYS", 90))
 
-    deleted = {"api_request_log": 0, "llm_call": 0}
+    deleted = {"api_request_log": 0, "llm_call": 0, "login_attempt": 0}
     if request_days > 0:
         cutoff = now - timedelta(days=request_days)
         deleted["api_request_log"], _ = ApiRequestLog.objects.filter(
@@ -46,6 +51,26 @@ def purge(*, now=None, request_days: int | None = None, llm_days: int | None = N
     if llm_days > 0:
         cutoff = now - timedelta(days=llm_days)
         deleted["llm_call"], _ = LlmCall.objects.filter(created_at__lt=cutoff).delete()
+    deleted["login_attempt"] = purge_login_attempts(now=now)
+    return deleted
+
+
+def purge_login_attempts(*, now=None) -> int:
+    """효력이 없는 로그인 실패 기록을 지운다(iter4 A3-2). 잠긴 행은 남긴다.
+
+    마지막 시도가 15분보다 오래됐으면 `begin` 이 어차피 0 부터 센다. 잠금 중의 시도는
+    `last_attempt_at` 을 바꾸지 않으므로 잠금 조건(`locked_until`)도 따로 본다.
+    (Partly AI-generated (Claude))
+    """
+    from django.db.models import Q
+
+    from apps.accounts import login_lock
+    from apps.accounts.models import LoginAttempt
+
+    now = now or timezone.now()
+    stale = Q(last_attempt_at__lt=login_lock.stale_before(now)) | Q(last_attempt_at__isnull=True)
+    not_locked = Q(locked_until__isnull=True) | Q(locked_until__lte=now)
+    deleted, _ = LoginAttempt.objects.filter(stale & not_locked).delete()
     return deleted
 
 

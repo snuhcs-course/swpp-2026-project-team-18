@@ -204,6 +204,11 @@ REST_FRAMEWORK = {
         # 글자마다 호출하는 비로그인 검사. 빠른 입력을 허용하되 IP별로 제한한다.
         "password_check": "600/min",
         "register": "10/hour",
+        # 이메일·비밀번호 로그인(iter4 A3-2). 인증 없이 받으므로 IP 별로 센다. 성공·실패를 합친다.
+        # 이메일별 잠금(5번)과 별개로, 한 IP 가 여러 이메일을 돌며 맞혀 보는 것을 막는다. 정상 사용은
+        # 하루 몇 번이고, 시연처럼 여러 사람이 한 와이파이(같은 공인 IP)로 로그인해도 넉넉하게 둔다.
+        # (Partly AI-generated (Claude))
+        "login": "60/hour",
         # 소셜 로그인·연결. 토큰마다 서명 검증을 하고 처음 보는 키면 제공자에 공개키를 묻는다.
         # 정상 사용은 하루 몇 번이다. 가입(10/hour)보다 넉넉한 것은 로그인도 같은 통이라서다.
         "social": "60/hour",
@@ -314,6 +319,15 @@ STATIC_MAP_DAILY_UPSTREAM_LIMIT = int(
 # FileBasedCache로 덮어쓴다.
 CACHES = {
     "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "jit-default",
+    },
+    # DRF 스로틀 기록(모든 `SimpleRateThrottle` — `apps.common.apps` 가 붙인다). 배포에서는 지도
+    # 이미지 캐시(300장 상한)와 나눈다 — 섞이면 이미지가 들어올 때 "5/hour" 기록이 퇴출돼 한도가
+    # 0 부터 다시 센다(iter4 X-1, prod.py). 개발·테스트는 `default` 와 **같은 LocMem 저장소**
+    # (`LOCATION` 이 같다)라서 스로틀 테스트의 `cache.clear()` 가 그대로 기록을 비운다.
+    # (Partly AI-generated (Claude))
+    "throttle": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "jit-default",
     },
