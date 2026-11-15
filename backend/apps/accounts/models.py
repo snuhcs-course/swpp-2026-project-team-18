@@ -140,6 +140,12 @@ class Profile(models.Model):
     coachmark_seen_at = models.DateTimeField(
         "홈 코치마크 본 시각", null=True, blank=True, default=None, db_default=None
     )
+    # 마지막으로 쌓인 기록을 초기화한 시각(iter4 BE-RESET, `docs/iter4/server-learning-reset.md`).
+    # 이보다 이른 관측 · 알람 기록 · 블록 기록이 오프라인 큐에서 늦게 올라오면 받기만 하고 버린다.
+    # 밤 학습도 이 값으로 초기화와 겹친 사용자를 다시 맞춘다. (Partly AI-generated (Claude))
+    learning_reset_at = models.DateTimeField(
+        "기록 초기화 시각", null=True, blank=True, default=None, db_default=None
+    )
 
     class Meta:
         db_table = "accounts_profile"
