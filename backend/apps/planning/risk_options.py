@@ -18,9 +18,18 @@ def build_risk_options(event) -> dict:
         and event.tag.default_tau is not None
         and event.tag.default_tau != profile.default_tau
     )
+    # Partly AI-generated (Claude) — BE-H3e. 사용자가 τ 를 직접 고르기 전의 값(종류 기본값, 없으면
+    # 프로필 기본값). 앱은 이 칸에 "추천" 을 붙인다. 세 칸 중 같은 τ 가 없으면 null 이다.
+    default_tau = (
+        event.tag.default_tau
+        if event.tag_id is not None and event.tag.default_tau is not None
+        else profile.default_tau
+    )
     result = {
         "options": [],
         "selected_key": next((key for key, _, value in OPTIONS if value == tau), None),
+        "recommended_key": next((key for key, _, value in OPTIONS if value == default_tau), None),
+        "default_tau": default_tau,
         "auto_adjusted": auto_adjusted,
         "auto_reason": (
             f"{event.tag.label} 일정 기본값 τ {tau:g} 적용 (프로필 기본값 τ {profile.default_tau:g})"

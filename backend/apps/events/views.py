@@ -26,7 +26,7 @@ from rest_framework.views import APIView
 
 from apps.observations import alarm_logs
 from apps.observations.models import TripReroute, current_route_key
-from apps.planning import live_switch
+from apps.planning import alarm_control, live_switch
 from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
@@ -172,6 +172,9 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
         else:
             # 제목·켬/끔만 바꾸면 기존 계획을 쓰고, 시각·τ 만 바꾸면 경로를 다시 조회하지 않는다.
             edits.replan(event, inputs_before, start_before=start_before)
+            # 빠르게 고르기 세 칸(τ)을 골랐으면 직접 정한 시각을 지우고 그 시각을 확인한다(H2-3).
+            if "tau_override" in write.validated_data:
+                alarm_control.preset_chosen(event)
 
         # Partly AI-generated (Claude)
         # 다른 날로 옮기면 옮겨 간 날의 수동 켬/끔을 자동으로 돌린다. 그날에 일정이 새로
