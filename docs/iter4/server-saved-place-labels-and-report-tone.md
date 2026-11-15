@@ -4,8 +4,8 @@
 `todos/iter4-todo.md` 의 **BE-H9**(H2-9 ⑭ 다른 집 이름 겹침)와 **BE-R1**(주간 요약·버퍼 이유 해요체)의 서버 구현이다.
 마이그레이션은 없다. 저장한 집 API 전체는 [saved-places-api](../iter3/saved-places-api.md) 를 따르고, 여기에는 바뀐 것만 적었다.
 
-구현: `backend/apps/accounts/saved_places.py` · `backend/apps/reports/summary.py` · `backend/apps/planning/buffers.py` · `backend/apps/planning/risk_options.py`
-테스트: `apps/accounts/tests/test_saved_places.py`(`TestLabelKey`·`TestLabelDuplicate`) · `apps/reports/tests/test_summary.py` · `apps/planning/tests/test_buffers.py` · `apps/events/tests/test_risk_options.py`
+구현: `backend/apps/accounts/saved_places.py` · `backend/apps/reports/summary.py` · `backend/apps/planning/buffers.py` · `backend/apps/planning/risk_options.py` · `backend/apps/planning/models.py`(`AlarmPlan.STATUS_LABELS`) · `backend/apps/common/errors.py`
+테스트: `apps/accounts/tests/test_saved_places.py`(`TestLabelKey`·`TestLabelDuplicate`) · `apps/reports/tests/test_summary.py` · `apps/planning/tests/test_buffers.py` · `apps/events/tests/test_risk_options.py` · `apps/planning/tests/test_services.py`(`test_status_labels_…`) · `apps/events/tests/test_home_destination.py` · `apps/events/tests/test_create_errors.py`
 
 ## 1. 저장한 집 이름 겹침 (BE-H9)
 
@@ -80,23 +80,55 @@ HTTP 200
 
 ## 2. 리포트 문장 해요체 (BE-R1)
 
+앱이 **그대로 보여 주는** 서버 문장을 친근한 해요체로 바꿨다. 리뷰(T-1~T-7) 뒤에 LLM 문장 검사, 남아 있던
+안쪽 낱말("버퍼"·"중앙값"), 알람 계획 상태 문구와 공통 오류 문구까지 넓혔다.
+
 ### 바꾼 것
 
 | 어디 | 전 | 후 |
 | --- | --- | --- |
-| `summary.SYSTEM_PROMPT` 2번 | "~함 · ~음 · ~임 으로 끝낸다" | 친근한 해요체("~했어요", "~였어요", "~예요", "~해 보세요"), "~함·~음·~임·~다" 금지 |
+| `summary.SYSTEM_PROMPT` 2번 | "~함 · ~음 · ~임 으로 끝낸다" | 친근한 해요체("~했어요", "~였어요", "~예요", "~해 보세요"), "~함·~음·~임·~다·**~습니다**" 금지 |
+| 프롬프트 3번 | "'한 번도'·'한번 더' … 쓰지 않는다" | 여기에 **"'한번 ~해 보세요'"** 를 더했다 |
 | 프롬프트 3·5번 | "지각은 없었음", "기록이 없음" | "지각은 없었어요", "기록이 없어요" |
+| `summary.check_text` | 길이·한글·숫자·날짜·"학습" | 여기에 **문장 끝 검사**(`not_haeyo`)를 더했다. 아래 "LLM 문장 검사" |
 | 템플릿 문장 · 제안 문장(`_suggestion`) | "…달성했음." "…나서 볼 것." | "…달성했어요." "…나서 보세요." |
+| 템플릿 다듬기 | "…출발 시각을 지켜 보세요." · "…%p 내렸어요." · "…정시 여부를 채점하지 못했어요." · "이동은 계획보다 평균 4분 더 걸렸어요(3번 기록)." | "…지켜 **주세요**." · "…%p **떨어졌어요**." · "…제때 도착했는지 알 수 없어요." · "이동 기록 3번을 보면 계획보다 평균 4분 더 걸렸어요." (출발은 "…평균 5분 늦게 나섰어요.") |
 | `summary.FALLBACK` | "…정리하지 못했음. 아래 수치를 확인할 것." | "…정리하지 못했어요. 아래 수치를 확인해 주세요." |
-| `buffers.reason_text` (리포트 `buffer.adjustments[].reason_text`) | "…늦었음. … 늘림." | "…늦었어요. … 늘렸어요." |
-| `risk_options` `unavailable_reason` (앱 알람 시각 시트가 그대로 보임) | "…볼 수 있습니다." 등 | "…볼 수 있어요." 등 |
+| `buffers.reason_text` (리포트 `buffer.adjustments[].reason_text`) 늘림 | "…늦었음. 알람이 약속한 정시 확률로는 0.3번 정도. 늦은 시간의 중앙값 4분을 보고 버퍼를 10분에서 14분으로 늘림." | "최근 6번 중 3번 늦었어요. 알람이 약속한 확률대로라면 늦는 날은 0.3번 정도였어요. 늦은 시간이 보통 4분이라 여유 시간을 10분에서 14분으로 늘렸어요." |
+| `buffers.reason_text` 줄임 | "…먼저 도착했음(가장 빠듯했을 때도 10분 일찍 도착). 버퍼를 …" | "최근 5번 모두 계획한 도착 시각보다 먼저 도착했고, 가장 빠듯했던 날도 10분 일찍 도착했어요. 그래서 여유 시간을 10분에서 8분으로 줄였어요." |
+| `risk_options` `unavailable_reason` (앱 알람 시각 시트가 그대로 보임) | "알람 계획을 계산한 뒤 선택지를 볼 수 있어요." · "저장된 경로 정보가 없어요. 알람을 다시 계산해 주세요." · "…여유별 선택지를 계산할 수 없어요." | 계획 없음/실패: "알람이 아직 계산되지 않아 고를 수 있는 알람 시각을 보여 드릴 수 없어요." · 경로 정보 없음: "저장된 경로 정보가 없어 고를 수 있는 알람 시각을 아직 계산할 수 없어요." · 변동 폭 모름: "걸리는 시간이 얼마나 달라지는지 아직 몰라 고를 수 있는 알람 시각을 계산할 수 없어요." |
+| 알람 계획 `status_label` (일정 응답의 `alarm_plan.status_label`) | "계산 완료 · 집 위치 미설정 · 일정 장소 없음 · 경로 조회 실패" | `ok` "알람을 계산했어요" · `no_home` "집 위치가 필요해요" · `no_place` "일정에 장소가 없어요" · `route_failed` "경로를 찾지 못했어요" |
+| 공통 오류 문구(`common/errors.py`) | "요청을 처리할 수 없다." · "서버에 문제가 생겨 처리하지 못했다. 잠시 뒤 다시 시도할 것." | "요청을 처리하지 못했어요." · "서버에 문제가 생겨 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요." |
 
-- `PROMPT_VERSION` 2 → **3**. 해시가 바뀌어 저장된 LLM 요약(`WeeklySummary`)은 다음 조회 때 다시 만든다(LLM 을 부를 수 있는 주만. 나머지는 템플릿).
-- 문장 내용·숫자는 그대로다. 수치 검사(`check_text`)도 그대로다.
+- 위험 단계를 "여유별" 이라 부르지 않는다. 화면의 "여유 시간" 은 버퍼(`buffer_minutes`)다. 시트에는 [다시 시도] 만 있으므로
+  "다시 계산해 주세요" 처럼 시트에서 할 수 없는 일을 시키지 않는다.
+- `status_label` 은 모델 choices 이름(관리자 화면용, "계산 완료" 등)을 그대로 두고 `AlarmPlan.STATUS_LABELS` 에서 내린다.
+  choices 를 바꾸면 마이그레이션이 생겨서다. **상태 코드(`status`)는 그대로다.** 앱(front-iter4)은 `status` 로 분기하고
+  `status_label` 은 점 라벨과 홈 목록 "장소 · <문구>" 에 그대로 보이기만 한다(비교하는 곳 없음. `"계산 완료"` 는 미리보기 데이터뿐).
+- 공통 오류도 앱은 `code` 로 분기하고 `message` 는 그대로 보이기만 한다(문구를 비교하는 곳 없음).
+- 문장 내용·숫자는 그대로다. 수치 검사(숫자는 집계값에 있는 것만)도 그대로다.
+
+### LLM 문장 검사 (T-1·T-2)
+
+- **문장 끝.** 문단을 ". ! ?" 뒤 공백에서 나눠(소수점 "83.3%" 은 나누지 않는다) **모든 문장이 "요" 또는 "죠" 로 끝나야**
+  한다. 그 뒤에 괄호 한 덩어리("…걸렸어요(3번 기록).")와 마침표·느낌표·물음표가 올 수 있고, 마지막 문장은 마침표가 없어도 된다.
+  "~함·~음·~임·~것·~다·~습니다" 로 끝나는 문장이 **하나라도** 있으면 `not_haeyo` 로 버리고, 다른 검사 실패와 똑같이
+  템플릿을 쓰고 그 수치(해시)를 백오프한다(`LlmCall.outcome = invalid`).
+- **"한번 ~해 보세요".** 프롬프트는 쓰지 말라고 하지만, 섞여 나와도 호출과 그 주의 백오프를 버리지 않게 검사는 이것을 수로 보지
+  않는다(결정). 붙여 쓴 "한번" 바로 뒤(낱말 하나까지)에 "보세요/보면" 이 올 때만이다 — "다른 경로도 한번 골라 보세요",
+  "한번 살펴보세요" 는 통과하고 "지각이 한번 있었으니 …", "한번 더 …", 띄어 쓴 "한 번 …", "지각은 한번이었어요" 는 그대로
+  `number_word` 로 떨어진다.
+- 템플릿은 늘 통과한다(테스트가 모든 템플릿 경우에 고정). 템플릿은 문장 끝 뒤에 괄호를 붙이지 않는다.
+
+### `PROMPT_VERSION`
+
+2 → 3(해요체) → **4**(리뷰: "~습니다" · "한번 ~해 보세요" 금지). 해시가 바뀌어 저장된 LLM 요약(`WeeklySummary`)은 다음 조회 때
+다시 만든다(LLM 을 부를 수 있는 최근 12주의 끝난 주만, 사용자당 하루 30번·서버 전체 하루 상한 안에서. 나머지는 템플릿).
+운영(main)은 아직 2 라서, 3 을 건너뛰고 4 로 배포돼도 다시 만드는 양은 같다 — 사용자·주마다 한 번.
 
 ### 길이 상한
 
-해요체는 문장마다 1~2자 길다. 가장 긴 템플릿 조합(진행 중 머리말 + 5문장, 세 자리 수)이 232자로 `MAX_CHARS` 400 보다 한참 작다.
+해요체는 문장마다 1~2자 길다. 가장 긴 템플릿 조합(진행 중 머리말 + 5문장, 세 자리 수)도 `MAX_CHARS` 400 보다 한참 작다.
 프롬프트의 "300자 이내" 와 `MIN_CHARS` 40 도 그대로 둔다. 테스트 `test_longest_template_fits_the_length_check` 가 고정한다.
 
 ### 그대로 둔 것
@@ -105,11 +137,16 @@ HTTP 200
 | --- | --- |
 | 위험 선택지 `label` "안전 · 보통 · 도박" | 앱(front-iter4 `AlarmTimeChoice.quickLabel`)이 key 로 "여유 있게 · 보통 · 빠듯하게" 를 직접 쓰고 서버 라벨은 모르는 key 일 때만 쓴다. key(`safe`·`normal`·`gamble`)도 바꾸지 않는다 |
 | 위험 선택지 `auto_reason` ("… 일정 기본값 τ 0.97 적용 …") | 앱이 화면에 보이지 않는다 |
-| 알람 계획 `tau_source_label` "직접 고른 값" 등 | 앱이 이 문자열을 비교에 쓴다(`MANUAL_TAU_SOURCE`) |
 | 원인 이름 "준비 초과 · 이동 초과 · 늦은 출발 · 계획 여유 부족 · 원인 측정 못 함" | LLM 에 보내는 집계값의 고정 문자열이다. 문장 끝이 아니다 |
 | 버퍼 배치 결과 "늘림 · 줄임 · 그대로(…)" | 배치 로그 전용 |
-| 저장한 집의 기존 오류 문구("…저장할 수 있다." 등) · 공통 오류 문구 | 앱이 코드로 자기 문구를 쓴다. 오류 문구 일괄 해요체는 A3/H2-1 범위라 이 작업에서 건드리지 않았다 |
+| 알람 계획 choices 이름("계산 완료" 등) | 관리자 화면 전용이다. API 는 `STATUS_LABELS` 를 쓴다 |
+| 저장한 집·로그인의 오류 문구 | 다른 작업(저장한 집 오류 문구, 로그인 401)이 고친다 |
+
+참고: `tau_source_label`("직접 고른 값" 등)은 **서버 필드가 아니다.** 앱(front-iter4 `EventRepository.tauSourceLabel`)이
+`tau_override`·종류로 만들어 `AlarmTimeChoice.MANUAL_TAU_SOURCE` 와 비교한다. 서버가 바꾸거나 지킬 것이 없다.
 
 ### 앱이 할 일
 
-없다. 같은 필드(`summary`, `reason_text`, `unavailable_reason`)에 말투만 바뀐 문장이 온다.
+없다. 같은 필드(`summary`, `reason_text`, `unavailable_reason`, `alarm_plan.status_label`, `error.message`)에 말투만 바뀐
+문장이 온다. 상태·오류 코드는 그대로다. (선택) 앱이 직접 쓰는 `NotComputedCard` 본문("…필요함", "…계산됨")도 같은 해요체로
+맞추면 점 라벨과 말투가 같아진다.
