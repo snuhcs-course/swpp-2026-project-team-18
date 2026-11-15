@@ -78,8 +78,8 @@
 - 회차를 7일 창(오늘 00:00 ~ 7일 뒤 00:00) 밖으로 옮기면 `alarm_plan` 이 `null` 이 되고
   목록에서 빠진다. 창 안에 들어오는 날 계산돼 다시 보인다. 창 안으로 다시 옮기면 바로
   계산한다. 계획이 없으니 경로부터 조회한다.
-- 회차 하나 지우기는 `DELETE /api/events/{id}` 다(그 날짜만 빠진다). 반복 전체 수정·종료는
-  아직 없다.
+- 회차 하나 지우기는 `DELETE /api/events/{id}` 다(그 날짜만 빠진다). "이후 일정 모두" 수정·삭제
+  (`scope: following`)는 iter4 [server-recurrence-scope.md](../iter4/server-recurrence-scope.md) 를 본다.
 
 ## 6. 앱이 할 일
 
