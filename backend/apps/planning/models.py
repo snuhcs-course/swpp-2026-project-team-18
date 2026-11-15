@@ -32,6 +32,16 @@ class AlarmPlan(models.Model):
         NO_PLACE = "no_place", "일정 장소 없음"
         ROUTE_FAILED = "route_failed", "경로 조회 실패"
 
+    # 앱이 그대로 보여 주는 상태 문구(`status_label`). 위 choices 이름은 관리자 화면용으로 두고
+    # (바꾸면 마이그레이션이 생긴다) API 에는 해요체 문구를 내린다(BE-R1 리뷰 T-7). 앱은 `status`
+    # 코드로 분기하고 이 문구는 비교하지 않는다. (Partly AI-generated (Claude))
+    STATUS_LABELS = {
+        Status.OK: "알람을 계산했어요",
+        Status.NO_HOME: "집 위치가 필요해요",
+        Status.NO_PLACE: "일정에 장소가 없어요",
+        Status.ROUTE_FAILED: "경로를 찾지 못했어요",
+    }
+
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -289,6 +299,11 @@ class AlarmPlan(models.Model):
                 name="planning_plan_ok_requires_values",
             ),
         ]
+
+    @property
+    def status_label(self) -> str:
+        """API 의 `status_label`. 모르는 상태면 choices 이름을 쓴다."""
+        return self.STATUS_LABELS.get(self.status, self.get_status_display())
 
     def __str__(self):
         # 일정 제목을 쓴다. id 만 보여 주면 관리 화면에서 어느 일정의 계획인지

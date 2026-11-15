@@ -162,8 +162,9 @@ def example_report(**kw) -> dict:
     return make_report(rows, previous=previous, deviation=deviation, **kw)
 
 
-# 해요체 문장 끝(BE-R1). "…했어요." 와 "…걸렸어요(3번 기록)." 둘 다 된다.
-HAEYO_END = re.compile(r"요(?:\([^)]*\))?\.$")
+# 해요체 문장 끝(BE-R1). 템플릿은 "…했어요." 로만 끝낸다 — 문장 끝 뒤에 괄호 메모를 붙이지
+# 않는다(T-5, "…걸렸어요(3번 기록)." 는 어색하다). LLM 문장 검사는 괄호를 받아 준다.
+HAEYO_END = re.compile(r"요\.$")
 
 
 EXAMPLE_TEXT = (
@@ -262,12 +263,12 @@ TEMPLATE_CASES = {
     ),
     "no_arrivals": (
         make_report([unseen(0), unseen(2), unseen(4)]),
-        "이 주 일정 3건 모두 도착 기록이 없어 정시 여부를 채점하지 못했어요. "
+        "이 주 일정 3건 모두 도착 기록이 없어 제때 도착했는지 알 수 없어요. "
         "위치 권한을 켜 두고 알람을 해제한 뒤 이동하면 출발·도착이 자동으로 기록돼요.",
     ),
     "no_arrivals_without_alarms": (
         make_report([unseen(0, alarm_on=False), unseen(1, alarm_on=False)]),
-        "이 주 일정 2건 모두 도착 기록이 없어 정시 여부를 채점하지 못했어요. "
+        "이 주 일정 2건 모두 도착 기록이 없어 제때 도착했는지 알 수 없어요. "
         "출발·도착은 알람을 해제한 뒤에만 기록되니 기록할 일정은 알람을 켜 두세요.",
     ),
     "thin": (
@@ -314,7 +315,7 @@ TEMPLATE_CASES = {
         three_arrivals_with_late("depart_late", {"depart_late": 0.4}),
         "이 주 도착을 기록한 3번 중 2번 정시 도착해 정시율 67%로 목표 90%에 못 미쳤어요. "
         "지각 1번은 집에서 늦게 나선 것 때문이었고 수요일에 5분 늦었어요. "
-        "다음 주에는 알람이 정한 출발 시각을 지켜 보세요.",
+        "다음 주에는 알람이 정한 출발 시각을 지켜 주세요.",
     ),
     "cause_prep": (
         three_arrivals_with_late("prep_over", {"prep_over": 7.0}),
@@ -364,7 +365,7 @@ TEMPLATE_CASES = {
             previous={"on_time_rate": 0.725, "on_time_rate_change_pp": -23},
         ),
         "이 주 도착을 기록한 4번 중 2번 정시 도착해 정시율 50%로 목표 90%에 못 미쳤어요. "
-        "지각 2번은 기록이 부족해 원인을 나누지 못했어요. 지난주 73%보다 23%p 내렸어요. "
+        "지각 2번은 기록이 부족해 원인을 나누지 못했어요. 지난주 73%보다 23%p 떨어졌어요. "
         "원인을 나누려면 출발 시각이 필요하니 집을 나서기 전에 알람을 해제해 두세요.",
     ),
     "trend_flat": (
@@ -382,7 +383,7 @@ TEMPLATE_CASES = {
                        "travel_over": stat(3, 4.0, 2.0)},
         ),
         "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했어요. "
-        "지각은 없었어요. 이동은 계획보다 평균 4분 더 걸렸어요(3번 기록). "
+        "지각은 없었어요. 이동 기록 3번을 보면 계획보다 평균 4분 더 걸렸어요. "
         "지금 설정을 그대로 유지해도 좋아요.",
     ),
     "depart_mean": (
@@ -392,7 +393,7 @@ TEMPLATE_CASES = {
                        "travel_over": stat(3, 3.0, 2.0)},
         ),
         "이 주 도착을 기록한 3번 중 3번 정시 도착해 정시율 100%로 목표 90%를 달성했어요. "
-        "지각은 없었어요. 출발은 계획보다 평균 5분 늦었어요(3번 기록). "
+        "지각은 없었어요. 출발 기록 3번을 보면 계획보다 평균 5분 늦게 나섰어요. "
         "지금 설정을 그대로 유지해도 좋아요.",
     ),
     "travel_spread": (
@@ -431,7 +432,7 @@ class TestTemplate:
     # Partly AI-generated (Claude)
     @pytest.mark.parametrize("name", sorted(TEMPLATE_CASES))
     def test_every_sentence_is_haeyo(self, name):
-        """BE-R1. 모든 문장이 해요체("~요." 또는 "~요(괄호)." )로 끝난다. "~음·~함·~것" 이 남지 않는다."""
+        """BE-R1. 모든 문장이 해요체 "~요." 로 끝난다. "~음·~함·~것" 이 남지 않는다."""
         report, _ = TEMPLATE_CASES[name]
         for sentence in re.split(r"(?<=\.)\s+", text_for(report)):
             assert HAEYO_END.search(sentence), sentence
@@ -443,7 +444,17 @@ class TestTemplate:
     def test_prompt_asks_for_haeyo_and_is_versioned(self):
         assert "해요체" in summary.SYSTEM_PROMPT
         assert "'~함', '~음', '~임' 으로 끝낸다" not in summary.SYSTEM_PROMPT
-        assert summary.PROMPT_VERSION == 3
+        assert "'~습니다'" in summary.SYSTEM_PROMPT
+        assert "'한번 ~해 보세요'" in summary.SYSTEM_PROMPT
+        assert summary.PROMPT_VERSION == 4
+
+    # Partly AI-generated (Claude)
+    @pytest.mark.parametrize("name", sorted(TEMPLATE_CASES))
+    def test_templates_avoid_awkward_wording(self, name):
+        """T-5. 리뷰에서 어색하다고 한 말이 템플릿에 남지 않는다."""
+        text = text_for(TEMPLATE_CASES[name][0])
+        for awkward in ("지켜 보세요", "%p 내렸어요", "채점", "요("):
+            assert awkward not in text, (awkward, text)
 
     def test_longest_template_fits_the_length_check(self):
         """해요체는 문장마다 1~2자 길다. 가장 긴 조합(진행 중 머리말 + 5문장, 큰 수)도
@@ -536,6 +547,59 @@ class TestCheckText:
     def test_rejects_length(self):
         assert summary.check_text("짧은 문장임.", self.facts()) == "length"
         assert summary.check_text("가" * (summary.MAX_CHARS + 1), self.facts()) == "length"
+
+    # Partly AI-generated (Claude)
+    @pytest.mark.parametrize(
+        "paragraph",
+        [
+            # 예전 메모체(~함·~음·~임·~것·~다). 숫자는 모두 집계값에 있다.
+            "이 주 도착을 기록한 6번 중 5번 정시 도착해 정시율 83%로 목표 90%에 못 미쳤음. "
+            "지각 1번은 이동 초과 때문이었음. 지난주보다 23%p 오름. "
+            "다른 경로를 골라 보거나 몇 분 일찍 나서 볼 것.",
+            "이 주 정시율은 83%로 목표 90%에 못 미쳤다. 지각 1번은 이동이 길어진 탓이다. "
+            "지난주보다 23%p 올랐다. 다음 주에는 몇 분 일찍 나서 보자.",
+            # 합쇼체.
+            "이 주 정시율은 83%로 목표 90%에 못 미쳤습니다. 지각 1번은 이동이 계획보다 오래 "
+            "걸렸기 때문입니다. 지난주보다 23%p 올랐습니다. 몇 분 일찍 나서 보세요.",
+            # 한 문장만 섞여도 버린다.
+            EXAMPLE_TEXT.replace("못 미쳤어요.", "못 미쳤음."),
+            EXAMPLE_TEXT.replace("올랐어요.", "올랐습니다."),
+            EXAMPLE_TEXT + " 화이팅!",
+        ],
+    )
+    def test_rejects_paragraphs_not_in_haeyo(self, paragraph):
+        """T-1. 해요체가 아닌 문단은 템플릿으로 돌아간다(숫자 검사는 통과하는 문단들이다)."""
+        assert summary.check_text(paragraph, self.facts()) == "not_haeyo"
+
+    @pytest.mark.parametrize(
+        "paragraph",
+        [
+            EXAMPLE_TEXT,
+            EXAMPLE_TEXT.rstrip("."),                                  # 마지막 마침표 없음
+            EXAMPLE_TEXT + " 다음 주도 지금처럼 하면 좋겠죠?",            # ~죠 · 물음표
+            EXAMPLE_TEXT + " 지금처럼만 하면 돼요!",                      # 느낌표
+            EXAMPLE_TEXT.replace("올랐어요.", "올랐어요(5번 기록)."),      # 요 뒤 괄호
+        ],
+    )
+    def test_accepts_haeyo_endings(self, paragraph):
+        assert summary.check_text(paragraph, self.facts()) is None
+
+    @pytest.mark.parametrize(
+        "extra",
+        ["다른 경로도 한번 골라 보세요.", "출발 시각을 한번 확인해 보세요.", "경로를 한번 살펴보세요.",
+         "한번 바꿔 보면 좋아요."],
+    )
+    def test_try_once_idiom_is_not_a_number_word(self, extra):
+        """T-2. 권하는 "한번 ~해 보세요" 는 횟수가 아니다. 섞여 나와도 LLM 호출을 버리지 않는다."""
+        assert summary.check_text(f"{EXAMPLE_TEXT} {extra}", self.facts()) is None
+
+    @pytest.mark.parametrize(
+        "extra",
+        ["지각이 한번 있었으니 조심해 보세요.", "한번 더 나서 보세요.", "한 번 골라 보세요.",
+         "지각은 한번이었어요."],
+    )
+    def test_counting_once_is_still_a_number_word(self, extra):
+        assert summary.check_text(f"{EXAMPLE_TEXT} {extra}", self.facts()) == "number_word"
 
     def test_rejects_text_without_hangul(self):
         assert summary.check_text("a" * 60, self.facts()) == "no_hangul"
@@ -686,6 +750,18 @@ class TestSummaryFor:
         assert summary.summary_for(user, example_report())[1] == summary.SOURCE_TEMPLATE
         assert cache.get(summary.DOWN_KEY) == llm.HTTP_4XX
         assert not WeeklySummary.objects.exists()
+
+    # Partly AI-generated (Claude)
+    def test_old_style_output_falls_back_for_that_digest(self, user, fake_llm):
+        """T-1. 숫자는 맞지만 "~음·~습니다" 로 쓴 문단은 저장하지 않고 템플릿을 쓴다."""
+        fake_llm.reply = EXAMPLE_TEXT.replace("못 미쳤어요.", "못 미쳤습니다.")
+        report = example_report()
+
+        assert summary.summary_for(user, report) == (EXAMPLE_TEXT, summary.SOURCE_TEMPLATE)
+        assert summary.summary_for(user, report)[1] == summary.SOURCE_TEMPLATE
+        assert fake_llm.calls == 1
+        assert not WeeklySummary.objects.exists()
+        assert LlmCall.objects.get().outcome == LlmCall.Outcome.INVALID
 
     def test_invalid_output_falls_back_for_that_digest(self, user, fake_llm):
         fake_llm.reply = EXAMPLE_TEXT.replace("83%", "84%")

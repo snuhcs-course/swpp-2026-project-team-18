@@ -163,8 +163,21 @@ class TestUnhandledErrorsUseTheCommonFormat:
         assert res.status_code == 500
         error = res.json()["error"]
         assert error["code"] == "server_error"
-        assert error["message"]
+        # 앱이 그대로 보이는 문구라 해요체다(BE-R1 T-7).
+        assert error["message"] == "서버에 문제가 생겨 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요."
         assert "bug" not in error["message"]
+
+    # Partly AI-generated (Claude)
+    def test_an_error_without_a_message_gets_the_friendly_fallback(self, client, monkeypatch):
+        """DRF 오류에 문구가 없으면 공통 문구를 쓴다. 해요체다(BE-R1 T-7)."""
+        from rest_framework.exceptions import ValidationError
+
+        monkeypatch.setattr(
+            "apps.events.tags.visible_tags", Mock(side_effect=ValidationError({}))
+        )
+        res = client.get("/api/events/tags")
+        assert res.status_code == 400
+        assert res.json()["error"]["message"] == "요청을 처리하지 못했어요."
 
     def test_debug_still_raises_for_the_developer(self, client, monkeypatch, settings):
         settings.DEBUG = True
