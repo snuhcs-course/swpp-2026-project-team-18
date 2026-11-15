@@ -3,7 +3,8 @@
 
 추가는 막는다 — 문의는 앱에서만 온다. 글 · 이메일 · 기기는 사용자가 보낸 그대로 둔다(읽기
 전용). 상태를 접수 밖으로 처음 바꾸면 `handled_at` 을 채우고, 다시 접수로 돌리면 비운다.
-삭제는 열어 둔다 — 사용자를 지울 때 연결된 문의 admin 이 삭제를 거부하면 사용자 삭제까지 막힌다.
+목록의 일괄 상태 변경은 바꿀 권한(`change`)이 있는 사람에게만 보인다 — 보기 권한만 있는
+직원은 읽기만 한다. 삭제는 열어 둔다 — 사용자를 지울 때 연결된 문의 admin 이 삭제를 거부하면 사용자 삭제까지 막힌다.
 """
 
 from __future__ import annotations
@@ -62,14 +63,14 @@ class InquiryAdmin(admin.ModelAdmin):
     def preview(self, obj):
         return obj.preview
 
-    @admin.action(description="답함으로 바꾸기")
+    @admin.action(description="답함으로 바꾸기", permissions=["change"])
     def mark_answered(self, request, queryset):
         self.message_user(request, f"{_mark(queryset, Inquiry.Status.ANSWERED)}건을 답함으로 바꿨다.")
 
-    @admin.action(description="닫음으로 바꾸기")
+    @admin.action(description="닫음으로 바꾸기", permissions=["change"])
     def mark_closed(self, request, queryset):
         self.message_user(request, f"{_mark(queryset, Inquiry.Status.CLOSED)}건을 닫음으로 바꿨다.")
 
-    @admin.action(description="접수로 되돌리기")
+    @admin.action(description="접수로 되돌리기", permissions=["change"])
     def mark_open(self, request, queryset):
         self.message_user(request, f"{_mark(queryset, Inquiry.Status.OPEN)}건을 접수로 되돌렸다.")
