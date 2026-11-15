@@ -176,12 +176,13 @@ class TestEveryAdminOpens:
         # 걷는 속도도 밤 학습이 도보 일정으로 다시 만든다(apps/routing/admin.py).
         # 이동 중 경로 변경은 앱의 [바꾸기]만 남긴다(apps/observations/admin.py).
         # 소셜 계정 연결은 ID 토큰을 검증한 API 로만 생긴다(apps/accounts/admin.py).
+        # 로그인 실패 기록은 로그인이 센다. admin 은 지워서 잠금을 풀기만 한다(BE-A3).
         # (Partly AI-generated (Claude))
         closed = {
             "alarmplan", "tripobservation", "weeklysummary",
             "planrevision", "alarmlog", "llmcall", "apirequestlog",
             "eventrecurrence", "bufferadjustment", "socialaccount", "emailcode", "savedplace",
-            "usertravelprofile", "tripreroute",
+            "usertravelprofile", "tripreroute", "loginattempt",
         }
         broken = []
         for model in registered_models():
