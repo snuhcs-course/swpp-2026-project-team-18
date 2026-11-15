@@ -71,6 +71,7 @@ curl http://127.0.0.1:8000/api/health
 | 반복 일정 범위 수정·삭제(이 일정만 / 이후 일정 모두) | [server-recurrence-scope](../docs/iter4/server-recurrence-scope.md) |
 | 쌓인 기록 초기화(iter4) | [server-learning-reset](../docs/iter4/server-learning-reset.md) |
 | 앱 안 문의하기(iter4) | [server-inquiry](../docs/iter4/server-inquiry.md) |
+| 최근 이동 경로 · 가장 자주 이용한 경로(iter4) | [server-route-history](../docs/iter4/server-route-history.md) |
 
 - **가입·비밀번호:** `POST /api/auth/password/check`는 조건 미충족도 200이고 결과를 `messages`에 담는다.
   가입에는 `terms_agreed: true`가 필요하고 IP당 10회/시간으로 제한한다.

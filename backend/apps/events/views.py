@@ -32,7 +32,7 @@ from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
 
-from . import edits, recurrence, route_preference
+from . import edits, recurrence, route_history, route_preference
 from .alarms import reset_alarm_overrides
 from .geo import validate_route_distance
 from .models import Event, EventTag
@@ -1004,6 +1004,33 @@ class PlaceReverseView(APIView):
 
         result, degraded = clients.coord_to_address(lat, lng)
         return Response({"result": result, "degraded": degraded})
+
+
+class RouteHistoryView(APIView):
+    """GET /api/routes/history?sort=recent|frequent&limit=5 — 다녀온 경로 목록(iter4).
+
+    "최근 이동 경로"(`recent`, 기본) · "가장 자주 이용한 경로"(`frequent`) 버튼에 쓴다. 외부 API 를
+    부르지 않는다(DB 만 읽는다). 규칙은 `route_history`, 계약은 `docs/iter4/server-route-history.md`.
+    (Partly AI-generated (Claude))
+    """
+
+    def get(self, request):
+        sort = request.query_params.get("sort") or route_history.RECENT
+        if sort not in route_history.SORTS:
+            raise ValidationError({"sort": "sort 는 recent 또는 frequent 여야 해요."})
+        raw_limit = request.query_params.get("limit")
+        limit = route_history.DEFAULT_LIMIT
+        if raw_limit not in (None, ""):
+            try:
+                limit = int(raw_limit)
+            except (TypeError, ValueError):
+                limit = 0
+            if not 1 <= limit <= route_history.MAX_LIMIT:
+                raise ValidationError(
+                    {"limit": f"limit 는 1~{route_history.MAX_LIMIT} 사이 숫자여야 해요."}
+                )
+        results = route_history.history(request.user, sort=sort, limit=limit)
+        return Response({"sort": sort, "days": route_history.HISTORY_DAYS, "results": results})
 
 
 class RouteCandidateView(APIView):
