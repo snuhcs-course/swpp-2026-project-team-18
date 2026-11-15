@@ -161,7 +161,9 @@ def _refresh(
         return SKIP_NOT_OK
     if started:
         return SKIP_STARTED
-    if plan.alarm_at <= cutoff:
+    # Partly AI-generated (Claude) — 울릴 시각으로 본다. 직접 정한 시각·지키는 시각이 추천보다 이르면
+    # 그 시각에 이미 울렸거나 곧 울린다(H2-3).
+    if alarm_control.effective_alarm_at(plan, event.start_at) <= cutoff:
         return SKIP_SOON
     profile = event.user.profile
     if event.resolve_origin(profile) is None or event.resolve_destination(profile) is None:

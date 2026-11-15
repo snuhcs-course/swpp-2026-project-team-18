@@ -47,21 +47,35 @@ def alarm_states(user) -> dict[int, tuple[bool, bool]]:
     """id → (alarm_on, is_first_alarm). 계산 불가·명시적 OFF·"안 감" 은 제외한다.
 
     안 가는 일정은 울리지 않고, 그날 다음 일정이 첫 알람이 된다.
-    """
-    tz = user_timezone(user)
 
-    events = (
+    순서는 **울릴 시각**(`alarm_control.effective_alarm_at`, 직접 정한 시각 · 지키는 시각 포함)으로
+    정한다. 추천 시각(`alarm_at`)으로 정하면 직접 앞당긴 알람이 첫 알람이 되지 못한다.
+    (Partly AI-generated (Claude))
+    """
+    from apps.planning.alarm_control import CONTROL_FIELDS, Control, effective_of
+
+    tz = user_timezone(user)
+    now = timezone.now()
+    rows = (
         Event.objects.filter(
             user=user, alarm_plan__status=AlarmPlan.Status.OK,
             alarm_plan__alarm_at__isnull=False, skipped_at__isnull=True,
         )
         .exclude(alarm_enabled=False)
-        .order_by("alarm_plan__alarm_at", "id")
-        .values_list("id", "start_at", "alarm_enabled")
+        .values(
+            "id", "start_at", "alarm_enabled", "alarm_plan__alarm_at",
+            *(f"alarm_plan__{name}" for name in CONTROL_FIELDS),
+        )
     )
+    events = []
+    for row in rows:
+        control = Control(**{name: row[f"alarm_plan__{name}"] for name in CONTROL_FIELDS})
+        effective = effective_of(control, row["alarm_plan__alarm_at"], row["start_at"], now)
+        events.append((effective, row["id"], row["start_at"], row["alarm_enabled"]))
+    events.sort(key=lambda item: (item[0], item[1]))
     days = set()
     states = {}
-    for event_id, start_at, enabled in events:
+    for _effective, event_id, start_at, enabled in events:
         day = start_at.astimezone(tz).date()
         first = day not in days
         days.add(day)
