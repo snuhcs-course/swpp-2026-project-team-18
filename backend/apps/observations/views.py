@@ -17,6 +17,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from apps.planning.learning_reset import recorded_before_reset
+
 from .models import AlarmLog, TripObservation
 from .serializers import (
     AlarmLogBatchSerializer,
@@ -49,6 +51,10 @@ class ObservationBatchView(APIView):
 
     응답은 저장 결과를 건수로 알려 준다. 앱은 `accepted + duplicated` 만큼을
     로컬 큐에서 지운다 — 중복도 "서버에 있다" 는 확인이므로 지워야 한다.
+
+    기록 초기화(`Profile.learning_reset_at`)보다 이른 `observed_at` 은 저장하지 않고
+    `ignored` 로 센다. 초기화 전에 쌓인 오프라인 큐가 늦게 올라와 지운 아침이 다시 학습에
+    들어가지 않게 한다. 2xx 이므로 앱 큐는 그대로 비워진다. (Partly AI-generated (Claude))
     """
 
     throttle_classes = [ScopedRateThrottle]
@@ -63,9 +69,14 @@ class ObservationBatchView(APIView):
 
         created: list[TripObservation] = []
         duplicated = 0
+        ignored = 0
+        reset_at = recorded_before_reset(request.user)
 
         with transaction.atomic():
             for item in items:
+                if reset_at is not None and item["observed_at"] < reset_at:
+                    ignored += 1
+                    continue
                 # 검증을 통과한 값을 **그대로** 넘긴다. 예전에는 필드를 손으로
                 # 나열했는데, 시리얼라이저에 필드를 더하고 여기를 잊으면
                 # 그 값이 조용히 버려진다. 400 도 아니고 null 로 저장된다 —
@@ -89,6 +100,7 @@ class ObservationBatchView(APIView):
             {
                 "accepted": len(created),
                 "duplicated": duplicated,
+                "ignored": ignored,
                 "results": TripObservationSerializer(created, many=True).data,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
@@ -139,6 +151,8 @@ class AlarmLogBatchView(APIView):
     일정 없이 들어갔는지는 `unlinked` 로 알려 준다. 올린 뒤에 지운 일정(SET_NULL)과 같은
     모양이고, 배치를 거절하지 않으므로 같은 배치의 다른 기록이 사라지지 않는다.
 
+    기록 초기화보다 이른 `occurred_at` 은 저장하지 않고 `ignored` 로 센다(이동 관측과 같다).
+
     조회 API 는 두지 않는다. 이 기록은 학습 배치와 admin 이 읽는다.
     """
 
@@ -153,8 +167,13 @@ class AlarmLogBatchView(APIView):
         created: list[int] = []
         duplicated = 0
         unlinked = 0
+        ignored = 0
+        reset_at = recorded_before_reset(request.user)
         with transaction.atomic():
             for item in items:
+                if reset_at is not None and item["occurred_at"] < reset_at:
+                    ignored += 1
+                    continue
                 defaults = {k: v for k, v in item.items() if k not in _IDENTITY_FIELDS}
                 log, was_created = AlarmLog.objects.get_or_create(
                     user=request.user,
@@ -173,6 +192,7 @@ class AlarmLogBatchView(APIView):
                 "accepted": len(created),
                 "duplicated": duplicated,
                 "unlinked": unlinked,
+                "ignored": ignored,
                 "results": created,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
