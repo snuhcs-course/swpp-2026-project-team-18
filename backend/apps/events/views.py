@@ -15,10 +15,11 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.core.cache import cache, caches
 from django.db import IntegrityError, transaction
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
@@ -32,7 +33,7 @@ from apps.planning.models import PlanRevision
 from apps.routing import clients
 
 from . import edits, recurrence, route_preference
-from .alarms import reset_alarm_overrides, user_timezone
+from .alarms import reset_alarm_overrides
 from .geo import validate_route_distance
 from .models import Event, EventTag
 from .serializers import (
@@ -152,46 +153,87 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
         return EventSerializer
 
     def update(self, request, *args, **kwargs):
-        """일정을 고치고 알람 계획을 다시 만든다. 규칙은 `edits` 와 docs/iter3/event-edit-api.md."""
+        """일정을 고치고 알람 계획을 다시 만든다. 규칙은 `edits` 와 docs/iter3/event-edit-api.md.
+
+        본문의 `scope`(iter4 A2, docs/iter4/server-recurrence-scope.md): 없음·`"this"` 는 그 회차만,
+        `"following"` 은 반복 회차면 이 회차부터 규칙을 바꾼다. 반복이 아니면 `"this"` 와 같다.
+        """
+        scope = _scope(request.data.get("scope") if hasattr(request.data, "get") else None)
         instance = self.get_object()
+        if scope == recurrence.FOLLOWING and instance.recurrence_id is not None:
+            event, write = self._update_following(request, instance)
+        else:
+            event, write = self._update_one(request, instance, scope)
+        event.refresh_from_db()
+        return Response(EventSerializer(event, context=self.get_serializer_context()).data)
+
+    def _write(self, request, instance, scope):
+        context = {**self.get_serializer_context(), "scope": scope}
+        write = EventWriteSerializer(instance, data=request.data, partial=True, context=context)
+        write.is_valid(raise_exception=True)
+        return write
+
+    def _update_one(self, request, instance, scope):
         # Partly AI-generated (Claude) — 저장 전 값. 스위치가 바뀌었는지 기록할 때 쓴다.
         alarm_before = instance.alarm_enabled
         start_before = instance.start_at
         # 계획 입력. 무엇이 실제로 바뀌었는지 보고 카카오를 부를지 정한다.
         inputs_before = edits.plan_inputs(instance)
-        write = self.get_serializer(instance, data=request.data, partial=True)
-        write.is_valid(raise_exception=True)
+        write = self._write(request, instance, scope)
         event = write.save()
 
-        if not recurrence.in_window(event):
-            # A late switch must preserve the historical plan. Only a moved date clears it.
-            if event.start_at != start_before:
-                plan = getattr(event, "alarm_plan", None)
-                if plan is not None:
-                    plan.delete()
-        else:
-            # 제목·켬/끔만 바꾸면 기존 계획을 쓰고, 시각·τ 만 바꾸면 경로를 다시 조회하지 않는다.
-            edits.replan(event, inputs_before, start_before=start_before)
+        # 창 밖이면 지난 계획을 남기고, 다른 날로 옮기면 옮겨 간 날의 수동 켬/끔을 돌린다(BE-25).
+        recurrence.replan_after_edit(event, inputs_before, start_before=start_before)
+        self._log_switch(write, event, alarm_before)
+        return event, write
 
-        # Partly AI-generated (Claude)
-        # 다른 날로 옮기면 옮겨 간 날의 수동 켬/끔을 자동으로 돌린다. 그날에 일정이 새로
-        # 들어온 것이라 생성과 같은 규칙이다(BE-25). 이 일정의 선택은 그대로 둔다.
-        tz = user_timezone(event.user)
-        if event.start_at.astimezone(tz).date() != start_before.astimezone(tz).date():
+    def _update_following(self, request, instance):
+        """반복 회차를 "이후 일정 모두" 로 고친다. 규칙 잠금 안에서 한 트랜잭션으로 한다.
+
+        이 회차를 규칙 값으로 되돌린 뒤 바뀐 필드를 얹어 저장하고, 그 값으로 규칙을 나눈다
+        (`recurrence.split_following`). (Partly AI-generated (Claude))
+        """
+        try:
             with transaction.atomic():
-                reset_alarm_overrides(event)
-        event.refresh_from_db()
+                rule, event = recurrence.lock_occurrence(instance)
+                alarm_before = event.alarm_enabled
+                start_before = event.start_at
+                inputs_before = edits.plan_inputs(event)
+                recurrence.reset_to_rule(event)
+                write = self._write(request, event, recurrence.FOLLOWING)
+                event = write.save()
+                weekdays = write.validated_data.get("repeat_weekdays") or rule.weekdays
+                recurrence.split_following(
+                    event, weekdays=weekdays, before=inputs_before, start_before=start_before,
+                )
+        except recurrence.ScopeError as exc:
+            raise ValidationError({exc.field: exc.message}) from exc
+        except Event.DoesNotExist as exc:
+            raise Http404 from exc
+        self._log_switch(write, event, alarm_before)
+        return event, write
 
+    @staticmethod
+    def _log_switch(write, event, alarm_before):
         # Partly AI-generated (Claude)
         # 알람 스위치를 바꿨으면 알람 기록에 남긴다(db-schema.md A3, source=server).
         # 실패해도 수정은 그대로 성공한다(`record_switch` 가 오류를 삼킨다).
         if "alarm_enabled" in write.validated_data:
+            event.refresh_from_db()
             alarm_logs.record_switch(event, alarm_before, event.alarm_enabled)
 
-        return Response(EventSerializer(event, context=self.get_serializer_context()).data)
-
-    def perform_destroy(self, instance):
-        recurrence.delete_occurrence(instance)
+    def destroy(self, request, *args, **kwargs):
+        """`?scope=following` 이면 이 회차부터 반복을 끝낸다(iter4 A2). 반복이 아니면 그냥 지운다."""
+        scope = _scope(request.query_params.get("scope"))
+        instance = self.get_object()
+        try:
+            if scope == recurrence.FOLLOWING:
+                recurrence.delete_following(instance)
+            else:
+                recurrence.delete_occurrence(instance)
+        except Event.DoesNotExist as exc:
+            raise Http404 from exc
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class EventRecomputeView(_UserScopedMixin, APIView):
@@ -510,6 +552,16 @@ def _minute(value):
     태운다. 그 비용은 사용자에게 보이지 않으면서 하루 한도를 말린다.
     """
     return None if value is None else value.replace(second=0, microsecond=0)
+
+
+def _scope(raw) -> str:
+    """수정·삭제 범위(iter4 A2). 없으면 `this`. 모르는 값은 400 이다 — 조용히 `this` 로 받으면
+    사용자는 이후 일정을 모두 바꿨다고 믿는다. (Partly AI-generated (Claude))"""
+    if raw is None or raw == "":
+        return recurrence.THIS
+    if not isinstance(raw, str) or raw not in recurrence.SCOPES:
+        raise ValidationError({"scope": "scope 는 this 또는 following 이어야 해요."})
+    return raw
 
 
 def _error(code: str, message: str, http_status: int) -> Response:

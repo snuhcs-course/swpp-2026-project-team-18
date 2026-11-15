@@ -417,9 +417,23 @@ class EventWriteSerializer(serializers.ModelSerializer):
         부분 수정(PATCH)에서는 저장된 값과 합쳐서 판단한다.
         """
         if self.instance is not None and "repeat_weekdays" in attrs:
-            raise serializers.ValidationError({"repeat_weekdays": "반복 규칙은 생성할 때 설정하며, 수정은 현재 회차에만 적용된다."})
+            # 요일은 반복 회차를 "이후 일정 모두"(`scope: following`)로 고칠 때만 바꾼다(iter4 A2).
+            # 하루치만 고치는 "이 일정만" 에는 뜻이 없고, 단일 일정을 반복으로 바꾸는 길은 아직 없다.
+            # 뷰가 `context["scope"]` 를 넣는다. (Partly AI-generated (Claude))
+            following = (
+                self.context.get("scope") == "following" and self.instance.recurrence_id is not None
+            )
+            if not following:
+                raise serializers.ValidationError(
+                    {"repeat_weekdays": "반복 요일은 반복 일정을 '이후 일정 모두'로 고칠 때만 바꿀 수 있어요."}
+                )
+            if not attrs["repeat_weekdays"]:
+                raise serializers.ValidationError(
+                    {"repeat_weekdays": "요일을 하나 이상 골라 주세요. 반복을 끝내려면 '이후 일정 모두 삭제'를 쓰면 돼요."}
+                )
+            attrs["repeat_weekdays"] = sorted(set(attrs["repeat_weekdays"]))
         days = attrs.get("repeat_weekdays")
-        if days:
+        if days and self.instance is None:
             if attrs["start_at"] < timezone.now():
                 raise serializers.ValidationError({"start_at": "반복 시작은 현재 이후로 설정해야 한다."})
             attrs["repeat_weekdays"] = sorted(set(days))
@@ -544,6 +558,8 @@ class EventWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         # 요청 id 는 만들 때 한 번만 정한다. 수정 요청에 실려 와도 바꾸지 않는다.
         validated_data.pop("client_request_id", None)
+        # 새 요일은 뷰가 규칙에 쓴다(`recurrence.split_following`). 회차의 필드가 아니다.
+        validated_data.pop("repeat_weekdays", None)
         if "place" in validated_data:
             instance.place = self._resolve_place(validated_data.pop("place"))
         if "tag_key" in validated_data:
