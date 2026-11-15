@@ -54,6 +54,8 @@ INSTALLED_APPS = [
     # 공통 오류 형식·헬스 체크 + API 요청 기록(`ApiRequestLog`, db-schema.md A4).
     # 모델이 생기면서 앱으로 등록한다. (Partly AI-generated (Claude))
     "apps.common",
+    # 앱 안 문의하기(iter4 BE-H4b). 문의를 저장하고 팀 메일로 알린다. (Partly AI-generated (Claude))
+    "apps.support",
 ]
 
 MIDDLEWARE = [
@@ -220,6 +222,11 @@ REST_FRAMEWORK = {
         # 앞으로의 알람을 다시 섞는다(카카오 0회). 목록 조회(GET)는 세지 않는다.
         # (Partly AI-generated (Claude))
         "event_tag": "60/hour",
+        # 쌓인 기록 초기화(iter4 BE-RESET). 지우고 앞으로의 알람을 다시 섞는다(카카오 0회).
+        # 사람이 확인 창을 거쳐 누르는 것이라 시간당 5번이면 충분하다. (Partly AI-generated (Claude))
+        "learning_reset": "5/hour",
+        # 앱 안 문의하기(iter4 BE-H4b). 한 건마다 팀 메일이 나간다. 사용자당 시간당 5건.
+        "support_inquiry": "5/hour",
     },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
@@ -255,6 +262,14 @@ EMAIL_BACKEND = (os.getenv("EMAIL_BACKEND") or "").strip() or (
 DEFAULT_FROM_EMAIL = (os.getenv("DEFAULT_FROM_EMAIL") or "").strip() or (
     EMAIL_HOST_USER or "JustInTime <no-reply@justintime.invalid>"
 )
+
+# 앱 안 문의(iter4 BE-H4b, `apps/support`)를 알릴 팀 주소. 쉼표로 여러 개. 비어 있으면 메일은
+# 건너뛰고 문의만 저장한다(관리 화면에서 본다). 값은 저장소에 적지 않는다. (Partly AI-generated (Claude))
+SUPPORT_INBOX_EMAILS = [
+    address.strip()
+    for address in (os.getenv("SUPPORT_INBOX_EMAILS") or "").split(",")
+    if address.strip()
+]
 
 from datetime import timedelta  # noqa: E402
 

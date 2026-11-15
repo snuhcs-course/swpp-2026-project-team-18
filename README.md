@@ -450,6 +450,7 @@ committed.** The deployed values live in the Render dashboard, and CI needs none
 | `SEOUL_BUS_API_KEY_ENCODING` / `_DECODING` | Bus real-time arrivals ([data.go.kr](https://www.data.go.kr)). Set both forms of the key |
 | `STATIC_MAP_DAILY_UPSTREAM_LIMIT` | Daily budget for Kakao static-map requests, default 900 |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL` | Weekly report summary (optional; without them a fixed template is used). Any OpenAI-compatible chat-completions endpoint; an empty base URL means OpenAI. Check with `python manage.py probe_report_summary` |
+| `SUPPORT_INBOX_EMAILS` | Team address(es) that receive in-app inquiries (`POST /api/support/inquiries`), comma-separated. Sent with the same mail settings as password-reset codes. Empty means inquiries are only saved and shown in Django admin ([docs/iter4/server-inquiry.md](docs/iter4/server-inquiry.md)) |
 
 Without the real-time keys the arrival lines simply do not appear; routing still works.
 `KMA_API_KEY`, `FCM_CREDENTIALS_PATH`, `KAKAO_MOBILITY_KEY` and `REDIS_URL` are reserved

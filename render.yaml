@@ -110,6 +110,12 @@ services:
       - key: DEFAULT_FROM_EMAIL
         sync: false
 
+      # 앱 안 문의(iter4 BE-H4b)를 받을 팀 주소. 쉼표로 여러 개. **대시보드에서 직접 넣는다.**
+      # 비우면 문의는 저장만 되고 관리 화면에서 본다. 메일은 위 발송 설정으로 나간다.
+      # (Partly AI-generated (Claude))
+      - key: SUPPORT_INBOX_EMAILS
+        sync: false
+
 # databases 블록을 두지 않는다.
 #
 # 여기에 Render Postgres 를 정의하면 DATABASE_URL 이 그쪽으로 자동 연결되고,
