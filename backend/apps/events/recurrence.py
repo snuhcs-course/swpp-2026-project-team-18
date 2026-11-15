@@ -4,11 +4,12 @@ iter4 A2: "이후 일정 모두" 수정(`split_following`)·삭제(`delete_follo
 규칙은 docs/iter4/server-recurrence-scope.md. (Partly AI-generated (Claude))
 """
 
+from collections import defaultdict
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.planning import services
@@ -21,6 +22,10 @@ TEMPLATE_FIELDS = (
     "title", "destination_is_home", "tau_override", "route_key",
     "origin_lat", "origin_lng", "origin_label",
 )
+
+# 회차별 표시. 수정이 아니라 **그날의** 선택이다("안 감", 알람 켬/끔, 준비 학습 제외).
+# "이후 일정 모두" 가 값을 덮어도 남기고, 서버가 행을 다른 날로 옮기면 따라가지 않는다.
+PER_DAY_FIELDS = ("skipped_at", "alarm_enabled", "prep_learning_excluded_at")
 
 
 def window(zone):
@@ -94,6 +99,14 @@ def expand(rule_id, *, reset_choices=False, reset_created=False):
         Q(recurrence_date__gte=start.date(), recurrence_date__lt=end.date())
         | Q(start_at__gte=start, start_at__lt=end),
     ).select_related("alarm_plan", "user__profile", "recurrence")}
+    if rule.until is not None:
+        # 끝난 규칙에 끝 뒤 자리·끝 뒤 시각의 회차가 남아 있으면 나눈 뒤에 잘못 이어 붙은 행이다
+        # (리뷰 A2-2). 보이지도 남기지도 않는다. 끝 전 자리에서 끝 뒤로 옮긴 회차("이 일정만")와
+        # 끝 뒤 자리에서 끝 전으로 옮긴 회차는 사용자가 옮긴 것이라 남긴다.
+        for slot, event in list(existing.items()):
+            if slot > rule.until and event.start_at.astimezone(start.tzinfo).date() > rule.until:
+                event.delete()
+                del existing[slot]
     day = max(start.date(), anchor.date())
     # 끝난 규칙(`until`)은 그 날까지만 펼친다.
     last = end.date() if rule.until is None else min(end.date(), rule.until + timedelta(days=1))
@@ -121,10 +134,32 @@ def expand(rule_id, *, reset_choices=False, reset_created=False):
 
 
 def expand_for_user(user):
+    """목록 조회 전에 사용자의 규칙을 펼치고, 보일 회차의 조건(`Q`)을 돌려준다.
+
+    **끝난 규칙(`until` 이 창 첫날 전)은 잠그지 않고 건너뛴다**(리뷰 A2-8). 새 회차가 생기지 않는다.
+    창 안에 계획이 없는 회차(예전에 창 밖으로 옮겨 둔 회차)나 끝 뒤에 남은 행이 있을 때만 펼친다.
+    """
     bounds = {}
-    for rule_id in EventRecurrence.objects.filter(user=user).values_list("id", flat=True):
-        zone, start, end = expand(rule_id)
-        bounds[zone] = (start, end)
+    ended = []
+    rules = EventRecurrence.objects.filter(user=user).order_by("pk").values_list("id", "timezone", "until")
+    for rule_id, zone, until in rules:
+        if zone not in bounds:
+            bounds[zone] = window(zone)
+        start, _ = bounds[zone]
+        if until is not None and until < start.date():
+            ended.append(rule_id)
+        else:
+            expand(rule_id)
+    if ended:
+        low = min(start for start, _ in bounds.values())
+        high = max(end for _, end in bounds.values())
+        stale = (
+            Event.objects.filter(recurrence_id__in=ended, start_at__gte=low, start_at__lt=high)
+            .filter(Q(alarm_plan__isnull=True) | Q(recurrence_date__gt=F("recurrence__until")))
+            .values_list("recurrence_id", flat=True)
+        )
+        for rule_id in sorted(set(stale)):
+            expand(rule_id)
     visible = Q(recurrence__isnull=True)
     for zone, (start, end) in bounds.items():
         visible |= Q(recurrence__timezone=zone, start_at__gte=start, start_at__lt=end)
@@ -133,8 +168,14 @@ def expand_for_user(user):
 
 @transaction.atomic
 def delete_occurrence(event):
-    if event.recurrence_id is not None:
-        rule = EventRecurrence.objects.select_for_update().get(pk=event.recurrence_id)
+    """한 회차만 지운다(`DELETE` 범위 없음·`this`). 그 자리를 회차가 **지금** 속한 규칙에서 뺀다.
+
+    잠그기 전에 동시에 온 "이후 일정 모두" 가 이 회차를 새 규칙으로 옮겼을 수 있다. 예전 규칙에
+    날짜를 빼면 새 규칙이 다음 조회에 그 회차를 다시 만든다(리뷰 A2-1). 그래서 `lock_occurrence` 로
+    다시 읽은 회차와 그 규칙을 쓴다.
+    """
+    rule, event = lock_occurrence(event)
+    if rule is not None:
         rule.excluded_dates = sorted(set(rule.excluded_dates) | {event.recurrence_date.isoformat()})
         rule.save(update_fields=["excluded_dates"])
     event.delete()
@@ -162,28 +203,70 @@ class ScopeError(Exception):
         self.message = message
 
 
-def lock_occurrence(event):
-    """회차와 그 규칙을 잠그고 다시 읽는다. 반복이 아니면 `(None, 다시 읽은 일정)`.
+def _family_ids(user_id, rule_id):
+    """이 규칙과 `split_from` 으로 이어진 규칙 id 전부(한 반복). 뿌리부터 모든 자손까지다.
 
-    잠금 순서는 `expand`·`delete_occurrence` 와 같다(규칙 먼저). 잠그기 전에 다른 요청이 이 회차를
-    다른 규칙으로 옮겼으면(동시에 온 "이후 일정 모두") 새 규칙으로 다시 잠근다. 그사이 지워졌으면
-    `Event.DoesNotExist` 다.
+    없는 id 를 가리키는 `split_from`(구버전이 원래 규칙을 지웠다)은 묶음의 끝으로 본다.
     """
+    links = dict(EventRecurrence.objects.filter(user_id=user_id).values_list("id", "split_from_id"))
+    root, seen = rule_id, {rule_id}
+    while links.get(root) in links and links[root] not in seen:
+        root = links[root]
+        seen.add(root)
+    children = defaultdict(list)
+    for pk, parent in links.items():
+        children[parent].append(pk)
+    family, stack = set(), [root]
+    while stack:
+        pk = stack.pop()
+        if pk not in family:
+            family.add(pk)
+            stack.extend(children.get(pk, ()))
+    return family
+
+
+def _lock(event, *, series):
+    """`lock_occurrence`·`lock_series` 의 공통 부분. 규칙들을 id 순으로 잠근 뒤 회차를 잠근다."""
     for _ in range(5):
-        rule = None
+        rules = {}
         if event.recurrence_id is not None:
-            rule = EventRecurrence.objects.select_for_update().get(pk=event.recurrence_id)
+            ids = _family_ids(event.user_id, event.recurrence_id) if series else {event.recurrence_id}
+            rules = {
+                rule.pk: rule
+                for rule in EventRecurrence.objects.select_for_update().filter(pk__in=ids).order_by("pk")
+            }
         fresh = (
             Event.objects.select_for_update(of=("self",))
             .select_related("place", "tag", "alarm_plan", "user__profile", "recurrence")
             .get(pk=event.pk)
         )
-        if fresh.recurrence_id == (rule.pk if rule else None):
-            if rule is not None:
-                fresh.recurrence = rule
-            return rule, fresh
+        rule = rules.get(fresh.recurrence_id)
+        if fresh.recurrence_id is None and not rules:
+            return None, fresh, []
+        if rule is not None and (not series or _family_ids(fresh.user_id, rule.pk) == set(rules)):
+            fresh.recurrence = rule
+            return rule, fresh, [rules[pk] for pk in sorted(rules)]
         event = fresh
     raise ScopeError("scope", "다른 수정과 겹쳤어요. 잠시 뒤 다시 시도해 주세요.")
+
+
+def lock_occurrence(event):
+    """회차와 그 규칙을 잠그고 다시 읽는다. 반복이 아니면 `(None, 다시 읽은 일정)`.
+
+    잠금 순서는 `expand` 와 같다(규칙 먼저). 잠그기 전에 다른 요청이 이 회차를
+    다른 규칙으로 옮겼으면(동시에 온 "이후 일정 모두") 새 규칙으로 다시 잠근다. 그사이 지워졌으면
+    `Event.DoesNotExist` 다. "이 일정만" 수정·삭제가 쓴다.
+    """
+    rule, fresh, _ = _lock(event, series=False)
+    return rule, fresh
+
+
+def lock_series(event):
+    """`lock_occurrence` 와 같되 이 반복의 나눈 규칙 전부(`_family_ids`)를 id 순으로 잠근다.
+
+    `(이 회차의 규칙, 다시 읽은 회차, 묶음의 규칙 목록)`. "이후 일정 모두" 수정·삭제가 쓴다.
+    """
+    return _lock(event, series=True)
 
 
 def _rule_time(rule):
@@ -208,15 +291,6 @@ def _fill_from_rule(event, rule, day):
     event.start_at = datetime.combine(day, _rule_time(rule), tzinfo=ZoneInfo(rule.timezone))
 
 
-def reset_to_rule(event):
-    """이 회차를 규칙 값으로 되돌린다(저장하지 않는다). "이후 일정 모두" 수정 전에 부른다.
-
-    수정 본문은 바뀐 필드뿐이라 **규칙 값 + 이번 수정** 이 새 규칙이 된다. 이 회차를 전에 따로
-    고쳤어도 다른 이후 회차처럼 덮어쓴다.
-    """
-    _fill_from_rule(event, event.recurrence, event.recurrence_date)
-
-
 def _first_day(day, weekdays, excluded, until):
     for _ in range(_FIRST_DAY_LOOKAHEAD):
         if until is not None and day > until:
@@ -225,6 +299,58 @@ def _first_day(day, weekdays, excluded, until):
             return day
         day += timedelta(days=1)
     return None
+
+
+def _fits(day, *, first, weekdays, excluded, until):
+    return (
+        day >= first and day.weekday() in weekdays and day.isoformat() not in excluded
+        and (until is None or day <= until)
+    )
+
+
+def _local_day(event, tz):
+    return event.start_at.astimezone(tz).date()
+
+
+def _clear_alarm_choice(event):
+    """덮어쓴 이후 회차의 직접 정한 알람 시각·확인·제안을 지운다(리뷰 A2-7). 새 회차와 같아진다.
+
+    `alarm_control` 의 공개 함수(`locked_plan`·`save`·`Control`)만 쓴다. 빈 `Control()` 이 사용자
+    상태가 없는 계획이다. 계획이 없으면(창 밖) 할 일이 없다.
+    """
+    from apps.planning import alarm_control
+
+    plan = alarm_control.locked_plan(event)
+    if plan is not None:
+        alarm_control.save(plan, alarm_control.Control())
+
+
+def _end_rule(rule, split_day, vacated):
+    """묶음의 다른 규칙을 나누는 날 전날로 끝낸다(이미 그 전에 끝났으면 그대로).
+
+    나누는 날 이후의 지운 날짜는 버린다(새 규칙이 가져갔거나 삭제로 필요 없다). `vacated` 는
+    나누는 날 전 자리에서 그 뒤로 옮겨 가 있다가 이번에 떠난 회차의 자리다. 그 자리를 다시 만들지
+    않게 지운 날짜로 남긴다(리뷰 A2-6).
+    """
+    split_iso = split_day.isoformat()
+    if rule.until is None or rule.until >= split_day:
+        rule.until = split_day - timedelta(days=1)
+    rule.excluded_dates = sorted(
+        {d for d in rule.excluded_dates if d < split_iso} | {d.isoformat() for d in vacated}
+    )
+    rule.save(update_fields=["until", "excluded_dates"])
+
+
+def _drop_if_empty(rule, split_day, today):
+    """회차가 하나도 남지 않고 더 만들 자리도 없는 규칙을 지운다. 자식 규칙은 부모에 잇는다."""
+    if rule.occurrences.exists():
+        return
+    anchor_day = rule.start_at.astimezone(ZoneInfo(rule.timezone)).date()
+    if anchor_day < split_day and rule.until is not None and rule.until >= today:
+        return  # 아직 펼치지 않은 앞 자리가 남아 있다
+    parent = EventRecurrence.objects.filter(pk=rule.pk).values_list("split_from_id", flat=True).first()
+    EventRecurrence.objects.filter(split_from_id=rule.pk).update(split_from_id=parent)
+    rule.delete()
 
 
 def replan_after_edit(event, before, *, start_before):
@@ -251,76 +377,128 @@ def replan_after_edit(event, before, *, start_before):
 
 
 @transaction.atomic
-def split_following(event, *, weekdays, before, start_before):
-    """이 회차부터 반복 규칙을 바꾼다(`PATCH` `scope: following`). 이 회차가 속한 규칙을 돌려준다.
+def split_following(event, *, family, weekdays, before, start_before, sent=frozenset()):
+    """이 회차부터 반복을 바꾼다(`PATCH` `scope: following`). 이 회차가 속한 규칙을 돌려준다.
 
-    부르기 전: `lock_occurrence` 로 규칙과 회차를 잠갔고, `reset_to_rule` 뒤 이번 수정을 저장해
-    `event` 가 새 값(규칙 값 + 바뀐 필드)을 들고 있다. `before`·`start_before` 는 수정 전 값이다.
+    부르기 전: `lock_series` 로 묶음의 규칙(`family`)과 회차를 잠갔고, 이번 수정을 이 회차에
+    저장했다. `event` 는 **사용자가 본 이 회차의 값 + 이번 수정** 이고 그대로 새 반복의 값이 된다
+    (리뷰 A2-4, 아이폰과 같다). `before`·`start_before` 는 수정 전 값, `sent` 는 본문에 실린 필드다.
+    규칙은 docs/iter4/server-recurrence-scope.md 1.1.
 
-    1. 이 회차의 원래 자리(`recurrence_date`)가 나누는 날이다. 그 전 회차는 바꾸지 않는다.
-    2. 새 규칙의 첫 날은 고친 시작 날짜부터 처음 맞는 요일이다(생성의 `first_start` 와 같다).
-       요일·날짜를 바꾸면 이 회차가 그 날로 옮겨 간다.
-    3. 이 회차가 규칙의 첫 회차면 규칙을 그 자리에서 고친다. 아니면 원래 규칙을 전날로 끝내고
-       (`until`) 새 규칙을 만든다. 나누는 날 이후의 제외 날짜(지운 회차)는 새 규칙으로 옮긴다.
-    4. 이미 펼친 이후 회차는 새 규칙에 다시 잇고 새 값으로 덮어쓴다(따로 고친 값도). id 와 회차별
-       표시(안 감·켬/끔)는 남긴다. 새 규칙에 없는 날의 회차는 지운다. 그다음 창을 다시 펼친다.
+    - 나누는 날 = 이 회차가 **보이던** 현지 날짜(수정 전 시작). 회차를 앞·뒤로 가르는 것도 원래
+      자리(`recurrence_date`)가 아니라 실제 시작 날짜다(리뷰 A2-6).
+    - 묶음의 모든 규칙(앞서 나눈 뒤쪽 규칙 포함, 리뷰 A2-5)에서 나누는 날 이후 회차를 새 반복이
+      가져간다. 다른 규칙은 전날로 끝내고, 회차가 남지 않으면 지운다.
     """
     from . import edits
 
     rule = event.recurrence
     tz = ZoneInfo(rule.timezone)
-    split_day = event.recurrence_date
+    split_day = start_before.astimezone(tz).date()
+    split_at = datetime.combine(split_day, time.min, tzinfo=tz)
+    split_iso = split_day.isoformat()
     local = event.start_at.astimezone(tz)
     if local.date() < split_day:
         raise ScopeError("start_at", "이후 일정 모두를 고칠 때는 이 회차보다 앞 날짜로 옮길 수 없어요.")
-    excluded = set(rule.excluded_dates)
-    first = _first_day(local.date(), weekdays, excluded, rule.until)
+    family_ids = [part.pk for part in family]
+
+    # 새 반복의 끝은 나누는 날 뒤를 맡던 부분의 끝이다(하나라도 끝이 없으면 끝없음).
+    later = [part for part in family if part.until is None or part.until >= split_day]
+    if any(part.until is None for part in later):
+        until = None
+    elif later:
+        until = max(part.until for part in later)
+    else:
+        until = rule.until
+    excluded = {d for part in family for d in part.excluded_dates if d >= split_iso}
+    # 나누는 날 뒤 자리를 앞으로 옮겨 둔 회차는 그 자리를 쓰고 있다. 새 반복이 다시 만들지 않는다.
+    excluded |= {
+        day.isoformat() for day in Event.objects.filter(
+            recurrence_id__in=family_ids, start_at__lt=split_at, recurrence_date__gte=split_day,
+        ).values_list("recurrence_date", flat=True)
+    }
+    first = _first_day(local.date(), weekdays, excluded, until)
     if first is None:
         raise ScopeError("start_at", "반복이 끝나는 날 뒤로는 옮길 수 없어요.")
     anchor = datetime.combine(first, local.time(), tzinfo=tz)
     template = _template_of(event)
     followers = list(
-        rule.occurrences.filter(recurrence_date__gte=split_day).exclude(pk=event.pk)
+        Event.objects.filter(recurrence_id__in=family_ids, start_at__gte=split_at)
+        .exclude(pk=event.pk).order_by("pk")
         .select_for_update(of=("self",)).select_related("alarm_plan", "user__profile")
     )
 
     if split_day <= rule.start_at.astimezone(tz).date():
+        # 이 회차가 규칙의 첫 회차다. 규칙을 그 자리에서 고친다.
         target = rule
         target.start_at, target.weekdays, target.template = anchor, list(weekdays), template
-        target.place, target.tag = event.place, event.tag
-        target.save(update_fields=["start_at", "weekdays", "template", "place", "tag"])
+        target.place, target.tag, target.until = event.place, event.tag, until
+        target.excluded_dates = sorted({d for d in rule.excluded_dates if d < split_iso} | excluded)
+        target.save(update_fields=["start_at", "weekdays", "template", "place", "tag", "until", "excluded_dates"])
     else:
         target = EventRecurrence.objects.create(
             user=rule.user, start_at=anchor, timezone=rule.timezone, weekdays=list(weekdays),
-            template=template, place=event.place, tag=event.tag, until=rule.until,
-            excluded_dates=sorted(d for d in excluded if d >= split_day.isoformat()),
+            template=template, place=event.place, tag=event.tag, until=until,
+            excluded_dates=sorted(excluded), split_from=rule,
         )
-        rule.until = split_day - timedelta(days=1)
-        rule.excluded_dates = sorted(d for d in excluded if d < split_day.isoformat())
-        rule.save(update_fields=["until", "excluded_dates"])
 
-    # 이 회차가 옮겨 갈 자리에 다른 회차가 있으면 비운다(같은 규칙·같은 날은 하나뿐이다).
-    kept = []
+    # 이후 회차를 새 반복의 날에 놓는다. 원래 자리가 나누는 날 이후면 그 자리, 앞 자리에서 옮겨 와
+    # 있던 회차면 보이던 날. 같은 날에 둘이면 그날이 원래 자리인 회차를 남긴다.
+    vacated = defaultdict(set)
+    if event.recurrence_date < split_day:
+        vacated[rule.pk].add(event.recurrence_date)
+    placed, doomed = {}, []
     for other in followers:
-        if other.recurrence_date == first:
-            other.delete()
+        slot = other.recurrence_date
+        day = slot if slot >= split_day else _local_day(other, tz)
+        if slot < split_day:
+            vacated[other.recurrence_id].add(slot)
+        if not _fits(day, first=first, weekdays=weekdays, excluded=excluded, until=until):
+            doomed.append(other)
+            continue
+        keeper = placed.get(day)
+        if keeper is None:
+            placed[day] = other
+        elif slot == day and keeper.recurrence_date != day:
+            doomed.append(keeper)
+            placed[day] = other
         else:
-            kept.append(other)
+            doomed.append(other)
+
+    # 이 회차가 다른 날로 옮겨 가면 그날의 표시를 쓴다(리뷰 A2-3). 그날 회차가 있었으면 그 회차의
+    # 표시를 받고 그 회차를 지운다. 없었으면 비운다. 본문에 실은 켬/끔은 이번 선택이라 그대로 둔다.
+    donor = placed.pop(first, None)
+    if donor is not None:
+        doomed.append(donor)
+    if first != split_day:
+        for field in PER_DAY_FIELDS:
+            if field not in sent:
+                setattr(event, field, getattr(donor, field) if donor is not None else None)
+    Event.objects.filter(pk__in=[other.pk for other in doomed]).delete()
+
     event.recurrence, event.recurrence_date, event.start_at = target, first, anchor
-    event.save(update_fields=["recurrence", "recurrence_date", "start_at", "updated_at"])
+    event.save(update_fields=["recurrence", "recurrence_date", "start_at", *PER_DAY_FIELDS, "updated_at"])
     replan_after_edit(event, before, start_before=start_before)
 
-    for other in kept:
-        day = other.recurrence_date
-        if (day < first or day.weekday() not in target.weekdays
-                or day.isoformat() in target.excluded_dates
-                or (target.until is not None and day > target.until)):
-            other.delete()
-            continue
+    for day in sorted(placed):
+        other = placed[day]
         other_before, other_start = edits.plan_inputs(other), other.start_at
+        moved = day != _local_day(other, tz)
         _fill_from_rule(other, target, day)
+        if moved:
+            for field in PER_DAY_FIELDS:
+                setattr(other, field, None)
         other.save()
         replan_after_edit(other, other_before, start_before=other_start)
+        _clear_alarm_choice(other)
+
+    today = timezone.now().astimezone(tz).date()
+    for part in family:
+        if part.pk != target.pk:
+            _end_rule(part, split_day, vacated.get(part.pk, ()))
+    for part in family:
+        if part.pk != target.pk:
+            _drop_if_empty(part, split_day, today)
 
     expand(target.pk, reset_created=True)
     return target
@@ -328,20 +506,29 @@ def split_following(event, *, weekdays, before, start_before):
 
 @transaction.atomic
 def delete_following(event):
-    """이 회차와 이후 회차를 지우고 규칙을 전날로 끝낸다(`DELETE ?scope=following`).
+    """이 회차와 이후 회차를 지우고 반복을 전날로 끝낸다(`DELETE ?scope=following`).
 
-    반복이 아니면 그냥 지운다. 이 회차가 첫 회차라 남는 회차가 없으면 규칙도 지운다.
+    반복이 아니면 그냥 지운다. 앞서 나눈 뒤쪽 규칙까지 묶음 전체에서 이 회차가 보이던 날 이후의
+    회차를 지운다(리뷰 A2-5·A2-6). 회차가 남지 않은 규칙은 지운다.
     """
-    rule, event = lock_occurrence(event)
+    rule, event, family = lock_series(event)
     if rule is None:
         event.delete()
         return
-    split_day = event.recurrence_date
-    rule.occurrences.filter(recurrence_date__gte=split_day).delete()
-    if not rule.occurrences.exists():
-        rule.delete()
-        return
-    until = split_day - timedelta(days=1)
-    rule.until = until if rule.until is None else min(rule.until, until)
-    rule.excluded_dates = sorted(d for d in rule.excluded_dates if d < split_day.isoformat())
-    rule.save(update_fields=["until", "excluded_dates"])
+    tz = ZoneInfo(rule.timezone)
+    split_day = _local_day(event, tz)
+    split_at = datetime.combine(split_day, time.min, tzinfo=tz)
+    doomed = list(
+        Event.objects.filter(recurrence_id__in=[part.pk for part in family], start_at__gte=split_at)
+        .values_list("pk", "recurrence_id", "recurrence_date")
+    )
+    vacated = defaultdict(set)
+    for _, rule_id, slot in doomed:
+        if slot < split_day:
+            vacated[rule_id].add(slot)
+    Event.objects.filter(pk__in=[pk for pk, _, _ in doomed]).delete()
+    today = timezone.now().astimezone(tz).date()
+    for part in family:
+        _end_rule(part, split_day, vacated.get(part.pk, ()))
+    for part in family:
+        _drop_if_empty(part, split_day, today)
