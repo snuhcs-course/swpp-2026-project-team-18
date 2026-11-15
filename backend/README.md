@@ -65,6 +65,8 @@ curl http://127.0.0.1:8000/api/health
 | 경로 그룹 · 리스크 · 집 목적지 | [route-risk-home](../docs/iter2/route-risk-home.md) |
 | 준비 시간 범위 · 가입 제한 · 이동 표본 수 | [account-ranges](../docs/iter2/account-ranges-and-travel-counts.md) |
 | 주간 반복 | [weekly-recurrence](../docs/iter2/weekly-recurrence.md) |
+| 쌓인 기록 초기화(iter4) | [server-learning-reset](../docs/iter4/server-learning-reset.md) |
+| 앱 안 문의하기(iter4) | [server-inquiry](../docs/iter4/server-inquiry.md) |
 
 - **가입·비밀번호:** `POST /api/auth/password/check`는 조건 미충족도 200이고 결과를 `messages`에 담는다.
   가입에는 `terms_agreed: true`가 필요하고 IP당 10회/시간으로 제한한다.
