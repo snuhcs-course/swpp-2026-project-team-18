@@ -163,6 +163,9 @@ class Control:
         self.user_alarm_probability = probability
 
     def confirm(self, effective, now) -> None:
+        """그 시각을 확인한 것으로 둔다. 이미 같은 시각을 확인했으면 처음 확인한 순간을 둔다."""
+        if self.confirmed(effective):
+            return
         self.confirmed_alarm_at = effective
         self.confirmed_at = now
 

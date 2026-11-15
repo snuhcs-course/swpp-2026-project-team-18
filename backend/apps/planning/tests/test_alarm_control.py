@@ -68,6 +68,15 @@ def test_confirm_then_same_time_stays_confirmed():
     assert c.confirmed(c.current(REC, START))
 
 
+def test_confirm_twice_keeps_first_moment():
+    c = Control()
+    c.confirm(REC, EARLY_NOW)
+    c.confirm(REC, EARLY_NOW + m(30))
+    assert c.confirmed_at == EARLY_NOW
+    c.confirm(REC - m(5), EARLY_NOW + m(40))
+    assert c.confirmed_at == EARLY_NOW + m(40)
+
+
 @pytest.mark.parametrize("move", [-3, 3, -5, 5])
 def test_small_move_is_applied_and_turns_unconfirmed(move):
     c = confirmed_at(REC)
