@@ -16,7 +16,9 @@
 "확인함" 은 저장하지 않고 **비교로 정한다.** 확인한 알람(`confirmed_alarm_at`)이 지금 울릴
 시각과 같으면 확인함, 다르면 확인 전이다. 그래서 재계산 경로가 몇 개든(일정 수정, 다시 계산,
 밤 학습, 루틴 수정, 프로필) "시각이 바뀌면 확인 전" 이 저절로 맞는다. 새 계획은 확인한
-알람이 없으므로 확인 전이다.
+알람이 없으므로 확인 전이다. 확인은 명시적인 조작(확인 · 직접 정하기 · 되돌리기 · 제안 수락/거절)
+에서만 생긴다. τ 칸 PATCH(`preset_chosen`)는 확인하지 않는다 — 확인을 모르는 지금 앱에 아무도
+보지 않는 제안이 생기지 않게 한다.
 
 ## 제안과 답이 없을 때
 
@@ -45,8 +47,11 @@ logger = logging.getLogger(__name__)
 
 # 추천 알람이 이만큼 **넘게** 움직이면 조용히 바꾸지 않고 묻는다(Figma `547:2766`). 이하는 바로 바꾼다.
 PROPOSAL_THRESHOLD = timedelta(minutes=5)
-# 울릴 시각 이만큼 전까지 답이 없으면 더 이른(안전한) 쪽을 쓴다(Figma 캡션의 예시, 잠정).
+# 두 시각 중 **더 이른 쪽** 이만큼 전까지 답이 없으면 더 이른(안전한) 쪽을 쓴다(Figma 캡션의 예시, 잠정).
 ANSWER_LEAD = timedelta(minutes=10)
+# 답이 없어 정할 때, 정하는 순간부터 이만큼도 남지 않은 시각으로는 바꾸지 않는다. 이미 지났거나
+# 기기 알람을 다시 걸 틈이 없는 시각이다. 그때는 지금 시각을 지킨다(`Control.settle`).
+SETTLE_MIN_AHEAD = timedelta(minutes=1)
 # 직접 정한 시각은 그 시각의 정시 도착 확률이 이것 **미만**일 때만 묻는다(%).
 USER_PROBABILITY_FLOOR = 70
 # 확인한 알람과 지금 울릴 시각이 이만큼까지 다르면 확인함으로 본다. 0 = 1분이라도 다르면 확인 전.
@@ -67,7 +72,10 @@ KIND_RECOMMENDED = "recommended_moved"
 KIND_USER = "user_low_probability"
 
 # 재계산 전 계획에서 읽어 두는 값. 제안 이유("이동 시간이 12분 늘었어요")를 만든다.
-SNAPSHOT_FIELDS = ("status", "alarm_at", "prep_minutes", "travel_minutes", "buffer_minutes", "tau_used")
+# `arrive_at` + `buffer_minutes` 는 그 계획을 만든 일정 시작이다(`_before_start`).
+SNAPSHOT_FIELDS = (
+    "status", "alarm_at", "arrive_at", "prep_minutes", "travel_minutes", "buffer_minutes", "tau_used",
+)
 
 
 def _minutes(delta: timedelta) -> int:
@@ -125,11 +133,15 @@ class Control:
         return self.proposed_alarm_at is not None
 
     def answer_by(self, recommended, start_at):
-        """제안에 답할 마감. 지금 울릴 시각의 10분 전."""
+        """제안에 답할 마감. 지금 울릴 시각과 제안 시각 중 **더 이른 쪽**의 10분 전.
+
+        앞당기는 제안이면 제안 시각의 10분 전이다. 지금 시각(더 늦다)의 10분 전으로 두면
+        답이 없을 때 이미 지난 제안 시각으로 바꾸게 된다(7:40 지킴, 7:15 제안 → 7:30 마감).
+        """
         current = self.current(recommended, start_at)
         if not self.has_proposal or current is None:
             return None
-        return current - ANSWER_LEAD
+        return min(current, self.proposed_alarm_at) - ANSWER_LEAD
 
     def confirmed(self, effective) -> bool:
         return (
@@ -155,6 +167,15 @@ class Control:
         self.user_alarm_reason = ""
         self.user_alarm_start_at = None
         self.user_alarm_probability = None
+
+    def clear_choice(self) -> None:
+        """직접 정한 시각 · 기다리는 제안 · 거절 기록을 지운다. 확인 기록은 그대로 둔다.
+
+        확인 상태는 비교라서 울릴 시각이 바뀌면 저절로 확인 전이 된다.
+        """
+        self._clear_proposal()
+        self._clear_user()
+        self.rejected_alarm_at = None
 
     def _pin(self, at, start_at, probability, reason) -> None:
         self.user_alarm_at = at
@@ -210,12 +231,26 @@ class Control:
     def settle(self, recommended, start_at, now) -> bool:
         """마감이 지난 제안을 처리한다. 두 시각 중 **더 이른(안전한) 쪽**을 쓴다. 처리했으면 True.
 
+        정하는 순간은 마감(`answer_by`)이다. 마감이 지난 뒤에 생긴 제안(알람 직전의 다시 계산)이면
+        제안이 생긴 순간(`proposed_at`)이다. 늦게(lazily) 읽어도 그 순간에 정했을 결론을 낸다 —
+        앱이 마감에 기기에서 정한 것과 같다.
+
+        - 제안 시각이 더 이르고 정하는 순간부터 `SETTLE_MIN_AHEAD`(1분) 넘게 남았으면 제안 시각으로
+          바꾼다. 마감에 정하면 제안 시각은 늘 10분 뒤이므로 앞당기는 제안은 이쪽이다.
+        - 아니면 지금 시각을 지킨다. 늦추는 제안(지금 시각이 더 이르다)이거나, 마감 뒤에 생긴
+          제안이라 제안 시각이 이미 지났거나 1분도 남지 않은 경우다. **이미 지난 시각으로는
+          바꾸지 않는다** — 그때 아직 오지 않은 시각은 지금 시각뿐이다.
+
         확인 상태는 건드리지 않는다. 앞당겨졌으면 확인한 시각과 달라져 확인 전이 된다.
         """
         deadline = self.answer_by(recommended, start_at)
         if deadline is None or now < deadline:
             return False
-        if self.proposed_alarm_at <= self.current(recommended, start_at):
+        decided_at = max(deadline, self.proposed_at or deadline)
+        if (
+            self.proposed_alarm_at <= self.current(recommended, start_at)
+            and self.proposed_alarm_at > decided_at + SETTLE_MIN_AHEAD
+        ):
             self._apply_proposal()
         else:
             self._keep_current(start_at)
@@ -241,10 +276,11 @@ class Control:
         self.confirm(at, now)
 
     def use_recommended(self, recommended, now) -> None:
-        """[추천 시각으로 되돌리기] 또는 빠르게 고르기 세 칸(τ). 추천 시각을 확인한 것으로 둔다."""
-        self._clear_proposal()
-        self._clear_user()
-        self.rejected_alarm_at = None
+        """[추천 시각으로 되돌리기] 또는 휠로 추천 시각과 같은 시각을 골랐다. 추천 시각을 확인한 것으로 둔다.
+
+        빠르게 고르기 세 칸(τ, `preset_chosen`)은 이것이 아니다 — 확인하지 않는다.
+        """
+        self.clear_choice()
         self.confirm(recommended, now)
 
     def after_compute(
@@ -258,22 +294,29 @@ class Control:
         now,
         probability_at: Callable[[datetime], int | None],
         reason: Callable[[], tuple[str, str]],
+        before_start_at=None,
     ) -> None:
         """재계산 뒤. 직접 정한 시각은 두고 확률만 새로 구한다. 추천이 5분 넘게 움직이면 묻는다.
 
         `before_recommended` 는 재계산 전 추천 시각(계산 불가였으면 None), `recommended` 는 새
         추천 시각(계산 불가면 None)이다. `probability_at(시각)` 은 새 분포에서 그 시각에 일어날
-        때의 정시 도착 확률, `reason()` 은 제안 이유 (코드, 문장)이다.
+        때의 정시 도착 확률, `reason()` 은 제안 이유 (코드, 문장)이다. `before_start_at` 은 재계산
+        전 계획을 만든 일정 시작이다(모르면 None — `start_at` 과 같다고 본다).
         """
-        # 1) 재계산 전에 마감이 지난 제안부터 처리한다. 그 뒤의 "지금 시각" 이 맞아야 한다.
-        if before_recommended is not None:
-            self.settle(before_recommended, start_at, now)
-
-        # 2) 일정 시작이 바뀌면 직접 정한 시각은 버린다(9:00 일정의 7:50 은 14:00 일정에 맞지 않다).
+        # 1) 일정 시작이 바뀌면 직접 정한 시각 · 제안 · 거절 기록을 버린다(9:00 일정의 7:50 은
+        #    14:00 일정에 맞지 않다). 마감 처리보다 **먼저** 한다. 마감 처리가 먼저면 "그대로 두기"
+        #    가 옛 시각을 새 시작에 묶어 14:00 일정이 7:40 에 울린다.
+        #    직접 정한 시각은 정할 때의 시작(`user_alarm_start_at`)으로, 제안은 재계산 전 계획의
+        #    시작(`before_start_at`)으로 본다.
+        start_changed = before_start_at is not None and before_start_at != start_at
         if self.user_alarm_at is not None and not self.user_active(start_at):
-            self._clear_user()
+            self.clear_choice()
+        elif start_changed:
             self._clear_proposal()
             self.rejected_alarm_at = None
+        # 2) 재계산 전에 마감이 지난 제안부터 처리한다. 그 뒤의 "지금 시각" 이 맞아야 한다.
+        elif before_recommended is not None:
+            self.settle(before_recommended, start_at, now)
 
         # 3) 계산 불가. 직접 정한 시각은 남겨 두고(다시 계산되면 그대로 쓴다) 제안만 버린다.
         if recommended is None:
@@ -330,6 +373,10 @@ class Control:
         self.settle(recommended, start_at, now)
 
 
+# 사용자 상태 필드 이름. 재계산 훅이 잠근 행에서 다시 읽고(`_lock_control`), 첫 알람 순서가 읽는다.
+CONTROL_FIELDS = tuple(f.name for f in fields(Control))
+
+
 # ---------------------------------------------------------------------------
 # 계획 · 분포
 # ---------------------------------------------------------------------------
@@ -339,6 +386,21 @@ def _recommended(plan: AlarmPlan | None):
     if plan is None or plan.status != AlarmPlan.Status.OK:
         return None
     return plan.alarm_at
+
+
+def effective_of(control: Control, recommended, start_at, now=None):
+    """울릴 시각. 마감이 지난 제안은 처리한 모습으로 본다(`present` 와 같다). `control` 은 바꾸지 않는다."""
+    settled = Control(**{name: getattr(control, name) for name in CONTROL_FIELDS})
+    settled.settle(recommended, start_at, now or timezone.now())
+    return settled.current(recommended, start_at)
+
+
+def effective_alarm_at(plan: AlarmPlan, start_at, now=None):
+    """계획의 울릴 시각(응답 `effective_alarm_at`). 계산하지 못한 계획이면 None.
+
+    "이미 울렸나 · 곧 울리나" · 그날 첫 알람 순서는 추천 시각(`alarm_at`)이 아니라 이 값으로 본다.
+    """
+    return effective_of(Control.of(plan), _recommended(plan), start_at, now)
 
 
 def probability_function(prep, travel, start_at) -> Callable[[datetime], int | None]:
@@ -448,10 +510,16 @@ def after_compute(event, plan: AlarmPlan, before: dict | None, *, trigger: str, 
     `components` 는 그 계산의 (준비, 이동) 분포 재료다. 없으면 확률을 구하지 않는다.
     **실패해도 알람 계획은 그대로 둔다.** 저장점 안에서 하고 오류는 로그로만 남긴다 — 알람이
     핵심이고 확인·제안은 그 위의 표시다. 이 단계가 실패하면 추천 시각에 울린다.
+
+    사용자 상태는 `plan` 인스턴스가 아니라 **잠근 행에서 다시 읽는다**(`_lock_control`). 재계산
+    경로는 계획을 잠그지 않고 일찍 읽어 둔다(`refresh_upcoming` 은 일정 50개를 한 번에). 그사이
+    `PUT …/alarm/time` 이 들어왔으면 옛 상태로 전이해 사용자가 정한 시각을 덮게 된다.
     """
     try:
         with transaction.atomic():
-            control = Control.of(plan)
+            control = _lock_control(plan)
+            if control is None:
+                return
             prep, travel = components if components is not None else (None, None)
             before_recommended = (
                 before["alarm_at"]
@@ -467,10 +535,33 @@ def after_compute(event, plan: AlarmPlan, before: dict | None, *, trigger: str, 
                 now=timezone.now(),
                 probability_at=probability_function(prep, travel, event.start_at),
                 reason=lambda: describe_change(before, plan),
+                before_start_at=_before_start(before),
             )
             save(plan, control)
     except Exception:  # noqa: BLE001 - 알람 계획 저장을 되돌리지 않는다
         logger.exception("일정 %s 알람 확인·제안 상태를 갱신하지 못했다", event.pk)
+
+
+def _lock_control(plan: AlarmPlan) -> Control | None:
+    """계획 행을 잠그고 사용자 상태를 DB 에서 다시 읽는다. 인스턴스에도 옮겨 `save` 의 비교가 맞게 한다."""
+    row = (
+        AlarmPlan.objects.select_for_update().filter(pk=plan.pk).values(*CONTROL_FIELDS).first()
+    )
+    if row is None:
+        return None
+    for name, value in row.items():
+        setattr(plan, name, value)
+    return Control(**row)
+
+
+def _before_start(before: dict | None):
+    """재계산 전 계획을 만든 일정 시작(도착 예정 + 버퍼, `services.alarm_fields`). 모르면 None."""
+    if not before or before.get("status") != AlarmPlan.Status.OK:
+        return None
+    arrive_at, buffer_minutes = before.get("arrive_at"), before.get("buffer_minutes")
+    if arrive_at is None or buffer_minutes is None:
+        return None
+    return arrive_at + timedelta(minutes=buffer_minutes)
 
 
 # ---------------------------------------------------------------------------
@@ -485,16 +576,43 @@ def locked_plan(event) -> AlarmPlan | None:
     return plan
 
 
-def preset_chosen(event) -> None:
-    """빠르게 고르기 세 칸(τ, `PATCH tau_override`)을 골랐다. 직접 정한 시각을 지우고 확인한다."""
+def clear_user_choice(event) -> bool:
+    """이 일정의 직접 정한 시각 · 기다리는 제안 · 거절 기록을 지운다. 바뀐 것이 있으면 True.
+
+    **확인하지 않는다**(확인 기록도 지우지 않는다 — 비교라서 시각이 바뀌면 저절로 확인 전이다).
+    계획 상태와 관계없이 지운다 — 다시 계산하지 못한 계획(`route_failed` 등)에 남겨 두면 다음에
+    계산될 때 옛 직접 정한 시각이 되살아난다. 계획이 없으면 아무것도 하지 않는다.
+    반복 "이후 일정 모두" 처럼 여러 회차면 `clear_user_choices` 를 쓴다.
+    """
     with transaction.atomic():
         plan = locked_plan(event)
-        recommended = _recommended(plan)
-        if recommended is None:
-            return
+        if plan is None:
+            return False
         control = Control.of(plan)
-        control.use_recommended(recommended, timezone.now())
-        save(plan, control)
+        control.clear_choice()
+        return save(plan, control)
+
+
+def clear_user_choices(event_ids) -> int:
+    """여러 일정에 `clear_user_choice` 를 한 번에(잠그지 않는 UPDATE 한 번). 대상 계획 수를 돌려준다."""
+    cleared = Control()
+    values = {
+        name: getattr(cleared, name)
+        for name in CONTROL_FIELDS
+        if name not in ("confirmed_alarm_at", "confirmed_at")
+    }
+    return AlarmPlan.objects.filter(event_id__in=list(event_ids)).update(**values)
+
+
+def preset_chosen(event) -> None:
+    """빠르게 고르기 세 칸(τ, `PATCH tau_override`)을 골랐다. 직접 정한 시각과 제안을 지운다.
+
+    **확인하지 않는다.** 지금 앱(front-iter4)은 τ 칸을 PATCH 로 고르고 기기 알람을 `alarm_at` 으로
+    걸며 확인 API 를 부르지 않는다. 여기서 확인함으로 두면 그 뒤 경로 갱신이 아무도 보지 않는
+    "바꿀까요" 를 만들고, 답이 없으면 서버가 지킨 시각(`kept`)이 기기 알람과 어긋난다. 확인은
+    명시적인 조작(`POST …/alarm/confirm`, `PUT …/alarm/time`, 제안 수락·거절)에서만 생긴다.
+    """
+    clear_user_choice(event)
 
 
 # ---------------------------------------------------------------------------

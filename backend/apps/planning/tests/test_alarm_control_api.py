@@ -215,7 +215,10 @@ def test_user_time_low_probability_proposal_and_accept(ctx):
     assert proposal["proposed_alarm_at"] == plan["alarm_at"]
     assert proposal["current_alarm_at"] == plan["user_alarm_at"]
     assert proposal["keep_probability"] == plan["user_alarm_probability"]
-    assert datetime.fromisoformat(proposal["answer_by"]) == picked - timedelta(minutes=10)
+    # 마감은 더 이른 쪽(제안 시각)의 10분 전이다.
+    assert datetime.fromisoformat(proposal["answer_by"]) == (
+        datetime.fromisoformat(proposal["proposed_alarm_at"]) - timedelta(minutes=10)
+    )
     plan = plan_of(client.post(url(event, "proposal/accept"),
                                {"proposed_alarm_at": proposal["proposed_alarm_at"]}, format="json"))
     assert plan["alarm_source"] == "recommended"
@@ -330,14 +333,94 @@ def test_small_recompute_change_turns_unconfirmed(ctx):
     assert plan["alarm_confirmed"] is False
 
 
-def test_preset_choice_clears_user_time_and_confirms(ctx):
+def test_preset_choice_clears_user_time_without_confirming(ctx):
+    """τ 칸(PATCH)은 직접 정한 시각만 지운다. 확인은 명시적인 조작에서만 생긴다(H3-4)."""
     client, event, _ = ctx
     client.put(url(event, "time"), {"alarm_at": iso(recommended(event) + timedelta(minutes=10))}, format="json")
     plan = plan_of(client.patch(f"/api/events/{event.pk}", {"tau_override": .97}, format="json"))
     assert plan["alarm_source"] == "recommended"
     assert plan["user_alarm_at"] is None
     assert plan["effective_alarm_at"] == plan["alarm_at"]
+    assert plan["alarm_confirmed"] is False
+    # 새 시트는 칸을 고른 뒤 확인을 부른다.
+    plan = plan_of(client.post(url(event, "confirm"), {"alarm_at": plan["effective_alarm_at"]}, format="json"))
     assert plan["alarm_confirmed"] is True
+
+
+def test_current_app_preset_then_route_refresh_creates_no_proposal(ctx):
+    """지금 앱: τ 칸 PATCH 뒤 경로 갱신(POST recompute)이 5분 넘게 움직여도 묻지 않고 바로 바꾼다."""
+    client, event, route = ctx
+    first = plan_of(client.patch(f"/api/events/{event.pk}", {"tau_override": .9}, format="json"))
+    route["minutes"] = 40
+    plan = plan_of(client.post(f"/api/events/{event.pk}/recompute"))
+    assert datetime.fromisoformat(first["alarm_at"]) - datetime.fromisoformat(plan["alarm_at"]) > timedelta(
+        minutes=5
+    )
+    assert plan["alarm_proposal"] is None
+    assert plan["effective_alarm_at"] == plan["alarm_at"]
+    assert plan["alarm_source"] == "recommended"
+    stored = AlarmPlan.objects.get(event=event)
+    assert stored.proposed_alarm_at is None and stored.user_alarm_at is None
+
+
+def test_preset_choice_clears_user_time_when_replan_fails(ctx, monkeypatch):
+    """τ 칸을 골랐는데 다시 계산이 실패해도 직접 정한 시각은 지운다(H3-6). 되살아나지 않는다."""
+    from apps.planning import refresh
+
+    client, event, route = ctx
+    picked = recommended(event) + timedelta(minutes=10)
+    client.put(url(event, "time"), {"alarm_at": iso(picked)}, format="json")
+
+    # 원값으로 다시 섞지 못해 경로부터 다시 구하는데, 경로 조회도 실패한다.
+    monkeypatch.setattr(refresh, "refresh_edited", lambda *a, **kw: None)
+    monkeypatch.setattr(services.clients, "best_route", lambda **kw: (None, True))
+    monkeypatch.setattr(services.clients, "resolve_route", lambda *a, **kw: (None, True))
+    response = client.patch(f"/api/events/{event.pk}", {"tau_override": .97}, format="json")
+    assert response.status_code == 200, response.content
+    stored = AlarmPlan.objects.get(event=event)
+    assert stored.status != AlarmPlan.Status.OK
+    assert stored.user_alarm_at is None and stored.proposed_alarm_at is None
+    # 경로가 돌아와 다시 계산되면 추천 시각이다. 예전 직접 정한 시각이 되살아나지 않는다.
+    monkeypatch.setattr(services.clients, "best_route", lambda **kw: (dict(route), False))
+    monkeypatch.setattr(services.clients, "resolve_route", lambda *a, **kw: (dict(route), False))
+    plan = plan_of(client.post(f"/api/events/{event.pk}/recompute"))
+    assert plan["alarm_source"] == "recommended"
+    assert plan["effective_alarm_at"] == plan["alarm_at"]
+
+
+def test_wheel_pick_equal_to_recommended_is_not_pinned(ctx):
+    """휠로 추천 시각 그대로를 고르면 직접 정한 시각이 아니라 추천 시각 · 확인함이다(H3-7b)."""
+    client, event, route = ctx
+    plan = plan_of(client.put(url(event, "time"), {"alarm_at": iso(recommended(event))}, format="json"))
+    assert plan["alarm_source"] == "recommended"
+    assert plan["user_alarm_at"] is None
+    assert plan["alarm_confirmed"] is True
+    assert AlarmPlan.objects.get(event=event).user_alarm_at is None
+    # 그 뒤 다시 계산하면 추천을 따라간다(5분 이하라 바로 바뀐다).
+    route["minutes"] = 22
+    plan = plan_of(client.post(f"/api/events/{event.pk}/recompute"))
+    assert plan["effective_alarm_at"] == plan["alarm_at"]
+
+
+def test_naive_alarm_time_is_read_in_user_timezone(ctx):
+    """오프셋 없는 시각은 사용자 시간대(프로필 `timezone`)로 읽는다(H3-7a)."""
+    from zoneinfo import ZoneInfo
+
+    client, event, _ = ctx
+    profile = event.user.profile
+    profile.timezone = "Asia/Tokyo"  # +09:00. 서버 TIME_ZONE 과 달라도 같은 순간이어야 한다.
+    profile.save()
+    picked = (recommended(event) + timedelta(minutes=10)).astimezone(ZoneInfo("Asia/Tokyo"))
+    naive = picked.replace(tzinfo=None).isoformat()
+    plan = plan_of(client.put(url(event, "time"), {"alarm_at": naive}, format="json"))
+    assert datetime.fromisoformat(plan["user_alarm_at"]) == picked
+
+    profile.timezone = "America/New_York"
+    profile.save()
+    target = (recommended(event) + timedelta(minutes=15)).astimezone(ZoneInfo("America/New_York"))
+    plan = plan_of(client.put(url(event, "time"), {"alarm_at": target.replace(tzinfo=None).isoformat()},
+                              format="json"))
+    assert datetime.fromisoformat(plan["user_alarm_at"]) == target
 
 
 def test_other_edits_keep_or_drop_user_time(ctx):
@@ -412,7 +495,8 @@ def test_risk_option_probability_agrees_with_user_time_probability(ctx):
     for option in data["options"]:
         at = datetime.fromisoformat(option["alarm_at"])
         plan = plan_of(client.put(url(event, "time"), {"alarm_at": iso(at)}, format="json"))
-        assert abs(plan["user_alarm_probability"] - option["probability"]) <= 1
+        # 추천 시각과 같은 칸은 직접 정한 시각이 되지 않는다(추천 시각 · 계획 확률).
+        assert abs(plan["effective_on_time_probability"] - option["probability"]) <= 1
     # 분포 구간을 앱처럼 균등 보간해 읽은 값과도 몇 %p 안이다.
     bins = data["distribution"]["bins"]
     at = datetime.fromisoformat(data["options"][1]["alarm_at"]) + timedelta(minutes=10)

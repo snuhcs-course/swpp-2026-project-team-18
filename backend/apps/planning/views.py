@@ -40,14 +40,18 @@ class _BadTime(Exception):
     pass
 
 
-def _parse_time(raw, *, required: bool):
-    """ISO 8601 시각. 초 이하는 버린다(알람은 분 단위다). 비었고 필수가 아니면 None."""
+def _parse_time(raw, *, required: bool, tz=None):
+    """ISO 8601 시각. 초 이하는 버린다(알람은 분 단위다). 비었고 필수가 아니면 None.
+
+    오프셋이 없는 시각(`2026-11-17T07:50:00`)은 **사용자 시간대**(`tz`, 프로필 `timezone`)의 벽시계
+    시각으로 읽는다. 서버 TIME_ZONE 으로 읽으면 시간대가 다른 사용자의 알람이 몇 시간 어긋난다.
+    """
     if raw in (None, ""):
         if required:
             raise _BadTime
         return None
     try:
-        value = serializers.DateTimeField().to_internal_value(raw)
+        value = serializers.DateTimeField(default_timezone=tz).to_internal_value(raw)
     except serializers.ValidationError as exc:
         raise _BadTime from exc
     return value.replace(second=0, microsecond=0)
@@ -68,6 +72,13 @@ class _EventAlarmView(APIView):
             .select_related("place", "tag", "alarm_plan", "user__profile", "recurrence")
             .first()
         )
+
+    @staticmethod
+    def _parse(event, raw, *, required: bool):
+        """오프셋 없는 시각은 일정 주인의 시간대로 읽는다(`_parse_time`)."""
+        from apps.events.alarms import user_timezone
+
+        return _parse_time(raw, required=required, tz=user_timezone(event.user))
 
     def _respond(self, request, event):
         from apps.events.serializers import EventSerializer
@@ -100,7 +111,7 @@ class AlarmTimeView(_EventAlarmView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         data = request.data if hasattr(request.data, "get") else {}
         try:
-            at = _parse_time(data.get("alarm_at"), required=True)
+            at = self._parse(event, data.get("alarm_at"), required=True)
         except _BadTime:
             return _error(
                 "invalid_alarm_time",
@@ -132,9 +143,14 @@ class AlarmTimeView(_EventAlarmView):
             plan, recommended = self._locked(event)
             if recommended is None:
                 return self._unavailable()
-            probability = alarm_control.probability_now(event, plan, at)
             control = Control.of(plan)
-            control.set_user(at, start, probability, now)
+            if _same_minute(at, recommended):
+                # 휠로 추천 시각 그대로를 골랐다. 직접 정한 시각으로 굳히면 다시 계산해도 그 시각에
+                # 묶이므로 [추천 시각으로 되돌리기] 와 같게 둔다(추천 시각 · 확인함).
+                control.use_recommended(recommended, now)
+            else:
+                probability = alarm_control.probability_now(event, plan, at)
+                control.set_user(at, start, probability, now)
             alarm_control.save(plan, control)
         return self._respond(request, event)
 
@@ -161,7 +177,7 @@ class AlarmConfirmView(_EventAlarmView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         data = request.data if hasattr(request.data, "get") else {}
         try:
-            expected = _parse_time(data.get("alarm_at"), required=False)
+            expected = self._parse(event, data.get("alarm_at"), required=False)
         except _BadTime:
             return _error(
                 "invalid_alarm_time", "알람 시각을 읽을 수 없어요.", status.HTTP_400_BAD_REQUEST,
@@ -199,7 +215,7 @@ class AlarmProposalView(_EventAlarmView):
             return Response(status=status.HTTP_404_NOT_FOUND)
         data = request.data if hasattr(request.data, "get") else {}
         try:
-            expected = _parse_time(data.get("proposed_alarm_at"), required=False)
+            expected = self._parse(event, data.get("proposed_alarm_at"), required=False)
         except _BadTime:
             return _error(
                 "invalid_alarm_time", "제안 시각을 읽을 수 없어요.", status.HTTP_400_BAD_REQUEST,
@@ -214,7 +230,7 @@ class AlarmProposalView(_EventAlarmView):
                 alarm_control.save(plan, control)
                 return _error(
                     "alarm_proposal_expired",
-                    "답할 시간이 지나 더 이른 시각으로 정해 두었어요.",
+                    "답할 시간이 지나 알람 시각을 정해 두었어요.",
                     status.HTTP_409_CONFLICT,
                     {"effective_alarm_at": _iso(control.current(recommended, event.start_at))},
                 )
