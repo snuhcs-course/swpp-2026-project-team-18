@@ -222,7 +222,7 @@ class AlarmPlan(models.Model):
     # 상태**라서 재계산(`compute_and_store` 의 `update_or_create`, `refresh._remix`)이
     # 덮지 않는다 — `services._blank_fields` 에 이 필드들을 넣지 않는 것이 그 장치다.
     # `alarm_at` 은 그대로 **추천 시각**(계산 결과)이고, 실제로 울릴 시각은
-    # `alarm_control.effective_alarm_at` 이 이 필드들로 정한다.
+    # `alarm_control.Control.current` 가 이 필드들로 정한다(응답 `effective_alarm_at`).
     #
     # 모두 null 허용이거나 `db_default` 가 있다. 구버전 서버가 같은 DB 에 INSERT 해도 깨지지
     # 않는다(`scripts/check_db_defaults.py`).

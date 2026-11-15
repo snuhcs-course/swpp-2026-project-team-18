@@ -71,6 +71,27 @@ def test_event_dto_has_new_fields_and_keeps_old_ones(ctx):
     assert listed["alarm_source"] == "recommended"
 
 
+def test_list_adds_no_queries_per_event(ctx):
+    """새 필드는 이미 읽은 계획에서 만든다. 일정이 늘어도 목록 조회 수가 늘지 않는다."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    client, event, _ = ctx
+
+    def count():
+        with CaptureQueriesContext(connection) as queries:
+            assert client.get("/api/events").status_code == 200
+        return len(queries)
+
+    one = count()
+    for days in (3, 4):
+        other = Event.objects.create(
+            user=event.user, place=event.place, title="추가", start_at=event.start_at + timedelta(days=days),
+        )
+        services.compute_and_store(other, trigger="create")
+    assert count() == one
+
+
 def test_set_user_time(ctx):
     client, event, _ = ctx
     picked = recommended(event) + timedelta(minutes=15)

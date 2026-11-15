@@ -9,7 +9,7 @@
 | --- | --- | --- |
 | 추천 시각 | `AlarmPlan.alarm_at` | 계산 결과. 재계산이 덮는다. 예전 앱이 읽는 값 그대로다 |
 | 직접 정한 시각 | `user_alarm_at` | 사용자가 휠로 고른 시각. **재계산이 바꾸지 않는다**(확률만 새로 구한다) |
-| 울릴 시각 | `effective_alarm_at()` | 직접 정한 시각 → 답을 기다리며 지키는 시각(`held_alarm_at`) → 추천 시각 |
+| 울릴 시각 | `Control.current()`, 응답 `effective_alarm_at` | 직접 정한 시각 → 답을 기다리며 지키는 시각(`held_alarm_at`) → 추천 시각 |
 
 ## 확인 상태
 
@@ -339,14 +339,6 @@ def _recommended(plan: AlarmPlan | None):
     if plan is None or plan.status != AlarmPlan.Status.OK:
         return None
     return plan.alarm_at
-
-
-def effective_alarm_at(plan: AlarmPlan, *, now=None):
-    """지금 울릴 시각. 마감이 지난 제안은 처리한 것으로 본다. 계산 불가면 None."""
-    control = Control.of(plan)
-    recommended = _recommended(plan)
-    control.settle(recommended, plan.event.start_at, now or timezone.now())
-    return control.current(recommended, plan.event.start_at)
 
 
 def probability_function(prep, travel, start_at) -> Callable[[datetime], int | None]:
