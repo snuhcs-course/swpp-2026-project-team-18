@@ -151,6 +151,10 @@ class EventRecurrence(models.Model):
     place = models.ForeignKey(Place, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     tag = models.ForeignKey(EventTag, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     excluded_dates = models.JSONField(default=list)
+    # 반복이 끝나는 날(규칙 시간대의 현지 날짜, 이 날까지 포함). null 이면 끝이 없다.
+    # "이후 일정 모두" 수정·삭제가 이 회차 전날로 채운다(iter4 A2, docs/iter4/server-recurrence-scope.md).
+    # 구버전 코드의 INSERT 도 받도록 DB 기본값을 null 로 둔다. (Partly AI-generated (Claude))
+    until = models.DateField(null=True, blank=True, default=None, db_default=None)
 
     class Meta:
         db_table = "events_recurrence"
