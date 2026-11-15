@@ -215,6 +215,58 @@ class AlarmPlan(models.Model):
 
     computed_at = models.DateTimeField("계산 시각", auto_now=True)
 
+    # --- 알람 확인 · 직접 정한 시각 · "바꿀까요" 제안 (iter4 H2-3) ------------------
+    # Partly AI-generated (Claude)
+    #
+    # 규칙은 전부 `planning.alarm_control` 에 있다. 위의 계산 결과와 달리 **사용자가 정한
+    # 상태**라서 재계산(`compute_and_store` 의 `update_or_create`, `refresh._remix`)이
+    # 덮지 않는다 — `services._blank_fields` 에 이 필드들을 넣지 않는 것이 그 장치다.
+    # `alarm_at` 은 그대로 **추천 시각**(계산 결과)이고, 실제로 울릴 시각은
+    # `alarm_control.Control.current` 가 이 필드들로 정한다(응답 `effective_alarm_at`).
+    #
+    # 모두 null 허용이거나 `db_default` 가 있다. 구버전 서버가 같은 DB 에 INSERT 해도 깨지지
+    # 않는다(`scripts/check_db_defaults.py`).
+
+    # 사용자가 휠로 직접 정한 알람 시각(BE-H3b). 비면 추천 시각을 쓴다.
+    user_alarm_at = models.DateTimeField("직접 정한 알람", null=True, blank=True)
+    # `picked`(휠로 골랐다) 또는 `kept`("그대로 두기" 로 원래 시각을 지켰다). 동작은 같다.
+    user_alarm_reason = models.CharField(
+        "직접 정한 이유", max_length=8, blank=True, default="", db_default=""
+    )
+    # 정할 때의 일정 시작. 일정 시작이 바뀌면 직접 정한 시각은 더는 맞지 않으므로 버린다.
+    user_alarm_start_at = models.DateTimeField("정할 때 일정 시작", null=True, blank=True)
+    # 직접 정한 시각에 일어날 때의 정시 도착 확률(%). 재계산마다 새로 구한다.
+    user_alarm_probability = models.PositiveSmallIntegerField(
+        "직접 정한 시각의 확률(%)", null=True, blank=True, validators=[MaxValueValidator(100)]
+    )
+
+    # 사용자가 확인한 알람 시각과 그 순간(BE-H3a). 지금 울릴 시각이 이 값과 다르면 "확인 전" 이다.
+    confirmed_alarm_at = models.DateTimeField("확인한 알람", null=True, blank=True)
+    confirmed_at = models.DateTimeField("확인한 시각", null=True, blank=True)
+
+    # "바꿀까요" 제안(BE-H3d). 추천 알람이 5분 넘게 움직였을 때 답을 받을 때까지 지키는 시각.
+    held_alarm_at = models.DateTimeField("지키는 알람", null=True, blank=True)
+    proposed_alarm_at = models.DateTimeField("제안한 알람", null=True, blank=True)
+    # `recommended_moved` 또는 `user_low_probability`. 제안이 없으면 빈 값.
+    proposal_kind = models.CharField(
+        "제안 종류", max_length=24, blank=True, default="", db_default=""
+    )
+    proposal_reason = models.CharField(
+        "제안 이유", max_length=24, blank=True, default="", db_default=""
+    )
+    proposal_reason_text = models.CharField(
+        "제안 이유 문장", max_length=200, blank=True, default="", db_default=""
+    )
+    proposal_keep_probability = models.PositiveSmallIntegerField(
+        "그대로 둘 때 확률(%)", null=True, blank=True, validators=[MaxValueValidator(100)]
+    )
+    proposal_change_probability = models.PositiveSmallIntegerField(
+        "바꿀 때 확률(%)", null=True, blank=True, validators=[MaxValueValidator(100)]
+    )
+    proposed_at = models.DateTimeField("제안한 시각", null=True, blank=True)
+    # 사용자가(또는 답이 없어 서버가) 거절한 제안 시각. 같은 제안을 15분마다 다시 묻지 않는다.
+    rejected_alarm_at = models.DateTimeField("거절한 제안", null=True, blank=True)
+
     class Meta:
         db_table = "planning_alarm_plan"
         verbose_name = "알람 계획"

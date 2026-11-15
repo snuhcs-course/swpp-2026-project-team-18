@@ -201,7 +201,27 @@ class TestResetLearning:
         assert (result.recomputed_plans, result.changed_plans) == (1, 1)
         assert len(route) == lookups  # 카카오를 다시 부르지 않는다
         latest = event.plan_revisions.order_by("-computed_at", "-id").first()
-        assert latest.trigger == PlanRevision.Trigger.LEARNING
+        assert latest.trigger == PlanRevision.Trigger.PROFILE
+
+    def test_confirmed_alarm_moves_without_a_proposal(self, alice, place, route):
+        """초기화는 사용자가 한 일이라 확인한 알람이 5분 넘게 바뀌어도 묻지 않고 바로 바꾼다(H3d)."""
+        BufferAdjustment.objects.create(
+            user=alice, previous_minutes=10, minutes=15, reason="late_more", sample_count=6,
+            late_count=3, expected_late=0.6, mean_slack_minutes=-2.0, tightest_slack_minutes=-9.0,
+        )
+        start = (timezone.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+        event = Event.objects.create(user=alice, place=place, title="수업", start_at=start)
+        services.compute_and_store(event, trigger=PlanRevision.Trigger.CREATE)
+        before = AlarmPlan.objects.get(event=event)
+        before.confirmed_alarm_at = before.alarm_at
+        before.save(update_fields=["confirmed_alarm_at"])
+
+        learning_reset.reset_learning(alice)
+
+        after = AlarmPlan.objects.get(event=event)
+        assert after.alarm_at == before.alarm_at + timedelta(minutes=15 - DEFAULT_MINUTES)
+        assert after.proposal_kind == ""
+        assert after.proposed_alarm_at is None
 
     def test_alarm_that_already_rang_is_left_alone(self, alice, place, route):
         BufferAdjustment.objects.create(

@@ -182,6 +182,17 @@ class AlarmPlanSerializer(serializers.Serializer):
     def get_travel_time_source(self, obj) -> str:
         return obj.travel_source or ""
 
+    def to_representation(self, obj):
+        # Partly AI-generated (Claude)
+        # 알람 확인 · 직접 정한 시각 · "바꿀까요" 제안(iter4 H2-3). 위 필드는 그대로 두고 덧붙인다.
+        # `alarm_at` 은 계속 추천 시각이고, 울릴 시각은 `effective_alarm_at` 이다.
+        # 계약: docs/iter4/server-alarm-control.md
+        from apps.planning.alarm_control import present
+
+        data = super().to_representation(obj)
+        data.update(present(obj))
+        return data
+
 
 class EventSerializer(serializers.ModelSerializer):
     """일정 조회용. 장소·태그·알람 계획을 펼쳐서 내린다.

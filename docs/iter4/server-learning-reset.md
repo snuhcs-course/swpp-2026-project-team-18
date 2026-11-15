@@ -68,7 +68,7 @@ Authorization: Bearer <access>
 
 ## 3. 알람 다시 섞기
 
-- 지운 뒤 앞으로의 일정(가까운 50개, 반복 창 안) 알람을 **카카오를 부르지 않고** 다시 섞는다. 루틴 블록 수정 · 밤 학습과 같은 함수다(`planning.refresh.refresh_upcoming`, 계획 이력의 `trigger` 는 `learning` "학습 반영").
+- 지운 뒤 앞으로의 일정(가까운 50개, 반복 창 안) 알람을 **카카오를 부르지 않고** 다시 섞는다. 루틴 블록 수정 · 밤 학습과 같은 함수다(`planning.refresh.refresh_upcoming`, 계획 이력의 `trigger` 는 `profile`). 사용자가 직접 한 일이라 확인한 알람이 5분 넘게 바뀌어도 "바꿀까요" 제안 없이 바로 바꾼다([alarm-control](server-alarm-control.md)).
 - 기록이 없을 때의 기준: 준비 시간은 루틴 블록 범위 · 프로필 준비 시간, 버퍼는 기본값(`buffers.DEFAULT_MINUTES`), 걷는 속도는 1.0. 이동 보정은 공용 값 그대로다.
 - **이미 울렸거나 지금 울려야 할 알람**(`alarm_at` 이 지금 이전)은 그대로 둔다. 기기에 걸린 알람과 서버 계획이 어긋나지 않게 한다.
 - 계산 불가 상태(`no_home`, `route_failed` 등)거나 이력에 원값이 없는 일정은 건드리지 않는다. 다음 계산(일정 수정 · 재계산 · 밤 배치)에서 새 기준이 들어간다.

@@ -56,6 +56,7 @@ curl http://127.0.0.1:8000/api/health
 
 | 기능 | 문서 |
 | --- | --- |
+| 알람 직접 정하기 · 확인 · "바꿀까요" 제안 · 추천 칸(iter4 H2-3) | [server-alarm-control](../docs/iter4/server-alarm-control.md) |
 | 일정 수정 · 준비 시간 포함 · 안 감 | [event-edit](../docs/iter3/event-edit-api.md) · [include-prep](../docs/iter3/include-prep-api.md) · [skip-event](../docs/iter3/skip-event-api.md) |
 | 일정 종류 직접 추가 | [event-tags](../docs/iter3/event-tags-api.md) |
 | 일정 추가 실패·재시도(`client_request_id`)·500 형식 | [event-create-errors](../docs/iter3/event-create-errors.md) |

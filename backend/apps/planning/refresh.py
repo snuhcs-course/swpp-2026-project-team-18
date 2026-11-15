@@ -45,7 +45,7 @@ from apps.events.models import Event
 from apps.events.recurrence import in_window
 from apps.routing.models import walk_factor_for
 
-from . import buffers, history, services
+from . import alarm_control, buffers, history, services
 from .models import AlarmPlan, PlanRevision
 
 # 사용자 한 명당 한 번에 다시 계산할 일정 수. 집 변경 재계산(`recompute_for_user`)과
@@ -244,6 +244,8 @@ def _remix(
         return CHANGED
 
     with transaction.atomic():
+        # Partly AI-generated (Claude) — 바꾸기 전 값. 추천 알람이 움직인 이유를 만든다(H2-3).
+        before = alarm_control.snapshot(plan)
         for name, value in fields.items():
             setattr(plan, name, value)
         plan.save(update_fields=[*fields, "computed_at"])
@@ -251,4 +253,5 @@ def _remix(
             event, plan, trigger=trigger, route_minutes_raw=revision.route_minutes_raw,
             walk_minutes_raw=revision.walk_minutes_raw,
         )
+        alarm_control.after_compute(event, plan, before, trigger=trigger, components=(prep, travel))
     return CHANGED

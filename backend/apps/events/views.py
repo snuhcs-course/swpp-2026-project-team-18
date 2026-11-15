@@ -27,7 +27,7 @@ from rest_framework.views import APIView
 
 from apps.observations import alarm_logs
 from apps.observations.models import TripReroute, current_route_key
-from apps.planning import live_switch
+from apps.planning import alarm_control, live_switch
 from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
@@ -184,6 +184,7 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
 
         # 창 밖이면 지난 계획을 남기고, 다른 날로 옮기면 옮겨 간 날의 수동 켬/끔을 돌린다(BE-25).
         recurrence.replan_after_edit(event, inputs_before, start_before=start_before)
+        self._preset_chosen(write, event)
         self._log_switch(write, event, alarm_before)
         return event, write
 
@@ -206,12 +207,20 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
                 recurrence.split_following(
                     event, weekdays=weekdays, before=inputs_before, start_before=start_before,
                 )
+                self._preset_chosen(write, event)
         except recurrence.ScopeError as exc:
             raise ValidationError({exc.field: exc.message}) from exc
         except Event.DoesNotExist as exc:
             raise Http404 from exc
         self._log_switch(write, event, alarm_before)
         return event, write
+
+    @staticmethod
+    def _preset_chosen(write, event):
+        # 빠르게 고르기 세 칸(τ)을 골랐으면 직접 정한 시각을 지우고 그 시각을 확인한다(H2-3).
+        # "이후 일정 모두" 로 골랐을 때도 이 회차에 같은 규칙을 쓴다. (Partly AI-generated (Claude))
+        if "tau_override" in write.validated_data and recurrence.in_window(event):
+            alarm_control.preset_chosen(event)
 
     @staticmethod
     def _log_switch(write, event, alarm_before):

@@ -95,7 +95,9 @@ def reset_learning(user) -> ResetResult:
         for key, model in _targets():
             _total, per_model = model.objects.filter(user_id=user.pk).delete()
             deleted[key] = per_model.get(model._meta.label, 0)
-        outcomes = refresh.refresh_upcoming(user, trigger=PlanRevision.Trigger.LEARNING)
+        # 사용자가 직접 지운 것이라 "바꿀까요" 제안(`alarm_control.PROPOSAL_TRIGGERS`)을 만들지 않고
+        # 바로 반영한다. 그래서 학습(`LEARNING`)이 아니라 사용자 입력 쪽 이유로 남긴다. (Partly AI-generated (Claude))
+        outcomes = refresh.refresh_upcoming(user, trigger=PlanRevision.Trigger.PROFILE)
 
     changed = outcomes.get(refresh.CHANGED, 0)
     result = ResetResult(
