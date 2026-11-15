@@ -258,12 +258,18 @@ class ProfileSerializer(serializers.ModelSerializer):
         return obj.home_lat is not None and obj.home_lng is not None
 
     def validate(self, attrs):
+        # 집 좌표를 보낸 PATCH 만 본다(BE-H4 리뷰 H4-2). 전에는 안내를 본 시각만 보내도 저장된 집을
+        # 다시 검사해서, 예전 규칙으로 국외 집이 저장된 계정은 안내를 닫을 때마다 400 을 받았다.
+        # (Partly AI-generated (Claude))
+        if "home_lat" not in attrs and "home_lng" not in attrs:
+            return attrs
+
         # 부분 수정이므로 인스턴스의 현재 값과 합쳐서 판단한다.
         lat = attrs.get("home_lat", getattr(self.instance, "home_lat", None))
         lng = attrs.get("home_lng", getattr(self.instance, "home_lng", None))
         if (lat is None) != (lng is None):
             raise serializers.ValidationError(
-                {"home_lat": "집 위도와 경도는 함께 설정해야 한다."}
+                {"home_lat": "집 위도와 경도는 함께 설정해야 해요."}
             )
 
         # **범위 검증이 없었다.** `home_lat=999, home_lng=999` 가 200 으로
@@ -273,14 +279,28 @@ class ProfileSerializer(serializers.ModelSerializer):
         # 일정의 `origin_*` 과 같은 규칙을 쓴다 — 집도 출발지이므로 다를 이유가 없다.
         if lat is not None and lng is not None:
             if not (-90 <= lat <= 90):
-                raise serializers.ValidationError({"home_lat": "위도 범위를 벗어났다."})
+                raise serializers.ValidationError({"home_lat": "위도 범위를 벗어났어요."})
             if not (-180 <= lng <= 180):
-                raise serializers.ValidationError({"home_lng": "경도 범위를 벗어났다."})
+                raise serializers.ValidationError({"home_lng": "경도 범위를 벗어났어요."})
             if not in_service_area(lat, lng):
                 raise serializers.ValidationError(
-                    {"home_lat": "국내 좌표만 집으로 설정할 수 있다."}
+                    {"home_lat": "국내 좌표만 집으로 설정할 수 있어요."}
                 )
         return attrs
+
+    def update(self, instance, validated_data):
+        """보낸 칸만 저장한다(`update_fields`, BE-H4 리뷰 H4-1).
+
+        `ModelSerializer.update` 는 `instance.save()` 로 모든 칸을 쓴다. gunicorn 워커 둘이 같은
+        프로필을 거의 동시에 고치면(안내 닫기 PATCH 와 집 변경, 첫 실행 안내와 코치마크 PATCH) 늦게
+        끝난 쪽이 먼저 읽은 옛 값으로 다른 칸을 되돌렸다. 행 잠금은 `ProfileView` 가 한다.
+        (Partly AI-generated (Claude))
+        """
+        for name, value in validated_data.items():
+            setattr(instance, name, value)
+        if validated_data:
+            instance.save(update_fields=list(validated_data))
+        return instance
 
 
 class LogoutSerializer(serializers.Serializer):
