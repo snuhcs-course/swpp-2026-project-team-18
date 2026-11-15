@@ -21,8 +21,9 @@ from apps.events.geo import in_service_area
 from . import login_lock
 from .models import Profile, User
 
-# 앱(`AuthRepository.login`)은 401 에서 이 문구를 그대로 보인다.
-LOGIN_FAILED_MESSAGE = "이메일 또는 비밀번호가 올바르지 않다."
+# 앱(`AuthRepository.login`)은 401 에서 이 문구를 그대로 보인다(문자열을 비교하지는 않는다).
+# 다른 새 문구와 같은 해요체다(iter4 A3-6). code `authentication_failed` · 본문 모양은 그대로다.
+LOGIN_FAILED_MESSAGE = "이메일 또는 비밀번호가 맞지 않아요."
 
 
 class UserSerializer(serializers.ModelSerializer):

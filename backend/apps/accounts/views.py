@@ -54,11 +54,19 @@ class RegisterView(CreateAPIView):
 
 
 class LoginView(TokenObtainPairView):
-    """POST /api/auth/token — `{email, password}` → `{access, refresh, user}`"""
+    """POST /api/auth/token — `{email, password}` → `{access, refresh, user}`
+
+    이메일별 잠금(423, `login_lock`)과 따로 IP 별 스로틀(429 `throttled`, `login` 통)을 둔다
+    (iter4 A3-2). 잠금은 한 이메일을 5번까지만 맞혀 보게 하고, 스로틀은 한 IP 가 여러 이메일을
+    돌며 맞혀 보거나 실패 기록 행을 끝없이 만드는 것을 막는다. 스로틀은 뷰에 들어오기 전에 걸리므로
+    429 는 실패로 세지 않는다.
+    """
 
     permission_classes = [AllowAny]
     authentication_classes = []
     serializer_class = LoginSerializer
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
 
 class PasswordCheckView(GenericAPIView):

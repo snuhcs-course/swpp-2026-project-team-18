@@ -89,6 +89,7 @@ REST_FRAMEWORK = {  # noqa: F405
         "observation": None,
         "password_check": None,
         "register": None,
+        "login": None,
         "social": None,
         "logout": None,
         "password_reset": None,
