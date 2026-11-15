@@ -155,6 +155,15 @@ class EventRecurrence(models.Model):
     # "이후 일정 모두" 수정·삭제가 이 회차 전날로 채운다(iter4 A2, docs/iter4/server-recurrence-scope.md).
     # 구버전 코드의 INSERT 도 받도록 DB 기본값을 null 로 둔다. (Partly AI-generated (Claude))
     until = models.DateField(null=True, blank=True, default=None, db_default=None)
+    # 이 규칙을 "이후 일정 모두" 수정으로 떼어 낸 원래 규칙. 나눈 규칙끼리 한 반복으로 묶는다.
+    # "이후 일정 모두" 수정·삭제가 이 묶음의 뒤쪽 규칙까지 함께 바꾼다(`recurrence._family_ids`).
+    # **DB 제약을 걸지 않는다**(`db_constraint=False`). 이 필드를 모르는 이전 버전이 원래 규칙을
+    # 지워도 FK 위반으로 막히지 않게 한다. 없는 id 를 가리키면 묶음의 끝으로 본다.
+    # (Partly AI-generated (Claude))
+    split_from = models.ForeignKey(
+        "self", on_delete=models.DO_NOTHING, db_constraint=False, null=True, blank=True,
+        default=None, db_default=None, related_name="+",
+    )
 
     class Meta:
         db_table = "events_recurrence"

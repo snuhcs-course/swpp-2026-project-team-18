@@ -174,6 +174,28 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
         return write
 
     def _update_one(self, request, instance, scope):
+        """한 일정(또는 한 회차)을 고친다.
+
+        반복 회차는 규칙과 회차를 잠근 한 트랜잭션에서 한다(리뷰 A2-2). 잠그지 않으면 동시에 온
+        "이후 일정 모두" 가 이 회차를 새 규칙으로 옮긴 뒤 이 요청이 예전 규칙으로 되돌려 저장해,
+        새 규칙이 같은 날 회차를 하나 더 만든다(같은 날 일정 둘 → 알람 둘). 저장도 바뀐 필드만 쓴다
+        (`EventWriteSerializer.update`). (Partly AI-generated (Claude))
+        """
+        if instance.recurrence_id is None:
+            event, write, alarm_before = self._save_one(request, instance, scope)
+        else:
+            try:
+                with transaction.atomic():
+                    _, locked = recurrence.lock_occurrence(instance)
+                    event, write, alarm_before = self._save_one(request, locked, scope)
+            except recurrence.ScopeError as exc:
+                raise ValidationError({exc.field: exc.message}) from exc
+            except Event.DoesNotExist as exc:
+                raise Http404 from exc
+        self._log_switch(write, event, alarm_before)
+        return event, write
+
+    def _save_one(self, request, instance, scope):
         # Partly AI-generated (Claude) — 저장 전 값. 스위치가 바뀌었는지 기록할 때 쓴다.
         alarm_before = instance.alarm_enabled
         start_before = instance.start_at
@@ -185,27 +207,27 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
         # 창 밖이면 지난 계획을 남기고, 다른 날로 옮기면 옮겨 간 날의 수동 켬/끔을 돌린다(BE-25).
         recurrence.replan_after_edit(event, inputs_before, start_before=start_before)
         self._preset_chosen(write, event)
-        self._log_switch(write, event, alarm_before)
-        return event, write
+        return event, write, alarm_before
 
     def _update_following(self, request, instance):
-        """반복 회차를 "이후 일정 모두" 로 고친다. 규칙 잠금 안에서 한 트랜잭션으로 한다.
+        """반복 회차를 "이후 일정 모두" 로 고친다. 묶음의 규칙 잠금 안에서 한 트랜잭션으로 한다.
 
-        이 회차를 규칙 값으로 되돌린 뒤 바뀐 필드를 얹어 저장하고, 그 값으로 규칙을 나눈다
-        (`recurrence.split_following`). (Partly AI-generated (Claude))
+        **이 회차의 지금 값(따로 고친 값 포함) + 바뀐 필드** 를 저장하고, 그 값으로 반복을 나눈다
+        (`recurrence.split_following`, 리뷰 A2-4: 사용자가 본 값이 새 반복의 값이다).
+        (Partly AI-generated (Claude))
         """
         try:
             with transaction.atomic():
-                rule, event = recurrence.lock_occurrence(instance)
+                rule, event, family = recurrence.lock_series(instance)
                 alarm_before = event.alarm_enabled
                 start_before = event.start_at
                 inputs_before = edits.plan_inputs(event)
-                recurrence.reset_to_rule(event)
                 write = self._write(request, event, recurrence.FOLLOWING)
                 event = write.save()
                 weekdays = write.validated_data.get("repeat_weekdays") or rule.weekdays
                 recurrence.split_following(
-                    event, weekdays=weekdays, before=inputs_before, start_before=start_before,
+                    event, family=family, weekdays=weekdays, before=inputs_before,
+                    start_before=start_before, sent=frozenset(write.validated_data),
                 )
                 self._preset_chosen(write, event)
         except recurrence.ScopeError as exc:
@@ -218,7 +240,8 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
     @staticmethod
     def _preset_chosen(write, event):
         # 빠르게 고르기 세 칸(τ)을 골랐으면 직접 정한 시각을 지우고 그 시각을 확인한다(H2-3).
-        # "이후 일정 모두" 로 골랐을 때도 이 회차에 같은 규칙을 쓴다. (Partly AI-generated (Claude))
+        # "이후 일정 모두" 로 골랐을 때도 이 회차에 같은 규칙을 쓴다. 덮어쓴 이후 회차는
+        # `split_following` 이 직접 정한 시각·확인을 모두 지운다(리뷰 A2-7). (Partly AI-generated (Claude))
         if "tau_override" in write.validated_data and recurrence.in_window(event):
             alarm_control.preset_chosen(event)
 
@@ -240,6 +263,9 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
                 recurrence.delete_following(instance)
             else:
                 recurrence.delete_occurrence(instance)
+        except recurrence.ScopeError as exc:
+            # 잠그는 동안 다른 수정과 계속 겹쳤다. PATCH 와 같은 400 이다(리뷰 A2-9).
+            raise ValidationError({exc.field: exc.message}) from exc
         except Event.DoesNotExist as exc:
             raise Http404 from exc
         return Response(status=status.HTTP_204_NO_CONTENT)

@@ -572,18 +572,25 @@ class EventWriteSerializer(serializers.ModelSerializer):
         validated_data.pop("client_request_id", None)
         # 새 요일은 뷰가 규칙에 쓴다(`recurrence.split_following`). 회차의 필드가 아니다.
         validated_data.pop("repeat_weekdays", None)
+        # 바뀐 필드만 쓴다(iter4 리뷰 A2-2). 모든 열을 쓰면 읽은 뒤 다른 요청이 바꾼 값
+        # (반복 규칙 `recurrence`·`recurrence_date`, "안 감" 등)을 읽어 둔 옛 값으로 되돌린다.
+        # (Partly AI-generated (Claude))
+        changed = {"updated_at"}
         if "place" in validated_data:
             instance.place = self._resolve_place(validated_data.pop("place"))
+            changed.add("place")
         if "tag_key" in validated_data:
             key = validated_data.pop("tag_key")
             instance.tag = (
                 EventTag.objects.visible_to(instance.user).filter(key=key).first()
                 if key else None
             )
+            changed.add("tag")
 
         for field, value in validated_data.items():
             setattr(instance, field, value)
-        instance.save()
+            changed.add(field)
+        instance.save(update_fields=sorted(changed))
         return instance
 
     def _resolve_place(self, place_data) -> Place | None:
