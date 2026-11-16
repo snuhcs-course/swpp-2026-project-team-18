@@ -166,6 +166,9 @@ fun PasswordResetConfirmScreen(
         )
 
         PasswordRuleCard(lengthPassed = passwordCheck?.minLength, mixPassed = passwordCheck?.lettersAndDigits)
+        // 두 점이 다 초록인데 서버가 거절한 이유(흔한 비밀번호)는 점으로 말할 수 없다. 서버 문구를 그대로 둔다.
+        // (Partly AI-generated (Claude))
+        passwordCheck?.extraReason?.let { ErrorText(it, modifier = Modifier.testTag("reset_password_reason")) }
         passwordCheckError?.let { ErrorText(it) }
 
         JitTextField(

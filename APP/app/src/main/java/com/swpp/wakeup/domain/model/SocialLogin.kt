@@ -87,6 +87,8 @@ object SocialLogin {
      * ID 토큰(JWT) 본문의 닉네임. 처음 가입 화면의 닉네임 칸을 미리 채운다. 서명은 보지 않는다 —
      * 검증은 서버가 하고, 이 값은 사용자가 고칠 수 있는 제안일 뿐이다. 카카오는 `nickname`,
      * 구글은 `name` 이다. 읽지 못하면 null.
+     *
+     * 한도는 서버처럼 코드 포인트로 센다. UTF-16 단위로 자르면 경계에 걸친 이모지가 반만 남는다.
      */
     fun nicknameHint(idToken: String): String? = runCatching {
         val payload = idToken.split('.').getOrNull(1)?.takeIf { it.isNotEmpty() } ?: return null
@@ -96,7 +98,7 @@ object SocialLogin {
             .firstNotNullOfOrNull { key ->
                 claims.get(key)?.takeIf { it.isJsonPrimitive }?.asString?.trim()?.takeIf { it.isNotEmpty() }
             }
-            ?.take(NICKNAME_MAX)
+            ?.takeCodePoints(NICKNAME_MAX)
     }.getOrNull()
 
     private fun String.padBase64(): String = when (length % 4) {

@@ -109,6 +109,11 @@ fun AlarmDecisionScreen(
     onArrive: (() -> Unit)? = null,
     /** "일정 수정"(event-edit-api.md). null 이면 그리지 않는다 */
     onEdit: (() -> Unit)? = null,
+    /**
+     * 수정 화면에 채울 서버 값을 받는 중. 버튼을 막고 "불러오는 중…" 으로 바꾼다 — 표시가 없으면 다시
+     * 누르게 된다. (AI-generated (Claude))
+     */
+    editBusy: Boolean = false,
     /** 이동 중 늦을 때의 경로 바꾸기 카드([com.swpp.wakeup.domain.model.RerouteAlert.banner]). null 이면 없다 */
     rerouteBanner: RerouteBanner? = null,
     /** [이 경로로 바꾸기]. 경로 key 를 받는다 */
@@ -127,6 +132,22 @@ fun AlarmDecisionScreen(
     fasterRouteBusy: Boolean = false,
     /** [이 경로로 바꾸기] (알람 전) */
     onSwitchFasterRoute: (FasterRouteOffer) -> Unit = {},
+    /**
+     * 계획을 받지 못한 이유. [plan] 이 null 일 때만 본다 — null 이면 받는 중이다. 예전에는 이 자리가 없어 실패해도
+     * 스피너가 끝나지 않았다. (AI-generated (Claude))
+     */
+    loadError: String? = null,
+    /** [loadError] 의 "다시 시도". 이 일정의 계획만 다시 받는다 */
+    onRetry: () -> Unit = {},
+    /** 일정을 지우는 중. "일정 삭제" 를 막는다 — 막지 않으면 누를 때마다 삭제 요청이 갔다. (AI-generated (Claude)) */
+    deleteBusy: Boolean = false,
+    /**
+     * 이동을 기록할 수 있는가(정확한 위치 권한). false 면 진행률 카드가 추적을 약속하지 않고 이유를 말한다
+     * ([TripProgressCard]). (AI-generated (Claude))
+     */
+    canTrack: Boolean = true,
+    /** [canTrack] 이 false 인 이유가 대략적인 위치만 허용한 것인가 */
+    coarseOnly: Boolean = false,
 ) {
     Column(
         modifier = modifier
@@ -145,7 +166,8 @@ fun AlarmDecisionScreen(
         ScreenHeader(title = "알람 결정", onBack = onBack)
 
         if (plan == null) {
-            LoadingBlock()
+            // 받지 못했으면 이유와 다시 시도를 둔다. 받는 중이면 스피너다. (Partly AI-generated (Claude))
+            if (loadError != null) PlanLoadErrorCard(message = loadError, onRetry = onRetry) else LoadingBlock()
             return@Column
         }
 
@@ -222,6 +244,8 @@ fun AlarmDecisionScreen(
                     arrivalAt = arrivalClock ?: plan.arrivalAt,
                     freshness = freshness,
                     onArrive = onArrive,
+                    canTrack = canTrack,
+                    coarseOnly = coarseOnly,
                 )
                 // 늦는 이유 한 줄(Figma ④-c 변형 `510:25`). 이동 중에만 의미가 있다.
                 if (stage == TripStage.IN_TRANSIT) lateCause?.let {
@@ -308,25 +332,26 @@ fun AlarmDecisionScreen(
             // 알람을 정한 뒤에도 제목·시각·장소·출발지·경로·종류를 고친다(Figma ④ `489:9`).
             onEdit?.let { edit ->
                 Text(
-                    text = "일정 수정",
+                    text = if (editBusy) "불러오는 중…" else "일정 수정",
                     color = JitColor.TextSecondary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .testTag("event_edit")
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = edit)
+                        .clickable(enabled = !editBusy, onClick = edit)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 )
             }
             Text(
-                text = "일정 삭제",
-                color = JitColor.Red,
+                // 지우는 동안에는 막고 그렇다고 쓴다. 실패하면 스낵바가 이유를 말한다. (Partly AI-generated (Claude))
+                text = if (deleteBusy) "삭제하는 중…" else "일정 삭제",
+                color = if (deleteBusy) JitColor.TextSecondary else JitColor.Red,
                 fontSize = 12.sp,
                 modifier = Modifier
                     .testTag("event_delete")
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable(onClick = onDelete)
+                    .clickable(enabled = !deleteBusy, onClick = onDelete)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
         }
@@ -765,6 +790,36 @@ private fun NotComputedCard(plan: AlarmPlanView, onRecompute: (() -> Unit)?, rec
     }
 }
 
+// AI-generated (Claude)
+/**
+ * 계획을 받지 못했을 때. 이 화면의 "알람 미계산" 카드와 같은 모양이다. 이유는 `HomeViewModel` 이 카드에 맞게 고른
+ * 말이다(통신 실패는 연결을 확인하라는 안내, 그 밖에는 저장소 문구 · `planLoadReasonOf`). 다시 시도는 이 일정의
+ * 계획만 다시 받는다 — 홈의 오류 카드처럼 홈을 다시 받지 않는다. (Partly AI-generated (Claude))
+ */
+@Composable
+private fun PlanLoadErrorCard(message: String, onRetry: () -> Unit) {
+    JitCard(modifier = Modifier.testTag("plan_load_error"), padding = 14.dp, gap = 8.dp) {
+        JitDotLabel(
+            text = "알람 정보를 불러오지 못했어요",
+            dotColor = JitColor.Red,
+            fontSize = 13,
+            dotSize = 8.dp,
+        )
+        Text(text = message, color = JitColor.TextSecondary, fontSize = 11.sp)
+        Text(
+            text = "다시 시도",
+            color = JitColor.Accent,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .testTag("plan_retry")
+                .clickable(onClick = onRetry)
+                .padding(vertical = 8.dp),
+        )
+    }
+}
+
 @Composable
 private fun LoadingBlock() {
     Row(
@@ -786,7 +841,7 @@ private fun AlarmDecisionPreview() {
         AlarmDecisionScreen(
             plan = AlarmPlanView(
                 eventId = 1,
-                whenLabel = "내일 아침",
+                whenLabel = "내일",
                 dateLabel = "9월 18일 금",
                 eventTitle = "09:00 자료구조 및 알고리즘",
                 eventPlace = "서울대학교 302동 · 서울 관악구 관악로 1",

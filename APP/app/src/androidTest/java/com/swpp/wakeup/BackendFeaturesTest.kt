@@ -78,6 +78,9 @@ class BackendFeaturesTest {
             ui.click(By.res("route_walk"), "route_scroll")
             ui.await(By.res("route_guide"))
             ui.click(By.res("route_preview_confirm"))
+            // 이미 주황인 [집] 을 다시 눌러도 고른 경로가 그대로다. (AI-generated (Claude))
+            ui.click(By.res("destination_home"), "add_event_scroll")
+            ui.await(By.text("선택함"), "add_event_scroll")
             ui.click(By.res("event_submit"), "add_event_scroll")
             ui.await(By.res("home_list"))
             val added = runBlocking { requireNotNull(ApiClient.events.list().body()).results

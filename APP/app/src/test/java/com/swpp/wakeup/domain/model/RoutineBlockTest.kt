@@ -77,6 +77,65 @@ class BlockDraftTest {
         assertTrue(BlockDraft().isNew)
         assertFalse(BlockDraft(id = 7).isNew)
     }
+
+    // AI-generated (Claude)
+    @Test
+    fun `칸에 붙지 않는 저장 실패는 폼 한 줄에 무엇을 못 했는지와 함께 남긴다`() {
+        // Given 검증을 통과한 폼을 보냈는데 통신 실패 · 5xx 처럼 칸 오류 없이 실패했다
+        val sent = draft().validate()
+
+        // When 저장 실패를 폼에 붙인다
+        val failed = sent.withSaveFailure("서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다.")
+
+        // Then 폼에 보이는 줄에 이유가 남고, 저장소의 문장 앞에 저장하지 못했다고 먼저 말한다. 목록의 오류 줄은 폼이 열려
+        // 있는 동안 그려지지 않는다
+        assertEquals(
+            mapOf(BlockDraft.FORM_ERROR to "저장하지 못했어요. 서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."),
+            failed.errors,
+        )
+        assertEquals("샤워", failed.name)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `칸 오류가 있으면 칸 아래에만 그대로 붙이고 폼 줄은 두지 않는다`() {
+        // Given 서버가 이름 중복을 칸 오류로 돌려줬다
+        val fieldErrors = mapOf("name" to "같은 이름의 항목이 이미 있다.")
+
+        // When 저장 실패를 폼에 붙인다
+        val failed = draft().withSaveFailure("입력값을 확인해야 한다.", fieldErrors)
+
+        // Then 같은 이유를 두 번 보이지 않고, 칸 오류 글은 고치지 않는다
+        assertEquals(fieldErrors, failed.errors)
+        assertNull(failed.errors[BlockDraft.FORM_ERROR])
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `삭제 실패는 폼 한 줄에 삭제하지 못했다고 먼저 말한다`() {
+        // Given 이미 있는 항목의 폼
+        val open = BlockDraft(id = 7, name = "샤워", minText = "12", maxText = "18")
+
+        // When 다른 기기에서 먼저 지워 삭제가 404 로 실패했다
+        val failed = open.withDeleteFailure("대상을 찾을 수 없다.")
+
+        // Then 저장소의 문장만 두지 않고 무엇을 못 했는지 앞에 적는다
+        assertEquals(mapOf(BlockDraft.FORM_ERROR to "삭제하지 못했어요. 대상을 찾을 수 없다."), failed.errors)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `폼 줄은 칸 오류 키와 겹치지 않고 다시 저장하면 지워진다`() {
+        // Given 저장 실패 한 줄이 남은 폼
+        val failed = draft().withFailure("서버에 문제가 생겼다.")
+
+        // When 다시 저장하려고 검증한다
+        val again = failed.validate()
+
+        // Then 칸 오류 키와 다르고, 검증이 오류를 새로 만들어 낡은 줄이 남지 않는다
+        assertFalse(BlockDraft.FORM_ERROR in setOf("name", "min", "max"))
+        assertTrue(again.errors.isEmpty())
+    }
 }
 
 class ConfidenceViewTest {
@@ -217,6 +276,58 @@ class RoutineEditorStateTest {
     fun `일정 모드는 eventId 로 갈린다`() {
         assertFalse(RoutineEditorState().isEventMode)
         assertTrue(RoutineEditorState(eventId = 3).isEventMode)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `받는 동안 다른 블록 화면을 열었으면 늦게 온 목록을 쓰지 않는다`() {
+        // Given 일정 5 의 블록을 받는 중에 일정 6 의 블록 화면을 열었다
+        val now = RoutineEditorState(loading = true, eventId = 6)
+
+        // When / Then 5 의 목록은 버리고 6 · 정의 편집은 제 것만 받는다
+        assertFalse(now.acceptsBlocksFor(5))
+        assertFalse(now.acceptsBlocksFor(null))
+        assertTrue(now.acceptsBlocksFor(6))
+        assertTrue(RoutineEditorState(loading = true).acceptsBlocksFor(null))
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `저장을 다시 보내기 시작하면 앞 실패 줄이 도는 버튼 위에 남지 않는다`() {
+        // Given 통신 실패로 저장하지 못한 폼이 열려 있다
+        val failed = BlockDraft(id = 1, name = " 샤워 ", minText = "12", maxText = "18")
+            .withSaveFailure("서버에 연결할 수 없다.")
+        val state = RoutineEditorState(blocks = listOf(block(1)), editing = failed, error = "앞 오류", notice = "안내")
+
+        // When 고치지 않고 저장을 다시 누른다 — 검증을 통과한 폼을 보낸다
+        val sent = failed.validate()
+        val sending = state.startingSave(sent)
+
+        // Then 보내는 폼이 곧 화면의 폼이라 앞 실패 줄이 없고, 버튼은 돈다
+        assertTrue(sending.saving)
+        assertEquals(sent, sending.editing)
+        assertNull(sending.editing?.errors?.get(BlockDraft.FORM_ERROR))
+        assertNull(sending.error)
+        assertNull(sending.notice)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `삭제를 다시 보내기 시작하면 앞 실패 줄만 지운다`() {
+        // Given 삭제에 실패한 폼과, 저장을 눌러 이름 칸 오류가 난 폼
+        val deleteFailed = BlockDraft(id = 1, name = "샤워", minText = "12", maxText = "18")
+            .withDeleteFailure("서버에 연결할 수 없다.")
+        val nameMissing = BlockDraft(id = 1, name = "", minText = "12", maxText = "18").validate()
+
+        // When 항목 삭제를 누른다
+        val retry = RoutineEditorState(editing = deleteFailed).startingDelete()
+        val withField = RoutineEditorState(editing = nameMissing).startingDelete()
+
+        // Then 앞 실패 줄은 지우고, 지금 입력에 대한 칸 오류는 둔다. 폼이 닫혀 있으면 폼을 만들지 않는다
+        assertTrue(retry.saving)
+        assertEquals(deleteFailed.copy(errors = emptyMap()), retry.editing)
+        assertEquals(nameMissing, withField.editing)
+        assertNull(RoutineEditorState().startingDelete().editing)
     }
 
     @Test

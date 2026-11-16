@@ -581,6 +581,70 @@ class EventRepositoryTest {
         assertEquals(ProfileUpdateRequest(onboardingPrepMin = 40), sent)
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `집 저장이 서버 오류로 실패하면 서버 문구와 상태 코드를 돌려준다`() = runTest {
+        // Given 서버가 공통 형식의 500 server_error 로 답한다
+        val api = object : FakeProfileApi() {
+            override suspend fun update(body: ProfileUpdateRequest) = httpError<ProfileDto>(
+                500,
+                """{"error":{"code":"server_error","message":"서버에 문제가 생겨 처리하지 못했다. 잠시 뒤 다시 시도할 것.","details":{}}}""",
+            )
+        }
+
+        // When
+        val result = EventRepository(FakeEventsApi(), api).setHome("집", 37.5, 127.0) as Result.Failure
+
+        // Then "알 수 없는 오류가 발생했다." 가 아니라 서버가 준 문구다
+        assertEquals("서버에 문제가 생겨 처리하지 못했다. 잠시 뒤 다시 시도할 것.", result.message)
+        assertEquals(500, result.status)
+        assertEquals("server_error", result.errorCode)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `집 좌표가 거절되면 그 칸의 서버 문구를 살린다`() = runTest {
+        // Given 국외 좌표라 400 이다
+        val message = "국내 좌표만 집으로 설정할 수 있다."
+        val api = object : FakeProfileApi() {
+            override suspend fun update(body: ProfileUpdateRequest) =
+                httpError<ProfileDto>(400, errorJson(message, mapOf("home_lat" to message)))
+        }
+
+        // When
+        val result = EventRepository(FakeEventsApi(), api).setHome("도쿄", 35.68, 139.76) as Result.Failure
+
+        // Then
+        assertEquals(message, result.message)
+        assertEquals(message, result.fields["home_lat"])
+        assertEquals(400, result.status)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `준비 시간 저장이 거절되면 서버 문구를 살리고 HTML 500 은 상태 코드 문구를 쓴다`() = runTest {
+        // Given 범위 밖이라 400, 또는 프록시가 HTML 500 을 준다
+        val rangeMessage = "이 값이 240보다 작거나 같은지 확인하십시오."
+        val rejected = object : FakeProfileApi() {
+            override suspend fun update(body: ProfileUpdateRequest) =
+                httpError<ProfileDto>(400, errorJson(rangeMessage, mapOf("onboarding_prep_min" to rangeMessage)))
+        }
+        val broken = object : FakeProfileApi() {
+            override suspend fun update(body: ProfileUpdateRequest) =
+                httpError<ProfileDto>(500, "<html><body>Server Error (500)</body></html>")
+        }
+
+        // When
+        val range = EventRepository(FakeEventsApi(), rejected).setOnboardingPrep(300) as Result.Failure
+        val html = EventRepository(FakeEventsApi(), broken).setOnboardingPrep(40) as Result.Failure
+
+        // Then
+        assertEquals(rangeMessage, range.message)
+        assertEquals(400, range.status)
+        assertEquals("서버에 문제가 생겼다.", html.message)
+        assertEquals(500, html.status)
+    }
+
     // --- 장소 ---------------------------------------------------------------
 
     @Test
@@ -657,7 +721,9 @@ class EventRepositoryTest {
 
         val result = EventRepository(api, FakeProfileApi()).loadPlan(1)
 
-        assertEquals(Result.Failure("알람이 아직 계산되지 않았다."), result)
+        // 결정 화면의 오류 카드(해요체 제목) 아래에 그대로 보이므로 같은 말투로, 안쪽 말("계산") 없이 쓴다.
+        // (Partly AI-generated (Claude))
+        assertEquals(Result.Failure("이 일정의 알람이 아직 정해지지 않았어요"), result)
     }
 
     @Test
@@ -697,6 +763,27 @@ class EventRepositoryTest {
         )
         // 서버가 alarm_on 을 주지 않으면 알람 등록과 같이 울리지 않는 것으로 본다.
         assertFalse(planOf(event(1, start, alarmOn = null)).alarmOn)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `근거 화면의 남은 시간은 올림하고 알람 시각 전에는 지난 알람이라고 하지 않는다`() {
+        // Given 알람이 일정 2시간 전인 일정
+        val start = future(days = 1)
+        val dto = event(1, start)
+        val alarm = OffsetDateTime.parse(shiftHours(start, -2))
+
+        // When 알람 30초 전 · 61초 전 · 1초 뒤의 시계로 근거 화면 값을 만든다
+        val before30s = dto.toPlanView(ZoneOffset.UTC, now = alarm.minusSeconds(30))!!
+        val before61s = dto.toPlanView(ZoneOffset.UTC, now = alarm.minusSeconds(61))!!
+        val after1s = dto.toPlanView(ZoneOffset.UTC, now = alarm.plusSeconds(1))!!
+
+        // Then 예전에는 내림해서 30초 전에 이미 "지난 알람" 이었고 단계도 "준비 중" 으로 넘어갔다
+        assertEquals("0시간 1분 남음", before30s.remaining)
+        assertFalse(before30s.alarmPassed)
+        assertEquals("0시간 2분 남음", before61s.remaining)
+        assertEquals("지난 알람", after1s.remaining)
+        assertTrue(after1s.alarmPassed)
     }
 
     /** 근거 화면의 시각·알람 판정 네 값. 실패 메시지에서 한눈에 비교하려고 묶는다 */

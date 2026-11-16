@@ -48,6 +48,17 @@ class SavedHomesTest {
         assertEquals(SavedHomes.LABEL_MAX, SavedHomes.labelOf("가".repeat(30), "x").length)
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `이름은 글자 수로 잘라 이모지를 반으로 자르지 않는다`() {
+        // Given 열한 글자 뒤에 이모지 하나와 글자 하나(13자, UTF-16 으로는 14단위)
+        val long = "가".repeat(11) + "😀" + "x"
+
+        // When / Then 열두 글자까지 남기고 이모지는 통째로 남는다. 이름을 비워 장소 이름을 쓸 때도 같다
+        assertEquals("가".repeat(11) + "😀", SavedHomes.labelOf(long, "p"))
+        assertEquals("가".repeat(11) + "😀", SavedHomes.labelOf("  ", long))
+    }
+
     @Test
     fun `50m 안이면 같은 자리다`() {
         val a = GeoPoint(37.5, 127.0)

@@ -444,6 +444,18 @@ fun BlockDraftSheet(
             onChange = onIncluded,
         )
 
+        // Partly AI-generated (Claude)
+        // 칸에 붙지 않는 저장 · 삭제 실패(통신 · 서버 · 지워진 항목). 이 폼이 목록 대신 그려지므로 목록의 오류 줄은
+        // 보이지 않는다. 누른 버튼 바로 위에 두고, 다음 입력과 다시 보내기가 지운다.
+        draft.errors[BlockDraft.FORM_ERROR]?.let {
+            Text(
+                text = it,
+                color = JitColor.Red,
+                fontSize = 11.sp,
+                modifier = Modifier.fillMaxWidth().testTag("block_form_error"),
+            )
+        }
+
         Spacer(Modifier.height(4.dp))
 
         JitPrimaryButton(

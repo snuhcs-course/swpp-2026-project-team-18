@@ -44,6 +44,31 @@ class PlaceSearchStateTest {
         loadingMore = loadingMore,
     )
 
+    // --- 버린 결과 (AI-generated (Claude)) ------------------------------------
+
+    @Test
+    fun `늦게 온 결과를 버려도 검색 중 표시는 내린다`() {
+        // Given 지도에서 이 지역 재검색을 눌러 원래 검색이 검색 중이 됐다
+        val started = state(results = 3, searching = true)
+        val late = state(results = 10).copy(query = "다른 결과")
+
+        // When 결과가 오기 전에 지도를 닫아 결과를 버린다
+        val kept = started.afterDropping(late)
+
+        // Then 검색 칸이 다시 열리고, 목록은 원래 것 그대로다
+        assertFalse(kept!!.searching)
+        assertFalse(kept.loadingMore)
+        assertEquals(started.results, kept.results)
+        assertEquals("카페", kept.query)
+    }
+
+    @Test
+    fun `아직 받는 중을 알리는 쓰기는 버릴 때 아무것도 쓰지 않는다`() {
+        val started = state(results = 3)
+        assertNull(started.afterDropping(state(searching = true)))
+        assertNull(started.afterDropping(state(loadingMore = true)))
+    }
+
     // --- 더 보기 ----------------------------------------------------------
 
     @Test

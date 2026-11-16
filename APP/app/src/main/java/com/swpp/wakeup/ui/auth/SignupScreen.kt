@@ -22,6 +22,10 @@ import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -77,6 +81,8 @@ fun SignupScreen(
     waking: Boolean = false,
     passwordCheck: com.swpp.wakeup.data.remote.PasswordCheckResponse? = null,
     passwordCheckError: String? = null,
+    /** 서버가 닉네임 칸에 붙인 거절 이유. 닉네임 칸 아래에 그린다 */
+    nicknameServerError: String? = null,
 ) {
     Column(
         modifier = modifier
@@ -124,12 +130,11 @@ fun SignupScreen(
             fontSize = 13.sp
         )
 
-        JitTextField(
-            label = stringResource(R.string.auth_nickname),
-            inputTag = "signup_nickname",
+        NicknameField(
             value = nickname,
             onValueChange = onNicknameChange,
-            enabled = !loading
+            serverError = nicknameServerError,
+            enabled = !loading,
         )
 
         EmailField(
@@ -154,9 +159,11 @@ fun SignupScreen(
 
         // Figma 순서: 비밀번호 → 조건 카드 → 비밀번호 확인
         PasswordRuleCard(lengthPassed = passwordCheck?.minLength, mixPassed = passwordCheck?.lettersAndDigits)
-        // 검사 API 의 `messages`("이 비밀번호는 너무 짧습니다…" 등)는 그리지 않는다.
-        // 조건 카드의 점 색이 같은 내용을 이미 말한다(사용자 결정 10-06).
-        // 검사 자체가 실패한 경우(네트워크 등)만 알린다.
+        // 검사 API 의 `messages` 중 점이 이미 말하는 것("이 비밀번호는 너무 짧습니다…" 등)은 그리지 않는다
+        // (사용자 결정 10-06). 두 점이 다 초록인데 남은 이유(흔한 비밀번호)는 점으로 말할 수 없어 서버 문구를
+        // 그대로 보인다. 없으면 버튼만 꺼져 있고 이유가 어디에도 없다. (Partly AI-generated (Claude))
+        passwordCheck?.extraReason?.let { ErrorText(it, modifier = Modifier.testTag("signup_password_reason")) }
+        // 검사 자체가 실패한 경우(네트워크 등)도 알린다.
         passwordCheckError?.let { ErrorText(it) }
 
         JitTextField(
@@ -232,6 +239,64 @@ fun SignupScreen(
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+    }
+}
+
+// AI-generated (Claude)
+/**
+ * 닉네임 칸. 서버 한도(20자)를 넘으면 입력하는 도중에도 빨간 줄과 오른쪽 글자 수("23/20")를 보이고, 서버가
+ * 닉네임을 거절하면 그 문구를 칸 아래에 그린다. 비워 둔 채 칸을 벗어나면 입력하라고 한다(이메일 칸과 같은
+ * 규칙이라 처음 입력하는 동안은 조용하다). 무엇을 언제 보일지는 [nicknameError] 가 정하고, 막는 일은 가입
+ * 버튼 조건([AuthViewModel.UiState.canSubmitSignup])이 한다.
+ */
+@Composable
+private fun NicknameField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    serverError: String?,
+    enabled: Boolean,
+) {
+    var hadFocus by remember { mutableStateOf(false) }
+    var blurred by remember { mutableStateOf(false) }
+    val error = nicknameError(value, serverError, leftOnce = blurred)
+    val count = nicknameOverLimitCount(value)
+
+    Column {
+        JitTextField(
+            label = stringResource(R.string.auth_nickname),
+            inputTag = "signup_nickname",
+            value = value,
+            onValueChange = onValueChange,
+            enabled = enabled,
+            isError = error != null,
+            onFocusChange = { focused ->
+                if (focused) hadFocus = true else if (hadFocus) blurred = true
+            },
+        )
+        if (error != null) {
+            Spacer(Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Text(
+                    text = error,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("signup_nickname_error"),
+                    color = JitColor.Red,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Normal,
+                )
+                if (count != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = count,
+                        modifier = Modifier.testTag("signup_nickname_counter"),
+                        color = JitColor.Red,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                    )
+                }
             }
         }
     }

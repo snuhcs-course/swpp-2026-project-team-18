@@ -15,7 +15,7 @@ import com.swpp.wakeup.sensing.GeoPoint
 data class AlarmPlanView(
     val eventId: Long,
 
-    /** "오늘" / "내일 아침" / "3일 뒤" */
+    /** "오늘" / "내일" / "3일 뒤". 날짜 차이만 말하고 아침 · 저녁은 붙이지 않는다 */
     val whenLabel: String,
     /** "9월 18일 금" */
     val dateLabel: String,
@@ -35,7 +35,7 @@ data class AlarmPlanView(
     /** 서버가 판정한 지각 민감도가 "높음" 인지(`lateness_sensitivity == "high"`, B-4) */
     val latenessSensitive: Boolean = false,
 
-    /** "7:40". 계산 못 했으면 null */
+    /** "7:40". 12시간제라 [meridiem] 과 함께 보여야 한다(17:50 은 "5:50"). 계산 못 했으면 null */
     val alarmAt: String?,
     /** "AM" / "PM" */
     val meridiem: String,
@@ -227,7 +227,42 @@ data class AlarmPlanView(
     /** 막대 길이를 상대 비율로 그리기 위한 최대값. */
     val maxRowMinutes: Int
         get() = breakdown.maxOfOrNull { it.minutes }?.coerceAtLeast(1) ?: 1
+
+    // AI-generated (Claude)
+    /**
+     * [nowMillis] 에 맞춘 사본. 시각으로 정해지는 넷 — [remaining] · [alarmPassed] · [departPassed] ·
+     * [eventPassed] — 을 같은 순간에서 다시 정한다. 그래야 화면 문구("지난 알람")와 단계가 서로 다른 시점을
+     * 근거로 삼지 않는다.
+     *
+     * 예전에는 계획을 받을 때 한 번만 정해서, 밤에 열어 둔 알람 결정 화면이 아침에도 "9시간 0분 남음" ·
+     * "알람 전" 이었다. 그래서 화면은 그릴 때마다 지금 시각으로 이것을 부르고, 저장소도 계획을 만들 때
+     * 부른다. 시각을 모르는 값(계산 못 한 알람의 남은 시간, 프리뷰)은 그대로 둔다.
+     */
+    fun at(nowMillis: Long): AlarmPlanView {
+        val untilAlarm = alarmAtMillis?.minus(nowMillis)
+        return copy(
+            remaining = untilAlarm?.let(::remainingLabel) ?: remaining,
+            alarmPassed = untilAlarm?.let { it <= 0L } ?: alarmPassed,
+            departPassed = departByMillis?.let { it <= nowMillis } ?: departPassed,
+            eventPassed = startAtMillis?.let { it < nowMillis } ?: eventPassed,
+        )
+    }
 }
+
+// AI-generated (Claude)
+/**
+ * 알람까지 남은 시간 문구. 알람 시각이 됐거나 지났으면 "지난 알람" 이다.
+ *
+ * 분은 **올림한다.** 내림하면 59초 남았을 때 0분이 되어 아직 울리지 않은 알람을 "지난 알람" 이라고 했고,
+ * 같은 값으로 정하던 단계도 일찍 "준비 중" 으로 넘어갔다.
+ */
+internal fun remainingLabel(untilAlarmMillis: Long): String {
+    if (untilAlarmMillis <= 0L) return "지난 알람"
+    val minutes = (untilAlarmMillis + MINUTE_MILLIS - 1) / MINUTE_MILLIS
+    return "${minutes / 60}시간 ${minutes % 60}분 남음"
+}
+
+private const val MINUTE_MILLIS = 60_000L
 
 /**
  * 계산 근거 한 줄.

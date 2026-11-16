@@ -1,5 +1,9 @@
 package com.swpp.wakeup.domain.model
 
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
 /**
  * 알람 하나를 등록하고 그 아침의 이동을 따라가는 데 필요한 값 전부.
  *
@@ -24,7 +28,7 @@ data class AlarmSchedule(
     /** 일정 시작 시각. 추적을 언제까지 할지 정하는 데 쓴다. */
     val startAtMillis: Long,
 
-    /** 알람 화면에 크게 띄우는 "7:40". */
+    /** 알람 화면에 크게 띄우는 "7:40". 12시간제라 [meridiem] 과 함께 보여야 한다 */
     val alarmLabel: String,
     /** "AM" / "PM" */
     val meridiem: String,
@@ -75,6 +79,33 @@ data class AlarmSchedule(
         firstAlarmAtMillis = firstAlarmAtMillis ?: alarmAtMillis,
     )
 
+    // AI-generated (Claude)
+    /**
+     * [atMillis] 로 미룬 사본. 표시 라벨은 [zone] 에서 본 그 시각이고 숫자는 12시간제다.
+     *
+     * 알람 화면과 알림은 라벨 옆에 AM/PM 을 붙인다. 예전에는 미룰 때 24시간제 "H:mm" 로 만들어 오후에 미룬
+     * 알람이 "17:53 PM" 이었다. 계획을 받을 때 만드는 라벨(`EventRepository` 의 `toSchedule`)과 같은 형식이다.
+     */
+    fun snoozedTo(atMillis: Long, zone: ZoneId): AlarmSchedule {
+        val (label, meridiem) = clockLabelAt(atMillis, zone)
+        return snoozedTo(atMillis = atMillis, label = label, meridiem = meridiem)
+    }
+
+    // AI-generated (Claude)
+    /**
+     * 표시 라벨([alarmLabel] · [meridiem])을 [alarmAtMillis] 에서 다시 만든 사본. [zone] 에서 본 그 시각이고 숫자는
+     * 12시간제다(계획을 받을 때 · 미룰 때와 같은 형식). 다른 값은 그대로다.
+     *
+     * 디스크 사본을 읽을 때 부른다(`ScheduledAlarmStore`). 라벨은 저장된 문자열이라, 12시간제로 바꾸기 전 버전이
+     * 저장한 사본은 오후 알람이 "17:50" 그대로다. 그 사본은 다음 동기화나 미루기가 다시 쓸 때까지 남는다(재부팅 ·
+     * 앱 업데이트 뒤 복원, 동기화가 지키는 미룬 알람, 놓친 알람). 그 전에 울리면 알람 화면과 알림이 "17:50 PM"
+     * 이었다. 라벨은 알람 시각에서 나오는 값이므로 읽을 때 맞춘다.
+     */
+    fun withClockLabel(zone: ZoneId): AlarmSchedule {
+        val (label, meridiem) = clockLabelAt(alarmAtMillis, zone)
+        return copy(alarmLabel = label, meridiem = meridiem)
+    }
+
     // Partly AI-generated (Claude)
     /** 서버에 보내는 `alarm_at` 의 기준. 미룬 알람이면 계획의 알람 시각, 아니면 알람 시각. */
     val plannedAlarmAtMillis: Long get() = firstAlarmAtMillis ?: alarmAtMillis
@@ -105,6 +136,16 @@ data class AlarmSchedule(
          * "아직 끝나지 않은 이동" 의 창이 추적 마감과 어긋나지 않게 한다.
          */
         const val TRACKING_GRACE_MILLIS = 60 * 60 * 1000L
+
+        /** [alarmLabel] 의 숫자. 옆에 AM/PM 이 붙으므로 12시간제다. 예 "7:40", 17:53 은 "5:53" */
+        private val LABEL_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm")
+
+        // AI-generated (Claude)
+        /** [atMillis] 를 [zone] 에서 본 [alarmLabel] 과 [meridiem]. 예 17:53 → "5:53" · "PM", 00:30 → "12:30" · "AM" */
+        private fun clockLabelAt(atMillis: Long, zone: ZoneId): Pair<String, String> {
+            val local = Instant.ofEpochMilli(atMillis).atZone(zone)
+            return local.format(LABEL_FORMAT) to if (local.hour < 12) "AM" else "PM"
+        }
     }
 }
 

@@ -18,8 +18,11 @@ import java.io.InterruptedIOException
  * 요청이 처리됐는지 안 됐는지 클라이언트는 알 수 없다. GET 은 몇 번 불러도
  * 상태가 바뀌지 않으므로 안전하다.
  *
- * 쓰기 요청(로그인·일정 생성 등)의 콜드 스타트는 다른 방법으로 막는다 —
- * [ServerWarmup] 이 먼저 GET 으로 서버를 깨운다.
+ * 쓰기 요청의 콜드 스타트는 다른 방법으로 막는다. 로그인·가입·소셜 로그인·비밀번호 재설정은
+ * 보내기 전에 [ServerWarmup] 이 GET 으로 서버를 깨우고 기다린다. 일정 생성·캘린더
+ * 가져오기는 기다리지 않는다 — 앱을 열 때 홈이 한 번 깨워 두고, 응답을 못 받아 다시
+ * 보내도 서버가 `client_request_id` · `external_id` 로 중복을 막는다.
+ * (Partly AI-generated (Claude))
  *
  * `retryOnConnectionFailure`(OkHttp 기본값 true)와 역할이 다르다. 그쪽은
  * 연결 자체가 실패했을 때 다른 경로로 재시도하고, 여기는 **응답이 늦거나

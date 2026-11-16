@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -81,6 +82,10 @@ import com.swpp.wakeup.ui.events.PrepOnboardingScreen
 import com.swpp.wakeup.ui.events.RouteChoiceScreen
 import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
+import com.swpp.wakeup.ui.home.SystemBack
+import com.swpp.wakeup.ui.home.forEvent
+import com.swpp.wakeup.ui.home.messageFor
+import com.swpp.wakeup.ui.home.systemBackOf
 import com.swpp.wakeup.ui.morning.MorningProgressScreen
 import com.swpp.wakeup.sensing.LocationPermissions
 import com.swpp.wakeup.sensing.TripGeofence
@@ -96,6 +101,7 @@ import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.ui.routines.RoutineEditorScreen
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -122,12 +128,22 @@ class MainActivity : ComponentActivity() {
             isAppearanceLightNavigationBars = false
         }
 
+        // Partly AI-generated (Claude)
+        // 인텐트는 처음 띄울 때만 읽는다. 다시 만들어질 때(회전, 프로세스가 죽은 뒤 최근 앱에서 다시 엶)
+        // 시스템이 넘기는 인텐트는 처음 띄운 그대로라, 이미 열고 나간 아침 기록 · 알람 결정과 환영 문구가
+        // 다시 나온다 — removeExtra 는 이 프로세스 안의 사본만 지운다. 아직 열지 못한 화면은
+        // onSaveInstanceState 가 남긴 것을 쓰고, 새로 온 인텐트는 onNewIntent 가 받는다.
         // 로그인 직후에만 환영 문구를 띄운다. 앱을 다시 열 때는 띄우지 않는다.
-        val welcomeNickname = intent.getStringExtra(EXTRA_WELCOME_NICKNAME)
-        // 알람을 해제하고 넘어온 경우. 아침 기록 화면으로 바로 들어간다.
-        openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
-        // 경로 바꾸기 제안 알림을 눌러 온 경우. 그 일정의 알람 결정 화면으로 간다.
-        openEventId = intent.openEventExtra()
+        val welcomeNickname = if (savedInstanceState == null) intent.getStringExtra(EXTRA_WELCOME_NICKNAME) else null
+        if (savedInstanceState == null) {
+            // 알람을 해제하고 넘어온 경우. 아침 기록 화면으로 바로 들어간다.
+            openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
+            // 경로 바꾸기 제안 알림을 눌러 온 경우. 그 일정의 알람 결정 화면으로 간다.
+            openEventId = intent.openEventExtra()
+        } else {
+            openMorning = savedInstanceState.getBoolean(STATE_OPEN_MORNING, false)
+            openEventId = savedInstanceState.getLong(STATE_OPEN_EVENT, -1L).takeIf { it > 0L }
+        }
 
         setContent {
             JitTheme {
@@ -155,6 +171,14 @@ class MainActivity : ComponentActivity() {
         // 알람 해제는 CLEAR_TOP + SINGLE_TOP으로 이미 열린 홈을 재사용한다.
         openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
         openEventId = intent.openEventExtra()
+    }
+
+    // AI-generated (Claude)
+    /** 아직 열지 못한 화면만 남긴다. 연 화면은 false · null 이라 다시 만들어져도 다시 열지 않는다 */
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_OPEN_MORNING, openMorning)
+        openEventId?.let { outState.putLong(STATE_OPEN_EVENT, it) }
     }
 
     private fun Intent.openEventExtra(): Long? = getLongExtra(EXTRA_OPEN_EVENT, -1L).takeIf { it > 0L }
@@ -193,6 +217,10 @@ class MainActivity : ComponentActivity() {
         /** 알림에서 한 일정의 알람 결정 화면으로 바로 들어갈 때의 일정 id */
         const val EXTRA_OPEN_EVENT = "open_event_id"
 
+        /** 다시 만들어질 때 쓸, 아직 열지 못한 아침 기록 · 알람 결정(onSaveInstanceState). AI-generated (Claude) */
+        private const val STATE_OPEN_MORNING = "pending_open_morning"
+        private const val STATE_OPEN_EVENT = "pending_open_event_id"
+
         // Partly AI-generated (Claude)
         /** 이동 중 알림(경로 바꾸기 제안)에서 그 일정 화면으로. [morningIntent] 와 같은 이유로 홈을 재사용한다 */
         fun eventIntent(context: android.content.Context, eventId: Long): Intent =
@@ -218,6 +246,7 @@ private fun MainHost(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val nav by viewModel.nav.collectAsStateWithLifecycle()
     val plan by viewModel.plan.collectAsStateWithLifecycle()
+    val planError by viewModel.planError.collectAsStateWithLifecycle()
     val risk by viewModel.risk.collectAsStateWithLifecycle()
     val routeMap by viewModel.routeMap.collectAsStateWithLifecycle()
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
@@ -326,7 +355,14 @@ private fun MainHost(
         }
     }
 
-    // 안드로이드 뒤로 버튼을 화면 스택에 연결한다. 스택이 하나면 기본 동작
+    // 지도 화면의 ‹ 와 시스템 뒤로가 같이 쓴다. 지도 상태(이미지 · 재검색)를 정리하고 닫는다.
+    // (Partly AI-generated (Claude))
+    val leaveMapPick = {
+        viewModel.closeMapPick()
+        viewModel.goBack()
+    }
+
+    // 안드로이드 뒤로 버튼(가장자리 밀기 포함)을 화면 스택에 연결한다. 스택이 하나면 기본 동작
     // (앱 종료)에 맡긴다.
     //
     // 블록 편집 폼은 같은 경로 안에서 겹쳐 뜨므로 스택에 없다. 폼이 열려
@@ -334,13 +370,31 @@ private fun MainHost(
     //
     // 경로 지도 미리보기도 같은 방식이다(⑬ 안에서 겹쳐 그림). 열려 있으면 미리보기만
     // 닫고 경로 목록으로 돌아간다.
-    val draftOpen = routineState.editing != null
-    val routePreviewOpen = nav.current == AppRoute.RouteChoice && routeState?.previewKey != null
-    BackHandler(enabled = nav.canGoBack || draftOpen || routePreviewOpen) {
-        when {
-            draftOpen -> viewModel.dismissBlockDraft()
-            routePreviewOpen -> viewModel.closeRoutePreview()
-            else -> viewModel.goBack()
+    //
+    // Partly AI-generated (Claude): 화면마다 그 화면의 ‹ 와 같은 일을 한다([systemBackOf]). 저장 중이라
+    // ‹ 가 꺼진 화면에서는 움직이지 않고, ⑱ · ⑮ 에서는 "나중에" 와 같고, 지도는 정리하고 닫는다. 폼과
+    // 미리보기는 그 화면이 맨 위일 때만 닫는다.
+    val systemBack = systemBackOf(
+        nav = nav,
+        add = addState,
+        homeSetup = homeSetupState,
+        prep = prepOnboardingState,
+        calendarImport = importState,
+        routine = routineState,
+        routeChoice = routeState,
+    )
+    BackHandler(enabled = systemBack != SystemBack.SYSTEM) {
+        when (systemBack) {
+            // 받아서 버린다. 핸들러를 끄면 뒤로가 시스템으로 넘어가 앱이 뒤로 간다.
+            SystemBack.STAY -> Unit
+            SystemBack.CLOSE_BLOCK_DRAFT -> viewModel.dismissBlockDraft()
+            SystemBack.CLOSE_ROUTE_PREVIEW -> viewModel.closeRoutePreview()
+            SystemBack.SKIP_CALENDAR_LINK -> viewModel.skipCalendarOnboarding()
+            SystemBack.SKIP_PREP -> viewModel.skipPrepOnboarding()
+            SystemBack.CLOSE_MAP -> leaveMapPick()
+            SystemBack.POP -> viewModel.goBack()
+            // 핸들러가 꺼져 있어 오지 않는다.
+            SystemBack.SYSTEM -> Unit
         }
     }
 
@@ -351,7 +405,11 @@ private fun MainHost(
             val message = addState.doneMessage ?: "일정을 추가했습니다"
             // 알람을 계산하지 못한 채 저장했으면 결정 화면의 "다시 계산" 으로 잇는다(A6).
             val recomputeId = addState.routeFailedEventId
-            viewModel.goBack()
+            // Partly AI-generated (Claude): 저장한 폼이 열려 있을 때만 그 폼을 닫는다. 기다리는 동안 [다시 시도]
+            // 스낵바 · 알림 · 알람으로 다른 화면에 가 있으면 그 화면은 그대로 둔다(예전에는 맨 위를 닫았다). 그 폼이
+            // 연 ⑬ · 지도에서 [다시 시도] 를 눌렀으면 그 화면도 같이 닫는다 — 비워진 폼을 읽는 화면이 남지 않는다.
+            val form = addState.editingEventId?.let { AppRoute.EditEvent(it) } ?: AppRoute.AddEvent
+            viewModel.closeSavedAddForm(form)
             viewModel.resetAdd()
             // resetAdd 가 done 을 false 로 돌려 이 효과를 취소하므로, 스낵바는 화면 범위(scope)에서 띄운다.
             // Partly AI-generated (Claude)
@@ -392,23 +450,25 @@ private fun MainHost(
             onDismiss = viewModel::dismissAddResumePrompt,
         )
     }
+    // Partly AI-generated (Claude)
     LaunchedEffect(homeSetupState.done) {
         if (homeSetupState.done) {
             // 건너뛴 경우에는 저장한 것이 없다. 준비 시간 온보딩과 같은 이유로
             // 확인 문구를 띄우지 않는다 — 저장되지 않은 것을 저장했다고 말한다.
             val saved = homeSetupState.saved
             val extra = homeSetupState.target == HomeViewModel.HomeTarget.EXTRA
-            viewModel.goBack()
+            viewModel.closeIfOpen { it == AppRoute.HomeSetup }
             viewModel.resetHomeSetup()
             if (saved) snackbarHostState.showSnackbar(if (extra) "다른 집을 저장했습니다" else "집 주소를 저장했습니다")
         }
     }
+    // Partly AI-generated (Claude)
     LaunchedEffect(prepOnboardingState.done) {
         if (prepOnboardingState.done) {
             // 건너뛴 경우에는 저장한 값이 없으므로 확인 문구를 띄우지 않는다.
             // "저장했습니다" 를 띄우면 저장되지 않은 것을 저장했다고 말한다.
             val saved = prepOnboardingState.parsed
-            viewModel.goBack()
+            viewModel.closeIfOpen { it == AppRoute.PrepOnboarding }
             viewModel.resetPrepOnboarding()
             if (saved != null) {
                 // "1시간 5분" 처럼 다이얼과 같은 표기. "분"·"간" 모두 받침이 있어 "으로" 고정.
@@ -416,10 +476,11 @@ private fun MainHost(
             }
         }
     }
+    // Partly AI-generated (Claude)
     LaunchedEffect(importState.done) {
         if (importState.done) {
             val label = importState.resultLabel
-            viewModel.goBack()
+            viewModel.closeIfOpen { it == AppRoute.CalendarImport }
             viewModel.resetCalendarImport()
             snackbarHostState.showSnackbar(label ?: "캘린더에서 가져왔습니다")
         }
@@ -428,7 +489,7 @@ private fun MainHost(
     LaunchedEffect(calendarOnboardingState.done) {
         if (calendarOnboardingState.done) {
             val saved = calendarOnboardingState.savedCount
-            viewModel.goBack()
+            viewModel.closeIfOpen { it == AppRoute.CalendarLink }
             viewModel.resetCalendarOnboarding()
             if (saved != null) snackbarHostState.showSnackbar("캘린더 ${saved}개를 연동했습니다")
         }
@@ -578,20 +639,42 @@ private fun MainHost(
                 )
 
                 is AppRoute.AlarmDecision -> {
+                    // Partly AI-generated (Claude)
+                    // 남은 시간 · 단계는 그릴 때의 시각으로, 이동 기록 가능 여부는 그릴 때 읽은 위치 권한으로 정한다.
+                    // 화면을 켜 둔 채 기다려도 1분마다, 앱에 돌아오면(기기 설정에서 권한을 바꿨을 수 있다) 바로 다시
+                    // 그리도록 clock 을 바꾼다 — 권한을 읽는 remember 가 clock 을 키로 읽으므로 이 분기가 다시 그려진다.
+                    // 아침 기록 화면의 1초 시계와 같은 방식이다.
+                    var clock by remember { mutableLongStateOf(System.currentTimeMillis()) }
+                    LaunchedEffect(route.eventId) {
+                        while (true) {
+                            delay(60_000L - System.currentTimeMillis() % 60_000L)
+                            clock = System.currentTimeMillis()
+                        }
+                    }
+                    LifecycleResumeEffect(route.eventId) {
+                        clock = System.currentTimeMillis()
+                        onPauseOrDispose { }
+                    }
+                    val canTrack = remember(clock) { LocationPermissions.granted(context) }
+                    val coarseOnly = remember(clock) { LocationPermissions.coarseOnly(context) }
                     // 진행률은 계획(경로)과 추적 위치가 **둘 다** 있어야 낼 수
                     // 있다. 하나라도 없으면 null 로 두고 화면이 이유를 말한다.
                     val nowMillis = System.currentTimeMillis()
+                    // 결정 화면이 둘 쌓이면(이동 중 알림) 계획 하나를 같이 쓴다. 이 화면 일정의 것만 쓰고(아니면 받는
+                    // 중으로 보이고 돌아올 때 다시 받는다), 시각으로 정해지는 값은 지금 시각에 맞춘다.
+                    // (Partly AI-generated (Claude))
+                    val eventPlan = plan.forEvent(route.eventId)?.at(nowMillis)
                     val live = tripLive?.takeIf {
                         it.eventId == route.eventId &&
                             it.accuracyM.isFinite() &&
                             it.accuracyM <= TripGeofence.MAX_ACCURACY_M &&
                             nowMillis - it.atMillis in 0..2 * 60_000L
                     }
-                    val progress = plan
+                    val progress = eventPlan
                         ?.takeIf { it.hasRoutePath }
                         ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
                     val arrival = tripArrivals[route.eventId]
-                    val stage = plan?.let { viewModel.stageOf(it, arrival, nowMillis) }
+                    val stage = eventPlan?.let { viewModel.stageOf(it, arrival, nowMillis) }
                         ?: TripStage.BEFORE_ALARM
 
                     // 지각 전망. 진행 바의 색이 이것으로 정해진다.
@@ -601,7 +684,7 @@ private fun MainHost(
                     // 꺼짐) 어디 있는지 모를 때(출발 확인 안 됨)도 마찬가지다.
                     // 경로를 벗어났을 때도 내지 않는다: 다른 길을 가는 중이면 계획
                     // 속도로 환산한 값이 아무 뜻이 없다.
-                    val outlook = plan?.takeIf {
+                    val outlook = eventPlan?.takeIf {
                         stage.canJudgeLateness && progress?.onRoute != false
                     }?.let { p ->
                         if (stage == TripStage.ARRIVED) {
@@ -664,7 +747,7 @@ private fun MainHost(
                             state.rerouteApplied?.hides(it) != true
                     }
                     val baseKey = CheckpointBasis.baseRouteKey(
-                        planRouteKey = plan?.routeKey,
+                        planRouteKey = eventPlan?.routeKey,
                         appliedRerouteKey = state.rerouteApplied
                             ?.takeIf { it.eventId == route.eventId }?.routeKey,
                     )
@@ -676,22 +759,28 @@ private fun MainHost(
                     val lateCause = freshLive?.takeIf { stage == TripStage.IN_TRANSIT }?.let {
                         LateCause.line(
                             lateMinutes = it.route.lateMinutes,
-                            departByMillis = plan?.departByMillis,
+                            departByMillis = eventPlan?.departByMillis,
                             departedAtMillis = departedAt,
-                            travelMinutes = plan?.travelMinutes,
+                            travelMinutes = eventPlan?.travelMinutes,
                             liveArriveAtMillis = it.route.arriveAtMillis,
                         )
                     }
                     val stopRows = checkpointState
                         ?.takeIf { it.eventId == route.eventId && it.routeKey == baseKey }
                         ?.segments
-                        ?.let { checkpointRows(it, plan?.eventPlace.orEmpty().substringBefore(" · "), departedAt) }
+                        ?.let { checkpointRows(it, eventPlan?.eventPlace.orEmpty().substringBefore(" · "), departedAt) }
                     AlarmDecisionScreen(
-                        plan = plan,
+                        plan = eventPlan,
                         onBack = viewModel::goBack,
                         onChangeRisk = { viewModel.openRiskChoice(route.eventId) },
                         onEditBlocks = { viewModel.openEventBlocks(route.eventId) },
                         onDelete = { viewModel.deleteEvent(route.eventId) },
+                        // 받지 못했으면 이유와 다시 시도. 다른 일정의 실패는 보이지 않는다. (Partly AI-generated (Claude))
+                        loadError = planError.messageFor(route.eventId),
+                        onRetry = { viewModel.retryPlan(route.eventId) },
+                        deleteBusy = state.deleteBusyId == route.eventId,
+                        canTrack = canTrack,
+                        coarseOnly = coarseOnly,
                         onRecompute = { viewModel.recomputePlan(route.eventId) },
                         recomputeBusy = state.recomputeBusyId == route.eventId,
                         modifier = Modifier.padding(innerPadding),
@@ -712,13 +801,14 @@ private fun MainHost(
                         skipBusy = state.skipUpdatingId != null,
                         onArrive = { viewModel.markArrived(route.eventId) },
                         onEdit = { viewModel.openEditEvent(route.eventId) },
+                        editBusy = state.editLoadingId == route.eventId,
                         rerouteBanner = rerouteBanner,
                         onReroute = { key -> viewModel.reroute(route.eventId, key) },
                         rerouteBusy = state.rerouteUpdatingId == route.eventId,
                         lateCause = lateCause,
                         checkpoints = stopRows,
                         checkpointsTimed = departedAt != null,
-                        fasterRoute = plan?.let { p ->
+                        fasterRoute = eventPlan?.let { p ->
                             FasterRoute.offer(
                                 isComputed = p.isComputed,
                                 skipped = p.skipped,
@@ -821,10 +911,7 @@ private fun MainHost(
                         onResearch = viewModel::researchMapArea,
                         onSelect = viewModel::onMapPlaceSelected,
                         onConfirm = viewModel::confirmMapPick,
-                        onBack = {
-                            viewModel.closeMapPick()
-                            viewModel.goBack()
-                        },
+                        onBack = leaveMapPick,
                         onOpenPlaceUrl = openPlaceUrl,
                         modifier = Modifier.padding(innerPadding),
                     )

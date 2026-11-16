@@ -21,6 +21,7 @@ import com.swpp.wakeup.data.remote.SocialLoginRequest
 import com.swpp.wakeup.data.remote.UserDto
 import com.swpp.wakeup.domain.model.SocialLogin
 import com.swpp.wakeup.domain.model.SocialProvider
+import com.swpp.wakeup.domain.model.takeCodePoints
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 
@@ -48,7 +49,12 @@ class AuthRepository(
 
     sealed interface AuthResult {
         data class Success(val user: UserDto) : AuthResult
-        data class Failure(val message: String) : AuthResult
+
+        /**
+         * [fields] 는 서버가 칸마다 붙인 거절 이유(`details`, 예 `nickname`). 화면이 그 칸 아래에 그린다.
+         * [message] 만으로는 어느 칸의 문제인지 알 수 없다. (Partly AI-generated (Claude))
+         */
+        data class Failure(val message: String, val fields: Map<String, String> = emptyMap()) : AuthResult
     }
 
     // Partly AI-generated (Claude)
@@ -225,7 +231,8 @@ class AuthRepository(
             SocialLoginRequest(
                 idToken = idToken,
                 termsAgreed = true.takeIf { termsAgreed },
-                nickname = nickname?.trim()?.take(SocialLogin.NICKNAME_MAX)?.takeIf { it.isNotEmpty() },
+                // 서버처럼 코드 포인트로 자른다. take 는 이모지를 반으로 잘라 짝 없는 서로게이트를 남긴다.
+                nickname = nickname?.trim()?.takeCodePoints(SocialLogin.NICKNAME_MAX)?.takeIf { it.isNotEmpty() },
             ),
         )
         if (response.isSuccessful) {
@@ -303,6 +310,7 @@ class AuthRepository(
         AccountResult.Failure(MESSAGE_UNKNOWN)
     }
 
+    // Partly AI-generated (Claude) — 실패 본문을 한 번만 읽어 문구와 칸별 오류(`fields`)를 함께 뽑는다.
     /**
      * register / login 이 같은 응답 모양을 쓰므로 공통 처리한다.
      * 성공하면 토큰을 저장하는 것까지가 이 함수의 책임이다.
@@ -317,8 +325,12 @@ class AuthRepository(
             if (!response.isSuccessful && errorMessage != null) {
                 AuthResult.Failure(errorMessage(response.code(), errorBodyOf(response.errorBody()?.string())))
             } else if (!response.isSuccessful || body == null) {
-                val serverMessage = ApiClient.parseErrorMessage(response.errorBody()?.string())
-                AuthResult.Failure(serverMessage ?: defaultMessage(response.code()))
+                // 실패 본문은 한 번만 읽힌다. 문구와 칸별 오류를 같은 값에서 뽑는다.
+                val raw = response.errorBody()?.string()
+                AuthResult.Failure(
+                    message = ApiClient.parseErrorMessage(raw) ?: defaultMessage(response.code()),
+                    fields = ApiClient.parseErrorFields(raw),
+                )
             } else {
                 store(body)
             }

@@ -28,6 +28,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -67,7 +70,17 @@ import com.swpp.wakeup.ui.theme.JitTheme
 class AlarmActivity : ComponentActivity() {
 
     private lateinit var store: ScheduledAlarmStore
-    private var schedule: AlarmSchedule? = null
+
+    // Partly AI-generated (Claude) — Compose 상태로 둔다. 화면이 떠 있는 동안 다른 알람이 울려
+    // [onNewIntent] 가 갈아 끼우면 화면도 그 알람을 다시 그린다. 보통 필드는 바뀌어도 Compose 가
+    // 알지 못해, 화면은 앞 알람을 그리는데 해제·미루기는 새 알람을 다뤘다.
+    private var schedule by mutableStateOf<AlarmSchedule?>(null)
+
+    /**
+     * 이 화면이 응답 없이 끝났다(`silenced`)고 적은 알람의 키([MissedAlarms.key]). 다른 알람으로
+     * 넘길 때 같은 알람을 두 번 적거나 그 알람으로 되돌아가지 않게 한다([AlarmHandover]).
+     */
+    private val silencedKeys = mutableSetOf<String>()
 
     /** 소리를 자동으로 멈추는 타이머. 사람이 없는 방에서 계속 울리지 않게 한다. */
     private val silenceHandler = Handler(Looper.getMainLooper())
@@ -75,7 +88,10 @@ class AlarmActivity : ComponentActivity() {
         Log.i(TAG, "${AUTO_SILENCE_MINUTES}분간 응답이 없어 소리를 멈춘다")
         AlarmRinger.stop(this)
         // Partly AI-generated (Claude) — 아무도 끄지 않았다는 사실도 기상 반응이다(A3).
-        schedule?.let { AlarmLogQueue(this).record(AlarmLogInput.KIND_SILENCED, it) }
+        schedule?.let {
+            AlarmLogQueue(this).record(AlarmLogInput.KIND_SILENCED, it)
+            silencedKeys += MissedAlarms.key(it)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -104,6 +120,8 @@ class AlarmActivity : ComponentActivity() {
 
         setContent {
             JitTheme {
+                // Partly AI-generated (Claude) — schedule 은 구성 안에서 읽는다. 밖에서 값으로 꺼내 두면
+                // 알람이 바뀌어도 앞 알람을 그린다.
                 AlarmRingingScreen(
                     schedule = schedule!!,
                     canTrack = schedule!!.canTrack && LocationPermissions.granted(this),
@@ -114,12 +132,37 @@ class AlarmActivity : ComponentActivity() {
         }
     }
 
+    // Partly AI-generated (Claude)
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // singleInstance 라서 두 번째 발화가 같은 인스턴스로 들어온다.
         // 이미 다른 알람이 떠 있다면 새 것으로 갈아 끼운다.
-        val eventId = intent.getLongExtra(EXTRA_EVENT_ID, -1L)
-        store.find(eventId)?.let { schedule = it }
+        //
+        // 같은 알람이 다시 들어온 것(전체화면 알림과 직접 시작이 둘 다 왔거나 알림을 누른 것)은
+        // 그대로 둔다. 판단은 [AlarmHandover] 에 있다.
+        val showing = schedule ?: return
+        val incoming = store.find(intent.getLongExtra(EXTRA_EVENT_ID, -1L))
+        val handover = AlarmHandover.of(showing, incoming, silencedKeys, store.handledKeys()) ?: return
+
+        Log.i(
+            TAG,
+            "다른 알람이 울려 화면을 넘긴다: 일정 ${showing.eventId} ${showing.alarmLabel} → " +
+                "일정 ${handover.next.eventId} ${handover.next.alarmLabel}",
+        )
+        // 앞 알람은 아무도 끄지 않은 채 끝났다. 그것도 기상 반응이다(A3).
+        handover.unanswered?.let {
+            AlarmLogQueue(this).record(AlarmLogInput.KIND_SILENCED, it)
+            silencedKeys += MissedAlarms.key(it)
+        }
+        schedule = handover.next
+        // 회전 등으로 화면을 다시 만들 때 앞 알람으로 돌아가지 않게 한다. onCreate 가 인텐트를 읽는다.
+        setIntent(intent)
+
+        // 앞 알람의 소리가 자동으로 멈췄을 수 있다. 새 알람은 다시 울리고(울리는 중이면 그대로 둔다)
+        // 자동 멈춤까지의 시간도 새로 센다.
+        AlarmRinger.start(this)
+        silenceHandler.removeCallbacks(silenceRunnable)
+        silenceHandler.postDelayed(silenceRunnable, AUTO_SILENCE_MINUTES * 60_000L)
     }
 
     override fun onDestroy() {

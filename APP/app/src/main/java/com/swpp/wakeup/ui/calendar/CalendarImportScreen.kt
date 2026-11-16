@@ -24,7 +24,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.CalendarImportState
@@ -154,12 +158,35 @@ fun CalendarImportScreen(
                 state.tooManyNote?.let {
                     Text(text = it, color = JitColor.Red, fontSize = 11.sp)
                 }
+                // Partly AI-generated (Claude)
+                // 버튼이 꺼진 이유와 보내기 실패는 누른 버튼 바로 위에 둔다. 위쪽 "불러오지 못했음" 카드는 목록 읽기
+                // 실패만 보인다 — 그 카드의 다시 시도는 목록을 다시 읽는다. 실패한 뒤에는 이 버튼이 같은 선택을 다시 보낸다.
+                state.startedNote?.let {
+                    Text(
+                        text = it,
+                        color = JitColor.TextSecondary,
+                        fontSize = 11.sp,
+                        modifier = Modifier.fillMaxWidth().testTag("import_started_note"),
+                    )
+                }
+                state.waitingNote?.let {
+                    Text(
+                        text = it,
+                        color = JitColor.TextSecondary,
+                        fontSize = 11.sp,
+                        modifier = Modifier.fillMaxWidth().testTag("import_wait_hint"),
+                    )
+                }
+                state.importError?.let {
+                    Text(
+                        text = "가져오지 못했어요. $it",
+                        color = JitColor.Red,
+                        fontSize = 11.sp,
+                        modifier = Modifier.fillMaxWidth().testTag("import_error"),
+                    )
+                }
                 JitPrimaryButton(
-                    label = if (state.selectedCount > 0) {
-                        "${state.selectedCount}건 가져오기"
-                    } else {
-                        "가져올 일정을 고를 것"
-                    },
+                    label = state.submitLabel,
                     onClick = onImport,
                     enabled = state.canImport,
                     loading = state.importing,
@@ -340,9 +367,14 @@ private fun PermissionCard(onRequest: () -> Unit) {
             fontSize = 13,
             dotSize = 8.dp,
         )
+        // Text 는 마크다운을 읽지 않는다. "**" 를 문자열에 넣으면 별표가 그대로 보였다. (Partly AI-generated (Claude))
         Text(
-            text = "기기 캘린더의 앞으로 2주 일정을 **읽기만** 함. 캘린더를 고치지 않음.\n" +
-                "읽은 목록에서 고른 것만 서버로 보냄 — 전부 자동으로 올리지 않음",
+            text = buildAnnotatedString {
+                append("기기 캘린더의 앞으로 2주 일정을 ")
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("읽기만") }
+                append(" 함. 캘린더를 고치지 않음.\n")
+                append("읽은 목록에서 고른 것만 서버로 보냄 — 전부 자동으로 올리지 않음")
+            },
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )

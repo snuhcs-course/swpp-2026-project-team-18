@@ -30,6 +30,15 @@ class SavedHomeSyncTest {
         assertEquals(false, savedHomesFirstUploadRunning(syncJobActive = false, synced = true))
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `받는 동안 이 기기가 집을 바꿨으면 받은 목록을 쓰지 않는다`() {
+        // Given 목록을 받기 시작할 때 판이 3이었다
+        // When / Then 그대로면 쓰고, 그 사이 기본으로 · 삭제 · 추가가 판을 올렸으면 버린다(바꾼 결과를 덮지 않는다)
+        assertEquals(true, savedHomesSyncApplies(startVersion = 3, currentVersion = 3))
+        assertEquals(false, savedHomesSyncApplies(startVersion = 3, currentVersion = 4))
+    }
+
     @Test
     fun `서버 행은 client_uuid 를 화면 키로 쓰고 server id 를 남긴다`() {
         val h = row().toSavedHome()!!
@@ -86,6 +95,16 @@ class SavedHomeSyncTest {
     @Test
     fun `bulk 항목의 이름이 비면 장소 이름을 쓴다`() {
         assertEquals("인계동 아파트", bulkItemsOf(listOf(home("a", label = ""))).single().label)
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `bulk 이름은 서버처럼 글자 수로 40자까지 자르고 이모지를 반으로 자르지 않는다`() {
+        // Given 서른아홉 글자 뒤에 이모지와 글자 하나(41자)
+        val label = "가".repeat(39) + "😀" + "x"
+
+        // When / Then
+        assertEquals("가".repeat(39) + "😀", bulkItemsOf(listOf(home("a", label = label))).single().label)
     }
 
     @Test

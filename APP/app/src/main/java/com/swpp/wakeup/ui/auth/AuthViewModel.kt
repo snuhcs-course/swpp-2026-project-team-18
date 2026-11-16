@@ -15,6 +15,7 @@ import com.swpp.wakeup.domain.model.EmailRule
 import com.swpp.wakeup.domain.model.SocialLogin
 import com.swpp.wakeup.domain.model.SocialNotice
 import com.swpp.wakeup.domain.model.SocialProvider
+import com.swpp.wakeup.domain.model.takeCodePoints
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -67,6 +68,25 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
      */
     enum class Screen { LOGIN, SIGNUP, SOCIAL_TERMS, RESET_REQUEST, RESET_CONFIRM }
 
+    // AI-generated (Claude)
+    /**
+     * 시스템 뒤로(제스처·뒤로 버튼)가 할 일. [UiState.systemBack] 이 정하고, `AuthHost` 의 BackHandler(켤지)와
+     * [onSystemBack](어디로 갈지)이 함께 따른다. 홈 쪽 화면의 같은 판단은 `ui/home/SystemBack.kt` 에 있다.
+     */
+    enum class SystemBack {
+        /** 앱이 받지 않는다. 로그인 화면이라 시스템 기본 동작이 앱을 닫는다 */
+        SYSTEM,
+
+        /** 서버를 기다리는 중이다. 화면의 ‹ 가 꺼진 것과 같이 움직이지 않는다. 받아서 버리므로 앱도 닫히지 않는다 */
+        STAY,
+
+        /** 로그인 화면으로 돌아간다. 가입 · 처음 가입 · 코드 요청 화면의 ‹ 와 같다 */
+        TO_LOGIN,
+
+        /** 코드 요청 화면으로 한 칸 돌아간다. 코드 확인 화면의 ‹ 와 같다 */
+        TO_RESET_REQUEST,
+    }
+
     // Partly AI-generated (Claude)
     /**
      * 소셜로 처음 가입하는 중. 서버가 400 `social_terms_required` 를 줬다. 같은 [idToken] 에 동의를
@@ -86,6 +106,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val email: String = "",
         val password: String = "",
         val nickname: String = "",
+        /** 서버가 가입을 거절하며 닉네임 칸에 붙인 이유(`details.nickname`). 닉네임을 고치면 지운다 */
+        val nicknameServerError: String? = null,
         val passwordConfirm: String = "",
         /** 가입 요청에 함께 보내는 약관 동의. */
         val termsAgreed: Boolean = false,
@@ -140,9 +162,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val passwordsMatch: Boolean
             get() = passwordConfirm.isNotEmpty() && password == passwordConfirm
 
-        /** 서버 비밀번호 검사·확인 일치·약관 동의가 모두 필요하다. */
+        /** 닉네임이 서버 한도(20자)를 넘는다. 서버처럼 앞뒤 공백을 자르고 코드 포인트로 센다 */
+        val nicknameTooLong: Boolean get() = isNicknameTooLong(nickname)
+
+        /** 서버 비밀번호 검사·확인 일치·약관 동의가 모두 필요하다. 닉네임은 비지 않고 한도 안이어야 한다 */
         val canSubmitSignup: Boolean
-            get() = !loading && EmailRule.isValid(email) && nickname.isNotBlank() &&
+            get() = !loading && EmailRule.isValid(email) && nickname.isNotBlank() && !nicknameTooLong &&
                 password.isNotBlank() && passwordsMatch && termsAgreed && passwordCheck?.valid == true
 
         /** 재설정 코드 받기: 이메일 형식이 맞아야 켜진다 */
@@ -153,6 +178,47 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val canSubmitResetConfirm: Boolean
             get() = !loading && resetCode.length == RESET_CODE_LENGTH && passwordsMatch &&
                 passwordCheck?.valid == true
+
+        // AI-generated (Claude)
+        /**
+         * 시스템 뒤로(제스처·뒤로 버튼)가 할 일. 로그인 화면만 받지 않는다 — 거기서 뒤로는 앱을 닫는다.
+         *
+         * 서버를 기다리는 중에도 받되 움직이지 않는다([SystemBack.STAY]). 받지 않으면 시스템 기본 동작이 돌아 앱이
+         * 뒤로 숨거나 닫히고, 닫히면 진행 중인 요청의 결과(보낸 재설정 코드 등)도 잃는다. 그 밖에는 화면의 ‹ 와 같은
+         * 곳으로 간다(가입 · 처음 가입 · 코드 요청 → 로그인, 코드 확인 → 코드 요청).
+         */
+        val systemBack: SystemBack
+            get() = when (screen) {
+                Screen.LOGIN -> SystemBack.SYSTEM
+                Screen.SIGNUP, Screen.SOCIAL_TERMS, Screen.RESET_REQUEST ->
+                    if (busy) SystemBack.STAY else SystemBack.TO_LOGIN
+                Screen.RESET_CONFIRM -> if (busy) SystemBack.STAY else SystemBack.TO_RESET_REQUEST
+            }
+
+        // AI-generated (Claude)
+        /** 시스템 뒤로를 앱이 받는가. `AuthHost` 의 BackHandler 를 켠다. [systemBack] 이 [SystemBack.SYSTEM] 이 아니면 받는다 */
+        val handlesSystemBack: Boolean get() = systemBack != SystemBack.SYSTEM
+
+        // AI-generated (Claude)
+        /** 시스템 뒤로로 한 단계 돌아가는가. 서버를 기다리는 중에는 움직이지 않는다(화면의 ‹ 도 꺼져 있다) */
+        val canGoBack: Boolean
+            get() = systemBack == SystemBack.TO_LOGIN || systemBack == SystemBack.TO_RESET_REQUEST
+
+        // AI-generated (Claude)
+        /**
+         * 실패한 요청을 화면 상태로. 서버가 닉네임 칸에 이유를 붙였으면(`details.nickname`) 그 칸 아래에 그리고,
+         * 그것만 왔으면 아래 오류 줄에는 되풀이하지 않는다(설정의 지금 비밀번호 칸과 같은 방식). 다른 칸의
+         * 이유가 함께 왔으면 서버의 대표 문구를 아래 줄에 그대로 둔다.
+         */
+        fun failedWith(failure: AuthRepository.AuthResult.Failure): UiState {
+            val onlyNickname = failure.fields.keys == setOf(FIELD_NICKNAME)
+            return copy(
+                loading = false,
+                waking = false,
+                nicknameServerError = failure.fields[FIELD_NICKNAME],
+                error = if (onlyNickname) null else failure.message,
+            )
+        }
     }
 
     private val _state = MutableStateFlow(UiState(email = lastEmailStore.email.orEmpty()))
@@ -175,7 +241,9 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun onNicknameChange(value: String) = _state.update { it.copy(nickname = value, error = null) }
+    // Partly AI-generated (Claude) — 닉네임을 고치면 서버가 그 칸에 붙인 이유도 지운다.
+    fun onNicknameChange(value: String) =
+        _state.update { it.copy(nickname = value, error = null, nicknameServerError = null) }
     fun onPasswordConfirmChange(value: String) =
         _state.update { it.copy(passwordConfirm = value, error = null) }
     // AI-generated (Claude)
@@ -194,6 +262,27 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun consumeAuthenticated() = _state.update { it.copy(authenticatedNickname = null) }
+
+    // AI-generated (Claude)
+    /**
+     * 시스템 뒤로(제스처·뒤로 버튼). 서버를 기다리는 중이면 받기만 하고 움직이지 않는다([UiState.systemBack] 이
+     * [SystemBack.STAY]).
+     *
+     * 움직일 때는 **그 화면의 ‹ 가 부르는 함수를 그대로 부른다**(`AuthHost` 의 onBackClick · onBackToLoginClick 과
+     * 같다). 가입은 [goToLogin], 처음 가입은 [cancelSocialTerms], 재설정 두 화면은 [goBackFromReset] 이다. 같은 곳으로
+     * 가는 함수를 따로 부르면 ‹ 쪽만 고쳤을 때 시스템 뒤로가 어긋난다. 가는 곳은 [UiState.systemBack] 이 적은
+     * 곳(가입 · 처음 가입 · 코드 요청 → 로그인, 코드 확인 → 코드 요청)과 같다. 연결은 `AuthBackWiringTest` 가 고정한다.
+     */
+    fun onSystemBack() {
+        val current = _state.value
+        if (!current.canGoBack) return
+        when (current.screen) {
+            Screen.SIGNUP -> goToLogin()
+            Screen.SOCIAL_TERMS -> cancelSocialTerms()
+            Screen.RESET_REQUEST, Screen.RESET_CONFIRM -> goBackFromReset()
+            Screen.LOGIN -> Unit
+        }
+    }
 
     // --- 비밀번호 재설정 (제안 계약 R3-9) — Partly AI-generated (Claude) -------------------
 
@@ -303,8 +392,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 한도(20자)는 서버처럼 코드 포인트로 센다. take 는 경계에 걸친 이모지를 반만 남긴다 */
     fun onSocialNicknameChange(value: String) = _state.update {
-        it.copy(socialTerms = it.socialTerms?.copy(nickname = value.take(SocialLogin.NICKNAME_MAX)), error = null)
+        val nickname = value.takeCodePoints(SocialLogin.NICKNAME_MAX)
+        it.copy(socialTerms = it.socialTerms?.copy(nickname = nickname), error = null)
     }
 
     fun onSocialTermsAgreedChange(value: Boolean) =
@@ -415,10 +506,16 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         /** 재설정 확인 코드 자릿수 */
         const val RESET_CODE_LENGTH = 6
+
+        /** 가입 실패 본문 `details` 에서 닉네임 칸의 이름 */
+        const val FIELD_NICKNAME = "nickname"
     }
 
+    // Partly AI-generated (Claude) — 다시 보낼 때 지난 닉네임 이유를 지우고, 실패하면 칸별 이유를 그 칸으로 보낸다.
     private fun submit(block: suspend () -> AuthRepository.AuthResult) {
-        _state.update { it.copy(loading = true, error = null, waking = false, socialNotice = null) }
+        _state.update {
+            it.copy(loading = true, error = null, waking = false, socialNotice = null, nicknameServerError = null)
+        }
         viewModelScope.launch {
             // 쓰기 요청 앞에서 서버를 깨운다. 로그인은 POST 라서
             // ColdStartRetryInterceptor 가 재시도해 주지 않는다 - 재시도하면
@@ -450,9 +547,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     // 타임아웃으로 실패했으면 "깨어 있다" 는 기록을 지운다.
                     // 그러지 않으면 다음 시도에서 깨우기를 건너뛴다.
                     ServerWarmup.invalidate()
-                    _state.update {
-                        it.copy(loading = false, waking = false, error = result.message)
-                    }
+                    // 칸별 이유(닉네임)는 그 칸 아래로 보낸다. (Partly AI-generated (Claude))
+                    _state.update { it.failedWith(result) }
                 }
             }
         }

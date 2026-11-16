@@ -22,8 +22,16 @@ data class PasswordChangeState(
     val passwordsMatch: Boolean
         get() = confirm.isNotEmpty() && newPassword == confirm
 
+    // AI-generated (Claude)
+    /**
+     * 새 비밀번호가 지금 것과 같다. 서버도 거절하지만(`password_unchanged`) 그 전에 [canSubmit] 이 버튼을 끄므로
+     * 서버 문구는 나오지 않는다. 그래서 화면이 이 값으로 새 비밀번호 칸 아래에 이유를 적는다.
+     */
+    val sameAsCurrent: Boolean
+        get() = newPassword.isNotEmpty() && newPassword == current
+
     /** 지금 비밀번호가 있고, 새 비밀번호가 확인과 같고 규칙을 지키며, 지금 것과 달라야 한다 */
     val canSubmit: Boolean
         get() = !busy && current.isNotBlank() && passwordsMatch &&
-            passwordCheck?.valid == true && newPassword != current
+            passwordCheck?.valid == true && !sameAsCurrent
 }

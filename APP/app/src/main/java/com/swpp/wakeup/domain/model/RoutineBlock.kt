@@ -129,6 +129,38 @@ data class RoutineEditorState(
 ) {
     val includedCount: Int get() = blocks.count { it.checked }
 
+    // AI-generated (Claude)
+    /**
+     * [requested] 일정(null 이면 블록 정의)으로 받은 블록 목록을 이 화면에 써도 되는가.
+     *
+     * 받는 동안 다른 화면(블록 정의 ↔ 다른 일정의 블록)을 열었으면 버린다. 쓰면 다른 일정의 체크가 이 화면의
+     * 일정 이름 아래 보이고, 저장할 때 그 체크를 기준선으로 삼아 이 일정에 보낸다.
+     */
+    fun acceptsBlocksFor(requested: Long?): Boolean = eventId == requested
+
+    // AI-generated (Claude)
+    /**
+     * 블록 저장을 보내기 시작한다. 검증을 통과한 [sent] 를 폼([editing])에 다시 쓴다.
+     *
+     * 폼에 앞 실패의 줄([BlockDraft.FORM_ERROR])이나 낡은 서버 칸 오류가 남아 있으면, 도는 저장 버튼 바로 위에 그 실패가
+     * 함께 보여 다시 보낸 요청도 이미 실패한 것처럼 보인다. [sent] 는 검증이 오류를 새로 만든 것이라 남은 것이 없다.
+     */
+    fun startingSave(sent: BlockDraft): RoutineEditorState =
+        copy(saving = true, error = null, notice = null, editing = sent)
+
+    // AI-generated (Claude)
+    /**
+     * 블록 삭제를 보내기 시작한다. 폼에 남은 앞 실패의 줄([BlockDraft.FORM_ERROR])을 지운다 — 남기면 도는 버튼 위에 그
+     * 실패가 함께 보인다. 칸 오류는 지금 입력에 대한 것이라 둔다.
+     */
+    fun startingDelete(): RoutineEditorState =
+        copy(
+            saving = true,
+            error = null,
+            notice = null,
+            editing = editing?.let { it.copy(errors = it.errors - BlockDraft.FORM_ERROR) },
+        )
+
     /** "단순 합 42~68분". 포함된 블록만 더한다 */
     val simpleSumLabel: String?
         get() {
@@ -168,7 +200,7 @@ data class BlockDraft(
     val dropCost: DropCost = DropCost.MEDIUM,
     val parallelizable: Boolean = false,
     val includedByDefault: Boolean = true,
-    /** 필드별 오류. 키는 `name` / `min` / `max` */
+    /** 필드별 오류. 키는 `name` / `min` / `max`, 칸에 붙지 않는 저장 · 삭제 실패는 [FORM_ERROR] */
     val errors: Map<String, String> = emptyMap(),
 ) {
     val isNew: Boolean get() = id == null
@@ -208,8 +240,39 @@ data class BlockDraft(
         return copy(name = trimmed, errors = found)
     }
 
+    // AI-generated (Claude)
+    /**
+     * 저장 · 삭제 실패를 폼에 붙인다.
+     *
+     * 서버가 칸 오류([fieldErrors], [errors] 의 키로 바꾼 것)를 주면 그 칸 아래에, 없으면(통신 실패 · 5xx · 다른
+     * 기기에서 지운 항목) 저장 버튼 위 한 줄([FORM_ERROR])에 둔다. 폼이 열려 있는 동안에는 목록이 그려지지 않아,
+     * 목록의 오류 줄에 두면 보이지 않다가 폼을 닫은 뒤에야 엉뚱하게 나타났다. 다음 입력과 다시 보내기
+     * ([RoutineEditorState.startingSave] · [RoutineEditorState.startingDelete])가 지운다. 화면에 붙이는 글은
+     * [withSaveFailure] · [withDeleteFailure] 가 정한다.
+     */
+    fun withFailure(message: String, fieldErrors: Map<String, String> = emptyMap()): BlockDraft =
+        copy(errors = fieldErrors.ifEmpty { mapOf(FORM_ERROR to message) })
+
+    // AI-generated (Claude)
+    /**
+     * 저장 실패를 폼에 붙인다([withFailure]). 칸 오류는 그대로 칸 아래에 두고, 칸에 붙지 않는 줄은 "저장하지 못했어요.
+     * {이유}" 로 쓴다.
+     *
+     * 저장소의 이유("서버에 연결할 수 없다. …")만 두면 무엇을 못 했는지 말하지 않는다. 캘린더 가져오기의 실패 줄
+     * ("가져오지 못했어요. …")과 같은 꼴이다.
+     */
+    fun withSaveFailure(message: String, fieldErrors: Map<String, String> = emptyMap()): BlockDraft =
+        withFailure("저장하지 못했어요. $message", fieldErrors)
+
+    // AI-generated (Claude)
+    /** 삭제 실패를 폼 한 줄([FORM_ERROR])에 붙인다. "삭제하지 못했어요. {이유}" — [withSaveFailure] 와 같은 꼴이다 */
+    fun withDeleteFailure(message: String): BlockDraft = withFailure("삭제하지 못했어요. $message")
+
     companion object {
         const val MAX_NAME = 40
         const val MAX_MINUTES = 480
+
+        /** [errors] 에서 칸에 붙지 않는 오류의 키. `name` / `min` / `max` 와 겹치지 않는다. AI-generated (Claude) */
+        const val FORM_ERROR = "form"
     }
 }

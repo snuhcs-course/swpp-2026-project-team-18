@@ -83,8 +83,13 @@ object HomeList {
                 effectiveAlarmMillis(e, nowMillis, device)?.takeIf { it > nowMillis }?.let { e to it }
             }
         val pick = candidates.minByOrNull { it.second }?.first
+        // 카드는 AM/PM 없이 24시간제 시각만 보인다([UpcomingEvent.alarmAt]). 기기 라벨([AlarmSchedule.alarmLabel])은
+        // AM/PM 과 함께 읽는 12시간제라 그대로 넣으면 오후 5시 53분으로 미룬 알람이 "5:53" 이 된다.
+        // (Partly AI-generated (Claude))
         val next = pick?.let { e ->
-            snoozeOf(e, nowMillis, device)?.let { e.copy(alarmAt = it.alarmLabel) } ?: e
+            snoozeOf(e, nowMillis, device)?.let {
+                e.copy(alarmAt = Instant.ofEpochMilli(it.alarmAtMillis).atZone(zone).format(ALARM_FORMAT))
+            } ?: e
         }
 
         val boundaries = buildList {
@@ -144,6 +149,9 @@ object HomeList {
 
     private val DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("M월 d일")
     private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
+
+    /** "다음 알람" 카드의 시각. AM/PM 을 붙이지 않는 24시간제로, 저장소가 만드는 [UpcomingEvent.alarmAt] 과 같다 */
+    private val ALARM_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm")
 }
 
 /** 화면 복귀 때 서버에서 다시 받을지. 순수 규칙이다. */

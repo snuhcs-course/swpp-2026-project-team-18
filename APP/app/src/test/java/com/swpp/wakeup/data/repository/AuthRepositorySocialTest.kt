@@ -81,6 +81,24 @@ class AuthRepositorySocialTest {
         assertEquals("google", api.sent[0].first)
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `처음 가입 닉네임은 코드 포인트로 잘라 이모지를 반으로 나누지 않는다`() = runTest {
+        // Given
+        val smile = "😀" // 😀, UTF-16 두 단위
+        val api = SocialApi { ok(authBody) }
+
+        // When 19자 + 이모지 + 1자(21자)를 닉네임으로 보낸다
+        repository(api).socialLogin(
+            SocialProvider.KAKAO, "k", termsAgreed = true, nickname = "가".repeat(19) + smile + "x",
+        )
+
+        // Then 서버 한도(20자)까지, 이모지는 통째로 보낸다
+        val sent = api.sent.single().second.nickname!!
+        assertEquals("가".repeat(19) + smile, sent)
+        assertFalse(Character.isHighSurrogate(sent.last()))
+    }
+
     @Test
     fun `처음이면 약관 동의를 요구하고 아무것도 저장하지 않는다`() = runTest {
         val result = repository(SocialApi { error(400, "social_terms_required") })

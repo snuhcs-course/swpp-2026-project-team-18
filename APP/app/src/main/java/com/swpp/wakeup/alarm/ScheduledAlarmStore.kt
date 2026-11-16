@@ -10,6 +10,7 @@ import com.swpp.wakeup.data.local.discardIfForeign
 import com.swpp.wakeup.data.local.stampOwner
 import com.swpp.wakeup.data.local.withDiskDefaults
 import com.swpp.wakeup.domain.model.AlarmSchedule
+import java.time.ZoneId
 
 /**
  * 등록한 알람의 디스크 사본.
@@ -29,6 +30,7 @@ class ScheduledAlarmStore(context: Context) {
     private val prefs = appContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
     private val gson = Gson()
 
+    // Partly AI-generated (Claude) — 읽은 사본의 표시 라벨을 알람 시각에서 다시 만든다([restored]).
     /** 등록해 둔 알람 전부. 순서는 알람 시각 오름차순. */
     fun all(): List<AlarmSchedule> {
         // 다른 계정이 로그인해 있으면 앞 사용자의 알람을 울리지 않는다. 잠금화면
@@ -44,8 +46,8 @@ class ScheduledAlarmStore(context: Context) {
             gson.fromJson<List<AlarmSchedule>>(raw, TYPE).orEmpty()
                 // 지우지 말 것. 구버전이 저장한 JSON 에는 뒤에 추가된 필드의
                 // 키가 없고, Gson 은 그 자리를 Kotlin 기본값이 아니라 null 로
-                // 남긴다. 이유는 [withDiskDefaults] 에 적어 뒀다.
-                .map { it.withDiskDefaults() }
+                // 남긴다. 이유는 [withDiskDefaults] 에 적어 뒀다. 표시 라벨도 여기서 맞춘다([restored]).
+                .map { it.restored() }
                 .sortedBy { it.alarmAtMillis }
         } catch (e: JsonSyntaxException) {
             // 모양이 바뀌었으면 버린다. 다음 서버 동기화가 다시 채운다.
@@ -114,7 +116,7 @@ class ScheduledAlarmStore(context: Context) {
         if (prefs.discardIfForeign(appContext)) return emptyList()
         val raw = prefs.getString(KEY_MISSED, null) ?: return emptyList()
         return try {
-            gson.fromJson<List<AlarmSchedule>>(raw, TYPE).orEmpty().map { it.withDiskDefaults() }
+            gson.fromJson<List<AlarmSchedule>>(raw, TYPE).orEmpty().map { it.restored() }
         } catch (e: JsonSyntaxException) {
             Log.w(TAG, "놓친 알람 사본을 읽을 수 없어 버린다", e)
             prefs.edit { remove(KEY_MISSED) }
@@ -129,6 +131,18 @@ class ScheduledAlarmStore(context: Context) {
         }
         prefs.stampOwner(appContext)
     }
+
+    // AI-generated (Claude)
+    /**
+     * 디스크에서 되살린 사본 하나를 쓸 수 있게 만든다. 등록한 알람과 놓친 알람을 읽을 때 같이 쓴다.
+     *
+     * 빠진 필드를 먼저 메운다([withDiskDefaults]). 그 전에 `copy` 를 부르면 null 로 남은 필드에서 죽는다. 그다음
+     * 표시 라벨을 알람 시각에서 다시 만든다([AlarmSchedule.withClockLabel]). 12시간제로 바꾸기 전 버전이 저장한
+     * "17:50" 이 동기화 전에 울려도 "17:50 PM" 이 되지 않는다. 시간대는 라벨을 만드는 곳(계획을 받을 때 · 미룰
+     * 때)과 같은 기기 시간대다.
+     */
+    private fun AlarmSchedule.restored(): AlarmSchedule =
+        withDiskDefaults().withClockLabel(ZoneId.systemDefault())
 
     private companion object {
         const val TAG = "ScheduledAlarmStore"

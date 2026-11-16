@@ -26,6 +26,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.R
+import com.swpp.wakeup.domain.model.SocialLogin
 import com.swpp.wakeup.domain.model.SocialProvider
 import com.swpp.wakeup.ui.common.JitPrimaryButton
 import com.swpp.wakeup.ui.common.JitTextField
@@ -89,8 +90,10 @@ fun SocialTermsScreen(
             fontSize = 13.sp,
         )
 
+        // 한도를 넘는 글자는 입력 단계에서 잘린다(AuthViewModel.onSocialNicknameChange). 말없이 사라지지 않게
+        // 한도를 라벨에 적는다. (Partly AI-generated (Claude))
         JitTextField(
-            label = "닉네임 · ${provider.label} 프로필에서 가져옴, 바꿀 수 있음",
+            label = "닉네임 · ${SocialLogin.NICKNAME_MAX}자까지 · ${provider.label} 프로필에서 가져옴, 바꿀 수 있음",
             inputTag = "social_nickname",
             value = nickname,
             onValueChange = onNicknameChange,

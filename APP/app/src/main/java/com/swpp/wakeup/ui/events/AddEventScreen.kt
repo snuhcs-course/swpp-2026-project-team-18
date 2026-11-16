@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.SavedHome
+import com.swpp.wakeup.domain.model.SavedHomes
 import com.swpp.wakeup.ui.common.JitCard
 import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.JitPickerValue
@@ -111,9 +112,12 @@ private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 @Composable
 fun AddEventScreen(
     state: HomeViewModel.AddState,
+    /** 집이 있는가. 서버가 집이 없다고 답하기 전까지(불러오는 중 · 실패 포함) true 다 */
     hasHome: Boolean,
     /**
-     * 저장된 집. 장소 검색 옆의 "집" 버튼에 쓴다. null 이면 버튼이 뜨지 않는다.
+     * 저장된 집. 출발지 · 도착지 줄의 [집] 에 쓴다. 첫 홈 불러오기가 끝나기 전(또는 실패)에는 [hasHome] 이
+     * true 여도 null 이다 — 집이 있는지는 [hasHome] 으로 정하고, 이 값은 집 좌표가 필요할 때만 본다
+     * ([endpointHomeOf]). (Partly AI-generated (Claude))
      *
      * 기본값을 두지 않는다. 두면 호출부가 빠뜨려도 컴파일되고, 집 버튼이
      * 조용히 사라진 것을 아무도 모른다.
@@ -240,27 +244,26 @@ fun AddEventScreen(
 
         // Figma 13-a 출발·도착 지정: 각 줄 [값] [집] [검색].
         JitCard(gap = 10.dp) {
-            // 출발지: null 이면 집. 집이 저장돼 있으면 처음부터 집이 선택된 상태다.
-            val originIsHome = state.origin == null && homePlace != null
+            // 출발지: null 이면 집. 집이 있으면(서버가 없다고 하기 전까지) 처음부터 집이 선택된 상태다.
+            // 집이 있는지는 hasHome 으로 본다. homePlace 는 첫 홈 불러오기가 끝나야 채워진다(endpointHomeOf).
+            val originHome = endpointHomeOf(hasHome, homePlace, needsPlace = false)
             EndpointRow(
                 label = "출발지",
                 tag = "origin",
-                value = when {
-                    state.originLocating -> "현재 위치를 확인하는 중"
-                    state.origin != null -> state.origin.name
-                    homePlace != null -> "집 · ${homePlace.name}"
-                    else -> "출발지를 정해 주세요"
-                },
-                hasValue = state.origin != null || homePlace != null,
-                isHome = originIsHome,
-                homeAvailable = homePlace != null,
+                value = originLineOf(state, hasHome, homePlace),
+                hasValue = state.origin != null || hasHome,
+                isHome = state.origin == null && hasHome,
+                homeAvailable = originHome == EndpointHome.PICK,
                 searching = originSearching,
                 enabled = enabled && !state.originLocating,
                 onHome = {
-                    if (homePlace == null) onSetHome()
-                    else {
-                        onOriginSelect(null)
-                        originSearching = false
+                    when (originHome) {
+                        EndpointHome.SET_UP -> onSetHome()
+                        // null 은 서버가 계정의 집을 쓴다는 뜻이라 집 좌표를 몰라도 고를 수 있다.
+                        EndpointHome.PICK, EndpointHome.WAIT -> {
+                            onOriginSelect(null)
+                            originSearching = false
+                        }
                     }
                 },
                 onSearchToggle = { originSearching = !originSearching },
@@ -325,21 +328,28 @@ fun AddEventScreen(
             HorizontalDivider(color = JitColor.Track)
 
             // 도착지: 집 버튼을 누르면 저장된 집이 들어간다(퇴근·귀가 일정).
+            // 경로를 받으려면 집 좌표가 있어야 해서, 아직 모르면 집 버튼을 흐리게 끈다.
             val destination = state.selectedPlace
+            val destinationHome = endpointHomeOf(hasHome, homePlace, needsPlace = true)
             EndpointRow(
                 label = "도착지",
                 tag = "destination",
                 value = destination?.name ?: "도착지를 검색해 주세요",
                 hasValue = destination != null,
                 isHome = state.destinationIsHome,
-                homeAvailable = homePlace != null,
+                homeAvailable = destinationHome == EndpointHome.PICK,
+                homeEnabled = destinationHome != EndpointHome.WAIT,
                 searching = destinationSearching,
                 enabled = enabled,
                 onHome = {
-                    if (homePlace == null) onSetHome()
-                    else {
-                        onDestinationHome()
-                        destinationSearching = false
+                    when (destinationHome) {
+                        EndpointHome.SET_UP -> onSetHome()
+                        EndpointHome.PICK -> {
+                            onDestinationHome()
+                            destinationSearching = false
+                        }
+                        // 버튼이 꺼져 있어 오지 않는다.
+                        EndpointHome.WAIT -> Unit
                     }
                 },
                 onSearchToggle = { destinationSearching = !destinationSearching },
@@ -409,14 +419,75 @@ fun AddEventScreen(
 
         Spacer(Modifier.height(4.dp))
 
-        JitPrimaryButton(
-            label = if (editing) "수정 저장" else "일정 추가",
-            modifier = Modifier.testTag("event_submit"),
-            onClick = onSubmit,
-            enabled = state.canSubmit,
-            loading = state.submitting,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            // 버튼이 꺼진 이유(제목 · 현재 위치). 제목 칸은 긴 폼의 맨 위라 말하지 않으면 왜 꺼졌는지 모른다.
+            // (Partly AI-generated (Claude))
+            state.submitHint?.let {
+                Text(
+                    text = it,
+                    color = JitColor.TextSecondary,
+                    fontSize = 11.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("add_submit_hint"),
+                )
+            }
+            JitPrimaryButton(
+                label = if (editing) "수정 저장" else "일정 추가",
+                modifier = Modifier.testTag("event_submit"),
+                onClick = onSubmit,
+                enabled = state.canSubmit,
+                loading = state.submitting,
+            )
+        }
     }
+}
+
+// AI-generated (Claude)
+/** 출발지 · 도착지 줄의 [집] 버튼이 할 일([endpointHomeOf]) */
+internal enum class EndpointHome {
+    /** 집이 없다(서버가 그렇게 답했다). 누르면 ⑭ 집 주소로 보낸다 */
+    SET_UP,
+
+    /** 집을 고른다 */
+    PICK,
+
+    /** 집 좌표를 아직 모른다(첫 홈 불러오기 중 · 실패). 흐리게 두고 누를 수 없다 */
+    WAIT,
+}
+
+// AI-generated (Claude)
+/**
+ * [집] 버튼이 할 일. 집이 있는지는 [hasHome] 으로 정한다 — 서버가 집이 없다고 답하기 전까지 true 다(홈의
+ * 집 없음 안내와 같은 규칙). [homePlace] 는 첫 홈 불러오기가 끝나야 채워진다.
+ *
+ * 예전에는 [homePlace] 가 null 이면 집이 없다고 보았다. 서버가 깨어나는 동안 일정 추가를 열면 출발지가
+ * "출발지를 정해 주세요" 였고, [집] 이 ⑭ 집 주소를 열어 그대로 저장하면 계정의 집이 바뀌었다.
+ *
+ * @param needsPlace 집 좌표가 있어야 고를 수 있는가. 도착지는 그 좌표로 경로를 받으므로 true, 출발지는 비워 두면
+ *   서버가 계정의 집을 쓰므로 false 다
+ */
+internal fun endpointHomeOf(
+    hasHome: Boolean,
+    homePlace: com.swpp.wakeup.data.remote.PlaceSearchItem?,
+    needsPlace: Boolean,
+): EndpointHome = when {
+    !hasHome -> EndpointHome.SET_UP
+    homePlace == null && needsPlace -> EndpointHome.WAIT
+    else -> EndpointHome.PICK
+}
+
+// AI-generated (Claude)
+/** 출발지 줄의 값. 출발지가 비어 있고(null = 집) 집이 있으면 집 좌표를 아직 몰라도 "집" 이다 */
+internal fun originLineOf(
+    state: HomeViewModel.AddState,
+    hasHome: Boolean,
+    homePlace: com.swpp.wakeup.data.remote.PlaceSearchItem?,
+): String = when {
+    state.originLocating -> "현재 위치를 확인하는 중"
+    state.origin != null -> state.origin.name
+    hasHome -> homePlace?.let { "집 · ${it.name}" } ?: "집"
+    else -> "출발지를 정해 주세요"
 }
 
 // Partly AI-generated (Claude)
@@ -517,10 +588,11 @@ fun HomeSetupScreen(
         )
 
         if (extra) {
-            // Partly AI-generated (Claude): same_as_default 는 Figma F-50 처럼 이름 칸 아래에 빨간 글씨로 보인다
+            // Partly AI-generated (Claude): same_as_default 는 Figma F-50 처럼 이름 칸 아래에 빨간 글씨로 보인다.
+            // 한도는 라벨에 적는다(종류 추가의 "20자까지" 와 같다). 적지 않으면 넘친 글자가 말없이 사라진다.
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 JitTextField(
-                    label = "이름 (예: 본가·기숙사)",
+                    label = "이름 (예: 본가·기숙사) · ${SavedHomes.LABEL_MAX}자까지",
                     inputTag = "home_setup_label",
                     value = state.label,
                     onValueChange = onLabelChange,
@@ -1074,7 +1146,8 @@ private fun RouteRow(
  * 출발지·도착지 한 줄. Figma 13-a: `[값] [집] [검색]`.
  *
  * 집 버튼은 값이 집이면 주황(활성), 아니면 회색이다. 집이 저장되지 않았으면
- * 흐리게 그리고, 누르면 ⑭ 집 주소로 보낸다([onHome] 이 처리).
+ * 흐리게 그리고, 누르면 ⑭ 집 주소로 보낸다([onHome] 이 처리). 집 좌표를 아직 모르면
+ * 흐리게 그리고 누를 수 없다([homeEnabled]). (Partly AI-generated (Claude))
  */
 @Composable
 private fun EndpointRow(
@@ -1088,6 +1161,7 @@ private fun EndpointRow(
     enabled: Boolean,
     onHome: () -> Unit,
     onSearchToggle: () -> Unit,
+    homeEnabled: Boolean = true,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, color = JitColor.TextSecondary, fontSize = 11.sp)
@@ -1106,7 +1180,7 @@ private fun EndpointRow(
                 text = "집",
                 active = isHome,
                 dimmed = !homeAvailable,
-                enabled = enabled,
+                enabled = enabled && homeEnabled,
                 onClick = onHome,
                 modifier = Modifier.testTag("${tag}_home"),
             )

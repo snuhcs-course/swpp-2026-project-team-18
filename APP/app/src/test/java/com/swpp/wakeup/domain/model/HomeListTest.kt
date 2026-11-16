@@ -107,6 +107,21 @@ class HomeListTest {
         assertEquals("미룬 알람이 울리는 순간 다시 그린다", now + 3 * minute, v.nextChangeMillis)
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `오후로 미룬 알람도 다음 알람 카드에는 AM PM 없는 24시간제로 보인다`() {
+        // Given 17:50 에 알람이 울려 17:53 으로 미뤘다. 기기 라벨은 AM/PM 과 함께 읽는 12시간제 "5:53" 이다
+        val evening = ZonedDateTime.of(2026, 11, 2, 17, 50, 0, 0, zone).toInstant().toEpochMilli()
+        val snoozed = event(1, startAt = evening + 70 * minute, alarmAt = evening)
+        val snoozedCopy = device(1, evening + 3 * minute, "5:53").copy(meridiem = "PM")
+
+        // When 17:50 에 홈을 그린다
+        val v = view(snoozed, device = mapOf(1L to snoozedCopy), at = evening)
+
+        // Then 카드는 AM/PM 을 붙이지 않으므로 라벨 "5:53" 을 그대로 쓰면 오전으로 읽힌다
+        assertEquals("17:53", v.nextAlarm?.alarmAt)
+    }
+
     @Test
     fun `안 감 일정과 꺼진 알람은 다음 알람이 아니다`() {
         val skipped = event(1, startAt = now + 60 * minute, skipped = true)

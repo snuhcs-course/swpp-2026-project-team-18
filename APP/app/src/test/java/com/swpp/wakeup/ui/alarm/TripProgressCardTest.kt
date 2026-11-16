@@ -195,4 +195,43 @@ class TripProgressCardTest {
     fun `이탈 중에는 전망을 말하지 않는다`() {
         assertEquals("경로 이탈", trailingLine(TripStage.IN_TRANSIT, offRoute(), onTime))
     }
+
+    // --- 위치 권한 (AI-generated (Claude)) -----------------------------------------
+
+    @Test
+    fun `위치 권한이 없으면 추적을 약속하지 않고 이유를 말한다`() {
+        // Given 정확한 위치 권한이 없어 알람을 꺼도 추적이 시작되지 않는다
+        val unfinished = listOf(
+            TripStage.BEFORE_ALARM,
+            TripStage.PREPARING,
+            TripStage.IN_TRANSIT,
+            TripStage.DEPARTURE_UNKNOWN,
+        )
+
+        // When 아직 끝나지 않은 단계의 안내를 고른다
+        // Then 권한이 없다고 말한다. 대략적인 위치만 허용했으면 정확한 위치를 짚는다
+        for (stage in unfinished) {
+            assertEquals("위치 권한이 없어 이동을 기록하지 않아요", stageHint(stage, canTrack = false))
+            assertEquals(
+                "정확한 위치 권한이 없어 이동을 기록하지 않아요",
+                stageHint(stage, canTrack = false, coarseOnly = true),
+            )
+        }
+        assertFalse(
+            "기록할 수 없는데 추적이 시작된다고 약속한다",
+            stageHint(TripStage.BEFORE_ALARM, canTrack = false).contains("추적이 시작"),
+        )
+    }
+
+    @Test
+    fun `권한이 있거나 기록과 상관없는 단계면 안내가 그대로다`() {
+        // Given 권한이 있는 경우와, 권한이 없어도 기록과 상관없는 단계(도착 · 지난 일정 · 알람 꺼짐)
+        // When 안내를 고른다
+        // Then 예전 문구 그대로다
+        assertEquals("알람이 울리면 추적이 시작됨", stageHint(TripStage.BEFORE_ALARM, canTrack = true))
+        assertEquals("집을 나서면 이동 거리가 표시됨", stageHint(TripStage.PREPARING))
+        assertEquals("도착함", stageHint(TripStage.ARRIVED, canTrack = false))
+        assertEquals("일정 시각이 지났고 이동 기록이 없음", stageHint(TripStage.PAST, canTrack = false))
+        assertEquals("알람이 꺼진 일정이라 이동을 기록하지 않음", stageHint(TripStage.ALARM_OFF, canTrack = false))
+    }
 }

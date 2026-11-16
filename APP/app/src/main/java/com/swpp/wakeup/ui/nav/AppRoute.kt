@@ -156,6 +156,9 @@ sealed interface AppRoute {
  *
  * [forward] 를 들고 다니는 이유는 전환 애니메이션의 방향을 정해야 하기
  * 때문이다. 파고들 때와 되돌아올 때 같은 방향으로 밀면 어색하다.
+ *
+ * 스택을 바꾸는 규칙([push] · [popIf] · [close])은 여기 둔다. `HomeViewModel` 은 JVM 테스트로
+ * 만들 수 없어서, 규칙을 순수 함수로 두어야 테스트가 지킨다(Partly AI-generated (Claude)).
  */
 data class NavState(
     val stack: List<AppRoute> = listOf(AppRoute.Home),
@@ -163,4 +166,51 @@ data class NavState(
 ) {
     val current: AppRoute get() = stack.last()
     val canGoBack: Boolean get() = stack.size > 1
+
+    // AI-generated (Claude)
+    /**
+     * [route] 를 맨 위에 쌓는다. **맨 위가 이미 [route] 면 그대로 둔다.**
+     *
+     * 화면 전환(280ms) 동안 나가는 화면도 탭을 받아서, 빠르게 두 번 누르면 같은 화면이 두 장 쌓였다.
+     * 두 장은 전환 키(`current.toString()`)가 같아 뒤로를 한 번 눌러도 바뀌는 것이 없어 보이고, 저장을
+     * 마친 폼은 한 장만 닫혀 빈 폼이 남았다. 화면을 여는 곳은 모두 이것을 쓴다.
+     */
+    fun push(route: AppRoute): NavState =
+        if (current == route) this else copy(stack = stack + route, forward = true)
+
+    // AI-generated (Claude)
+    /**
+     * 맨 위가 [match] 에 맞을 때만 한 칸 닫는다. 맨 아래(홈)는 닫지 않는다.
+     *
+     * 기다린 결과로 화면을 닫을 때 쓴다. 기다리는 동안 사용자가 다른 화면으로 갔으면 그 화면을
+     * 닫지 않는다 — 맨 위를 무조건 닫으면 사용자가 보던 엉뚱한 화면이 닫힌다.
+     */
+    fun popIf(match: (AppRoute) -> Boolean): NavState =
+        if (canGoBack && match(current)) copy(stack = stack.dropLast(1), forward = false) else this
+
+    // AI-generated (Claude)
+    /**
+     * [match] 에 맞는 가장 위 화면 하나를 닫는다. 맨 위면 [popIf] 와 같다.
+     *
+     * 그 위에 다른 화면이 쌓였으면(저장하는 동안 알림·알람에서 연 화면) **위 화면은 그대로 두고**
+     * 스택에서만 뺀다 — 일을 마친 폼이 비워진 채 밑에 남지 않는다. 맞는 화면이 없으면(이미 닫힘)
+     * 그대로다. 다른 화면은 닫지 않고, 맨 아래(홈)는 빼지 않는다.
+     *
+     * 뺀 자리 양옆이 같은 화면이면(같은 일정의 알림이 같은 결정 화면을 위에 열었다) 한 장만 남긴다. 두 장이 붙어
+     * 있으면 전환 키가 같아 뒤로를 한 번 눌러도 바뀌는 것이 없어 보였다([push] 가 막는 것과 같다).
+     */
+    fun close(match: (AppRoute) -> Boolean): NavState {
+        val index = stack.indexOfLast(match)
+        return when {
+            index <= 0 -> this
+            index == stack.lastIndex -> popIf(match)
+            // 맨 위는 그대로라 전환이 일어나지 않는다. 방향도 그대로 둔다.
+            else -> {
+                val rest = stack.filterIndexed { i, _ -> i != index }
+                // 붙은 두 장은 같으므로 아래 것을 뺀다. 보고 있던 맨 위는 그대로다.
+                val twin = rest[index - 1] == rest[index]
+                copy(stack = if (twin) rest.filterIndexed { i, _ -> i != index - 1 } else rest)
+            }
+        }
+    }
 }

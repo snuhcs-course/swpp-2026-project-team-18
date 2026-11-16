@@ -24,7 +24,7 @@ data class UpcomingEvent(
     val title: String,
     /** 장소와 이동 수단을 합친 한 줄. 계산 불가 사유가 들어올 수도 있다 */
     val placeAndRoute: String,
-    /** 계산된 알람 시각. 예 "7:40". 계산 못 했으면 null */
+    /** 계산된 알람 시각. AM/PM 없이 보이는 24시간제다. 예 "7:40", "17:50". 계산 못 했으면 null */
     val alarmAt: String?,
     /** 정시 도착 확률. 관측이 없으면 null */
     val onTimeProbability: Int?,

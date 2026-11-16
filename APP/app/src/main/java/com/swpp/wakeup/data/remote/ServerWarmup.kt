@@ -17,6 +17,9 @@ import kotlinx.coroutines.withTimeoutOrNull
  * 그래서 로그인·회원가입 같은 쓰기 요청 앞에서는 GET 하나로 서버를 깨우고,
  * 깨어난 뒤에 본 요청을 보낸다.
  *
+ * 앱을 열 때 홈(`HomeViewModel` 의 init)도 기다리지 않고 한 번 부른다. 자동 로그인은 로그인 화면을
+ * 거치지 않아 그러지 않으면 [serverVersion] 이 내내 null 이다. (Partly AI-generated (Claude))
+ *
  * `/api/health` 를 쓴다. 인증이 필요 없고 상태를 바꾸지 않아 몇 번 불러도 된다.
  */
 object ServerWarmup {

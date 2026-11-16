@@ -431,7 +431,7 @@ private fun RiskChoicePreview() {
         RiskChoiceScreen(
             plan = AlarmPlanView(
                 eventId = 1,
-                whenLabel = "내일 아침",
+                whenLabel = "내일",
                 dateLabel = "9월 18일 금",
                 eventTitle = "09:00 자료구조 및 알고리즘",
                 eventPlace = "서울대학교 302동",

@@ -82,6 +82,14 @@ fun TripProgressCard(
     freshness: String?,
     /** "도착했어요". null 이면 그리지 않는다. 가는 중일 때만 보인다([TripStage.canMarkArrived]) */
     onArrive: (() -> Unit)? = null,
+    /**
+     * 이동을 기록할 수 있는가. 정확한 위치 권한이 없으면 알람을 꺼도 추적이 시작되지 않는다
+     * ([com.swpp.wakeup.sensing.LocationPermissions.granted]). false 면 바 아래 줄이 그 이유를 말한다([stageHint]).
+     * (AI-generated (Claude))
+     */
+    canTrack: Boolean = true,
+    /** [canTrack] 이 false 인 이유가 대략적인 위치만 허용한 것인가 */
+    coarseOnly: Boolean = false,
 ) {
     JitCard(padding = 14.dp, gap = 8.dp) {
         Text("개인 진행률", color = JitColor.TextSecondary, fontSize = 11.sp)
@@ -103,7 +111,7 @@ fun TripProgressCard(
                     "진행률을 계산할 수 없음" to JitColor.Amber
 
             freshness != null -> freshness to JitColor.TextSecondary
-            else -> stageHint(stage) to JitColor.TextSecondary
+            else -> stageHint(stage, canTrack, coarseOnly) to JitColor.TextSecondary
         }
         Text(text = note.first, color = note.second, fontSize = 10.sp)
 
@@ -333,8 +341,30 @@ internal fun trailingLine(
     else -> "도착 예정"
 }
 
-/** 진행률을 못 그리는 이유. 상태마다 다르다. */
-internal fun stageHint(stage: TripStage): String = when (stage) {
+/**
+ * 진행률을 못 그리는 이유. 상태마다 다르다.
+ *
+ * 이동을 기록할 수 없으면([canTrack] false) 아직 끝나지 않은 단계는 그 이유를 말한다. 예전에는 위치 권한이
+ * 없어도 "알람이 울리면 추적이 시작됨" 이라고 약속했고, 알람 뒤에는 이유 없이 "위치 기록이 없어" 라고만 했다.
+ * 도착 · 지난 일정 · 알람 꺼짐은 기록과 상관없는 사실이라 그대로 둔다. (Partly AI-generated (Claude))
+ *
+ * @param coarseOnly 대략적인 위치만 허용했다. 정확한 위치를 켜야 한다고 짚는다
+ */
+internal fun stageHint(stage: TripStage, canTrack: Boolean = true, coarseOnly: Boolean = false): String = when {
+    !canTrack && stage in TRACKED_STAGES ->
+        if (coarseOnly) "정확한 위치 권한이 없어 이동을 기록하지 않아요" else "위치 권한이 없어 이동을 기록하지 않아요"
+    else -> stageHintTracked(stage)
+}
+
+/** 이동을 기록해야 말할 수 있는 단계. 기록할 수 없으면 [stageHint] 가 이유를 말한다 */
+private val TRACKED_STAGES = setOf(
+    TripStage.BEFORE_ALARM,
+    TripStage.PREPARING,
+    TripStage.IN_TRANSIT,
+    TripStage.DEPARTURE_UNKNOWN,
+)
+
+private fun stageHintTracked(stage: TripStage): String = when (stage) {
     TripStage.BEFORE_ALARM -> "알람이 울리면 추적이 시작됨"
     TripStage.PREPARING -> "집을 나서면 이동 거리가 표시됨"
     TripStage.IN_TRANSIT -> "위치를 아직 받지 못했음"

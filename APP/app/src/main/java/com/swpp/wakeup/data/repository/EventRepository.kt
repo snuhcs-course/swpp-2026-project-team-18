@@ -63,7 +63,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.Response
 import java.io.IOException
-import java.time.Duration
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -674,6 +673,10 @@ class EventRepository(
      * 함께 보내면 곤란한 이유가 있다. 가입 직후 집을 먼저 받는데 그때 준비
      * 시간을 같이 보내면 `onboarding_prep_min` 이 채워지고, 그러면 준비 시간
      * 온보딩이 "이미 답한 것" 으로 판단해 뜨지 않는다.
+     *
+     * 실패하면 서버 문구(필드 오류 · `server_error`)와 상태 코드를 돌려준다([failureFrom]). 예전에는 어떤
+     * 실패든 "알 수 없는 오류가 발생했다." 여서 국내 좌표가 아니라거나 서버가 잠시 멈췄다는 것을 알 수
+     * 없었다. (Partly AI-generated (Claude))
      */
     suspend fun setHome(
         label: String,
@@ -687,8 +690,9 @@ class EventRepository(
             homeLabel = label,
             onboardingPrepMin = prepMinutes,
         )
-        unwrap(profileApi.update(body))?.let { Result.Success(it) }
-            ?: Result.Failure(MESSAGE_UNKNOWN)
+        val response = profileApi.update(body)
+        unwrap(response)?.let { Result.Success(it) }
+            ?: failureFrom(response.code(), response.errorBody()?.string())
     }
 
     /**
@@ -701,11 +705,14 @@ class EventRepository(
      *
      * 서버는 이 값이 바뀌면 알람을 다시 계산한다. 준비 시간이 알람 시각의
      * 시작점이라 그래야 화면과 실제가 어긋나지 않는다.
+     *
+     * 실패는 [setHome] 처럼 서버 문구를 살린다(예: 범위 밖 400). (Partly AI-generated (Claude))
      */
     suspend fun setOnboardingPrep(minutes: Int): Result<ProfileDto> = guard {
         val body = ProfileUpdateRequest(onboardingPrepMin = minutes)
-        unwrap(profileApi.update(body))?.let { Result.Success(it) }
-            ?: Result.Failure(MESSAGE_UNKNOWN)
+        val response = profileApi.update(body)
+        unwrap(response)?.let { Result.Success(it) }
+            ?: failureFrom(response.code(), response.errorBody()?.string())
     }
 
     /**
@@ -748,8 +755,9 @@ class EventRepository(
             val dto = unwrap(response)
                 ?: return@guard Result.Failure(errorMessage(response))
             cache?.saveEvent(dto)
+            // 결정 화면의 오류 카드(해요체 제목) 아래에 그대로 보인다. 같은 말투로 쓴다. (Partly AI-generated (Claude))
             dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
-                ?: Result.Failure("알람이 아직 계산되지 않았다.")
+                ?: Result.Failure("이 일정의 알람이 아직 정해지지 않았어요")
         }
         if (online is Result.Success) return online
 
@@ -1007,6 +1015,11 @@ internal fun failureFrom(code: Int, raw: String?): EventRepository.Result.Failur
 // ---------------------------------------------------------------------------
 
 private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
+
+/**
+ * AM/PM 없이 보이는 24시간제 시각. 예 "17:50". AM/PM 을 옆에 붙일 숫자에는 쓰지 않는다 — 그건
+ * [CLOCK_12_FORMAT] 이다. 섞으면 "17:50 PM" 이 된다. (Partly AI-generated (Claude))
+ */
 private val ALARM_FORMAT = DateTimeFormatter.ofPattern("H:mm")
 private val DATE_FORMAT = DateTimeFormatter.ofPattern("M월 d일")
 private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
@@ -1018,10 +1031,13 @@ private fun dayLabel(date: LocalDate): String = DAY_NAMES[date.dayOfWeek.value -
  *
  * **음수를 따로 다룬다.** 빼먹으면 이틀 전 일정이 "-2일 뒤" 로 나온다. 지난
  * 일정을 열어 보는 일이 드물지 않으므로(기록 확인) 실제로 보이는 문구다.
+ *
+ * **날짜 차이만 말한다.** 예전에는 내일을 "내일 아침" 이라고 해서 내일 저녁 7시 약속이나 오늘 밤에 울리는
+ * 내일 0시 30분 일정에도 "아침" 이 붙었다. 이 함수는 시각을 모른다. (Partly AI-generated (Claude))
  */
 internal fun relativeDayLabel(days: Long): String = when {
     days == 0L -> "오늘"
-    days == 1L -> "내일 아침"
+    days == 1L -> "내일"
     days == -1L -> "어제"
     days < 0L -> "${-days}일 전"
     else -> "${days}일 뒤"
@@ -1266,7 +1282,10 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
 }
 
 // AI-generated (Claude)
-/** 홈 행의 12시간제 시각. 예 "7:40" (AM/PM 은 따로 붙인다) */
+/**
+ * AM/PM([meridiem])을 옆에 붙이는 시각의 12시간제 숫자. 예 "7:40", 17:50 은 "5:50". 홈 행 · 알람 결정 ·
+ * 알람 등록(알람 화면 · 알림)이 모두 이것을 써야 같은 알람이 화면마다 같게 읽힌다.
+ */
 private val CLOCK_12_FORMAT = DateTimeFormatter.ofPattern("h:mm")
 
 // AI-generated (Claude)
@@ -1454,7 +1473,13 @@ internal fun tauSourceLabel(tauOverride: Double?, tagLabel: String?): String = w
 }
 
 // Partly AI-generated (Claude)
-internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
+/**
+ * 알람 결정 화면에 쓸 계획. 계획이 없으면(`alarm_plan` null) null.
+ *
+ * @param now 남은 시간 · 알람 · 출발 · 일정이 지났는가를 정할 시각. 테스트가 시계를 고정할 때만 넘긴다. 화면은
+ *   그릴 때 [AlarmPlanView.at] 으로 다시 정한다
+ */
+internal fun EventDto.toPlanView(zone: ZoneId, now: OffsetDateTime = OffsetDateTime.now(zone)): AlarmPlanView? {
     val plan = alarmPlan ?: return null
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
     val startLocal = start.atZoneSameInstant(zone)
@@ -1511,18 +1536,11 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         }
     }
 
-    val today = LocalDate.now(zone)
+    val today = now.atZoneSameInstant(zone).toLocalDate()
     val whenLabel = relativeDayLabel(ChronoUnit.DAYS.between(today, startLocal.toLocalDate()))
 
-    // 알람까지 남은 분. 음수면 이미 지났다. 표시 문구와 단계 판정이 **같은
-    // 값**에서 나와야 둘이 어긋나지 않는다.
-    val minutesToAlarm = alarmLocal?.let {
-        Duration.between(OffsetDateTime.now(zone), it).toMinutes()
-    }
-    val remaining = minutesToAlarm?.let { minutes ->
-        if (minutes <= 0) "지난 알람" else "${minutes / 60}시간 ${minutes % 60}분 남음"
-    }
-
+    // 남은 시간과 알람 · 출발 · 일정이 지났는가는 맨 아래 [AlarmPlanView.at] 이 한 순간에서 정한다. 표시 문구와
+    // 단계 판정이 **같은 값**에서 나와야 둘이 어긋나지 않는다. (Partly AI-generated (Claude))
     return AlarmPlanView(
         eventId = id,
         whenLabel = whenLabel,
@@ -1534,9 +1552,12 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         sensitivityTag = tag?.label,
         isFirstAlarm = isFirstAlarm,
         latenessSensitive = latenessSensitivity == "high",
-        alarmAt = alarmLocal?.format(ALARM_FORMAT),
-        meridiem = alarmLocal?.let { if (it.hour < 12) "AM" else "PM" } ?: "",
-        remaining = remaining,
+        // 화면이 옆에 AM/PM 을 붙이므로 12시간제다. 24시간제로 두면 오후 알람이 "17:50 PM" 이었고, 지각 위험
+        // 바꾸기의 선택지("5:50 PM")와도 어긋났다. (Partly AI-generated (Claude))
+        alarmAt = alarmLocal?.format(CLOCK_12_FORMAT),
+        meridiem = alarmLocal?.let(::meridiem) ?: "",
+        // 알람 시각이 있으면 [AlarmPlanView.at] 이 채운다. 없으면(계산 못 함) 비워 둔다.
+        remaining = null,
         onTimeProbability = plan.onTimeProbability,
         tauUsed = plan.tauUsed,
         tauSourceLabel = tauSourceLabel(tauOverride, tag?.label),
@@ -1562,14 +1583,10 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         arriveAtMillis = arriveAt?.toInstant()?.toEpochMilli(),
         altRouteKey = plan.altRouteKey?.takeIf { it.isNotBlank() },
         routeFellBack = plan.routeChoiceHonored == false,
-        // 알람 시각을 아는 곳은 여기뿐이다(화면에는 표시 문자열만 간다).
-        // 시각이 없으면 아직 계산되지 않은 것이므로 "지나지 않았다" 로 둔다.
-        alarmPassed = (minutesToAlarm ?: 1L) <= 0L,
-        // 일정 시각이 지났는가. 알람과 따로 본다 — 알람은 지났지만 일정은
-        // 아직 안 온 구간(준비·이동 중)이 이 화면의 본래 자리다.
-        eventPassed = start.isBefore(OffsetDateTime.now()),
-        // Partly AI-generated (Claude) — 추적 근거가 없을 때 "준비 중" 을 말할 수 있는 끝.
-        departPassed = departBy?.isAfter(OffsetDateTime.now()) == false,
+        // alarmPassed · eventPassed · departPassed 는 맨 아래 [AlarmPlanView.at] 이 위의 시각(ms)으로 정한다. 알람
+        // 시각이 없으면 아직 계산되지 않은 것이므로 "지나지 않았다" 로 둔다. 일정 시각은 알람과 따로 본다 — 알람은
+        // 지났지만 일정은 아직 안 온 구간(준비·이동 중)이 이 화면의 본래 자리다. (Partly AI-generated (Claude))
+
         // 알람 등록(toSchedule)과 같은 기준이다. 값이 없으면 알람이 울리지 않는다.
         alarmOn = alarmOn == true,
         routeDetail = plan.routeDetail?.takeIf { it.isNotBlank() },
@@ -1582,7 +1599,7 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         altFasterMinutes = plan.altFasterMinutes?.takeIf { it > 0 },
         skipped = skipped,
         routeBasis = routeBasis,
-    )
+    ).at(now.toInstant().toEpochMilli())
 }
 
 // Partly AI-generated (Claude)
@@ -1659,8 +1676,10 @@ internal fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedu
             ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
             ?.toInstant()?.toEpochMilli(),
         startAtMillis = start.toInstant().toEpochMilli(),
-        alarmLabel = alarmLocal.format(ALARM_FORMAT),
-        meridiem = if (alarmLocal.hour < 12) "AM" else "PM",
+        // 알람 화면 · 알림 · 놓친 알람 안내가 옆에 AM/PM 을 붙이므로 12시간제다(미룰 때도 같다,
+        // [AlarmSchedule.snoozedTo]). (Partly AI-generated (Claude))
+        alarmLabel = alarmLocal.format(CLOCK_12_FORMAT),
+        meridiem = meridiem(alarmLocal),
         eventLine = "${startLocal.format(TIME_FORMAT)} $title",
         placeName = place?.let { p ->
             listOfNotNull(p.name, p.address?.takeIf(String::isNotBlank)).joinToString(" · ")

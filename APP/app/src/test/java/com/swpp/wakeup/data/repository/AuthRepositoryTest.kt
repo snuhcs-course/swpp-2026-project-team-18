@@ -207,6 +207,30 @@ class AuthRepositoryTest {
         assertTrue("가입도 성공하면 바로 로그인 상태다", tokenStore.isLoggedIn)
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `가입이 닉네임 때문에 거절되면 그 칸의 이유를 따로 돌려준다`() = runTest {
+        // Given 서버(DRF)가 닉네임 칸에 이유를 붙여 400 을 준다. 대표 문구도 같은 문장이다
+        val reason = "이 필드의 글자 수가 20 이하인지 확인하십시오."
+        val api = object : FakeAuthApi() {
+            override suspend fun register(body: RegisterRequest) =
+                httpError<AuthResponse>(400, errorJson(reason, mapOf("nickname" to reason)))
+        }
+
+        // When
+        val result = repository(api).register(
+            email = "me@snu.ac.kr",
+            nickname = "가".repeat(21),
+            password = "pw12345678",
+            passwordConfirm = "pw12345678",
+            termsAgreed = true,
+        )
+
+        // Then 화면이 닉네임 칸 아래에 그릴 수 있게 칸 이름과 함께 온다
+        assertEquals(AuthResult.Failure(reason, mapOf("nickname" to reason)), result)
+        assertFalse(tokenStore.isLoggedIn)
+    }
+
     // --- 비밀번호 검사 ------------------------------------------------------
 
     @Test

@@ -83,6 +83,28 @@ class SocialLoginTest {
         )
     }
 
+    // AI-generated (Claude)
+    @Test
+    fun `닉네임 한도는 코드 포인트로 세고 이모지를 반으로 자르지 않는다`() {
+        val smile = "😀" // 😀, UTF-16 두 단위
+        // Given 19자 + 이모지 + 1자 = 21자(UTF-16 으로는 22단위)
+        val name = "가".repeat(19) + smile + "x"
+
+        // When
+        val hint = SocialLogin.nicknameHint(jwt("{\"nickname\":\"$name\"}"))!!
+
+        // Then 20번째 글자인 이모지를 통째로 남긴다. 짝 없는 서로게이트는 서버에 '?' 로 들어간다
+        assertEquals("가".repeat(19) + smile, hint)
+        assertFalse(Character.isHighSurrogate(hint.last()))
+        assertEquals(SocialLogin.NICKNAME_MAX, hint.codePointLength())
+
+        // 21번째 글자인 이모지는 통째로 뺀다
+        assertEquals(
+            "가".repeat(20),
+            SocialLogin.nicknameHint(jwt("{\"nickname\":\"${"가".repeat(20)}$smile\"}")),
+        )
+    }
+
     @Test
     fun `읽지 못하는 토큰이면 닉네임을 비워 둔다`() {
         assertNull(SocialLogin.nicknameHint("not-a-jwt"))

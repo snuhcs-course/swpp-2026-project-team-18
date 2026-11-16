@@ -7,9 +7,7 @@ import android.content.Intent
 import android.util.Log
 import com.swpp.wakeup.data.remote.AlarmLogInput
 import com.swpp.wakeup.domain.model.AlarmSchedule
-import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 /**
  * 정확 알람 등록·해제.
@@ -79,14 +77,10 @@ class AlarmScheduler(private val context: Context) {
      */
     fun snooze(schedule: AlarmSchedule, minutes: Int) {
         val at = System.currentTimeMillis() + minutes * 60_000L
-        val local = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault())
 
-        // Partly AI-generated (Claude) — 계획의 알람 시각은 기록용으로 남긴다(AlarmSchedule.snoozedTo).
-        val next = schedule.snoozedTo(
-            atMillis = at,
-            label = local.format(LABEL_FORMAT),
-            meridiem = if (local.hour < 12) "AM" else "PM",
-        )
+        // Partly AI-generated (Claude) — 계획의 알람 시각은 기록용으로 남긴다. 라벨은 계획을 받을 때와 같은
+        // 12시간제 숫자 + AM/PM 이다(AlarmSchedule.snoozedTo). 24시간제로 만들면 "17:53 PM" 이 된다.
+        val next = schedule.snoozedTo(atMillis = at, zone = ZoneId.systemDefault())
         store.upsert(next)
         register(next)
         Log.i(TAG, "알람 미루기: 일정 ${next.eventId} → ${minutes}분 뒤 (${next.alarmLabel})")
@@ -297,8 +291,5 @@ class AlarmScheduler(private val context: Context) {
 
         /** showIntent 의 requestCode 가 발화용과 겹치지 않게 띄운다. */
         const val SHOW_REQUEST_OFFSET = 1_000_000
-
-        /** 알람 화면의 큰 시각. `EventRepository` 의 형식과 같아야 한다. */
-        val LABEL_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm")
     }
 }

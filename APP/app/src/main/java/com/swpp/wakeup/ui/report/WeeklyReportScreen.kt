@@ -106,7 +106,9 @@ fun WeeklyReportScreen(
             ),
         verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
     ) {
-        ScreenHeader(title = "주간 리포트", onBack = onBack, enabled = !loading)
+        // 읽기만 하는 화면이라 불러오는 중에도 ‹ 를 막지 않는다. 막으면 누른 것이 그냥 사라지고(화살표 색은
+        // 그대로다), 시스템 뒤로와도 다르다. 늦게 온 응답은 세대 번호가 거른다. (Partly AI-generated (Claude))
+        ScreenHeader(title = "주간 리포트", onBack = onBack)
 
         if (loading && report == null) {
             LoadingBlock()

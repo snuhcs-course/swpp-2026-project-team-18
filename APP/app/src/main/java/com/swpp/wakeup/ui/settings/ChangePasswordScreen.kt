@@ -83,21 +83,37 @@ fun ChangePasswordScreen(
             }
         }
 
-        JitTextField(
-            label = "새 비밀번호",
-            value = state.newPassword,
-            onValueChange = onNewChange,
-            isPassword = true,
-            passwordToggle = true,
-            keyboardType = KeyboardType.Password,
-            inputTag = "pw_new",
-            enabled = !state.busy,
-        )
+        // 지금 것과 같으면 버튼이 꺼진다. 칸이 가려져 있어 같은 줄 모를 수 있으니 이유를 칸 아래에 적는다.
+        // (Partly AI-generated (Claude))
+        Column {
+            JitTextField(
+                label = "새 비밀번호",
+                value = state.newPassword,
+                onValueChange = onNewChange,
+                isPassword = true,
+                passwordToggle = true,
+                keyboardType = KeyboardType.Password,
+                inputTag = "pw_new",
+                enabled = !state.busy,
+                isError = state.sameAsCurrent,
+            )
+            if (state.sameAsCurrent) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "지금 비밀번호와 같아요. 다른 비밀번호를 써 주세요",
+                    modifier = Modifier.testTag("pw_new_same"),
+                    color = JitColor.Red,
+                    fontSize = 11.sp,
+                )
+            }
+        }
 
         PasswordRuleCard(
             lengthPassed = state.passwordCheck?.minLength,
             mixPassed = state.passwordCheck?.lettersAndDigits,
         )
+        // 두 점이 다 초록인데 서버가 거절한 이유(흔한 비밀번호)는 점으로 말할 수 없다. 서버 문구를 그대로 둔다.
+        state.passwordCheck?.extraReason?.let { ErrorText(it, modifier = Modifier.testTag("pw_new_reason")) }
         state.passwordCheckError?.let { ErrorText(it) }
 
         JitTextField(

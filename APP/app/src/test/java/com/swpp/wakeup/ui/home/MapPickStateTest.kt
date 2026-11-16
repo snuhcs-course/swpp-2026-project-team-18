@@ -75,6 +75,53 @@ class MapPickStateTest {
         assertTrue(replaced.selected == null)
     }
 
+    // --- 이 장소로 선택 (AI-generated (Claude)) ---------------------------------
+
+    @Test
+    fun `미리 골라 둔 지금 값을 그대로 확인하면 바뀌지 않는다`() {
+        // Given 도착지가 집이라 지도가 집을 1번 핀으로 골라 둔 채 열렸다(집은 카카오 id 가 없다)
+        val home = PlaceSearchItem(
+            kakaoPlaceId = null,
+            name = "우리집",
+            address = null,
+            lat = 37.4781,
+            lng = 126.9515,
+            category = null,
+        )
+
+        // When / Then 그대로 확인하면 집 표시와 경로를 지키려고 값을 다시 넣지 않는다
+        assertFalse(mapPickChangesValue(current = home, picked = home))
+        assertFalse(mapPickChangesValue(current = home, picked = home.copy()))
+        // 검색한 장소는 카카오 id 로 같은 곳이다
+        assertFalse(mapPickChangesValue(place(37.48, 126.95, "12345"), place(37.48, 126.95, "12345")))
+    }
+
+    @Test
+    fun `다른 핀을 고르면 바뀐다`() {
+        val current = place(37.4783, 126.9516, "12345")
+        assertTrue(mapPickChangesValue(current, place(37.4783, 126.9516, "67890")))
+        // 값이 없던 칸(집 출발 · 아직 없는 도착지)에 고르면 늘 바뀐다
+        assertTrue(mapPickChangesValue(current = null, picked = current))
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `집 핀 대신 같은 자리의 검색한 장소 핀을 고르면 바뀐다`() {
+        // Given 도착지가 집이라 지도가 집을 1번 핀으로 열었다. 집은 그 아파트를 검색해 정해서 좌표가 똑같다
+        val home = PlaceSearchItem(
+            kakaoPlaceId = null,
+            name = "우리집",
+            address = null,
+            lat = 37.4781,
+            lng = 126.9515,
+            category = null,
+        )
+        val apartment = place(home.lat, home.lng, "5501")
+
+        // When / Then 지도는 두 핀을 따로 그린다. 다른 핀을 골랐으니 넣는다 — 집이 아닌 도착지가 된다
+        assertTrue(mapPickChangesValue(current = home, picked = apartment))
+    }
+
     // --- 줌 한계 ----------------------------------------------------------
 
     @Test

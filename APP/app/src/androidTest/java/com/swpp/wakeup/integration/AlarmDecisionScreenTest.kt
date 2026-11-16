@@ -155,4 +155,110 @@ class AlarmDecisionScreenTest {
         compose.onNodeWithText("일정 삭제").assertDoesNotExist()
         compose.onNodeWithText("확인").assertDoesNotExist()
     }
+
+    // AI-generated (Claude)
+    @Test
+    fun `일정 수정에 채울 값을 받는 동안 버튼이 막히고 불러오는 중이라고 쓴다`() {
+        // Given 일정 수정을 한 번 눌러 서버 값을 받는 중
+        val plan = planFrom(eventJson(computedPlan))
+        compose.setContent {
+            JitTheme {
+                AlarmDecisionScreen(
+                    plan = plan,
+                    onBack = {},
+                    onChangeRisk = {},
+                    onEditBlocks = {},
+                    onDelete = {},
+                    onEdit = { calls += "edit" },
+                    editBusy = true,
+                )
+            }
+        }
+
+        // When 한 번 더 누른다
+        compose.onNodeWithText("일정 수정").assertDoesNotExist()
+        compose.onNodeWithText("불러오는 중…").performScrollTo().performClick()
+
+        // Then 두 번째 누름은 아무것도 열지 않는다
+        assertTrue(calls.isEmpty())
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `계획을 받지 못하면 스피너 대신 이유와 다시 시도를 보인다`() {
+        // Given 이 일정의 계획을 받지 못했다(계획 없음 · 통신 실패)
+        compose.setContent {
+            JitTheme {
+                AlarmDecisionScreen(
+                    plan = null,
+                    onBack = {},
+                    onChangeRisk = {},
+                    onEditBlocks = {},
+                    onDelete = { calls += "delete" },
+                    loadError = "이 일정의 알람이 아직 정해지지 않았어요",
+                    onRetry = { calls += "retry" },
+                )
+            }
+        }
+
+        // When 이유를 읽고 다시 시도를 누른다
+        compose.onNodeWithText("알람 정보를 불러오지 못했어요").assertExists()
+        compose.onNodeWithText("이 일정의 알람이 아직 정해지지 않았어요").assertExists()
+        compose.onNodeWithText("다시 시도").performClick()
+
+        // Then 이 일정의 계획만 다시 받고, 계획이 없으니 동작 버튼은 내놓지 않는다
+        assertEquals(listOf("retry"), calls)
+        compose.onNodeWithText("일정 삭제").assertDoesNotExist()
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `일정을 지우는 동안 삭제 버튼이 막히고 삭제하는 중이라고 쓴다`() {
+        // Given 일정 삭제를 한 번 눌러 서버에 보내는 중
+        val plan = planFrom(eventJson(computedPlan))
+        compose.setContent {
+            JitTheme {
+                AlarmDecisionScreen(
+                    plan = plan,
+                    onBack = {},
+                    onChangeRisk = {},
+                    onEditBlocks = {},
+                    onDelete = { calls += "delete" },
+                    deleteBusy = true,
+                )
+            }
+        }
+
+        // When 한 번 더 누른다
+        compose.onNodeWithText("일정 삭제").assertDoesNotExist()
+        compose.onNodeWithText("삭제하는 중…").performScrollTo().performClick()
+
+        // Then 두 번째 삭제는 보내지 않는다
+        assertTrue(calls.isEmpty())
+    }
+
+    // AI-generated (Claude)
+    @Test
+    fun `정확한 위치 권한이 없으면 진행률 카드가 추적을 약속하지 않는다`() {
+        // Given 내일 아침 알람이 계산된 일정, 대략적인 위치만 허용했다
+        val plan = planFrom(eventJson(computedPlan))
+        compose.setContent {
+            JitTheme {
+                AlarmDecisionScreen(
+                    plan = plan,
+                    onBack = {},
+                    onChangeRisk = {},
+                    onEditBlocks = {},
+                    onDelete = {},
+                    canTrack = false,
+                    coarseOnly = true,
+                )
+            }
+        }
+
+        // When 개인 진행률 카드를 본다
+        // Then 알람이 울리면 추적한다고 하지 않고 이유를 말한다
+        compose.onNodeWithText("정확한 위치 권한이 없어 이동을 기록하지 않아요").performScrollTo()
+        compose.onNodeWithText("알람이 울리면 추적이 시작됨").assertDoesNotExist()
+    }
 }
