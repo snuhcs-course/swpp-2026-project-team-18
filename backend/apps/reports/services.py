@@ -61,7 +61,7 @@ from apps.events.alarms import alarm_states
 from apps.events.models import Event
 from apps.observations import selection
 from apps.observations.models import AlarmLog, TripObservation
-from apps.planning import buffers
+from apps.planning import buffers, learning_reset
 from apps.planning.estimators import PREP_SOURCE_NOT_FROM_HOME
 from apps.planning.models import AlarmPlan, BufferAdjustment
 from apps.routines.models import BlockObservation
@@ -704,7 +704,7 @@ def weekly(user, *, anchor: date | None = None) -> dict:
         "target_met": target_met,
         "previous_week": _previous_week(user, start, on_time_rate, len(arrived)),
         "deviation": _deviation_stats(list(measured.values())),
-        "learning": _learning(outcomes),
+        "learning": _learning(outcomes, learning_reset.recorded_before_reset(user)),
         "buffer": _buffer(user, start, end),
         # 알람 울림·미루기·끄기(R3-6). 그 주 울린 알람이 없으면 null.
         "wake": wake_stats(user, start, end),
@@ -871,20 +871,25 @@ def _deviation_stats(rows: list[dict[str, float | None]]) -> dict:
 
 
 # Partly AI-generated (Claude)
-def _learning(outcomes: list[Outcome]) -> dict:
+def _learning(outcomes: list[Outcome], reset_at=None) -> dict:
     """이 주 계획이 실제 기록을 썼는지 센다.
 
     `prediction.ModelArtifact` 는 알람 계산이 읽지 않는다. 아티팩트를 "학습 반영"
     으로 보이면 사실이 아니어서, 대신 **각 계획이 실제로 쓴 출처**를 센다.
     이동 보정(`RouteCorrection`)은 모든 사용자의 기록으로 만든다 — 그래서 앱은
     이동 쪽을 "내 기록" 이 아니라 "이동 기록 보정" 이라고 쓴다.
+
+    기록 초기화(`reset_at`) 전에 계산한 계획은 지운 기록을 썼다. 초기화 안내가 "주간 리포트의
+    지난 결과도 비워져요" 이므로 그 계획은 기록에서 나온 것으로 세지 않는다(`plan_count` 에는
+    든다). 초기화 뒤에 다시 계산한 계획은 그 뒤에 쌓인 기록만 쓴다. (Partly AI-generated (Claude))
     """
     plans = [plan for plan in (_ok_plan(o.event) for o in outcomes) if plan is not None]
+    fresh = [p for p in plans if reset_at is None or p.computed_at >= reset_at]
     return {
         "plan_count": len(plans),
-        "prep_from_records": sum(1 for p in plans if p.prep_source == PREP_SOURCE_OBSERVED),
+        "prep_from_records": sum(1 for p in fresh if p.prep_source == PREP_SOURCE_OBSERVED),
         "travel_from_records": sum(
-            1 for p in plans if TRAVEL_SOURCE_OBSERVED_MARK in (p.travel_source or "")
+            1 for p in fresh if TRAVEL_SOURCE_OBSERVED_MARK in (p.travel_source or "")
         ),
     }
 

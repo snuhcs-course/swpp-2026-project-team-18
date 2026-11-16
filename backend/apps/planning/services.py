@@ -48,7 +48,7 @@ from apps.events.models import Event
 from apps.routing import clients
 from apps.routing.models import BICYCLE, CAR, WALK, travel_kind, walk_factor_for
 
-from . import buffers, estimators, history, prep_observations
+from . import alarm_control, buffers, estimators, history, prep_observations
 from .models import AlarmPlan, PlanRevision
 
 logger = logging.getLogger(__name__)
@@ -256,6 +256,7 @@ def compute_and_store(event: Event, *, trigger: str = "") -> AlarmPlan:
         # 카카오가 준 분 그대로(G2). 계획의 `travel_minutes` 는 보정·τ 분위수가 들어간 값이다.
         route_minutes_raw=_raw_minutes(route),
         walk_minutes_raw=walk_raw_minutes(route),
+        components=(prep, travel),
     )
 
 
@@ -463,7 +464,10 @@ def _upsert(
     trigger: str = "",
     route_minutes_raw: int | None = None,
     walk_minutes_raw: int | None = None,
+    components: tuple | None = None,
 ) -> AlarmPlan:
+    # Partly AI-generated (Claude) — 재계산 전 값. 추천 알람이 얼마나·왜 움직였는지 본다(H2-3).
+    before = alarm_control.snapshot_for(event)
     plan, _created = AlarmPlan.objects.update_or_create(event=event, defaults=defaults)
     # Partly AI-generated (Claude)
     # 같은 트랜잭션에서 이력을 남긴다(db-schema.md A2). 계획은 덮어쓰지만 이력은 쌓인다 —
@@ -472,6 +476,9 @@ def _upsert(
         event, plan, trigger=trigger, route_minutes_raw=route_minutes_raw,
         walk_minutes_raw=walk_minutes_raw,
     )
+    # 직접 정한 시각은 두고 확률만 새로 구하고, 확인한 추천 알람이 5분 넘게 움직였으면 묻는다
+    # (`alarm_control`). `components` 는 이 계산의 분포 재료(계산 불가 상태면 None)다.
+    alarm_control.after_compute(event, plan, before, trigger=trigger, components=components)
     return plan
 
 

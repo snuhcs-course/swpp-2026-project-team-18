@@ -49,6 +49,8 @@ urlpatterns = [
     ),
     # back-spec.md 5.3 일정·장소
     path("api/", include("apps.events.urls")),
+    # 알람 직접 정하기 · 확인 · "바꿀까요" 답하기(iter4 H2-3). 경로는 events/{id}/alarm/... 이다.
+    path("api/", include("apps.planning.urls")),
     # 이동 관측 — 앱이 GPS 로 판별한 실제 출발·도착 시각
     path("api/", include("apps.observations.urls")),
     # back-spec.md 4.3 아침 루틴 블록 + 블록 관측
@@ -58,4 +60,6 @@ urlpatterns = [
     # back-spec.md 5.8 주간 리포트·캘리브레이션.
     # 모델이 없다 — 요청 시점에 기존 관측에서 계산한다(apps/reports/services.py).
     path("api/", include("apps.reports.urls")),
+    # 앱 안 문의하기(iter4 BE-H4b, docs/iter4/server-inquiry.md). (Partly AI-generated (Claude))
+    path("api/support/", include("apps.support.urls")),
 ]

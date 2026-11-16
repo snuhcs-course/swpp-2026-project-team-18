@@ -18,9 +18,18 @@ def build_risk_options(event) -> dict:
         and event.tag.default_tau is not None
         and event.tag.default_tau != profile.default_tau
     )
+    # Partly AI-generated (Claude) — BE-H3e. 사용자가 τ 를 직접 고르기 전의 값(종류 기본값, 없으면
+    # 프로필 기본값). 앱은 이 칸에 "추천" 을 붙인다. 세 칸 중 같은 τ 가 없으면 null 이다.
+    default_tau = (
+        event.tag.default_tau
+        if event.tag_id is not None and event.tag.default_tau is not None
+        else profile.default_tau
+    )
     result = {
         "options": [],
         "selected_key": next((key for key, _, value in OPTIONS if value == tau), None),
+        "recommended_key": next((key for key, _, value in OPTIONS if value == default_tau), None),
+        "default_tau": default_tau,
         "auto_adjusted": auto_adjusted,
         "auto_reason": (
             f"{event.tag.label} 일정 기본값 τ {tau:g} 적용 (프로필 기본값 τ {profile.default_tau:g})"
@@ -29,15 +38,18 @@ def build_risk_options(event) -> dict:
         "distribution": None,
         "unavailable_reason": None,
     }
+    # Partly AI-generated (Claude) — BE-R1 T-4. 앱 시트가 그대로 보이는 문장이다. 시트에는 [다시 시도]
+    # 만 있으므로 "다시 계산해 주세요" 처럼 할 수 없는 일을 시키지 않고, 위험 단계를 화면의
+    # "여유 시간" 과 헷갈리게 "여유별" 이라 부르지 않는다.
     plan = getattr(event, "alarm_plan", None)
     if plan is None or plan.status != AlarmPlan.Status.OK:
-        result["unavailable_reason"] = "알람 계획을 계산한 뒤 선택지를 볼 수 있습니다."
+        result["unavailable_reason"] = "알람이 아직 계산되지 않아 고를 수 있는 알람 시각을 보여 드릴 수 없어요."
         return result
 
     # Never fall back to older raw values when the latest revision no longer matches the plan.
     revision = history.reusable_revision(event, plan)
     if revision is None:
-        result["unavailable_reason"] = "저장된 경로 원값이 없습니다. 알람을 다시 계산해 주세요."
+        result["unavailable_reason"] = "저장된 경로 정보가 없어 고를 수 있는 알람 시각을 아직 계산할 수 없어요."
         return result
 
     # 실제 알람과 같은 버퍼여야 선택지의 알람 시각이 "이걸 고르면 이렇게 울린다" 가 된다.
@@ -50,7 +62,7 @@ def build_risk_options(event) -> dict:
     }, buffer_minutes=buffer.minutes)
     total = estimators.total_distribution(prep, travel)
     if total.quantile(.99) <= total.quantile(.5) + 1e-9:
-        result["unavailable_reason"] = "소요시간의 변동 폭을 아직 몰라 위험별 선택지를 계산할 수 없습니다."
+        result["unavailable_reason"] = "걸리는 시간이 얼마나 달라지는지 아직 몰라 고를 수 있는 알람 시각을 계산할 수 없어요."
         return result
 
     for key, label, option_tau in OPTIONS:

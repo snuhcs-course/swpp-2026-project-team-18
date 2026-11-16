@@ -15,6 +15,7 @@ from .views import (
     PlaceSearchView,
     PlaceStaticMapView,
     RouteCandidateView,
+    RouteHistoryView,
     RouteLiveView,
 )
 
@@ -40,6 +41,7 @@ urlpatterns = [
     path("places/staticmap", PlaceStaticMapView.as_view(), name="place_staticmap"),
     path("places/reverse", PlaceReverseView.as_view(), name="place_reverse"),
     path("routes/candidates", RouteCandidateView.as_view(), name="route_candidates"),
+    path("routes/history", RouteHistoryView.as_view(), name="route_history"),
     # 이동 중 1분마다. 현재 위치부터 목적지까지 다시 푼 최단 경로를 받는다.
     path("routes/live", RouteLiveView.as_view(), name="route_live"),
 ]

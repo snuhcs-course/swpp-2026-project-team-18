@@ -152,6 +152,8 @@ def test_profile_change_clears_invalid_plan_and_route_without_upstream(api, rout
     event = api.get(f'/api/events/{created.data["id"]}').data
     plan = event["alarm_plan"]
     assert plan["status"] == status
+    # 앱이 그대로 보이는 문구다(BE-R1 T-7).
+    assert plan["status_label"] == {"no_home": "집 위치가 필요해요", "route_failed": "경로를 찾지 못했어요"}[status]
     assert plan["alarm_at"] is None
     assert plan["route_path"] == plan["alt_route_path"] == []
     assert plan["route_distance_m"] is None

@@ -35,6 +35,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Collection
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
@@ -45,7 +46,7 @@ from apps.events.models import Event
 from apps.events.recurrence import in_window
 from apps.routing.models import walk_factor_for
 
-from . import buffers, history, services
+from . import alarm_control, buffers, history, services
 from .models import AlarmPlan, PlanRevision
 
 # 사용자 한 명당 한 번에 다시 계산할 일정 수. 집 변경 재계산(`recompute_for_user`)과
@@ -77,8 +78,15 @@ def refresh_upcoming(
     protect: timedelta = timedelta(0),
     horizon: timedelta | None = None,
     dry_run: bool = False,
+    keep_ids: Collection[int] = (),
+    limit: int = MAX_EVENTS_PER_USER,
 ) -> Counter:
-    """사용자의 앞으로의 일정 알람을 경로 조회 없이 다시 계산한다. 결과별 건수를 돌려준다."""
+    """사용자의 앞으로의 일정 알람을 경로 조회 없이 다시 계산한다. 결과별 건수를 돌려준다.
+
+    `keep_ids` 는 호출자가 그대로 두라고 한 일정이다. 이미 울림·출발한 일정처럼 센다 —
+    기록 초기화가 울림·출발 기록을 지우기 전에 모아 둔다(`learning_reset`). `limit` 은
+    다시 계산할 가까운 일정 수다. (Partly AI-generated (Claude))
+    """
     from apps.observations.models import AlarmLog, TripObservation
 
     now = timezone.now()
@@ -89,7 +97,7 @@ def refresh_upcoming(
     )
     if horizon is not None:
         qs = qs.filter(start_at__lt=now + horizon)
-    events = [event for event in qs[:MAX_EVENTS_PER_USER] if in_window(event)]
+    events = [event for event in qs[:limit] if in_window(event)]
 
     outcomes: Counter = Counter()
     if not events:
@@ -102,7 +110,7 @@ def refresh_upcoming(
     ) | set(
         TripObservation.objects.filter(event_id__in=ids, kind=TripObservation.Kind.DEPART)
         .values_list("event_id", flat=True)
-    )
+    ) | set(keep_ids)
     inputs = services.prep_inputs(user.pk)
     buffer = buffers.current(user.pk)
     walk_factor = walk_factor_for(user.pk)
@@ -161,7 +169,9 @@ def _refresh(
         return SKIP_NOT_OK
     if started:
         return SKIP_STARTED
-    if plan.alarm_at <= cutoff:
+    # Partly AI-generated (Claude) — 울릴 시각으로 본다. 직접 정한 시각·지키는 시각이 추천보다 이르면
+    # 그 시각에 이미 울렸거나 곧 울린다(H2-3).
+    if alarm_control.effective_alarm_at(plan, event.start_at) <= cutoff:
         return SKIP_SOON
     profile = event.user.profile
     if event.resolve_origin(profile) is None or event.resolve_destination(profile) is None:
@@ -244,6 +254,8 @@ def _remix(
         return CHANGED
 
     with transaction.atomic():
+        # Partly AI-generated (Claude) — 바꾸기 전 값. 추천 알람이 움직인 이유를 만든다(H2-3).
+        before = alarm_control.snapshot(plan)
         for name, value in fields.items():
             setattr(plan, name, value)
         plan.save(update_fields=[*fields, "computed_at"])
@@ -251,4 +263,5 @@ def _remix(
             event, plan, trigger=trigger, route_minutes_raw=revision.route_minutes_raw,
             walk_minutes_raw=revision.walk_minutes_raw,
         )
+        alarm_control.after_compute(event, plan, before, trigger=trigger, components=(prep, travel))
     return CHANGED

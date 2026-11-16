@@ -28,6 +28,7 @@ from rest_framework.views import APIView
 
 from apps.events.models import Event
 from apps.events.serializers import EventSerializer
+from apps.planning import learning_reset as planning_learning_reset
 from apps.planning import refresh as planning_refresh
 from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
@@ -187,6 +188,9 @@ class BlockObservationBatchView(APIView):
 
     멱등하다. 같은 `client_uuid` 를 다시 보내면 무시한다. 오프라인 큐가
     재전송하므로 필수다 — 행이 늘면 같은 아침이 두 번 학습된다.
+
+    기록 초기화(`Profile.learning_reset_at`)보다 이른 `client_recorded_at` 은 저장하지 않고
+    `ignored` 로 센다. 2xx 라 앱 큐는 비워진다. (Partly AI-generated (Claude))
     """
 
     throttle_classes = [ScopedRateThrottle]
@@ -198,6 +202,12 @@ class BlockObservationBatchView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         rows = serializer.validated_data["observations"]
+        reset_at = planning_learning_reset.recorded_before_reset(request.user)
+        ignored = 0
+        if reset_at is not None:
+            kept = [r for r in rows if r["client_recorded_at"] >= reset_at]
+            ignored = len(rows) - len(kept)
+            rows = kept
 
         existing = set(
             BlockObservation.objects.filter(
@@ -218,6 +228,7 @@ class BlockObservationBatchView(APIView):
             {
                 "accepted": len(created),
                 "duplicated": len(rows) - len(created),
+                "ignored": ignored,
                 "results": created,
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,

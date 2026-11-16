@@ -15,6 +15,10 @@
 그날 올라온 블록 기록·GPS 출발이 다음 아침 알람에 들어간다. 알람이 3시간 안에 울릴 일정은
 앱 경로 갱신 워커에 맡긴다. --dry-run 이면 바뀔 건수만 출력한다(이때는 새 보정·버퍼도
 저장하지 않았으므로 지금 DB 기준). --routes-only 는 버퍼를 건드리지 않는다.
+
+마지막으로 기록 초기화(`planning.learning_reset`)와 겹친 사용자를 맞춘다. 학습 시작 뒤에
+초기화한 사용자는 이번 학습이 쓴 개인 학습값을 지우고 다시 섞는다. 초기화 뒤 첫 밤 학습이 낸
+"바꿀까요" 제안은 거둔다(초기화 때문에 움직인 알람이다). --dry-run 이면 하지 않는다.
 """
 
 from __future__ import annotations
@@ -23,8 +27,9 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
-from apps.planning import buffers, refresh
+from apps.planning import buffers, learning_reset, refresh
 from apps.prediction import learning
 
 
@@ -54,10 +59,22 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        # 기록을 읽기 전. 이 뒤에 초기화한 사용자의 학습값은 지운 기록에서 나왔을 수 있다.
+        started = timezone.now()
         self._train(options)
         if not options["routes_only"]:
             self._adjust_buffers(options["dry_run"])
         self._refresh_plans(options["dry_run"])
+        if not options["dry_run"]:
+            self._settle_resets(started)
+
+    # Partly AI-generated (Claude)
+    def _settle_resets(self, started):
+        """기록 초기화와 겹친 사용자를 맞춘다. 건수만 출력한다(공개 로그)."""
+        self.stdout.write("\n[6] 기록 초기화와 겹친 사용자")
+        redone = learning_reset.redo_after_nightly(started)
+        dropped = learning_reset.drop_nightly_proposals(started)
+        self.stdout.write(f"  학습 중 초기화 {redone}명 다시 맞춤 / 초기화 뒤 첫 밤 제안 {dropped}건 거둠")
 
     # Partly AI-generated (Claude)
     def _adjust_buffers(self, dry: bool):

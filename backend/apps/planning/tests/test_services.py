@@ -264,6 +264,17 @@ class TestTravelSampleCount:
 
 
 class TestFailureStates:
+    # Partly AI-generated (Claude)
+    def test_status_labels_are_friendly_and_cover_every_status(self):
+        """BE-R1 T-7. 앱이 `status_label` 을 그대로 보인다. 메모체("집 위치 미설정")가 아니라
+        해요체이고, 모든 상태에 문구가 있다. 상태 코드는 그대로다."""
+        assert set(AlarmPlan.STATUS_LABELS) == set(AlarmPlan.Status)
+        assert [s.value for s in AlarmPlan.Status] == ["ok", "no_home", "no_place", "route_failed"]
+        for status, label in AlarmPlan.STATUS_LABELS.items():
+            assert label.endswith("요"), label
+            assert AlarmPlan(status=status).status_label == label
+        assert AlarmPlan(status="unknown").status_label == "unknown"
+
     def test_no_place(self, user, stub_route):
         event = Event.objects.create(
             user=user, title="장소 없음",
