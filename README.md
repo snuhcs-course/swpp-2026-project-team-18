@@ -20,7 +20,7 @@ reset and in-app inquiries.
 | --- | --- |
 | Iteration | 4 · 2026-11-07 – 2026-11-20 (Hardening and UAT) |
 | Snapshot | `front-iter4` at [`a52d9b2`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/a52d9b2) (2026-11-16): the app of `main` [`d296ce4`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/d296ce4) plus the server of `back-iter4` [`86a1293`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/86a1293). This branch adds only this README |
-| Version | Server **0.21.0** on this branch (`APP_VERSION`) — **not deployed yet**; the shared server still runs 0.20.0 until `back-iter4` is merged into `main` · app `versionName` 0.14.0 (not bumped this iteration) |
+| Version | Server **0.21.0** (`APP_VERSION`) — **deployed on 2026-11-16**: `back-iter4` was merged into `main` ([`a175b4d`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/a175b4d), the same code as this snapshot) and the shared server answers 0.21.0 · app `versionName` 0.14.0 (not bumped this iteration) |
 | Server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
 | Demo video | Not recorded yet — the planned scenes are listed [below](#demo-video) |
 | UAT | Sheet submitted 11-13; sessions in class on 11-16 and 11-18. Results go to the Wiki's [Testing Documentation, Iteration 4](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter4%E2%80%90testing) |
@@ -53,8 +53,8 @@ Planned scenes, in the order the heuristic evaluation ranked the problems:
 | 1 · First run | Sign-up with the nickname rule shown under the field, the prep-time screen with the wheel, the three intro pages, then the coachmark over the new Home | Shared server |
 | 2 · Home and tabs | The next-alarm card (time, on-time probability chip, "1시간 28분 뒤 · 9:00 일정"), today and tomorrow listed in full, then the 이동 (trip), 리포트 (report) and 내 정보 (me) tabs | Shared server |
 | 3 · Change the alarm | [시각 바꾸기] (change time) on the next-alarm card opens the sheet: the three presets (여유 있게 · 보통 · 빠듯하게), the wheel previewing the on-time probability, then saving a preset and the snackbar | Shared server |
-| 4 · Help | ? → help with search, the "정시 도착 확률이 뭐예요?" (what is the on-time probability) sheet with ten circles, and the contact sheet | Shared server (sending needs 0.21.0) |
-| 5 · Recurring event | Editing one occurrence of a weekly event, saving with "이후 일정 모두" (this and following) and changing the weekdays | Local 0.21.0 server ([step 8](#8-trying-the-iteration-4-server-features-locally)) |
+| 4 · Help | ? → help with search, the "정시 도착 확률이 뭐예요?" (what is the on-time probability) sheet with ten circles, and the contact sheet | Shared server |
+| 5 · Recurring event | Editing one occurrence of a weekly event, saving with "이후 일정 모두" (this and following) and changing the weekdays | Shared server |
 | 6 · Weekly report | The report tab opening on this week: "이번 주 N번 중 M번 제시간에 도착했어요" (on time M of N this week) with weekday dots, then expected vs actual on-time and prep bars | Shared server, an account with past trips |
 
 ---
@@ -68,8 +68,9 @@ every tab, a time picker that doesn't fight the user, and a way to change the al
 
 ### Features implemented (whole app, as of this snapshot)
 
-**New in Iteration 4** is in bold. "Needs 0.21.0" means the app part is in this snapshot but the
-server part is only on `back-iter4`, not yet on the shared server.
+**New in Iteration 4** is in bold. "Needs 0.21.0" marks what works only with server 0.21.0. The
+shared server runs 0.21.0 since 2026-11-16; against an older server (for example a local
+checkout from before that day) the app falls back as each row says.
 
 | # | Feature | What to look for |
 | --- | --- | --- |
@@ -114,7 +115,7 @@ the backend are [`docs/iter4/*-api.md`](docs/iter4/); the backend's contracts ar
 - Nickname errors under the field; own event types renamed and deleted; recurring-event scope
   sheet; learning reset dialog; Sunday report notification
 
-**Server (`back-iter4`, 0.21.0, not deployed)**
+**Server (`back-iter4`, 0.21.0, merged into `main` and deployed on 11-16)**
 
 | Request | What the server does | Contract |
 | --- | --- | --- |
@@ -136,8 +137,9 @@ Each BE request above went through a review round on 11-15 before it was merged 
   tests 34 → **56** (55 pass, 1 fails), contract checks 241 passed · 34 skipped (no Kakao key) ·
   0 failed
 - CI [run 94](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/runs/43795831229)
-  on `main` `d296ce4`: backend, contract and app unit jobs passed; **the device integration job
-  failed** (see [Known limitations](#known-limitations-and-todos))
+  on `main` `d296ce4` and [run 95](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/runs/43819062902)
+  on `main` `a175b4d` (after the server merge): backend, contract and app unit jobs passed; **the
+  device integration job failed** in both (see [Known limitations](#known-limitations-and-todos))
 
 **PM work**
 
@@ -159,7 +161,7 @@ Severity is the highest rating any evaluator gave (0–4).
 | Too much on Home, nothing stands out (3) | Four tabs; Home shows one next-alarm card and a plain list | ✅ in the app |
 | Developer wording on screen (3) | Server texts in 해요체 (0.21.0); app texts rewritten on the new screens | 🚧 server done; "~함 / ~음" texts remain in the app, also on parts of the new Home, the decision screen, calendar import and event add |
 | The computed alarm can't be changed or approved (3) | Alarm-time sheet with presets and a wheel; server user time, confirmation and proposals | 🚧 presets save; custom time, confirmation and proposals wait for the app connection |
-| No help or tutorial (2) | Intro, coachmark, help, i sheets, contact | ✅ in the app (sending an inquiry needs 0.21.0) |
+| No help or tutorial (2) | Intro, coachmark, help, i sheets, contact | ✅ in the app |
 | The clock dial is hard to use (2) | Time and duration wheels | ✅ |
 | Buttons look like text (2) | Four button levels in Figma | ❌ not in the app yet |
 | Back only by the on-screen button (2) | Predictive back; fix the sign-up back gesture | ❌ not in the app yet |
@@ -200,9 +202,9 @@ The design is in the Wiki's
 
 ## How to run
 
-No backend setup is needed for most of the demo: every build talks to the shared server. Only
-the features marked "needs 0.21.0" need the local server of [step 8](#8-trying-the-iteration-4-server-features-locally)
-until `back-iter4` is deployed.
+No backend setup is needed: every build talks to the shared server, which runs 0.21.0 since
+2026-11-16. A local server ([step 8](#8-trying-the-iteration-4-server-features-locally)) is only
+for trying the server features on throwaway data.
 
 ### Quick start
 
@@ -315,8 +317,11 @@ More on phones, including battery settings: [docs/device-setup.md](docs/device-s
 - **On-time probability**: tap the probability chip on Home or the i on the decision screen. A
   new account shows "정시 도착 확률 계산 전" until prep and travel records have a spread.
 - **Time wheel**: add an event and tap the start time; prep time in me › 준비 시간.
-- **Help and contact**: ? on Home, trip or report. [문의하기] on 0.20.0 answers "아직 앱에서 문의를
-  받을 수 없어요" (inquiries are not accepted yet) and keeps the text.
+- **Help and contact**: ? on Home, trip or report. [문의하기] sends the text with a reply email
+  (at most 5 an hour). A server older than 0.21.0 answers "아직 앱에서 문의를 받을 수 없어요"
+  (inquiries are not accepted yet) and the app keeps the text.
+- **Recurring event**: open one occurrence of a weekly event and save; the sheet asks "이 일정만 /
+  이후 일정 모두" (this one / this and following), and weekdays can change for "following".
 - **Report**: the report tab opens on this week; ‹ goes back a week.
 - **Sunday notification**: me › 알림·권한 › "주간 리포트 알림"; it fires on Sundays at 12:00
   (device time) and is skipped after 18:00.
@@ -327,10 +332,10 @@ More on phones, including battery settings: [docs/device-setup.md](docs/device-s
 
 ### 8. Trying the Iteration 4 server features locally
 
-Recurring-event scope, inquiries, learning reset and the server texts in 해요체 need server
-0.21.0, which is on this branch but not deployed. Run it on a **throwaway SQLite database** —
-`backend/.env` normally points at the team's shared Neon database, and migrating it from this
-branch before the team deploys would break the shared server.
+Optional: the shared server already runs 0.21.0. Run the server locally only to try
+recurring-event scope, inquiries, learning reset or the 해요체 texts on data you can throw away.
+Use a **throwaway SQLite database** — `backend/.env` normally points at the team's shared Neon
+database, and running migrations against it from a local checkout can break the shared server.
 
 ```bash
 cd backend
@@ -354,7 +359,7 @@ event can't look up a route.
 | --- | --- |
 | Can't sign in | Server address (build output) → [`/api/health`](https://justintime-api.onrender.com/api/health) → the message on screen. After idle, the first request takes up to a minute |
 | Kakao or Google sign-in fails | The APK's signing key is not registered; use email sign-up |
-| "아직 서버에서 지원하지 않아요" (not supported by the server yet) | The feature needs 0.21.0 (step 8) |
+| "아직 서버에서 지원하지 않아요" (not supported by the server yet) | The server is older than 0.21.0: check [`/api/health`](https://justintime-api.onrender.com/api/health), or `devServerHost` in `APP/local.properties` points at an older local server |
 | The "이후 일정 모두" option doesn't appear | The server reports a version below 0.21.0 (`/api/health`) |
 | Times are 9 hours off | The emulator time zone (step 4) |
 | Alarm doesn't ring or doesn't open full screen | The alarm is in the future and registered (me › 알림·권한, or `adb shell dumpsys alarm` and look for `com.swpp.wakeup`) → time zone → notification and full-screen permissions → volume |
@@ -372,9 +377,11 @@ Logs contain locations; don't share them.
 
 ## Known limitations and todos
 
-**Waiting for the deploy.** `back-iter4` (server 0.21.0) is merged into `front-iter4` but not into
-`main`, so Render still serves 0.20.0. Until then the shared server doesn't have recurring-event
-scope, login lock, inquiries, learning reset, the alarm-control API or the 해요체 texts.
+**Deployed during the UAT week.** `back-iter4` (server 0.21.0) was merged into `main` (`a175b4d`)
+on 11-16 at 15:46 KST, the day of the first UAT session, and Render served 0.21.0 when checked that
+evening. The
+plan had been 11-19, after the second session, so the two sessions may have run against
+different server versions; the Wiki's Testing page records the version for each session.
 
 **App connections still open** (from the backend's answer of 11-15):
 
@@ -397,8 +404,8 @@ choosing home (H2-9), the route bar legend and color sheet (H2-10), and the rema
 wording in older screens (H2-1). The map zoom (A4, a pinch can still jump up to three levels) and
 the grey travelled path on the trip map (A5) are also open.
 
-**CI.** The device integration job of CI run 94 (`main` `d296ce4`) failed; the backend, contract
-and app unit jobs passed. Run locally on this snapshot, 55 of the 56 device tests pass and one
+**CI.** The device integration job of CI runs 94 (`main` `d296ce4`) and 95 (`main` `a175b4d`)
+failed; the backend, contract and app unit jobs passed. Run locally on this snapshot, 55 of the 56 device tests pass and one
 fails: `SignupScreenTest` "서버가 닉네임을 거절하면 … 고치면 칸의 이유가 사라진다" (line 202) — after the
 nickname is edited, the server's reason "쓸 수 없는 닉네임이에요" (this nickname can't be used) is
 still under the field. CI's log needs a sign-in to read, so that this is the same failure is
@@ -408,8 +415,8 @@ likely but not confirmed. Whether the screen or the test is wrong is not decided
 a real Sunday, and the `qa/demo/run.py` UI runner of Iteration 2 against the new tab layout. The
 UAT results of 11-16 and 11-18 will be added to the Wiki.
 
-**Next (Iteration 5)** — finish the alarm-control connection and the open HE items, deploy 0.21.0,
-fix what the UAT finds, split `HomeViewModel` (ViewModel coverage is still 7.1%), design-pattern
+**Next (Iteration 5)** — finish the alarm-control connection and the open HE items, fix what the
+UAT finds, split `HomeViewModel` (ViewModel coverage is still 7.1%), design-pattern
 refactoring, then alpha and beta testing.
 
 ---
