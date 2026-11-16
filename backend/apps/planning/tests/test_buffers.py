@@ -368,9 +368,12 @@ class TestReport:
         assert item["reason"] == BufferAdjustment.Reason.LATE_MORE_THAN_PROMISED
         assert item["adjusted_at"] == reports._iso(row.created_at)
         assert item["reason_text"] == (
-            "최근 6번 중 3번 늦었음. 알람이 약속한 정시 확률로는 0.3번 정도였음. "
-            "늦은 시간의 중앙값 4분을 보고 버퍼를 10분에서 14분으로 늘림."
+            "최근 6번 중 3번 늦었어요. 알람이 약속한 확률대로라면 늦는 날은 0.3번 정도였어요. "
+            "늦은 시간이 보통 4분이라 여유 시간을 10분에서 14분으로 늘렸어요."
         )
+        # 앱이 그대로 보이는 문장이다. 안쪽 낱말을 쓰지 않는다(BE-R1 T-3).
+        for word in ("버퍼", "중앙값", "정시 확률로는"):
+            assert word not in item["reason_text"]
 
     def test_shrink_reason(self, user):
         row = BufferAdjustment.objects.create(
@@ -379,10 +382,12 @@ class TestReport:
             expected_late=0.25, mean_slack_minutes=13.4, tightest_slack_minutes=10.4,
         )
 
-        assert buffers.reason_text(row) == (
-            "최근 5번 모두 계획한 도착 시각보다 먼저 도착했음(가장 빠듯했을 때도 10분 일찍 도착). "
-            "버퍼를 10분에서 8분으로 줄임."
+        text = buffers.reason_text(row)
+        assert text == (
+            "최근 5번 모두 계획한 도착 시각보다 먼저 도착했고, 가장 빠듯했던 날도 10분 일찍 도착했어요. "
+            "그래서 여유 시간을 10분에서 8분으로 줄였어요."
         )
+        assert "버퍼" not in text and "요(" not in text
 
     def test_other_weeks_do_not_show_the_adjustment(self, user):
         adjusted(user, minutes=14, days_ago=14)

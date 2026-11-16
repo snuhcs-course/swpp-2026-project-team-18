@@ -13,8 +13,9 @@ from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.db.models import Count
+from django.utils import timezone
 
-from .models import EmailCode, Profile, SavedPlace, SocialAccount, User
+from .models import EmailCode, LoginAttempt, Profile, SavedPlace, SocialAccount, User
 
 
 class ProfileForm(forms.ModelForm):
@@ -152,6 +153,13 @@ class ProfileAdmin(admin.ModelAdmin):
             },
         ),
         ("실험", {"fields": ("shadow_started_at",)}),
+        (
+            "첫 실행 안내",
+            {
+                "fields": ("intro_seen_at", "coachmark_seen_at"),
+                "description": "비우면 그 계정의 다음 가입·홈 화면에서 안내(코치마크)가 다시 뜬다.",
+            },
+        ),
     )
 
     def get_queryset(self, request):
@@ -225,6 +233,31 @@ class SavedPlaceAdmin(admin.ModelAdmin):
     )
     list_select_related = ("user",)
     ordering = ("-created_at", "-id")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+# Partly AI-generated (Claude)
+@admin.register(LoginAttempt)
+class LoginAttemptAdmin(admin.ModelAdmin):
+    """로그인 실패 기록(BE-A3). 보기만 한다. **행을 지우면 그 이메일의 잠금이 바로 풀린다.**
+
+    사용자가 "잠겼다" 고 문의하면 여기서 지워 준다. 손으로 고치면 횟수 규칙이 꼬이므로 수정은 막는다.
+    """
+
+    list_display = ("email", "failures", "locked_until", "is_locked", "last_attempt_at")
+    search_fields = ("email",)
+    fields = ("email", "failures", "locked_until", "last_attempt_at")
+    readonly_fields = fields
+    ordering = ("-last_attempt_at", "-id")
+
+    @admin.display(description="잠김", boolean=True)
+    def is_locked(self, obj):
+        return obj.locked_until is not None and obj.locked_until > timezone.now()
 
     def has_add_permission(self, request):
         return False

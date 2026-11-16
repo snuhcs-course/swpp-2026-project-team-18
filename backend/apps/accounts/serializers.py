@@ -5,17 +5,25 @@ back-spec.md 5.1 인증. 요청·응답은 snake_case JSON 이다.
 
 from __future__ import annotations
 
+import math
+from datetime import timedelta
+
 from django.contrib.auth import password_validation
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
-from rest_framework import serializers
+from rest_framework import exceptions, serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 # 집도 출발지다. 일정의 `origin_*` 과 같은 범위 규칙을 써야 한다.
 from apps.events.geo import in_service_area
 
+from . import login_lock
 from .models import Profile, User
+
+# 앱(`AuthRepository.login`)은 401 에서 이 문구를 그대로 보인다(문자열을 비교하지는 않는다).
+# 다른 새 문구와 같은 해요체다(iter4 A3-6). code `authentication_failed` · 본문 모양은 그대로다.
+LOGIN_FAILED_MESSAGE = "이메일 또는 비밀번호가 맞지 않아요."
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -124,6 +132,50 @@ class PasswordCheckSerializer(serializers.Serializer):
     )
 
 
+# Partly AI-generated (Claude)
+class LoginFailed(exceptions.AuthenticationFailed):
+    """틀린 이메일·비밀번호. 전과 같은 401 `authentication_failed` 에 `details.remaining_attempts` 를 더한다."""
+
+    default_detail = LOGIN_FAILED_MESSAGE
+
+    def __init__(self, remaining: int):
+        super().__init__(LOGIN_FAILED_MESSAGE)
+        # `common.errors` 가 `details` 에 그대로(숫자로) 싣는다.
+        self.extra_details = {"remaining_attempts": remaining}
+
+
+class AccountLocked(exceptions.APIException):
+    """잠긴 이메일. 비밀번호가 맞아도 423 `account_locked` + `Retry-After`.
+
+    429 가 아니라 423 인 이유 — 429 는 이미 스로틀(`throttled`, IP·사용자 단위 "요청이 많음")에 쓴다.
+    앱의 다른 화면은 429 를 코드와 관계없이 "요청이 많음" 으로 바꾼다(`AuthRepository.passwordFlowMessage`).
+    로그인을 그 규칙에 태우면 잠금 해제 시각이 사라진다. 지금 앱의 로그인은 상태 코드와 관계없이
+    `error.message` 를 보이므로 423 도 아래 문구가 그대로 뜬다. 근거는 `docs/iter4/server-login-lock.md`.
+    """
+
+    status_code = 423
+    default_code = "account_locked"
+    default_detail = "비밀번호를 여러 번 틀려서 잠시 로그인할 수 없어요."
+
+    def __init__(self, attempt: login_lock.Attempt):
+        now = timezone.now()
+        seconds = attempt.retry_after_seconds(now)
+        minutes = max(1, math.ceil(seconds / 60))
+        super().__init__(
+            f"비밀번호를 {login_lock.max_failures()}번 틀려서 로그인할 수 없어요. "
+            f"{minutes}분 뒤에 다시 해 주세요. 비밀번호를 재설정하면 바로 풀려요."
+        )
+        # 초 단위로 올림한다. 내리면 앱이 그 시각에 다시 눌러도 1초 모자라 또 잠김이 뜬다.
+        locked_until = attempt.locked_until
+        if locked_until.microsecond:
+            locked_until = (locked_until + timedelta(seconds=1)).replace(microsecond=0)
+        self.wait = seconds  # DRF 가 `Retry-After` 헤더로 싣는다
+        self.extra_details = {
+            "locked_until": serializers.DateTimeField().to_representation(locked_until),
+            "retry_after_seconds": seconds,
+        }
+
+
 class LoginSerializer(TokenObtainPairSerializer):
     """이메일·비밀번호 로그인.
 
@@ -135,7 +187,7 @@ class LoginSerializer(TokenObtainPairSerializer):
     """
 
     default_error_messages = {
-        "no_active_account": "이메일 또는 비밀번호가 올바르지 않다.",
+        "no_active_account": LOGIN_FAILED_MESSAGE,
     }
 
     def validate(self, attrs):
@@ -155,9 +207,21 @@ class LoginSerializer(TokenObtainPairSerializer):
         """
         field = self.username_field  # USERNAME_FIELD 가 email 이다
         if isinstance(attrs.get(field), str):
-            attrs[field] = attrs[field].strip().lower()
+            attrs[field] = login_lock.normalize(attrs[field])
 
-        data = super().validate(attrs)
+        # 연속 5번 틀리면 15분 잠금(iter4 BE-A3). 시도를 먼저 센 뒤 비밀번호를 본다 — 이유는
+        # `login_lock` 문서. 없는 이메일도 같은 길을 탄다(계정이 있는지 드러나지 않게).
+        email = attrs[field]
+        attempt = login_lock.begin(email)
+        if attempt.was_locked:
+            raise AccountLocked(attempt)
+        try:
+            data = super().validate(attrs)
+        except exceptions.AuthenticationFailed:
+            if attempt.locked_until is not None:
+                raise AccountLocked(attempt) from None
+            raise LoginFailed(attempt.remaining) from None
+        login_lock.succeed(email)
         data["user"] = UserSerializer(self.user).data
         return data
 
@@ -182,6 +246,9 @@ class ProfileSerializer(serializers.ModelSerializer):
             "onboarding_prep_min",
             "shadow_started_at",
             "timezone",
+            # 첫 실행 안내 · 홈 코치마크를 본 시각(iter4 BE-H4). `null` 을 보내면 지운다.
+            "intro_seen_at",
+            "coachmark_seen_at",
         )
         read_only_fields = ("shadow_started_at",)
         extra_kwargs = {
@@ -192,12 +259,18 @@ class ProfileSerializer(serializers.ModelSerializer):
         return obj.home_lat is not None and obj.home_lng is not None
 
     def validate(self, attrs):
+        # 집 좌표를 보낸 PATCH 만 본다(BE-H4 리뷰 H4-2). 전에는 안내를 본 시각만 보내도 저장된 집을
+        # 다시 검사해서, 예전 규칙으로 국외 집이 저장된 계정은 안내를 닫을 때마다 400 을 받았다.
+        # (Partly AI-generated (Claude))
+        if "home_lat" not in attrs and "home_lng" not in attrs:
+            return attrs
+
         # 부분 수정이므로 인스턴스의 현재 값과 합쳐서 판단한다.
         lat = attrs.get("home_lat", getattr(self.instance, "home_lat", None))
         lng = attrs.get("home_lng", getattr(self.instance, "home_lng", None))
         if (lat is None) != (lng is None):
             raise serializers.ValidationError(
-                {"home_lat": "집 위도와 경도는 함께 설정해야 한다."}
+                {"home_lat": "집 위도와 경도는 함께 설정해야 해요."}
             )
 
         # **범위 검증이 없었다.** `home_lat=999, home_lng=999` 가 200 으로
@@ -207,14 +280,28 @@ class ProfileSerializer(serializers.ModelSerializer):
         # 일정의 `origin_*` 과 같은 규칙을 쓴다 — 집도 출발지이므로 다를 이유가 없다.
         if lat is not None and lng is not None:
             if not (-90 <= lat <= 90):
-                raise serializers.ValidationError({"home_lat": "위도 범위를 벗어났다."})
+                raise serializers.ValidationError({"home_lat": "위도 범위를 벗어났어요."})
             if not (-180 <= lng <= 180):
-                raise serializers.ValidationError({"home_lng": "경도 범위를 벗어났다."})
+                raise serializers.ValidationError({"home_lng": "경도 범위를 벗어났어요."})
             if not in_service_area(lat, lng):
                 raise serializers.ValidationError(
-                    {"home_lat": "국내 좌표만 집으로 설정할 수 있다."}
+                    {"home_lat": "국내 좌표만 집으로 설정할 수 있어요."}
                 )
         return attrs
+
+    def update(self, instance, validated_data):
+        """보낸 칸만 저장한다(`update_fields`, BE-H4 리뷰 H4-1).
+
+        `ModelSerializer.update` 는 `instance.save()` 로 모든 칸을 쓴다. gunicorn 워커 둘이 같은
+        프로필을 거의 동시에 고치면(안내 닫기 PATCH 와 집 변경, 첫 실행 안내와 코치마크 PATCH) 늦게
+        끝난 쪽이 먼저 읽은 옛 값으로 다른 칸을 되돌렸다. 행 잠금은 `ProfileView` 가 한다.
+        (Partly AI-generated (Claude))
+        """
+        for name, value in validated_data.items():
+            setattr(instance, name, value)
+        if validated_data:
+            instance.save(update_fields=list(validated_data))
+        return instance
 
 
 class LogoutSerializer(serializers.Serializer):

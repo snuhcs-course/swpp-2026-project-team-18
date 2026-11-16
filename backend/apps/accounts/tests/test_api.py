@@ -310,6 +310,41 @@ class TestLogin:
             assert res.status_code == 200, f"{typed} 로 로그인 실패"
 
 
+class TestProfileSerializerSavesOnlySentFields:
+    """BE-H4 리뷰 H4-1. 먼저 읽은(오래된) 인스턴스로 저장해도 보내지 않은 칸을 되돌리지 않는다.
+
+    gunicorn 워커 둘이 같은 프로필을 거의 동시에 고치는 경우다. (Partly AI-generated (Claude))
+    """
+
+    SEEN = "2026-11-11T04:12:30.512Z"
+
+    def save(self, instance, data):
+        from apps.accounts.serializers import ProfileSerializer
+
+        serializer = ProfileSerializer(instance, data=data, partial=True)
+        assert serializer.is_valid(), serializer.errors
+        return serializer.save()
+
+    def test_stale_instance_keeps_a_newer_home(self, user):
+        stale = Profile.objects.get(user=user)
+        Profile.objects.filter(user=user).update(
+            home_lat=37.4842, home_lng=126.9297, onboarding_prep_min=40
+        )
+        self.save(stale, {"intro_seen_at": self.SEEN})
+        fresh = Profile.objects.get(user=user)
+        assert (fresh.home_lat, fresh.home_lng, fresh.onboarding_prep_min) == (37.4842, 126.9297, 40)
+        assert fresh.intro_seen_at is not None
+
+    def test_intro_and_coachmark_saves_do_not_clear_each_other(self, user):
+        a = Profile.objects.get(user=user)
+        b = Profile.objects.get(user=user)
+        self.save(a, {"intro_seen_at": self.SEEN})
+        self.save(b, {"coachmark_seen_at": self.SEEN})
+        fresh = Profile.objects.get(user=user)
+        assert fresh.intro_seen_at is not None
+        assert fresh.coachmark_seen_at is not None
+
+
 class TestProfileCoordinateValidation:
     """**이 클래스가 이 파일의 핵심이다.**
 

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from django.db import transaction
 from rest_framework.generics import RetrieveUpdateAPIView
 from rest_framework.response import Response
 
@@ -28,14 +29,23 @@ class ProfileView(RetrieveUpdateAPIView):
         return self.request.user.profile
 
     def update(self, request, *args, **kwargs):
-        profile = self.get_object()
-        before = (profile.home_lat, profile.home_lng, profile.onboarding_prep_min)
+        # 프로필 행을 잠그고 다시 읽은 다음 고친다(BE-H4 리뷰 H4-1). 같은 사용자의 다른 요청(다른
+        # gunicorn 워커의 PATCH, 저장한 집 `make-default`)과 읽기-쓰기가 겹치지 않는다. 저장은
+        # 보낸 칸만 한다(`ProfileSerializer.update`). 다시 계산은 잠금을 푼 뒤에 한다 — 카카오를
+        # 부르는 동안 잠그지 않게. (Partly AI-generated (Claude))
+        with transaction.atomic():
+            profile = Profile.objects.select_for_update().get(user=request.user)
+            before = (profile.home_lat, profile.home_lng, profile.onboarding_prep_min)
 
-        serializer = self.get_serializer(profile, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        profile = serializer.save()
+            serializer = self.get_serializer(profile, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            profile = serializer.save()
+        # `request.user.profile` 캐시도 새 값으로 맞춘다(다시 계산이 이것을 읽는다).
+        request.user.profile = profile
 
         after = (profile.home_lat, profile.home_lng, profile.onboarding_prep_min)
+        # 안내를 본 시각(`intro_seen_at`·`coachmark_seen_at`, BE-H4)·τ·시간대만 바꾼 PATCH 는 다시 계산하지
+        # 않는다(`recomputed_plans: 0`). 앱이 안내를 닫을 때마다 부른다. (Partly AI-generated (Claude))
 
         recomputed = 0
         if before != after:

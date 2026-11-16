@@ -105,6 +105,8 @@ THROTTLED_PATHS = {
     "/api/auth/social/kakao": "제공자 공개키 조회·서명 검증 (Partly AI-generated (Claude))",
     "/api/auth/me/social/kakao": "제공자 공개키 조회·서명 검증",
     "/api/auth/logout": "인증 없는 쓰기(취소 기록)",
+    # 이메일별 잠금(423)과 별개로 IP 단위(iter4 A3-2). 여러 이메일을 돌며 맞혀 보는 것을 막는다.
+    "/api/auth/token": "비밀번호 추측 · 실패 기록 행 폭주 방지 (Partly AI-generated (Claude))",
     "/api/auth/password/reset": "메일 발송 (IP·이메일별)",
     "/api/auth/password/reset/confirm": "6자리 코드 추측 방지",
     "/api/auth/me/password": "현재 비밀번호 추측 방지",
@@ -112,6 +114,9 @@ THROTTLED_PATHS = {
     "/api/auth/me/email/verify/confirm": "6자리 코드 추측 방지",
     "/api/observations/batch": "쓰기 폭주 방지",
     "/api/routines/observations/batch": "쓰기 폭주 방지",
+    # Partly AI-generated (Claude)
+    "/api/auth/me/learning/reset": "기록 전체 삭제 · 알람 재계산 반복 방지",
+    "/api/support/inquiries": "문의 한 건마다 팀 메일 발송",
 }
 
 

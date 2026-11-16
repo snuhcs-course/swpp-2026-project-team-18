@@ -4,7 +4,7 @@
     python manage.py purge_logs                     # 설정값(요청 30일, LLM 90일)
     python manage.py purge_logs --request-days 14   # DB 가 300 MB 를 넘으면
 
-API 요청 기록과 LLM 호출만 지운다. 학습 재료는 건드리지 않는다. 미들웨어가 프로세스마다
+API 요청 기록과 LLM 호출, 효력이 없는 로그인 실패 기록(잠금 시간이 지난 행)만 지운다. 학습 재료는 건드리지 않는다. 미들웨어가 프로세스마다
 하루 한 번 같은 일을 하므로(`retention.maybe_purge`) 평소에는 손으로 돌릴 일이 없다.
 """
 
@@ -16,7 +16,7 @@ from apps.common import retention
 
 
 class Command(BaseCommand):
-    help = "보존 기간이 지난 API 요청 기록·LLM 호출 기록을 지운다."
+    help = "보존 기간이 지난 API 요청 기록·LLM 호출 기록·로그인 실패 기록을 지운다."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -38,5 +38,6 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             f"API 요청 기록 {deleted['api_request_log']}건 · "
-            f"LLM 호출 {deleted['llm_call']}건 삭제"
+            f"LLM 호출 {deleted['llm_call']}건 · "
+            f"로그인 실패 기록 {deleted['login_attempt']}건 삭제"
         )

@@ -81,7 +81,8 @@ class AlarmPlanSerializer(serializers.Serializer):
     """
 
     status = serializers.CharField()
-    status_label = serializers.CharField(source="get_status_display")
+    # 앱이 그대로 보이는 해요체 문구(`AlarmPlan.STATUS_LABELS`). 분기는 `status` 로 한다.
+    status_label = serializers.CharField()
     alarm_at = serializers.DateTimeField(allow_null=True)
     depart_by = serializers.DateTimeField(allow_null=True)
     arrive_at = serializers.DateTimeField(allow_null=True)
@@ -181,6 +182,17 @@ class AlarmPlanSerializer(serializers.Serializer):
 
     def get_travel_time_source(self, obj) -> str:
         return obj.travel_source or ""
+
+    def to_representation(self, obj):
+        # Partly AI-generated (Claude)
+        # 알람 확인 · 직접 정한 시각 · "바꿀까요" 제안(iter4 H2-3). 위 필드는 그대로 두고 덧붙인다.
+        # `alarm_at` 은 계속 추천 시각이고, 울릴 시각은 `effective_alarm_at` 이다.
+        # 계약: docs/iter4/server-alarm-control.md
+        from apps.planning.alarm_control import present
+
+        data = super().to_representation(obj)
+        data.update(present(obj))
+        return data
 
 
 class EventSerializer(serializers.ModelSerializer):
@@ -417,9 +429,23 @@ class EventWriteSerializer(serializers.ModelSerializer):
         부분 수정(PATCH)에서는 저장된 값과 합쳐서 판단한다.
         """
         if self.instance is not None and "repeat_weekdays" in attrs:
-            raise serializers.ValidationError({"repeat_weekdays": "반복 규칙은 생성할 때 설정하며, 수정은 현재 회차에만 적용된다."})
+            # 요일은 반복 회차를 "이후 일정 모두"(`scope: following`)로 고칠 때만 바꾼다(iter4 A2).
+            # 하루치만 고치는 "이 일정만" 에는 뜻이 없고, 단일 일정을 반복으로 바꾸는 길은 아직 없다.
+            # 뷰가 `context["scope"]` 를 넣는다. (Partly AI-generated (Claude))
+            following = (
+                self.context.get("scope") == "following" and self.instance.recurrence_id is not None
+            )
+            if not following:
+                raise serializers.ValidationError(
+                    {"repeat_weekdays": "반복 요일은 반복 일정을 '이후 일정 모두'로 고칠 때만 바꿀 수 있어요."}
+                )
+            if not attrs["repeat_weekdays"]:
+                raise serializers.ValidationError(
+                    {"repeat_weekdays": "요일을 하나 이상 골라 주세요. 반복을 끝내려면 '이후 일정 모두 삭제'를 쓰면 돼요."}
+                )
+            attrs["repeat_weekdays"] = sorted(set(attrs["repeat_weekdays"]))
         days = attrs.get("repeat_weekdays")
-        if days:
+        if days and self.instance is None:
             if attrs["start_at"] < timezone.now():
                 raise serializers.ValidationError({"start_at": "반복 시작은 현재 이후로 설정해야 한다."})
             attrs["repeat_weekdays"] = sorted(set(days))
@@ -544,18 +570,27 @@ class EventWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         # 요청 id 는 만들 때 한 번만 정한다. 수정 요청에 실려 와도 바꾸지 않는다.
         validated_data.pop("client_request_id", None)
+        # 새 요일은 뷰가 규칙에 쓴다(`recurrence.split_following`). 회차의 필드가 아니다.
+        validated_data.pop("repeat_weekdays", None)
+        # 바뀐 필드만 쓴다(iter4 리뷰 A2-2). 모든 열을 쓰면 읽은 뒤 다른 요청이 바꾼 값
+        # (반복 규칙 `recurrence`·`recurrence_date`, "안 감" 등)을 읽어 둔 옛 값으로 되돌린다.
+        # (Partly AI-generated (Claude))
+        changed = {"updated_at"}
         if "place" in validated_data:
             instance.place = self._resolve_place(validated_data.pop("place"))
+            changed.add("place")
         if "tag_key" in validated_data:
             key = validated_data.pop("tag_key")
             instance.tag = (
                 EventTag.objects.visible_to(instance.user).filter(key=key).first()
                 if key else None
             )
+            changed.add("tag")
 
         for field, value in validated_data.items():
             setattr(instance, field, value)
-        instance.save()
+            changed.add(field)
+        instance.save(update_fields=sorted(changed))
         return instance
 
     def _resolve_place(self, place_data) -> Place | None:

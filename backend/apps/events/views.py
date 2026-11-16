@@ -15,10 +15,11 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.core.cache import cache, caches
 from django.db import IntegrityError, transaction
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
@@ -26,13 +27,13 @@ from rest_framework.views import APIView
 
 from apps.observations import alarm_logs
 from apps.observations.models import TripReroute, current_route_key
-from apps.planning import live_switch
+from apps.planning import alarm_control, live_switch
 from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
 from apps.routing import clients
 
-from . import edits, recurrence, route_preference
-from .alarms import reset_alarm_overrides, user_timezone
+from . import edits, recurrence, route_history, route_preference
+from .alarms import reset_alarm_overrides
 from .geo import validate_route_distance
 from .models import Event, EventTag
 from .serializers import (
@@ -152,46 +153,123 @@ class EventDetailView(_UserScopedMixin, RetrieveUpdateDestroyAPIView):
         return EventSerializer
 
     def update(self, request, *args, **kwargs):
-        """일정을 고치고 알람 계획을 다시 만든다. 규칙은 `edits` 와 docs/iter3/event-edit-api.md."""
+        """일정을 고치고 알람 계획을 다시 만든다. 규칙은 `edits` 와 docs/iter3/event-edit-api.md.
+
+        본문의 `scope`(iter4 A2, docs/iter4/server-recurrence-scope.md): 없음·`"this"` 는 그 회차만,
+        `"following"` 은 반복 회차면 이 회차부터 규칙을 바꾼다. 반복이 아니면 `"this"` 와 같다.
+        """
+        scope = _scope(request.data.get("scope") if hasattr(request.data, "get") else None)
         instance = self.get_object()
+        if scope == recurrence.FOLLOWING and instance.recurrence_id is not None:
+            event, write = self._update_following(request, instance)
+        else:
+            event, write = self._update_one(request, instance, scope)
+        event.refresh_from_db()
+        return Response(EventSerializer(event, context=self.get_serializer_context()).data)
+
+    def _write(self, request, instance, scope):
+        context = {**self.get_serializer_context(), "scope": scope}
+        write = EventWriteSerializer(instance, data=request.data, partial=True, context=context)
+        write.is_valid(raise_exception=True)
+        return write
+
+    def _update_one(self, request, instance, scope):
+        """한 일정(또는 한 회차)을 고친다.
+
+        반복 회차는 규칙과 회차를 잠근 한 트랜잭션에서 한다(리뷰 A2-2). 잠그지 않으면 동시에 온
+        "이후 일정 모두" 가 이 회차를 새 규칙으로 옮긴 뒤 이 요청이 예전 규칙으로 되돌려 저장해,
+        새 규칙이 같은 날 회차를 하나 더 만든다(같은 날 일정 둘 → 알람 둘). 저장도 바뀐 필드만 쓴다
+        (`EventWriteSerializer.update`). (Partly AI-generated (Claude))
+        """
+        if instance.recurrence_id is None:
+            event, write, alarm_before = self._save_one(request, instance, scope)
+        else:
+            try:
+                with transaction.atomic():
+                    _, locked = recurrence.lock_occurrence(instance)
+                    event, write, alarm_before = self._save_one(request, locked, scope)
+            except recurrence.ScopeError as exc:
+                raise ValidationError({exc.field: exc.message}) from exc
+            except Event.DoesNotExist as exc:
+                raise Http404 from exc
+        self._log_switch(write, event, alarm_before)
+        return event, write
+
+    def _save_one(self, request, instance, scope):
         # Partly AI-generated (Claude) — 저장 전 값. 스위치가 바뀌었는지 기록할 때 쓴다.
         alarm_before = instance.alarm_enabled
         start_before = instance.start_at
         # 계획 입력. 무엇이 실제로 바뀌었는지 보고 카카오를 부를지 정한다.
         inputs_before = edits.plan_inputs(instance)
-        write = self.get_serializer(instance, data=request.data, partial=True)
-        write.is_valid(raise_exception=True)
+        write = self._write(request, instance, scope)
         event = write.save()
 
-        if not recurrence.in_window(event):
-            # A late switch must preserve the historical plan. Only a moved date clears it.
-            if event.start_at != start_before:
-                plan = getattr(event, "alarm_plan", None)
-                if plan is not None:
-                    plan.delete()
-        else:
-            # 제목·켬/끔만 바꾸면 기존 계획을 쓰고, 시각·τ 만 바꾸면 경로를 다시 조회하지 않는다.
-            edits.replan(event, inputs_before, start_before=start_before)
+        # 창 밖이면 지난 계획을 남기고, 다른 날로 옮기면 옮겨 간 날의 수동 켬/끔을 돌린다(BE-25).
+        recurrence.replan_after_edit(event, inputs_before, start_before=start_before)
+        self._preset_chosen(write, event)
+        return event, write, alarm_before
 
-        # Partly AI-generated (Claude)
-        # 다른 날로 옮기면 옮겨 간 날의 수동 켬/끔을 자동으로 돌린다. 그날에 일정이 새로
-        # 들어온 것이라 생성과 같은 규칙이다(BE-25). 이 일정의 선택은 그대로 둔다.
-        tz = user_timezone(event.user)
-        if event.start_at.astimezone(tz).date() != start_before.astimezone(tz).date():
+    def _update_following(self, request, instance):
+        """반복 회차를 "이후 일정 모두" 로 고친다. 묶음의 규칙 잠금 안에서 한 트랜잭션으로 한다.
+
+        **이 회차의 지금 값(따로 고친 값 포함) + 바뀐 필드** 를 저장하고, 그 값으로 반복을 나눈다
+        (`recurrence.split_following`, 리뷰 A2-4: 사용자가 본 값이 새 반복의 값이다).
+        (Partly AI-generated (Claude))
+        """
+        try:
             with transaction.atomic():
-                reset_alarm_overrides(event)
-        event.refresh_from_db()
+                rule, event, family = recurrence.lock_series(instance)
+                alarm_before = event.alarm_enabled
+                start_before = event.start_at
+                inputs_before = edits.plan_inputs(event)
+                write = self._write(request, event, recurrence.FOLLOWING)
+                event = write.save()
+                weekdays = write.validated_data.get("repeat_weekdays") or rule.weekdays
+                recurrence.split_following(
+                    event, family=family, weekdays=weekdays, before=inputs_before,
+                    start_before=start_before, sent=frozenset(write.validated_data),
+                )
+                self._preset_chosen(write, event)
+        except recurrence.ScopeError as exc:
+            raise ValidationError({exc.field: exc.message}) from exc
+        except Event.DoesNotExist as exc:
+            raise Http404 from exc
+        self._log_switch(write, event, alarm_before)
+        return event, write
 
+    @staticmethod
+    def _preset_chosen(write, event):
+        # 빠르게 고르기 세 칸(τ)을 골랐으면 직접 정한 시각과 제안을 지운다(H2-3). 확인으로 치지는 않는다 —
+        # 지금 앱은 확인을 보내지 않으므로, 확인은 새 시트의 `POST …/alarm/confirm` 으로만 한다(리뷰 H3-4).
+        # "이후 일정 모두" 로 골랐을 때도 이 회차에 같은 규칙을 쓴다. 덮어쓴 이후 회차는
+        # `split_following` 이 직접 정한 시각·확인을 모두 지운다(리뷰 A2-7). (Partly AI-generated (Claude))
+        if "tau_override" in write.validated_data and recurrence.in_window(event):
+            alarm_control.preset_chosen(event)
+
+    @staticmethod
+    def _log_switch(write, event, alarm_before):
         # Partly AI-generated (Claude)
         # 알람 스위치를 바꿨으면 알람 기록에 남긴다(db-schema.md A3, source=server).
         # 실패해도 수정은 그대로 성공한다(`record_switch` 가 오류를 삼킨다).
         if "alarm_enabled" in write.validated_data:
+            event.refresh_from_db()
             alarm_logs.record_switch(event, alarm_before, event.alarm_enabled)
 
-        return Response(EventSerializer(event, context=self.get_serializer_context()).data)
-
-    def perform_destroy(self, instance):
-        recurrence.delete_occurrence(instance)
+    def destroy(self, request, *args, **kwargs):
+        """`?scope=following` 이면 이 회차부터 반복을 끝낸다(iter4 A2). 반복이 아니면 그냥 지운다."""
+        scope = _scope(request.query_params.get("scope"))
+        instance = self.get_object()
+        try:
+            if scope == recurrence.FOLLOWING:
+                recurrence.delete_following(instance)
+            else:
+                recurrence.delete_occurrence(instance)
+        except recurrence.ScopeError as exc:
+            # 잠그는 동안 다른 수정과 계속 겹쳤다. PATCH 와 같은 400 이다(리뷰 A2-9).
+            raise ValidationError({exc.field: exc.message}) from exc
+        except Event.DoesNotExist as exc:
+            raise Http404 from exc
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class EventRecomputeView(_UserScopedMixin, APIView):
@@ -510,6 +588,16 @@ def _minute(value):
     태운다. 그 비용은 사용자에게 보이지 않으면서 하루 한도를 말린다.
     """
     return None if value is None else value.replace(second=0, microsecond=0)
+
+
+def _scope(raw) -> str:
+    """수정·삭제 범위(iter4 A2). 없으면 `this`. 모르는 값은 400 이다 — 조용히 `this` 로 받으면
+    사용자는 이후 일정을 모두 바꿨다고 믿는다. (Partly AI-generated (Claude))"""
+    if raw is None or raw == "":
+        return recurrence.THIS
+    if not isinstance(raw, str) or raw not in recurrence.SCOPES:
+        raise ValidationError({"scope": "scope 는 this 또는 following 이어야 해요."})
+    return raw
 
 
 def _error(code: str, message: str, http_status: int) -> Response:
@@ -916,6 +1004,33 @@ class PlaceReverseView(APIView):
 
         result, degraded = clients.coord_to_address(lat, lng)
         return Response({"result": result, "degraded": degraded})
+
+
+class RouteHistoryView(APIView):
+    """GET /api/routes/history?sort=recent|frequent&limit=5 — 다녀온 경로 목록(iter4).
+
+    "최근 이동 경로"(`recent`, 기본) · "가장 자주 이용한 경로"(`frequent`) 버튼에 쓴다. 외부 API 를
+    부르지 않는다(DB 만 읽는다). 규칙은 `route_history`, 계약은 `docs/iter4/server-route-history.md`.
+    (Partly AI-generated (Claude))
+    """
+
+    def get(self, request):
+        sort = request.query_params.get("sort") or route_history.RECENT
+        if sort not in route_history.SORTS:
+            raise ValidationError({"sort": "sort 는 recent 또는 frequent 여야 해요."})
+        raw_limit = request.query_params.get("limit")
+        limit = route_history.DEFAULT_LIMIT
+        if raw_limit not in (None, ""):
+            try:
+                limit = int(raw_limit)
+            except (TypeError, ValueError):
+                limit = 0
+            if not 1 <= limit <= route_history.MAX_LIMIT:
+                raise ValidationError(
+                    {"limit": f"limit 는 1~{route_history.MAX_LIMIT} 사이 숫자여야 해요."}
+                )
+        results = route_history.history(request.user, sort=sort, limit=limit)
+        return Response({"sort": sort, "days": route_history.HISTORY_DAYS, "results": results})
 
 
 class RouteCandidateView(APIView):

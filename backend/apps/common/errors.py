@@ -20,9 +20,11 @@ from rest_framework.views import set_rollback
 
 logger = logging.getLogger(__name__)
 
-FALLBACK_MESSAGE = "요청을 처리할 수 없다."
+# 앱이 그대로 보여 주는 문구라 해요체다(BE-R1 리뷰 T-7). 앱은 `code` 로 분기하고 문구는 비교하지 않는다.
+# (Partly AI-generated (Claude))
+FALLBACK_MESSAGE = "요청을 처리하지 못했어요."
 # 예상하지 못한 오류(500). 앱은 이 문구를 그대로 보여 주고 입력을 지우지 않는다.
-SERVER_ERROR_MESSAGE = "서버에 문제가 생겨 처리하지 못했다. 잠시 뒤 다시 시도할 것."
+SERVER_ERROR_MESSAGE = "서버에 문제가 생겨 처리하지 못했어요. 잠시 뒤 다시 시도해 주세요."
 
 
 def _stringify(value):
@@ -94,6 +96,12 @@ def api_exception_handler(exc, context):
     else:
         message = str(detail)
         details = {}
+
+    # 예외가 `extra_details`(dict)를 들고 있으면 문자열로 바꾸지 않고 `details` 에 더한다. 숫자·시각을
+    # 그대로 싣는다(로그인 잠금의 `remaining_attempts` 등, iter4 BE-A3). (Partly AI-generated (Claude))
+    extra = getattr(exc, "extra_details", None)
+    if isinstance(extra, dict):
+        details = {**details, **extra}
 
     response.data = {
         "error": {

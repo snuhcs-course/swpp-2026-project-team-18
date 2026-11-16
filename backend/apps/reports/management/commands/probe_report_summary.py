@@ -55,7 +55,7 @@ SAMPLE_FACTS = {
     "on_time_change_pp": 23,
     "alarm_events": 7,
     "unobserved_with_alarm": 1,
-    "suggestion": "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 볼 것.",
+    "suggestion": "이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 보거나 몇 분 일찍 나서 보세요.",
 }
 
 

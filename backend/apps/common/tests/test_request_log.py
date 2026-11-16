@@ -387,7 +387,7 @@ class TestRetention:
         old_req, new_req = self.request_row(31), self.request_row(29)
         old_llm, new_llm = self.llm_row(user, 91), self.llm_row(user, 89)
 
-        assert retention.purge() == {"api_request_log": 1, "llm_call": 1}
+        assert retention.purge() == {"api_request_log": 1, "llm_call": 1, "login_attempt": 0}
         assert list(ApiRequestLog.objects.values_list("pk", flat=True)) == [new_req.pk]
         assert list(LlmCall.objects.values_list("pk", flat=True)) == [new_llm.pk]
         assert old_req.pk != new_req.pk and old_llm.pk != new_llm.pk
@@ -404,7 +404,11 @@ class TestRetention:
     def test_zero_days_keeps_everything(self, user):
         self.request_row(400)
         self.llm_row(user, 400)
-        assert retention.purge(request_days=0, llm_days=0) == {"api_request_log": 0, "llm_call": 0}
+        assert retention.purge(request_days=0, llm_days=0) == {
+            "api_request_log": 0,
+            "llm_call": 0,
+            "login_attempt": 0,
+        }
         assert ApiRequestLog.objects.count() == LlmCall.objects.count() == 1
 
     def test_settings_choose_the_window(self, settings):

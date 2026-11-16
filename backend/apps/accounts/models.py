@@ -132,6 +132,21 @@ class Profile(models.Model):
     shadow_started_at = models.DateTimeField("섀도 시작 시각", null=True, blank=True)
     timezone = models.CharField("시간대", max_length=40, default="Asia/Seoul")
 
+    # 첫 실행 안내 · 홈 코치마크를 계정이 본 시각(iter4 BE-H4, `docs/iter4/server-first-run-guide.md`).
+    # 앱이 닫을 때 PATCH 로 채운다. 알람 계산은 이 값을 보지 않는다. (Partly AI-generated (Claude))
+    intro_seen_at = models.DateTimeField(
+        "첫 실행 안내 본 시각", null=True, blank=True, default=None, db_default=None
+    )
+    coachmark_seen_at = models.DateTimeField(
+        "홈 코치마크 본 시각", null=True, blank=True, default=None, db_default=None
+    )
+    # 마지막으로 쌓인 기록을 초기화한 시각(iter4 BE-RESET, `docs/iter4/server-learning-reset.md`).
+    # 이보다 이른 관측 · 알람 기록 · 블록 기록이 오프라인 큐에서 늦게 올라오면 받기만 하고 버린다.
+    # 밤 학습도 이 값으로 초기화와 겹친 사용자를 다시 맞춘다. (Partly AI-generated (Claude))
+    learning_reset_at = models.DateTimeField(
+        "기록 초기화 시각", null=True, blank=True, default=None, db_default=None
+    )
+
     class Meta:
         db_table = "accounts_profile"
         verbose_name = "프로필"
@@ -293,3 +308,34 @@ class SavedPlace(models.Model):
 
     def __str__(self):
         return f"{self.label} ({self.user_id})"
+
+
+# Partly AI-generated (Claude)
+class LoginAttempt(models.Model):
+    """이메일 로그인의 연속 실패 횟수와 잠금(iter4 BE-A3, `apps.accounts.login_lock`).
+
+    사용자 FK 가 아니라 **정규화한 이메일**로 센다. 없는 이메일도 같은 규칙으로 세야 계정이
+    있는지 드러나지 않는다. 캐시가 아니라 DB 에 두는 이유는 배포 캐시(`/tmp` 파일 캐시)가
+    재시작하면 사라지기 때문이다 — 그러면 재배포가 잠금을 풀어 버린다.
+
+    로그인에 성공하거나 비밀번호 재설정을 마치면 행을 지운다. admin 에서 행을 지우면 잠금이 풀린다.
+    효력이 없는 행(잠금 시간이 지난 행)은 하루 한 번 보존 정리(`apps.common.retention`)가 지운다.
+    254자를 넘는 이메일은 `sha256:<hex>` 로 줄여 넣는다(`login_lock.key`).
+    """
+
+    email = models.CharField("이메일(정규화)", max_length=254, unique=True)
+    failures = models.PositiveSmallIntegerField("연속 실패", default=0, db_default=0)
+    locked_until = models.DateTimeField(
+        "잠금 해제 시각", null=True, blank=True, default=None, db_default=None
+    )
+    last_attempt_at = models.DateTimeField(
+        "마지막 시도", null=True, blank=True, default=None, db_default=None
+    )
+
+    class Meta:
+        db_table = "accounts_login_attempt"
+        verbose_name = "로그인 실패 기록"
+        verbose_name_plural = "로그인 실패 기록"
+
+    def __str__(self):
+        return f"{self.email} ({self.failures}회)"

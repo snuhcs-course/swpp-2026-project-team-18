@@ -54,6 +54,8 @@ INSTALLED_APPS = [
     # 공통 오류 형식·헬스 체크 + API 요청 기록(`ApiRequestLog`, db-schema.md A4).
     # 모델이 생기면서 앱으로 등록한다. (Partly AI-generated (Claude))
     "apps.common",
+    # 앱 안 문의하기(iter4 BE-H4b). 문의를 저장하고 팀 메일로 알린다. (Partly AI-generated (Claude))
+    "apps.support",
 ]
 
 MIDDLEWARE = [
@@ -202,6 +204,11 @@ REST_FRAMEWORK = {
         # 글자마다 호출하는 비로그인 검사. 빠른 입력을 허용하되 IP별로 제한한다.
         "password_check": "600/min",
         "register": "10/hour",
+        # 이메일·비밀번호 로그인(iter4 A3-2). 인증 없이 받으므로 IP 별로 센다. 성공·실패를 합친다.
+        # 이메일별 잠금(5번)과 별개로, 한 IP 가 여러 이메일을 돌며 맞혀 보는 것을 막는다. 정상 사용은
+        # 하루 몇 번이고, 시연처럼 여러 사람이 한 와이파이(같은 공인 IP)로 로그인해도 넉넉하게 둔다.
+        # (Partly AI-generated (Claude))
+        "login": "60/hour",
         # 소셜 로그인·연결. 토큰마다 서명 검증을 하고 처음 보는 키면 제공자에 공개키를 묻는다.
         # 정상 사용은 하루 몇 번이다. 가입(10/hour)보다 넉넉한 것은 로그인도 같은 통이라서다.
         "social": "60/hour",
@@ -220,6 +227,11 @@ REST_FRAMEWORK = {
         # 앞으로의 알람을 다시 섞는다(카카오 0회). 목록 조회(GET)는 세지 않는다.
         # (Partly AI-generated (Claude))
         "event_tag": "60/hour",
+        # 쌓인 기록 초기화(iter4 BE-RESET). 지우고 앞으로의 알람을 다시 섞는다(카카오 0회).
+        # 사람이 확인 창을 거쳐 누르는 것이라 시간당 5번이면 충분하다. (Partly AI-generated (Claude))
+        "learning_reset": "5/hour",
+        # 앱 안 문의하기(iter4 BE-H4b). 한 건마다 팀 메일이 나간다. 사용자당 시간당 5건.
+        "support_inquiry": "5/hour",
     },
     # back-spec.md 5절 공통 에러 포맷 {"error": {code, message, details}}
     "EXCEPTION_HANDLER": "apps.common.errors.api_exception_handler",
@@ -228,7 +240,15 @@ REST_FRAMEWORK = {
 }
 
 # ---------------------------------------------------------------------------
-# 메일 — 비밀번호 재설정·이메일 인증 코드(apps/accounts/codes.py)
+# 로그인 잠금(iter4 BE-A3, apps/accounts/login_lock.py) (Partly AI-generated (Claude))
+# ---------------------------------------------------------------------------
+# 같은 이메일로 연속 [LOGIN_MAX_FAILURES] 번 틀리면 [LOGIN_LOCK_SECONDS] 초 동안 맞는 비밀번호도
+# 받지 않는다. 마지막 시도에서 같은 시간이 지나면 실패 횟수도 잊는다.
+LOGIN_MAX_FAILURES = 5
+LOGIN_LOCK_SECONDS = 15 * 60
+
+# ---------------------------------------------------------------------------
+# 메일 —비밀번호 재설정·이메일 인증 코드(apps/accounts/codes.py)
 # ---------------------------------------------------------------------------
 # `EMAIL_HOST` 가 있으면 SMTP, 없으면 콘솔(로그에 찍힌다). Render 에는 SMTP 값을 환경 변수로
 # 둔다. 값은 저장소에 적지 않는다. `EMAIL_BACKEND` 로 직접 고를 수도 있다.
@@ -247,6 +267,17 @@ EMAIL_BACKEND = (os.getenv("EMAIL_BACKEND") or "").strip() or (
 DEFAULT_FROM_EMAIL = (os.getenv("DEFAULT_FROM_EMAIL") or "").strip() or (
     EMAIL_HOST_USER or "JustInTime <no-reply@justintime.invalid>"
 )
+
+# 앱 안 문의(iter4 BE-H4b, `apps/support`)를 알릴 팀 주소. 쉼표로 여러 개. 비어 있으면 메일은
+# 건너뛰고 문의만 저장한다(관리 화면에서 본다). 값은 저장소에 적지 않는다. (Partly AI-generated (Claude))
+SUPPORT_INBOX_EMAILS = [
+    address.strip()
+    for address in (os.getenv("SUPPORT_INBOX_EMAILS") or "").split(",")
+    if address.strip()
+]
+# 문의 알림 메일을 응답 뒤 데몬 스레드에서 보낸다(SMTP 가 느려도 요청이 기다리지 않는다).
+# 테스트는 끄고 커밋 직후 같은 스레드에서 보낸다. (Partly AI-generated (Claude))
+SUPPORT_NOTIFY_IN_BACKGROUND = True
 
 from datetime import timedelta  # noqa: E402
 
@@ -288,6 +319,15 @@ STATIC_MAP_DAILY_UPSTREAM_LIMIT = int(
 # FileBasedCache로 덮어쓴다.
 CACHES = {
     "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "jit-default",
+    },
+    # DRF 스로틀 기록(모든 `SimpleRateThrottle` — `apps.common.apps` 가 붙인다). 배포에서는 지도
+    # 이미지 캐시(300장 상한)와 나눈다 — 섞이면 이미지가 들어올 때 "5/hour" 기록이 퇴출돼 한도가
+    # 0 부터 다시 센다(iter4 X-1, prod.py). 개발·테스트는 `default` 와 **같은 LocMem 저장소**
+    # (`LOCATION` 이 같다)라서 스로틀 테스트의 `cache.clear()` 가 그대로 기록을 비운다.
+    # (Partly AI-generated (Claude))
+    "throttle": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "jit-default",
     },
@@ -439,4 +479,4 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 # 버전만으로 판별하지 않는 것이 더 확실하다. `scripts/check_deployed.py` 와
 # 같은 방식으로 **새 엔드포인트의 404 여부**를 보면 버전을 올리는 것을
 # 잊었더라도 드러난다 — 인증이 필요한 경로는 배포됐으면 401, 미배포면 404 다.
-APP_VERSION = "0.20.0"
+APP_VERSION = "0.21.0"
