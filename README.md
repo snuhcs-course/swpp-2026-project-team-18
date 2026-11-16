@@ -1,491 +1,442 @@
-# JustInTime
-
-[![CI](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/workflows/ci.yml/badge.svg)](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/workflows/ci.yml)
+# JustInTime — Iteration 4 Demo
 
 **An alarm you set by arrival confidence, not by clock time.**
 
-A normal alarm makes you pick "7:40". But what you actually want to decide is not a
-time — it is *how sure you want to be that you won't be late*. JustInTime works
-backwards from when your event starts:
+You pick how sure you want to be of arriving on time — τ, e.g. 0.90 for a class, 0.99
+for an exam — and the app works backwards from the event:
 
 ```
-alarm = event start − safety buffer (5 min to start) − τ-quantile of (prep + travel)
+alarm = event start − safety buffer − τ-quantile of (prep + travel)
 ```
 
-τ is the confidence you ask for — 0.90 for a class, 0.99 for an exam or a train. The
-app **shows the reasoning behind the number**: what Kakao estimated (a route of
-20 min, 4.6 km, one transfer), what is fixed or learned (the buffer), and what comes from
-observations. The buffer only covers risk the model misses: nightly training raises it when
-you are late more often than the promised on-time probability, and lowers it when you never
-needed it (4–15 min).
+Iteration 4 is **hardening and the user acceptance test**. The heuristic evaluation of 11-04 said
+the app was hard to read, talked like a developer, gave no help and gave no control over the
+alarm. This iteration rebuilt the app's structure around four tabs, added a first-run guide and
+help, replaced the clock dials, opened the alarm time to the user, and built the server side for
+user-set alarms, confirmation and change proposals, login lock, recurring-event scope, learning
+reset and in-app inquiries.
 
 | | |
 | --- | --- |
-| Version | **0.14.0** — source `APP_VERSION` and app `versionName`; deployment status is tracked separately |
-| Shared server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
-| Stack | Android · Kotlin · Jetpack Compose — Django · DRF · Neon Postgres — Render |
+| Iteration | 4 · 2026-11-07 – 2026-11-20 (Hardening and UAT) |
+| Snapshot | `front-iter4` at [`a52d9b2`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/a52d9b2) (2026-11-16): the app of `main` [`d296ce4`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/d296ce4) plus the server of `back-iter4` [`86a1293`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/86a1293). This branch adds only this README |
+| Version | Server **0.21.0** on this branch (`APP_VERSION`) — **not deployed yet**; the shared server still runs 0.20.0 until `back-iter4` is merged into `main` · app `versionName` 0.14.0 (not bumped this iteration) |
+| Server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
+| Demo video | Not recorded yet — the planned scenes are listed [below](#demo-video) |
+| UAT | Sheet submitted 11-13; sessions in class on 11-16 and 11-18. Results go to the Wiki's [Testing Documentation, Iteration 4](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter4%E2%80%90testing) |
 
-![Figma board](docs/figma-board-2026-10-18.png)
+Everything needed to run the demo is on this page. The full project README (architecture, API,
+deployment, configuration) is on
+[`main`](https://github.com/snuhcs-course/swpp-2026-project-team-18/blob/main/README.md); the
+earlier demos are on
+[`iteration-1-demo`](https://github.com/snuhcs-course/swpp-2026-project-team-18/tree/iteration-1-demo),
+[`iteration-2-demo`](https://github.com/snuhcs-course/swpp-2026-project-team-18/tree/iteration-2-demo)
+and [`iteration-3-demo`](https://github.com/snuhcs-course/swpp-2026-project-team-18/tree/iteration-3-demo).
 
-> The Figma board as of 2026-10-18: 18 screens plus state variants, in four flow bands —
-> A sign-in · onboarding · settings, B home · alarm · replanning, C add event · route ·
-> place, D reports. Each band reads left to right; a screen's states sit directly below
-> it. The multi-user screens (⑩ room, ⑪ member detail) are parked on the right and are
-> out of scope for now. The board is ahead of the app in places — the lists below
-> describe the app.
+**Contents:** [Demo video](#demo-video) · [What the demo shows](#what-the-demo-shows) ·
+[Major progress in Iteration 4](#major-progress-in-iteration-4) ·
+[Heuristic evaluation: issue → change → result](#heuristic-evaluation-issue--change--result) ·
+[Tech stack and environment](#tech-stack-and-environment) · [How to run](#how-to-run) ·
+[Known limitations and todos](#known-limitations-and-todos) · [Verification](#verification)
 
 ---
 
-## Features
+## Demo video
 
-What the MVP supports:
+**Not recorded yet.** The video is recorded on a physical phone before the iteration closes and
+goes into `demo-video/` on this branch, like
+[`iteration-3-demo`](https://github.com/snuhcs-course/swpp-2026-project-team-18/tree/iteration-3-demo#demo-video).
+Planned scenes, in the order the heuristic evaluation ranked the problems:
 
-1. **Sign up and onboard** — email with a server-checked password, or Kakao/Google; terms consent, home address, prep time (5–240 minutes); sign-up allows 10 attempts per IP per hour
-2. **Add an event** — title, time, category (which sets τ), destination (Kakao place
-   search, a pick on the map, or your current home), origin (home by default), and a route chosen from
-   grouped Kakao candidates: transit, walk, bicycle or car, with server-written guidance.
-   Up to five transit options, one per axis (fastest, fewest transfers, least walking,
-   subway only, bus only, mixed, cheapest) and then routes with lines not shown yet; routes that
-   differ only by bus number are one option listing every bus
-   ([docs/iter3/transit-candidates.md](docs/iter3/transit-candidates.md)).
-   [Weekly repeats](docs/iter2/weekly-recurrence.md) show seven days ahead, with an independent alarm for each occurrence.
-   A saved event can be edited later from its decision screen (only changed fields are sent,
-   [docs/iter3/event-edit-api.md](docs/iter3/event-edit-api.md)); leaving from somewhere other
-   than home asks whether to include prep time
-   ([docs/iter3/include-prep-api.md](docs/iter3/include-prep-api.md)). An event you will not go
-   to can be marked "안 감" so its alarm stays off and it is left out of learning and reports
-3. **See the alarm and why** — the server computes it; the decision screen breaks out
-   prep, travel and buffer, each labeled as estimated, observed, learned or fixed, with a progress bar and
-   a route map. A faster alternative from the origin is drawn on the map
-4. **Wake up reliably** — `setAlarmClock` (survives Doze, shows the system next-alarm
-   icon), full screen over the lock screen, re-registered after reboot, app update and
-   clock changes, 5-minute snooze. Home switches save to the server; only enabled alarms
-   for the next 7 days are registered. If a force-stop cleared an alarm, home says so and
-   offers to start tracking
-5. **Log the morning** — dismissing the alarm starts one-tap-per-block prep logging and
-   GPS trip tracking
-6. **Commute** — departure and arrival are detected on the device (arrival = the first
-   valid location within 100 m of the destination). While you are moving, the app fetches the
-   fastest route from your current position every minute and draws it in purple; the
-   progress bar shows a live ETA and colors the lateness outlook. If the current route will
-   make you late and another one arrives earlier, a heads-up notification and a card offer to
-   switch for this trip only (not while riding, not within 5 minutes of arrival). If GPS misses
-   the arrival, "도착했어요" on the card or the tracking notification records it
-7. **Choose risk** — server-modeled safe/normal/gamble choices update the alarm and device schedule. Missing uncertainty has an explicit empty state
-8. **Learn** — departures, arrivals and prep blocks are uploaded, queued on disk while
-   offline. Prep observations feed the next calculation directly, using only mornings within
-   0.5–1.5× of the prep time you set; GitHub Actions schedules
-   travel correction (your walking speed, time of day, then the route itself —
-   [docs/iter3/travel-factors.md](docs/iter3/travel-factors.md)) and safety buffer training
-   daily at 23:17 KST, then recalculates the next
-   7 days of alarms without a new route lookup ([status and guide](docs/iter2/daily-training.md))
-9. **Review** — a weekly report with a short written summary, a per-day detail (plan
-   vs actual, cause of lateness) and calibration: did you arrive as often as τ promised?
+| Scene | What it should show | Runs on |
+| --- | --- | --- |
+| 1 · First run | Sign-up with the nickname rule shown under the field, the prep-time screen with the wheel, the three intro pages, then the coachmark over the new Home | Shared server |
+| 2 · Home and tabs | The next-alarm card (time, on-time probability chip, "1시간 28분 뒤 · 9:00 일정"), today and tomorrow listed in full, then the 이동 (trip), 리포트 (report) and 내 정보 (me) tabs | Shared server |
+| 3 · Change the alarm | [시각 바꾸기] (change time) on the next-alarm card opens the sheet: the three presets (여유 있게 · 보통 · 빠듯하게), the wheel previewing the on-time probability, then saving a preset and the snackbar | Shared server |
+| 4 · Help | ? → help with search, the "정시 도착 확률이 뭐예요?" (what is the on-time probability) sheet with ten circles, and the contact sheet | Shared server (sending needs 0.21.0) |
+| 5 · Recurring event | Editing one occurrence of a weekly event, saving with "이후 일정 모두" (this and following) and changing the weekdays | Local 0.21.0 server ([step 8](#8-trying-the-iteration-4-server-features-locally)) |
+| 6 · Weekly report | The report tab opening on this week: "N번 중 M번 제시간" with weekday dots, then expected vs actual on-time and prep bars | Shared server, an account with past trips |
 
-Also: Seoul subway and bus real-time arrivals on the route (express, last train,
-congestion), device calendar import, an offline cache and background sync (plans every
-6 hours, routes every 15 minutes for events within 3 hours).
+---
 
-### Why the probability is blank
+## What the demo shows
 
-An on-time probability needs a **distribution** of travel times. Kakao returns a single
-`totalTime` with no variance, so the spread comes from observed trips — route
-corrections learned from departures and arrivals across users. Until that evidence exists,
-the home screen hides the probability and the detail screen explains why it cannot yet be calculated. Filling in an arbitrary 90% would
-make the screen look finished while being untrue.
+Iteration 1 built one flow end to end; Iteration 2 made it trustworthy; Iteration 3 let the user
+correct the plan and made the learning personal. **Iteration 4 makes the app usable by people who
+did not build it**: one main fact per screen, plain Korean, a guide on first run and help on
+every tab, a time picker that doesn't fight the user, and a way to change the alarm.
+
+### Features implemented (whole app, as of this snapshot)
+
+**New in Iteration 4** is in bold. "Needs 0.21.0" means the app part is in this snapshot but the
+server part is only on `back-iter4`, not yet on the shared server.
+
+| # | Feature | What to look for |
+| --- | --- | --- |
+| 1 | Navigate | **Four bottom tabs — 홈 (home) · 이동 (trip) · 리포트 (report) · 내 정보 (me) — each keeping its own back stack.** The alarm screen and sign-in stay outside the tabs |
+| 2 | Sign up and sign in | Email with a server-checked password, Kakao and Google; forgot and change password; optional email verification. **Nickname rule under the field ("다른 사람에게 보이는 이름이에요 · 20자까지", live character count, the server's reason under the field and in a red card).** Login lock after 5 wrong passwords: server only (needs 0.21.0), the app still shows the server's message only |
+| 3 | First run | Home address, **prep time on a redesigned screen (−/+ 5 min, quick chips, a wheel; no prefilled value)**, optional calendar link, **then three intro pages and a one-time coachmark on Home**. Whether the guide was seen is **stored on the account** (falls back to the phone on a 0.20.0 server) |
+| 4 | Home | **Redrawn: today's date, one large next-alarm card (alarm time, on-time probability chip or a grey "정시 도착 확률 계산 전" (not computed yet) chip, time to go, place and title), then today and tomorrow in full; each row is start · title · place · alarm time with its switch; a floating [+ 일정 추가] (add event).** The weekly report, calendar and routine cards moved to the report and me tabs |
+| 5 | Add and edit an event | Title, date, **time on a scrolling wheel (1-minute steps) instead of the clock dial**, event type (**rename and delete your own types**), destination, origin, weekly repeat, route. **Recurring events: [저장] asks "이 일정만 / 이후 일정 모두" (this one / this and following) and weekdays can change for "following" — needs 0.21.0; on 0.20.0 only that occurrence changes and its weekdays can't be edited, as before** |
+| 6 | Change the alarm | **A bottom sheet from Home's [시각 바꾸기] and the decision screen: three presets 여유 있게 · 보통 · 빠듯하게 (safe .97 · normal .90 · tight .65) and a wheel in 5-minute steps that previews the on-time probability from the travel distribution. Saving a time other than the presets, confirming the alarm and the "바꿀까요" (change it?) proposals are on the server (needs 0.21.0) but not connected in the app yet.** The old risk-choice screen ⑤ was removed |
+| 7 | See the alarm and why | Prep, travel and safety buffer add up to start − alarm, each labeled; the route map and alternatives. **An i button opens "정시 도착 확률이 뭐예요?" (what is the on-time probability) — ten circles, "10번 중 N번" rounded down** |
+| 8 | Trip tab | **Before leaving: the next trip (leave time, time left, arrival) with the on-time chip and a vertical "가는 길" (the way) timeline of the planned legs; empty states for no trip today, no events, and no route chosen.** While moving it links to the trip progress card of Iteration 3 (reroute when late, "도착했어요") |
+| 9 | Wake up reliably | Full screen over the lock screen, 5-min snooze, re-registered after reboot and app update; only the first alarm of each day on by default |
+| 10 | Learn | Nightly training at 23:17 KST: safety buffer, prep from GPS departures, walking speed and time-of-day factors, route correction; the next 7 days recomputed. **"기록 초기화" (reset my records) in me › account clears the learned data and keeps events, homes and routines — needs 0.21.0 (on 0.20.0 the app says the server doesn't support it yet)** |
+| 11 | Report tab | **Opens on this week: "이번 주 N번 중 M번 제시간" (on time M of N) with weekday dots, late days → the day detail ⑨, expected vs actual on-time probability with a verdict, expected vs actual prep time; ‹ › move between weeks.** **A Sunday 12:00 notification "이번 주 리포트가 나왔어요" (this week's report is ready) opens it; switch in me › 알림·권한** |
+| 12 | Me tab | **Profile, then 내 아침 (my morning: homes, prep time, routine) · 일정 (calendar) · 도움 (help) · 계정 (account) rows with their current values; 알림·권한 (notifications and permissions) shows notifications, full-screen alarm and precise location, with what is off in orange and a shortcut to the setting** |
+| 13 | Help | **Help screen with eight questions, search, and [처음 안내 다시 보기] (replay the intro); a ? on Home, trip and report; [문의하기] (contact us) sends a message with a reply email — needs 0.21.0** |
+
+The app's text is Korean. Server texts (weekly summary, buffer reasons, plan status, errors) are
+rewritten in the polite 해요체 on 0.21.0; the app shows them as they come.
+
+---
+
+## Major progress in Iteration 4
+
+Compared with [`iteration-3-demo`](https://github.com/snuhcs-course/swpp-2026-project-team-18/tree/iteration-3-demo)
+(`5dc51ef`, 2026-11-05): 48 commits without merges. Jinho Kim is the PM, Sooyeon Kim did the app
+and Junha Park the server (roles rotate each iteration). The 15 commits of 11-06 – 11-07 are the
+last Iteration 3 app fixes (merged into `main` on 11-07 as `86ba415`). The frontend's requests to
+the backend are [`docs/iter4/*-api.md`](docs/iter4/); the backend's contracts are
+`docs/iter4/server-*.md`.
+
+**Usability (app, on `main`)**
+
+- Four-tab navigation with one back stack per tab; Home, trip, report and me redrawn from the
+  Figma section "피드백 적용" (HE redesign, 35 frames)
+- First-run intro (three pages), Home coachmark, help with search, on-time probability sheet,
+  contact sheet; the guide state kept on the account
+- A scrolling time wheel and a duration wheel replace the Material clock dials; the prep-time
+  screen redrawn
+- The alarm-time sheet replaces the risk-choice screen; probability colors follow one rule
+  everywhere (below 70% red before the target is checked)
+- Nickname errors under the field; own event types renamed and deleted; recurring-event scope
+  sheet; learning reset dialog; Sunday report notification
+
+**Server (`back-iter4`, 0.21.0, not deployed)**
+
+| Request | What the server does | Contract |
+| --- | --- | --- |
+| BE-H3a/b/d/e | A user-set alarm time that survives recomputes (`PUT`/`DELETE events/{id}/alarm/time`), confirmation (`POST …/alarm/confirm`), "바꿀까요" change proposals with accept/reject and an `answer_by` deadline, the recommended preset in risk-options; the alarm to ring is `effective_alarm_at` | [`server-alarm-control.md`](docs/iter4/server-alarm-control.md) |
+| BE-A2 | Edit or delete a recurring event for "this" or "this and following", with weekday changes | [`server-recurrence-scope.md`](docs/iter4/server-recurrence-scope.md) |
+| BE-A3 | 5 wrong passwords lock email sign-in for 15 minutes (423 `account_locked`, `remaining_attempts`) | [`server-login-lock.md`](docs/iter4/server-login-lock.md) |
+| BE-H4 | Intro and coachmark "seen" times on the profile | [`server-first-run-guide.md`](docs/iter4/server-first-run-guide.md) |
+| BE-H4b | In-app inquiry: stored, mailed to the team after commit, 5 per hour | [`server-inquiry.md`](docs/iter4/server-inquiry.md) |
+| BE-RESET | Reset the learned data in one transaction and recompute | [`server-learning-reset.md`](docs/iter4/server-learning-reset.md) |
+| BE-H9, BE-R1 | Saved-place names may not be "집" or repeat; every server text in 해요체, LLM summaries that aren't are rejected | [`server-saved-place-labels-and-report-tone.md`](docs/iter4/server-saved-place-labels-and-report-tone.md) |
+| (team) | Recent and most-used routes of the last 90 days, for a future quick-add (`GET routes/history`) | [`server-route-history.md`](docs/iter4/server-route-history.md) |
+
+Each BE request above went through a review round on 11-15 before it was merged into `back-iter4`
+(the "review fixes" commits for A2, A3, H3, H4, H4b, H9, R1 and RESET).
+
+**Testing** (run locally on this snapshot on 2026-11-16, see [Verification](#verification))
+
+- Backend tests 1,795 → **2,298** (96.0% line coverage), app JVM tests 950 → **1,221**, device
+  tests 34 → **56** (55 pass, 1 fails), contract checks 241 passed · 34 skipped (no Kakao key) ·
+  0 failed
+- CI [run 94](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/runs/43795831229)
+  on `main` `d296ce4`: backend, contract and app unit jobs passed; **the device integration job
+  failed** (see [Known limitations](#known-limitations-and-todos))
+
+**PM work**
+
+- The heuristic evaluation sheets organized by theme with the code location of each finding, and
+  the Figma section "피드백 적용" with one redesigned frame per finding and 13 open decisions
+- The frontend's request list to the backend and the backend's answer (what the app still has to
+  connect), the UAT sheet (five stories, submitted 11-13), the Nov 9 meeting log
+
+---
+
+## Heuristic evaluation: issue → change → result
+
+The full table, with the unresolved items and why, is in section 7 of the Wiki's
+[Testing Documentation, Iteration 4](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter4%E2%80%90testing).
+Severity is the highest rating any evaluator gave (0–4).
+
+| Issue (severity) | Change | Result in this snapshot |
+| --- | --- | --- |
+| Too much on Home, nothing stands out (3) | Four tabs; Home shows one next-alarm card and a plain list | ✅ in the app |
+| Developer wording on screen (3) | Server texts in 해요체 (0.21.0); app texts rewritten on the new screens | 🚧 server done, older app screens still have some "~함" texts |
+| The computed alarm can't be changed or approved (3) | Alarm-time sheet with presets and a wheel; server user time, confirmation and proposals | 🚧 presets save; custom time, confirmation and proposals wait for the app connection |
+| No help or tutorial (2) | Intro, coachmark, help, i sheets, contact | ✅ in the app (sending an inquiry needs 0.21.0) |
+| The clock dial is hard to use (2) | Time and duration wheels | ✅ |
+| Buttons look like text (2) | Four button levels in Figma | ❌ not in the app yet |
+| Back only by the on-screen button (2) | Predictive back; fix the sign-up back gesture | ❌ not in the app yet |
+| Adding an event in a hurry takes too long (2) | An add sheet with three required fields; the route history API | ❌ app not started; server API done |
+| Choosing "집" by mistake; duplicate home names (1) | Undo after swapping to home; the server refuses duplicate names | 🚧 server done (0.21.0); app not started |
+| Route colors unclear (1) | Line names in the bar, a legend and a color sheet | ❌ not in the app yet |
+| Nickname error without a reason (1) | Rule and reason under the field | ✅ |
+
+---
+
+## Tech stack and environment
+
+Unchanged from Iteration 3 — no new libraries in the app or the server.
+
+| Part | Stack |
+| --- | --- |
+| App | Kotlin, Jetpack Compose (Material 3), Retrofit + OkHttp, Room, WorkManager, Google Play services Location, Kakao SDK and Credential Manager for sign-in, Android Keystore for tokens · minSdk 34, targetSdk 37 · AGP 9.3, Gradle 9.5 |
+| Server | Python 3.12, Django 5.2, Django REST Framework, SimpleJWT, gunicorn · Docker on Render (free plan, Singapore). New on 0.21.0: the `support` app (inquiries) and the `SUPPORT_INBOX_EMAILS` setting in `render.yaml` |
+| Database | Neon Postgres |
+| Scheduled jobs | GitHub Actions (`train-models.yml`: buffer, prep and travel training, then the 7-day recompute, daily at 23:17 KST) |
+| External APIs | Kakao (routes, place search, static maps, sign-in), Google sign-in, Seoul real-time subway and bus arrivals, an OpenAI-compatible LLM for the report summary, SMTP (Brevo) for password codes and inquiries — all called by the server only |
+
+Development and test environment this iteration:
+
+- **App:** Android Studio with its bundled JBR, Android SDK Platform 37
+- **Server:** Python 3.12; the server features were reviewed and fixed on `back-iter4` before the
+  merge into `front-iter4`
+- **Local verification of this snapshot:** Windows 11, Python 3.12, Android Studio's JBR, an
+  Android 36 emulator (`SWPP_APP`)
+- **CI:** GitHub Actions on Ubuntu; app integration tests on an API 34 emulator
+
+The design is in the Wiki's
+[Design Documentation](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter1%E2%80%90design)
+(v4.0 for Iteration 4) and the requirements in the
+[Requirements Specification](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter1%E2%80%90reqspec).
+
+---
+
+## How to run
+
+No backend setup is needed for most of the demo: every build talks to the shared server. Only
+the features marked "needs 0.21.0" need the local server of [step 8](#8-trying-the-iteration-4-server-features-locally)
+until `back-iter4` is deployed.
+
+### Quick start
+
+1. `git clone -b iteration-4-demo https://github.com/snuhcs-course/swpp-2026-project-team-18.git`
+2. In Android Studio, open the **`APP`** folder and wait for Gradle Sync.
+3. Start an emulator (Google Play image) or connect a phone, on Android 14 (API 34) or newer.
+4. Press **Run ▶**, allow notifications and precise location, then **sign up with an email**.
+   The intro and the Home coachmark appear once after sign-up.
+
+The first request after 15 idle minutes wakes the server and takes 30–60 seconds. Kakao and
+Google sign-in work only with an APK signed by a key registered in their consoles, so use email
+sign-up on your own build.
+
+### 1. Requirements
+
+- **Android Studio**, a recent version. Its bundled JDK (JBR) is what Gradle uses
+- **Android SDK Platform 37** (Android Studio offers it during the first sync; otherwise
+  **Tools → SDK Manager**)
+- An **emulator or phone with Android 14 (API 34) or newer**. Emulators need a **Google Play**
+  or **Google APIs** system image. On Apple Silicon, use an ARM64 image
+- Internet access
+
+### 2. Get the code
+
+```bash
+git clone -b iteration-4-demo https://github.com/snuhcs-course/swpp-2026-project-team-18.git
+cd swpp-2026-project-team-18
+```
+
+### 3. Build and install
+
+**Android Studio (recommended)**
+
+1. **File → Open** and choose the **`APP` folder** inside the repository, not the repository
+   root. Wait for Gradle Sync to finish.
+2. **Device Manager** → create a phone with an API 34+ Google Play image, and start it.
+3. Select the device and press **Run ▶**. JustInTime opens on the login screen.
+4. The Build output should show `[JustInTime] API=https://justintime-api.onrender.com/`. If it
+   shows another address, delete the `devServerHost=` line from `APP/local.properties`.
+
+**Terminal** — start an emulator or connect a phone first, then from the repository root:
+
+```bash
+# macOS
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export PATH="$ANDROID_HOME/platform-tools:$PATH"
+cd APP
+./gradlew installDebug
+adb shell am start -n com.swpp.wakeup/.ui.auth.LoginActivity
+```
+
+```powershell
+# Windows PowerShell
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:Path = "$env:ANDROID_HOME\platform-tools;$env:Path"
+cd APP
+.\gradlew.bat installDebug
+adb shell am start -n com.swpp.wakeup/.ui.auth.LoginActivity
+```
+
+With more than one device, add `-s <device-id>` to `adb` (`adb devices -l` lists them). The APK
+is written to `APP/app/build/outputs/apk/debug/app-debug.apk`. If an older JustInTime signed on
+another computer is installed, uninstall it first; events and settings come back after sign-in.
+
+### 4. Set up the emulator once
+
+```bash
+# Time zone. The default (GMT) puts every time 9 hours off
+adb shell cmd alarm set-timezone Asia/Seoul
+
+# Show the on-screen keyboard, needed to type Korean place names
+adb shell settings put secure show_ime_with_hard_keyboard 1
+```
+
+Then add a Korean keyboard in the emulator (Gboard → Languages → Add keyboard → 한국어).
+
+### 5. Permissions
+
+Allow **notifications** and **precise location** when asked ("while using the app" is enough).
+On Android 14 and newer, also allow **full-screen notifications** for the alarm to open over the
+lock screen; me › 알림·권한 shows all three and turns the missing one orange. From a terminal:
+
+```bash
+adb shell pm grant com.swpp.wakeup android.permission.POST_NOTIFICATIONS
+adb shell pm grant com.swpp.wakeup android.permission.ACCESS_FINE_LOCATION
+adb shell pm grant com.swpp.wakeup android.permission.ACCESS_COARSE_LOCATION
+adb shell pm grant com.swpp.wakeup android.permission.READ_CALENDAR
+adb shell appops set com.swpp.wakeup USE_FULL_SCREEN_INTENT allow
+```
+
+### 6. On a phone instead of an emulator
+
+- **USB**: Settings → About phone → tap *Build number* 7 times, turn on *USB debugging*, connect
+  and accept the prompt.
+- **Wireless** (Android 11+): same network, Developer options → *Wireless debugging* → *Pair
+  device with pairing code*, `adb pair <IP>:<pairing-port>`, then `adb connect <IP>:<port>`.
+  Campus Wi-Fi often blocks this; use USB instead.
+
+More on phones, including battery settings: [docs/device-setup.md](docs/device-setup.md).
+
+### 7. Trying the Iteration 4 features (shared server)
+
+- **Tabs**: the bar at the bottom; each tab keeps its own screen when you switch.
+- **First run again**: me › 도움 › "처음 안내 다시 보기" replays the intro and the coachmark.
+- **Change the alarm**: [시각 바꾸기] on Home's next-alarm card, or "지각 위험 바꾸기" on the
+  decision screen. Pick a preset and save; turn the wheel to see the probability change. A wheel
+  time that matches no preset can't be saved yet (needs the app connection to 0.21.0).
+- **On-time probability**: tap the probability chip on Home or the i on the decision screen. A
+  new account shows "정시 도착 확률 계산 전" until prep and travel records have a spread.
+- **Time wheel**: add an event and tap the start time; prep time in me › 준비 시간.
+- **Help and contact**: ? on Home, trip or report. [문의하기] on 0.20.0 answers "아직 앱에서 문의를
+  받을 수 없어요" (inquiries are not accepted yet) and keeps the text.
+- **Report**: the report tab opens on this week; ‹ goes back a week.
+- **Sunday notification**: me › 알림·권한 › "주간 리포트 알림"; it fires on Sundays at 12:00
+  (device time) and is skipped after 18:00.
+- **Getting the alarm in a few minutes**: set the start to about *now + prep + travel + buffer
+  (5 min for a new account) + 3–5 min*. Only the first alarm of the day rings by default.
+- **Moving the emulator**: ⋯ → Location; a Single point at home before dismissing the alarm, then
+  a Route to the destination at 1×, or `adb emu geo fix <longitude> <latitude>`.
+
+### 8. Trying the Iteration 4 server features locally
+
+Recurring-event scope, inquiries, learning reset and the server texts in 해요체 need server
+0.21.0, which is on this branch but not deployed. Run it on a **throwaway SQLite database** —
+`backend/.env` normally points at the team's shared Neon database, and migrating it from this
+branch before the team deploys would break the shared server.
+
+```bash
+cd backend
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements/dev.txt     # Windows: .venv\Scripts\python.exe
+export DATABASE_URL="sqlite:///$(pwd)/demo-iter4.sqlite3"     # PowerShell: $env:DATABASE_URL = "sqlite:///$((Get-Location) -replace '\\','/')/demo-iter4.sqlite3"
+export KAKAO_REST_API_KEY="<from the team>"                  # needed for route lookups
+.venv/bin/python manage.py migrate
+.venv/bin/python manage.py runserver 0.0.0.0:8000
+curl http://127.0.0.1:8000/api/health                        # "version": "0.21.0"
+```
+
+Then put `devServerHost=10.0.2.2` in `APP/local.properties` (emulator; a phone on the same network
+uses the computer's LAN address), build again, and sign up on the local server. Remove the line
+afterwards to go back to the shared server. Without a Kakao key the server starts, but adding an
+event can't look up a route.
+
+### 9. Troubleshooting
+
+| Problem | Check, in this order |
+| --- | --- |
+| Can't sign in | Server address (build output) → [`/api/health`](https://justintime-api.onrender.com/api/health) → the message on screen. After idle, the first request takes up to a minute |
+| Kakao or Google sign-in fails | The APK's signing key is not registered; use email sign-up |
+| "아직 서버에서 지원하지 않아요" (not supported by the server yet) | The feature needs 0.21.0 (step 8) |
+| The "이후 일정 모두" option doesn't appear | The server reports a version below 0.21.0 (`/api/health`) |
+| Times are 9 hours off | The emulator time zone (step 4) |
+| Alarm doesn't ring or doesn't open full screen | The alarm is in the future and registered (me › 알림·권한, or `adb shell dumpsys alarm` and look for `com.swpp.wakeup`) → time zone → notification and full-screen permissions → volume |
+| No trip recorded | Tracking starts only when you dismiss the alarm → precise location → enough GPS movement (step 7) |
+| Can't type Korean | On-screen keyboard setting and a Korean keyboard (step 4) |
+| Gradle Sync or build fails | SDK Platform 37 installed → Gradle JDK set to Android Studio's JBR |
+
+```bash
+adb logcat -s AlarmScheduler AlarmReceiver TripTrackingService TripObservationQueue
+```
+
+Logs contain locations; don't share them.
 
 ---
 
 ## Known limitations and todos
 
-**Partial**
+**Waiting for the deploy.** `back-iter4` (server 0.21.0) is merged into `front-iter4` but not into
+`main`, so Render still serves 0.20.0. Until then the shared server doesn't have recurring-event
+scope, login lock, inquiries, learning reset, the alarm-control API or the 해요체 texts.
 
-- On-time probability *value* — the pipeline is complete; the value waits for travel
-  variance evidence (above)
-- Replanning while moving ⑦ — colors, ETA, the live route, a switch suggestion when late,
-  the stops of the planned route and a one-line cause when late (a late start or a longer trip).
-  A reroute made from the notification does not update the stops card
-- Route choice — grouped candidates, a default from your past choice (`preferred_key`, else
-  the fastest) and guidance work. Four car variants (BE-8), arrival-time/operating-hour
-  routing (BE-11) and optional bicycle-road ratio (BE-14) remain
-- Weekly and detailed reports ⑧⑨ — built, including the wake panel (alarms fired, snoozes,
-  median time to dismiss, by weekday; hidden when the server sends no `wake`; a snoozed alarm
-  counts once). Sleep and per-weekday auto-adjustment panels are left out
-- More than one home — other homes (a family home, a dorm) are saved to the account
-  (`/api/saved-places/`; a device list is uploaded once with `bulk`) and offered first in the
-  origin search, with prep time included; an event from a saved home sends `origin_place_id`.
-  Known gap: a home added or deleted while that first upload is still waiting can be overwritten
-  ([docs/iter3/front-iter3.md](docs/iter3/front-iter3.md))
-- Sign-in with Kakao and Google — the app gets an ID token from the Kakao SDK or Credential
-  Manager and sends it to `POST /api/auth/social/{provider}`
-  ([docs/iter3/social-login-api.md](docs/iter3/social-login-api.md)); first-time accounts see
-  a terms screen, an email already used by another account gets a notice, and settings can
-  link or unlink either provider. It works only after each signing key is registered in the
-  consoles (Kakao key hash, Google Android client SHA-1) and the server has both keys
-  ([app guide](APP/README.md#소셜-로그인))
+**App connections still open** (from the backend's answer of 11-15):
 
-- Replanning before departure ⑥ — before the alarm, a faster route is offered from the server's
-  alternative; once the alarm is off and 10 minutes before leaving, at most two checks offer a
-  reroute for this trip; those checks send `context: "pre_departure"` to `routes/live`
-- Email account features — forgot password, change password, optional email verification in
-  settings, email format check, show/hide password and remembered email are built and the
-  reset and change flows were checked end to end against the local server; against an older
-  server the app shows a notice ([docs/iter3/backend-requests.md](docs/iter3/backend-requests.md))
-- Saving an event — a failed save shows per-field messages, keeps the input, offers a retry
-  with the same `client_request_id`, and asks whether to continue an unsaved draft (kept only
-  while the app process lives)
+- Alarm control (largest): register the device alarm at `effective_alarm_at`, save any wheel time
+  (`PUT …/alarm/time`), [추천 시각으로 되돌리기] (back to the recommended time), the
+  "확인 전 / 확인함" (not confirmed / confirmed) state and [이 시각으로 알람 맞추기] (set this
+  alarm), the "바꿀까요" card and heads-up notification with the `answer_by` deadline, and the
+  "추천" (recommended) preset from `recommended_key`
+- Login lock: a countdown with [로그인] disabled, and "N번 더 틀리면 15분 동안 잠겨요"
+- Saved-place names: the 409 duplicate and empty-name errors under the name field, checked before
+  saving with the server's rule
+- Inquiry: refuse a reply email longer than 254 characters
+- Learning reset: drop queued uploads older than `reset_at`
+- Route history: the "최근 이동 경로" (recent routes) and "가장 자주 이용한 경로" (most-used
+  routes) screens are not designed yet
 
-**Not started**
+**Heuristic evaluation items not started** — button levels (H2-6), predictive back and the
+sign-up back gesture (H2-7), the add-alarm sheet (H2-8), the event screen redraw with undo after
+choosing home (H2-9), the route bar legend and color sheet (H2-10), and the remaining 해요체
+wording in older screens (H2-1). The map zoom (A4, a pinch can still jump up to three levels) and
+the grey travelled path on the trip map (A5) are also open.
 
+**CI.** The device integration job of CI run 94 (`main` `d296ce4`) failed; the backend, contract
+and app unit jobs passed. Run locally on this snapshot, 55 of the 56 device tests pass and one
+fails: `SignupScreenTest` "서버가 닉네임을 거절하면 … 고치면 칸의 이유가 사라진다" (line 202) — after the
+nickname is edited, the server's reason "쓸 수 없는 닉네임이에요" (this nickname can't be used) is
+still under the field. CI's log needs a sign-in to read, so that this is the same failure is
+likely but not confirmed. Whether the screen or the test is wrong is not decided yet.
 
-- Group rooms ⑩⑪
-- Arbitrary τ entry in the app (risk presets already work), natural-language input, weather adjustment, push (FCM), bedtime suggestions
-- Sleep-time calculation (BE-22); managing (renaming, deleting) your own event tags
-- Refresh-token rotation on the server stays off until this app version is deployed: the app now
-  stores a rotated refresh token, so `JWT_ROTATE_REFRESH_TOKENS=1` can be set on Render after release
-  ([docs/iter3/token-security-api.md](docs/iter3/token-security-api.md))
-- Battery-optimization guidance
+**Not checked yet** — the new screens on a physical phone end to end, the Sunday notification on
+a real Sunday, and the `qa/demo/run.py` UI runner of Iteration 2 against the new tab layout. The
+UAT results of 11-16 and 11-18 will be added to the Wiki.
 
-**Runtime limitations** (route scope and previously identified recovery/map issues)
-
-1. Live/alternative routes compare within the selected mode. The candidate picker opens on the server's `preferred_key` (last choice for the same destination, else the most used mode) and falls back to `fastest_key`
-2. Static maps only have whole zoom levels: a pinch below about 1.34× (or above 0.75×) snaps back,
-   a larger one moves to the nearest level. When you let go, the map keeps what was on screen,
-   even if the previous tile is still loading
-
-Arrivals are kept on the device for three days and, after a reinstall or on another device,
-read back from the server's observations, so an arrived event stays arrived after the app
-restarts. If the system kills the tracking service in transit, it resumes in transit with the
-original departure time instead of waiting for a new departure.
-
----
-
-## Getting started
-
-### Run the app
-
-No backend setup is needed to try the app. The default build talks to the shared server
-(`jitApiBaseUrl` in [`APP/gradle.properties`](APP/gradle.properties)). A local
-`devServerHost` override takes precedence; remove that line and rebuild to use the shared server.
-See the [app run guide](APP/README.md) and [MVP demo checklist](docs/demo-checklist.md).
-
-- Android Studio with Android SDK 37 (the project uses AGP 9.3 and Gradle 9.5; Gradle
-  downloads the JDKs it needs)
-- An emulator or device running **Android 14 (API 34) or newer**
-
-```bash
-cd APP
-./gradlew assembleDebug        # Windows: .\gradlew.bat assembleDebug
-./gradlew installDebug
-```
-
-The build log prints `[JustInTime] API=...` — the server that build talks to. If Gradle
-cannot find a JDK, point `JAVA_HOME` at the JBR bundled with Android Studio.
-
-Sign in with the demo account `demo@demo.com` / `demo1234`, or create one.
-
-The shared server runs on Render's free plan and sleeps after 15 minutes without
-traffic. The first request then takes 30–60 seconds; the app wakes the server with a
-health check and says so on screen.
-
-**Emulator setup** — skip these and you will mistake them for app bugs.
-
-```bash
-# Time zone. The default is GMT, which puts every displayed time 9 hours off.
-adb shell cmd alarm set-timezone Asia/Seoul
-
-# Soft keyboard. In hardware-keyboard mode no on-screen keyboard appears and the
-# host keyboard sends raw ASCII, so Hangul never gets composed.
-adb shell settings put secure show_ime_with_hard_keyboard 1
-```
-
-For Korean input, add **Settings → Languages → Add a language → 한국어(대한민국)**.
-
-**Physical devices** — see [docs/device-setup.md](docs/device-setup.md) for USB and
-wireless debugging, permissions and battery settings. Test devices against the shared
-server; the guide also covers optional local-server development.
-[`APP/scripts/`](APP/scripts/README.md) has PowerShell helpers for installing and
-checking a device.
-
-### Work on the backend
-
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements/dev.txt
-test -f .env || cp .env.example .env  # Create the template only when .env does not exist
-python -m pytest                   # in-memory SQLite, no keys needed
-```
-
-For platform instructions and `.env` setup, see the [backend run guide](backend/README.md).
-Unit tests need nothing else. Running the server needs `DATABASE_URL` and the API keys
-in `.env` ([Configuration](#configuration)); the values come from the team and are never
-committed. The dev settings refuse to start without `DATABASE_URL`.
-
-> **`DATABASE_URL` is the team's shared Neon database** — the one the deployed server
-> uses. `runserver`, `migrate` and scripts run locally write team data. Run
-> `python scripts/backup_db.py` before anything destructive.
-
-To try server changes in the app before deploying, run the server locally and point an
-emulator build at it with a git-ignored `APP/local.properties` line. Remove the line and
-rebuild to go back to the shared server.
-
-```bash
-python manage.py runserver 0.0.0.0:8000
-```
-
-```properties
-devServerHost=10.0.2.2
-```
-
----
-
-## Architecture
-
-App — one direction only, `ui → ViewModel → repository → remote/local`:
-
-```
-ui/                        Compose screens
-  ↑ StateFlow   ↓ actions
-HomeViewModel · AuthViewModel
-  ↓
-data/repository            → data/remote (Retrofit) · data/local (Room cache, SharedPreferences)
-domain/model               pure calculations and view models, covered by JVM tests
-alarm/ sensing/ background/   receivers, the trip-tracking foreground service, WorkManager workers
-```
-
-Server — the app talks to it only over HTTPS with JWT:
-
-```
-accounts · events · routines · observations · reports    views and serializers
-  ↓
-planning     alarm calculation (compute_and_store)
-  ↓
-routing      Kakao routes, places, static maps · Seoul subway and bus real-time
-prediction   learning from observations (manage.py train_models)
-  ↓
-Neon Postgres
-```
-
-Creating or changing an event runs the calculation on the server: resolve the route
-with Kakao, estimate the prep and travel distributions, take the τ-quantile and store
-the result as an `AlarmPlan` returned with the event. The app caches responses in Room,
-so screens look the same online and offline.
-
-**The app never calls Kakao or the real-time APIs directly.** An API key shipped in an
-APK can be extracted, so the server proxies those calls, throttles them and keeps a daily
-budget for static maps.
-
-### Project structure
-
-```
-├── APP/                          Android app (Gradle root)
-│   ├── app/src/main/java/com/swpp/wakeup/
-│   │   ├── alarm/                scheduling, full-screen alarm, re-registration
-│   │   ├── background/           workers — observation upload, plan sync, route refresh
-│   │   ├── calendar/             device calendar reader
-│   │   ├── data/                 remote (Retrofit) · local (Room, prefs) · repository
-│   │   ├── domain/model/         pure calculations and view models
-│   │   ├── sensing/              trip tracking, departure/arrival detection, upload queues
-│   │   └── ui/                   alarm · auth · calendar · common · events · home · morning
-│   │                             · nav · onboarding · places · report · routines · settings · theme
-│   ├── gradle.properties         jitApiBaseUrl — the shared server
-│   └── scripts/                  PowerShell helpers for physical devices
-├── backend/                      Django + DRF
-│   ├── apps/
-│   │   ├── accounts/             User · Profile (home, prep time, default τ)
-│   │   ├── events/               Place · EventTag · Event · calendar import · place and route views
-│   │   ├── planning/             AlarmPlan · distributions · estimators · compute_and_store
-│   │   ├── routing/              Kakao client · real-time arrivals · RouteCorrection
-│   │   ├── routines/             prep blocks, per-event selection, block observations
-│   │   ├── observations/         detected departures and arrivals
-│   │   ├── prediction/           learning from observations
-│   │   ├── reports/              weekly report, calibration
-│   │   └── common/               error format, health
-│   ├── config/settings/          base · dev · prod · test · local_suite
-│   ├── scripts/                  HTTP checks and DB tools
-│   └── Dockerfile                migrate, then gunicorn
-├── docs/                         setup guides, design notes, iteration records
-├── qa/demo/                      emulator end-to-end runner
-├── .github/workflows/            ci.yml (CI) · train-models.yml (nightly training)
-└── render.yaml                   Render Blueprint
-```
+**Next (Iteration 5)** — finish the alarm-control connection and the open HE items, deploy 0.21.0,
+fix what the UAT finds, split `HomeViewModel` (ViewModel coverage is still 7.1%), design-pattern
+refactoring, then alpha and beta testing.
 
 ---
 
 ## Verification
 
-Latest local run (2026-10-30, 0.14.0): **1,583 backend tests and 738 Android JVM tests pass.**
-The PostgreSQL regressions, HTTP suites, lint and emulator E2E were last run on 2026-10-19
-(0.11.0) with replayed routing; see the [demo checklist](docs/demo-checklist.md).
-
-Four suites run locally and in CI on every push to `main` and every pull request
-([`ci.yml`](.github/workflows/ci.yml)). CI uses no secrets. Local feature checks can use `:app:testE2eUnitTest` and `:app:lintE2e` with `-PjitE2e=true`; see [QA setup](qa/demo/README.md).
-
 ```bash
-cd backend && python -m pytest                      # backend unit + integration tests
-cd backend && python -m pytest -m "not integration" # backend unit tests only
-cd backend && python -m pytest -m integration       # backend API integration tests only
-cd backend && python scripts/run_local_suite.py     # 8 HTTP suites against a live local server
-cd APP     && ./gradlew testDebugUnitTest lintDebug assembleDebug   # Android unit tests + lint + build
-cd APP     && ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.package=com.swpp.wakeup.integration
-                                                    # Android integration tests on a running emulator (API 34+)
+cd backend && python -m pytest --cov                # backend unit + API integration tests
+cd backend && python scripts/run_local_suite.py     # 8 HTTP suites against a throwaway local server
+cd APP     && ./gradlew testDebugUnitTest jacocoDebugUnitTestReport lintDebug assembleDebug
+cd APP     && ./gradlew jacocoDebugAndroidTestReport -Pandroid.testInstrumentationRunnerArguments.package=com.swpp.wakeup.integration
+                                                    # app integration tests on a running emulator
 ```
 
-Backend integration tests are the ones that send a request through the Django test
-client (URL → view → serializer → permission → DB) and carry `@pytest.mark.integration`.
-[`backend/conftest.py`](backend/conftest.py) fails a test whose marker doesn't match what
-it actually did, so the two counts stay accurate.
+Run on this snapshot (`a52d9b2`) on 2026-11-16 (Windows 11, Python 3.12, Android Studio's JBR):
 
-The Android integration tests (`app/src/androidTest/.../integration`) run screens, the Room
-cache and the repository together on a real Android runtime, with fake APIs and no
-server. They log the debug app out on the emulator they run on. The package filter
-leaves out the end-to-end tests in the same folder, which need the QA build and the
-replay server and run through `qa/demo/run.py`.
-
-CI also measures line coverage and prints a per-layer table in the job summary; the
-HTML reports are uploaded as the `backend-coverage`, `app-coverage` (JVM unit tests) and
-`app-device-coverage` (integration tests on the emulator) artifacts.
-To get the same numbers locally:
-
-```bash
-cd backend && python -m pytest --cov --cov-report=html --cov-report=json && python scripts/coverage_summary.py
-cd APP     && ./gradlew jacocoDebugUnitTestReport && python3 scripts/coverage_summary.py
-cd APP     && ./gradlew jacocoDebugAndroidTestReport -Pandroid.testInstrumentationRunnerArguments.package=com.swpp.wakeup.integration \
-           && python3 scripts/coverage_summary.py app/build/reports/jacoco/jacocoDebugAndroidTestReport/jacocoDebugAndroidTestReport.xml
-```
-
-Excluded from coverage: tests, migrations and seed commands on the server
-([`.coveragerc`](backend/.coveragerc)); generated code (R, BuildConfig, Room `*_Impl`,
-`ComposableSingletons`), `ui/theme` and the app entry points in the app
-(`coverageExcludes` in [`app/build.gradle.kts`](APP/app/build.gradle.kts)).
-
-The HTTP suite is the unusual part. `scripts/check_*.py` drive a **running** Django
-server over HTTP, which catches what the Django test client does not: a URL that was
-never wired up, a serializer field the app reads under a different name, a missing
-permission class. `run_local_suite.py` starts the server, stops it afterwards, and
-refuses to run if port 8000 is already taken — a stale server answering health checks
-once made a whole suite pass against old code.
-
-It also pins the database to a **throwaway SQLite file in the temp directory**, never
-the team's Neon database; the scripts create close to a hundred accounts per run. Its dedicated `local_suite` settings disable only the sign-up throttle; separate tests and the emulator use the real 10/hour limit.
-Without `KAKAO_REST_API_KEY` the checks that need route lookups are **skipped rather
-than failed**, so CI never burns the daily free quota. Lint blocks errors only.
-
-For the deployed server, `python scripts/check_deployed.py` runs HTTP checks and
-`/api/health` reports the running version.
-
----
-
-## API
-
-Everything is under `/api/`. Requests carry `Authorization: Bearer <access>` except
-health, password check, sign-up, token, refresh, social sign-in and logout (the refresh
-token in the body is the credential).
-
-| Area | Endpoints |
+| Suite | Result |
 | --- | --- |
-| Health | `GET health` — version and real-time availability |
-| Auth | `POST auth/password/check` · `POST auth/register` · `POST auth/token` · `POST auth/token/refresh` · `POST auth/logout` · `POST auth/me/logout-all` · `GET auth/me` · `POST auth/social/{kakao,google}` · `POST DELETE auth/me/social/{provider}` |
-| Profile | `GET PATCH PUT profile` — home, prep time, default τ. A new home or prep time recomputes up to 50 future events |
-| Events | `GET POST events` · `GET PATCH DELETE events/{id}` · `GET events/{id}/risk-options` · `POST events/{id}/recompute` · `POST DELETE events/{id}/skip` · `POST events/import` · `GET events/tags` · `GET PUT events/{id}/blocks` |
-| Places | `GET places/search` · `GET places/staticmap` · `GET places/reverse` |
-| Routes | `GET routes/candidates` · `POST routes/live` (from the current position, while moving) |
-| Observations | `POST observations/batch` · `GET observations` · `POST alarm-logs/batch` |
-| Routines | `GET POST routines/blocks` · `GET PATCH DELETE routines/blocks/{id}` · `POST routines/observations/batch` |
-| Reports | `GET reports/weekly` · `GET reports/calibration` |
+| Backend pytest | 2,298 passed (unit 1,302 · integration 996) in 80 s; line coverage 96.0% (computation 95.6%, API 96.2%) |
+| Contract suites (8), without a Kakao key | 241 passed · 34 skipped · 0 failed |
+| App JVM tests | 1,221 passed, 0 failed; line coverage domain 97.2%, data 70.0%, ViewModel 7.1%, platform 14.1% |
+| App device tests (`integration` package, Android 36 emulator) | 55 passed · **1 failed** (`SignupScreenTest`, see [Known limitations](#known-limitations-and-todos)); no device coverage report, because Gradle stops at the failure |
 
-- Errors look like `{"error": {"code", "message", "details"}}`. Another user's id
-  returns **404, not 403**, so existence does not leak
-- Sign-up requires `terms_agreed: true` and is limited to 10 attempts/IP/hour (429 with `Retry-After`). Profile prep time accepts 5–240 minutes or null.
-- `destination_is_home:true` resolves the current profile home without a Place row. Risk distributions use modeled `bins.mass`, not observation counts; `travel_sample_count` is persisted correction provenance.
-- Alarm enablement and password validation
-  contracts are documented in [backend setup](backend/README.md#api-계약).
-- Batch uploads are idempotent on `(user, client_uuid)`. Detection happens mid-commute
-  where there is often no network, so the app queues records and resends them; a retry
-  must not create a second row
-- `places/search` reports `reachable_count` rather than Kakao's `total_count`: Kakao
-  answers "카페" with 142,759 matches but serves only 45, and the larger number next to a
-  list that ends at 45 reads as a bug
-- Place search prioritizes complete road/lot addresses, then falls back to place names.
-  The response shape is unchanged; address results have a null `kakao_place_id`.
-- `places/staticmap` returns a PNG cached for an hour, within a daily budget (900 by
-  default) of the 1,000 free Kakao requests. Failures are not cached
+CI runs the same suites on every push to `main` and every pull request. Coverage by layer and the
+device test results are in the Wiki's
+[Testing Documentation, Iteration 4](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter4%E2%80%90testing).
 
 ---
-
-## Deployment
-
-| | |
-| --- | --- |
-| Service | Render `justintime-api` — Docker, free plan, Singapore, deploys `main` |
-| Start | `backend/Dockerfile` runs `migrate`, then gunicorn with 2 workers |
-| Database | Neon Postgres, **direct** URL (the `-pooler` endpoint can break migrations) |
-| Expected source health | `GET /api/health` → `{"ok": true, "version": "0.14.0", "realtime": {"subway": true, "bus": true}, "social": {"kakao": true, "google": true}}`, independent of the database |
-| Idle | sleeps after 15 minutes; waking takes 30–60 seconds |
-
-Bump the server `APP_VERSION` and the app `versionName` / `versionCode` together in the
-change you deploy — the app adds a "server is behind" hint to its errors when the server
-reports an older version. After deploying, check that `/api/health` shows the new
-version: a 200 alone does not mean the new code is live. `render.yaml` deliberately has
-no `databases` block — with one, Render attached its own Postgres and the demo login
-broke while health stayed 200.
-
----
-
-## Configuration
-
-Local values go in `backend/.env`, copied from `.env.example`. **`.env` is never
-committed.** The deployed values live in the Render dashboard, and CI needs none.
-
-| Variable | Used for |
-| --- | --- |
-| `DATABASE_URL` | Neon Postgres, direct URL. Required |
-| `DJANGO_SECRET_KEY` | Django secret key |
-| `KAKAO_REST_API_KEY` | [Kakao](https://developers.kakao.com) routes (transit, walk, bicycle, car), place search, reverse geocoding, static maps |
-| `KAKAO_NATIVE_APP_KEY` / `GOOGLE_WEB_CLIENT_ID` | Social sign-in: the accepted ID-token audience (Kakao native app key with OpenID Connect on, Google OAuth web client ID). Empty means that sign-in answers 503. `/api/health` shows whether each is set |
-| `JWT_ROTATE_REFRESH_TOKENS` | `1` makes token refresh return a new refresh token and revoke the old one. Leave unset until the app saves the rotated token; today's app would be signed out after its first refresh ([docs/iter3/token-security-api.md](docs/iter3/token-security-api.md)) |
-| `SEOUL_SUBWAY_API_KEY` | Subway real-time arrivals ([data.seoul.go.kr](https://data.seoul.go.kr)) |
-| `SEOUL_BUS_API_KEY_ENCODING` / `_DECODING` | Bus real-time arrivals ([data.go.kr](https://www.data.go.kr)). Set both forms of the key |
-| `STATIC_MAP_DAILY_UPSTREAM_LIMIT` | Daily budget for Kakao static-map requests, default 900 |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` / `OPENAI_BASE_URL` | Weekly report summary (optional; without them a fixed template is used). Any OpenAI-compatible chat-completions endpoint; an empty base URL means OpenAI. Check with `python manage.py probe_report_summary` |
-| `SUPPORT_INBOX_EMAILS` | Team address(es) that receive in-app inquiries (`POST /api/support/inquiries`), comma-separated. Sent with the same mail settings as password-reset codes. Empty means inquiries are only saved and shown in Django admin ([docs/iter4/server-inquiry.md](docs/iter4/server-inquiry.md)) |
-
-Without the real-time keys the arrival lines simply do not appear; routing still works.
-`KMA_API_KEY`, `FCM_CREDENTIALS_PATH`, `KAKAO_MOBILITY_KEY` and `REDIS_URL` are reserved
-for planned features; nothing uses them yet.
-
-Kakao Map needs no review — switch it on under `My Application > Product Settings >
-Kakao Map`. **The free quota applies to one app per developer account, so the team
-shares a single app and key.**
-
----
-
-## Documentation
-
-- [task.md](task.md) — current to-do list and owners (Korean)
-- [docs/iter3/](docs/iter3) — server contracts the app still has to wire up (Korean)
-- [docs/iter2/summary.md](docs/iter2/summary.md) — iteration 2 record (Korean)
-- [APP/README.md](APP/README.md) — running the app in Android Studio, macOS and Windows (Korean)
-- [backend/README.md](backend/README.md) — local backend setup and isolated verification (Korean)
-- [docs/demo-checklist.md](docs/demo-checklist.md) — MVP rehearsal, pass criteria and verified scope (Korean)
-- [docs/team-setup.md](docs/team-setup.md) — shared server and database, deployment,
-  verification scripts (Korean)
-- [docs/device-setup.md](docs/device-setup.md) — running on a physical device
-- [docs/progress-tracking.md](docs/progress-tracking.md) — progress bar, lateness
-  outlook, ETA and route refresh design (Korean)
-- [APP/scripts/README.md](APP/scripts/README.md) — device scripts
-
-Specifications, checklists and course documents are kept out of the repository and
-shared through the course **Wiki**.
-
----
-
-## Team
 
 SNU SWPP 2026 Fall · Team 18 · Momentum
-
-Each iteration has three roles — **UI** (Figma, screens, research), **BE** (backend,
-unit tests, QA) and **PM** (schedule, decisions, integration, deliverables). The PM
-rotates every iteration. Iteration 3: PM 박준하 · BE 김수연 · UI 김진호.
