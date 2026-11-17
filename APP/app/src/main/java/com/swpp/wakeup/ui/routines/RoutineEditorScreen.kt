@@ -105,9 +105,9 @@ fun RoutineEditorScreen(
         )
         Text(
             text = if (state.isEventMode) {
-                state.eventTitle ?: "체크를 바꾸면 이 일정의 알람만 다시 계산됨"
+                state.eventTitle ?: "체크를 바꾸면 이 일정의 알람만 다시 계산해요"
             } else {
-                "항목을 쪼개면 준비 시간의 근거가 생기고, 늦었을 때 무엇을 줄일지 고를 수 있음"
+                "항목을 쪼개면 준비 시간의 근거가 생기고, 늦었을 때 무엇을 줄일지 고를 수 있어요"
             },
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
@@ -123,8 +123,8 @@ fun RoutineEditorScreen(
         if (state.outOfRangeCount > 0) {
             NoticeCard(
                 dot = JitColor.Amber,
-                title = "실측이 신고 범위를 벗어난 항목 ${state.outOfRangeCount}개",
-                body = "아래 항목의 범위를 실제에 맞게 고치면 알람이 정확해짐",
+                title = "실제 시간이 적어 둔 범위를 벗어난 항목 ${state.outOfRangeCount}개",
+                body = "아래 항목의 범위를 실제에 맞게 고치면 알람이 정확해져요",
             )
         }
 
@@ -162,7 +162,7 @@ fun RoutineEditorScreen(
                 loading = state.saving,
             )
             Text(
-                text = "체크는 이 일정에만 적용됨. 기본값을 바꾸려면 내 정보 › 아침 루틴에서 고침",
+                text = "체크는 이 일정에만 적용돼요. 기본값을 바꾸려면 내 정보 › 아침 루틴에서 고쳐 주세요",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
@@ -175,7 +175,7 @@ fun RoutineEditorScreen(
                 loading = state.saving,
             )
             Text(
-                text = "정의를 고치면 앞으로의 알람에 자동으로 반영됨. 이미 울린 알람은 그대로임",
+                text = "항목을 고치면 앞으로의 알람에 자동으로 반영돼요. 이미 울린 알람은 그대로예요",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
@@ -209,8 +209,8 @@ private fun SummaryCard(state: RoutineEditorState) {
             }
         }
         Text(
-            text = "합계는 단순 더하기임. 병렬 항목과 선행 관계는 알람 계산에서 반영되므로 " +
-                "실제 준비 시간은 이보다 짧을 수 있음",
+            text = "합계는 단순히 더한 값이에요. 함께 하는 항목과 순서는 알람 계산에 반영되므로 " +
+                "실제 준비 시간은 이보다 짧을 수 있어요",
             color = JitColor.TextSecondary,
             fontSize = 10.sp,
         )
@@ -399,9 +399,9 @@ fun BlockDraftSheet(
             } else {
                 JitColor.Blue
             },
-            title = "범위가 변동 폭의 재료임",
-            body = "최소와 최대를 다르게 주면 그 폭을 준비 시간 변동으로 계산함. " +
-                "정시 도착 확률은 이동 기록도 쌓여야 나옴",
+            title = "범위가 있어야 얼마나 달라지는지 알 수 있어요",
+            body = "최소와 최대를 다르게 주면 그 폭만큼 준비 시간이 달라질 수 있다고 보고 계산해요. " +
+                "정시 도착 확률은 이동 기록도 쌓여야 나와요",
         )
 
         Text("포기 시 손실", color = JitColor.TextSecondary, fontSize = 11.sp)
@@ -430,7 +430,7 @@ fun BlockDraftSheet(
 
         ToggleRow(
             title = "병렬로 진행 가능",
-            body = "다른 일과 겹쳐 할 수 있음. 총 준비 시간에 더하지 않고 겹쳐 계산함",
+            body = "다른 일과 겹쳐 할 수 있어요. 총 준비 시간에 더하지 않고 겹쳐 계산해요",
             checked = draft.parallelizable,
             enabled = !saving,
             onChange = onParallel,
@@ -438,7 +438,7 @@ fun BlockDraftSheet(
 
         ToggleRow(
             title = "새 일정에 기본 포함",
-            body = "끄면 일정마다 직접 체크해야 포함됨",
+            body = "끄면 일정마다 직접 체크해야 포함돼요",
             checked = draft.includedByDefault,
             enabled = !saving,
             onChange = onIncluded,
@@ -470,7 +470,7 @@ fun BlockDraftSheet(
                 )
             }
             Text(
-                text = "지금까지 쌓인 이 항목의 관측도 함께 사라짐",
+                text = "지금까지 쌓인 이 항목의 기록도 함께 사라져요",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
                 modifier = Modifier.fillMaxWidth(),
@@ -543,7 +543,7 @@ private fun MessageLine(
 private fun EmptyCard() {
     JitCard(padding = 16.dp, gap = 7.dp) {
         JitDotLabel(
-            text = "등록된 항목이 없음",
+            text = "등록된 항목이 없어요",
             dotColor = JitColor.TextSecondary,
             fontSize = 13,
             dotSize = 8.dp,
@@ -552,7 +552,7 @@ private fun EmptyCard() {
             // 준비 시간은 ⑮ 에서 받고, 답하지 않았으면 서버 기본값을 쓴다. 그 숫자는
             // 서버 소유라 앱에 적지 않는다.
             text = "항목이 없으면 평소 준비 시간 하나를 한 덩어리로 씀. " +
-                "쪼개면 왜 그 시각인지 설명됨",
+                "쪼개면 왜 그 시각인지 설명할 수 있어요",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
@@ -599,8 +599,8 @@ private fun previewBlocks() = listOf(
         includedByDefault = true,
         order = 1,
         observationCount = 7,
-        observedMeanLabel = "실측 평균 14.2분",
-        learningNote = "실측 평균 14.2분 · 관측 7회, 신고 범위 안에 있음",
+        observedMeanLabel = "실제 평균 14.2분",
+        learningNote = "실제 평균 14.2분 · 7번 기록, 적어 둔 범위 안이에요",
         rangeMismatch = false,
         checked = true,
     ),
@@ -615,8 +615,8 @@ private fun previewBlocks() = listOf(
         includedByDefault = true,
         order = 2,
         observationCount = 5,
-        observedMeanLabel = "실측 평균 19분",
-        learningNote = "실측 평균 19분 · 신고 최대보다 4분 길다. 범위를 늘리는 것을 권함",
+        observedMeanLabel = "실제 평균 19분",
+        learningNote = "실제 평균 19분 · 적어 둔 최대보다 4분 길어요. 범위를 늘려 보세요",
         rangeMismatch = true,
         checked = false,
         explicit = true,
@@ -633,7 +633,7 @@ private fun previewBlocks() = listOf(
         order = 3,
         observationCount = 0,
         observedMeanLabel = null,
-        learningNote = "관측 없음 · 범위가 한 점이라 변동 폭이 없음",
+        learningNote = "기록 없음 · 범위가 한 점이라 달라질 폭이 없어요",
         rangeMismatch = false,
         checked = false,
     ),

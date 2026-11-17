@@ -13,8 +13,8 @@ class TagAddErrorTest {
     @Test
     fun `400 은 label 문구를 먼저 쓰고 없으면 서버 문구를 쓴다`() {
         assertEquals(
-            "이름을 입력해야 한다.",
-            error(400, """{"error":{"code":"invalid","message":"틀림","details":{"label":["이름을 입력해야 한다."]}}}"""),
+            "이름을 입력해 주세요.",
+            error(400, """{"error":{"code":"invalid","message":"틀림","details":{"label":["이름을 입력해 주세요."]}}}"""),
         )
         assertEquals(
             "틀림",
@@ -32,15 +32,15 @@ class TagAddErrorTest {
 
     @Test
     fun `404 와 405 는 서버가 아직 지원하지 않는다는 안내다`() {
-        assertEquals("아직 서버에서 지원하지 않아요", error(404))
-        assertEquals("아직 서버에서 지원하지 않아요", error(405))
+        assertEquals("아직 지원하지 않는 기능이에요", error(404))
+        assertEquals("아직 지원하지 않는 기능이에요", error(405))
     }
 
     @Test
     fun `통신 실패와 429 와 HTML 500 은 다시 시도 안내다`() {
         val net = EventRepository.Result.Failure(message = "offline", network = true)
-        assertEquals("서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요", tagAddErrorOf(net))
+        assertEquals("연결하지 못했어요. 잠시 뒤 다시 시도해 주세요", tagAddErrorOf(net))
         assertEquals("요청이 너무 잦아요. 잠시 뒤 다시 시도해 주세요", error(429))
-        assertEquals("서버에 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요", error(500, "<html>oops</html>"))
+        assertEquals("잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요", error(500, "<html>oops</html>"))
     }
 }

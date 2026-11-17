@@ -32,7 +32,7 @@ object Inquiry {
     const val UNSUPPORTED = "아직 앱에서 문의를 받을 수 없어요. 적은 내용은 그대로 두었어요"
     const val LIMITED = "문의를 너무 자주 보냈어요. 잠시 후 다시 보내 주세요"
     const val FAILED = "문의를 보내지 못했어요. 잠시 후 다시 시도해 주세요"
-    const val OFFLINE = "서버에 연결되지 않아 문의를 보내지 못했어요"
+    const val OFFLINE = "인터넷에 연결되지 않아 문의를 보내지 못했어요"
 
     enum class Outcome { DONE, UNSUPPORTED, LIMITED, FAILED, OFFLINE }
 

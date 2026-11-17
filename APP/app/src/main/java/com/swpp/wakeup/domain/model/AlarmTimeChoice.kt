@@ -55,6 +55,14 @@ object AlarmTimeChoice {
         return hour24 * 60 + minute
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 휠의 분 간격. 세 칸(서버가 정한 시각)이나 지금 알람이 5분 단위가 아니면 1분 간격으로 연다 —
+     * 5분 휠에 7:43 을 올리면 7:40 으로 보이고, 그대로 [맞추기] 하면 다른 시각이 저장된다.
+     */
+    fun wheelStep(minutesOfDay: List<Int?>): Int =
+        if (minutesOfDay.filterNotNull().all { it % MINUTE_STEP == 0 }) MINUTE_STEP else 1
+
     fun minutesOfDay(hour24: Int, minute: Int): Int =
         ((hour24 * 60 + minute) % MINUTES_PER_DAY + MINUTES_PER_DAY) % MINUTES_PER_DAY
 

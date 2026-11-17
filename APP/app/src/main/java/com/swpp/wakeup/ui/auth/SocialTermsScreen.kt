@@ -84,13 +84,13 @@ fun SocialTermsScreen(
 
         Text(text = "처음 오셨네요", color = JitColor.TextPrimary, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Text(
-            text = "약관에 동의하면 이 ${provider.label} 계정으로 바로 시작함",
+            text = "약관에 동의하면 이 ${provider.label} 계정으로 바로 시작해요",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
 
         JitTextField(
-            label = "닉네임 · ${provider.label} 프로필에서 가져옴, 바꿀 수 있음",
+            label = "닉네임 · ${provider.label} 프로필에서 가져왔어요. 바꿀 수 있어요",
             inputTag = "social_nickname",
             value = nickname,
             onValueChange = onNicknameChange,
@@ -106,7 +106,7 @@ fun SocialTermsScreen(
         )
         Text(
             text = "이미 가입한 ${provider.label} 계정이면 이 화면 없이 바로 들어감. 같은 이메일로 가입한 " +
-                "계정이 있으면 합치지 않고 안내함",
+                "계정이 있으면 합치지 않고 알려 드려요",
             color = JitColor.TextSecondary,
             fontSize = 9.sp,
         )

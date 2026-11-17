@@ -281,7 +281,7 @@ private fun AlarmRingingScreen(
                 if (canTrack) {
                     JitCard {
                         JitDotLabel(
-                            text = "해제하면 이동을 따라간다",
+                            text = "해제하면 이동을 따라가요",
                             dotColor = JitColor.Blue,
                             fontSize = 12,
                         )
@@ -289,8 +289,8 @@ private fun AlarmRingingScreen(
                             // 기록은 학습 배치가 돌아야 보정에 반영된다(R-3). "다음 알람이
                             // 더 정확해진다" 고 약속하지 않는다.
                             text = "집에서 나가는 시각과 목적지에 닿는 시각을 " +
-                                "위치로 판별해 기록함. 이 기록이 쌓이면 이동 " +
-                                "시간 보정에 쓰임",
+                                "위치로 알아서 기록해요. 이 기록이 쌓이면 이동 " +
+                                "시간을 더 정확하게 맞춰요",
                             color = JitColor.TextSecondary,
                             fontSize = 12.sp,
                         )
@@ -312,7 +312,7 @@ private fun AlarmRingingScreen(
                     ),
                 ) {
                     Text(
-                        text = if (canTrack) "일어났음 · 이동 기록 시작" else "알람 해제",
+                        text = if (canTrack) "일어났어요 · 이동 기록 시작" else "알람 해제",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
@@ -339,7 +339,7 @@ private fun AlarmRingingScreen(
                 }
 
                 Text(
-                    text = "미루면 도착 확률이 그만큼 떨어진다",
+                    text = "미루면 정시 도착 확률이 그만큼 떨어져요",
                     color = JitColor.TextSecondary,
                     fontSize = 11.sp,
                     modifier = Modifier.fillMaxWidth(),

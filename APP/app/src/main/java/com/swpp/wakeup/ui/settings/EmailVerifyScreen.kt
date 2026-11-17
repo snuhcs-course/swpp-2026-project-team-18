@@ -55,7 +55,7 @@ fun EmailVerifyScreen(
     ) {
         ScreenHeader(title = "이메일 인증", onBack = onBack)
         Text(
-            text = "${state.sentTo ?: "내 이메일"}로 보낸 6자리 코드를 입력함 · 10분 동안 유효",
+            text = "${state.sentTo ?: "내 이메일"}로 보낸 6자리 코드를 입력해 주세요 · 10분 동안 쓸 수 있어요",
             color = JitColor.TextSecondary,
             fontSize = 12.sp,
             modifier = Modifier.testTag("email_verify_intro"),
@@ -95,7 +95,7 @@ fun EmailVerifyScreen(
             }
         }
         Text(
-            text = "인증하지 않아도 앱은 그대로 쓸 수 있음",
+            text = "인증하지 않아도 앱은 그대로 쓸 수 있어요",
             color = JitColor.TextSecondary,
             fontSize = 10.sp,
         )

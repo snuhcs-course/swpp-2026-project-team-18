@@ -638,7 +638,7 @@ private fun MapSheet(
     ) {
         if (state.markers.isEmpty()) {
             Text(
-                text = "이 영역에는 결과가 없음. 지도를 옮기고 재검색할 것",
+                text = "이 영역에는 결과가 없어요. 지도를 옮기고 다시 검색해 보세요",
                 color = JitColor.TextSecondary,
                 fontSize = 12.sp,
                 modifier = Modifier.fillMaxWidth(),

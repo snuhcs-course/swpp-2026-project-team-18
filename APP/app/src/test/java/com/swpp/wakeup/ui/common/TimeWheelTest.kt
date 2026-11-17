@@ -87,4 +87,20 @@ class TimeWheelTest {
         assertEquals(1, centeredValue(3, size, loop = false))
         assertEquals(1, centeredValue(5, size, loop = false))
     }
+
+    // Partly AI-generated (Claude) — 알람 시각 시트의 빠르게 고르기 칸을 누르면 휠이 따라간다(11-16 피드백)
+    @Test
+    fun `밖에서 값이 바뀌면 지금 자리에서 가장 가까운 같은 값으로 간다`() {
+        val size = 12
+        val center = firstRowFor(5, size, loop = true) + TimeWheelMath.CENTER_ROW // 지금 가운데 값 5
+        val target = TimeWheelMath.nearestFirstRow(7, center, size, loop = true)
+        assertEquals(7, valueAt(target + TimeWheelMath.CENTER_ROW, size, loop = true))
+        assertEquals(2, target + TimeWheelMath.CENTER_ROW - center) // 두 칸만 굴러간다
+        // 반대쪽이 더 가까우면 그쪽(11 → 1 은 두 칸 아래)
+        val at11 = firstRowFor(11, size, loop = true) + TimeWheelMath.CENTER_ROW
+        val to1 = TimeWheelMath.nearestFirstRow(1, at11, size, loop = true)
+        assertEquals(2, to1 + TimeWheelMath.CENTER_ROW - at11)
+        // 끝이 있는 열(오전/오후)은 처음 자리 그대로
+        assertEquals(firstRowFor(1, 2, loop = false), TimeWheelMath.nearestFirstRow(1, 2, 2, loop = false))
+    }
 }

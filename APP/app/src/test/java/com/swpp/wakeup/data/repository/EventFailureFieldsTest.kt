@@ -47,9 +47,9 @@ class EventFailureFieldsTest {
     fun `JSON 이 아닌 본문은 상태 코드별 문구로 떨어진다`() {
         val html = "<html><body>502 Bad Gateway</body></html>"
 
-        assertEquals("서버에 문제가 생겼다.", failureFrom(502, html).message)
+        assertEquals("잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.", failureFrom(502, html).message)
         assertTrue(failureFrom(502, html).fields.isEmpty())
-        assertEquals("입력값을 확인해야 한다.", failureFrom(400, null).message)
+        assertEquals("입력한 값을 확인해 주세요.", failureFrom(400, null).message)
     }
 
     // Partly AI-generated (Claude)
@@ -72,7 +72,7 @@ class EventFailureFieldsTest {
 
     @Test
     fun `429 는 서버 문구가 없으면 잠시 뒤 다시 시도하라고 한다`() {
-        assertEquals("요청이 너무 잦음. 잠시 뒤 다시 시도", failureFrom(429, "").message)
+        assertEquals("요청이 너무 잦아요. 잠시 뒤 다시 시도해 주세요", failureFrom(429, "").message)
     }
 
     @Test

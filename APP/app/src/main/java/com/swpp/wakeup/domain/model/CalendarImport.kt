@@ -57,8 +57,8 @@ data class ImportCandidate(
         get() = when {
             resolving -> "장소 찾는 중…"
             resolvedPlace != null -> "장소 ${resolvedPlace.name}"
-            source.location != null -> "\"${source.location}\" 을 찾지 못함 · 장소 없이 가져옴"
-            else -> "캘린더에 장소가 없음 · 나중에 추가할 수 있음"
+            source.location != null -> "\"${source.location}\" 을 찾지 못해 장소 없이 가져와요"
+            else -> "캘린더에 장소가 없어요 · 나중에 추가할 수 있어요"
         }
 
     /** 장소가 없으면 알람 시각을 계산할 수 없다. 화면이 색으로 구분한다 */
@@ -104,7 +104,7 @@ data class CalendarImportState(
     /** 상한을 넘겼을 때의 안내. null 이면 문제없다 */
     val tooManyNote: String?
         get() = if (selectedCount > MAX_PER_REQUEST) {
-            "한 번에 ${MAX_PER_REQUEST}건까지 가져올 수 있음. ${selectedCount - MAX_PER_REQUEST}건을 해제할 것"
+            "한 번에 ${MAX_PER_REQUEST}건까지 가져올 수 있어요. ${selectedCount - MAX_PER_REQUEST}건을 해제해 주세요"
         } else {
             null
         }

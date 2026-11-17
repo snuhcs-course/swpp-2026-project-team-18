@@ -24,9 +24,9 @@ object LearningReset {
     const val CANCEL = "취소"
 
     const val DONE = "기록을 모두 지웠어요. 알람은 처음 기준으로 다시 맞춰요"
-    const val UNSUPPORTED = "아직 서버에서 지원하지 않아요. 기록은 그대로예요"
+    const val UNSUPPORTED = "아직 지원하지 않는 기능이에요. 기록은 그대로예요"
     const val FAILED = "기록을 지우지 못했어요. 잠시 후 다시 시도해 주세요"
-    const val OFFLINE = "서버에 연결되지 않아 기록을 지우지 못했어요"
+    const val OFFLINE = "인터넷에 연결되지 않아 기록을 지우지 못했어요"
     const val SESSION = "로그인이 끝나 기록을 지우지 못했어요. 다시 로그인해 주세요"
 
     enum class Outcome { DONE, UNSUPPORTED, SESSION, FAILED, OFFLINE }

@@ -1,6 +1,8 @@
 // Partly AI-generated (Claude)
 package com.swpp.wakeup.ui.report
 
+import androidx.compose.ui.platform.testTag
+import com.swpp.wakeup.ui.common.JitRetryButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -87,7 +89,7 @@ internal fun CalibrationTable(view: CalibrationView, highlightLower: Double?) {
         }
 
         if (!view.hasData) {
-            Text("아직 채점된 아침이 없음", color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text("아직 채점된 아침이 없어요", color = JitColor.TextSecondary, fontSize = 11.sp)
         }
 
         view.points.forEach { point ->
@@ -140,23 +142,17 @@ internal fun NoticeCard(dot: Color, title: String, body: String, caption: String
 @Composable
 internal fun ErrorCard(message: String, onRetry: () -> Unit) {
     JitCard(
-        modifier = Modifier.clickable(role = Role.Button, onClick = onRetry),
         padding = 14.dp,
         gap = 6.dp,
     ) {
         JitDotLabel(
-            text = "불러오지 못했음",
+            text = "불러오지 못했어요",
             dotColor = JitColor.Red,
             fontSize = 12,
             dotSize = 7.dp,
         )
         Text(text = message, color = JitColor.TextSecondary, fontSize = 11.sp)
-        Text(
-            text = "눌러서 다시 시도",
-            color = JitColor.Accent,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 2.dp).testTag("report_retry"))
     }
 }
 

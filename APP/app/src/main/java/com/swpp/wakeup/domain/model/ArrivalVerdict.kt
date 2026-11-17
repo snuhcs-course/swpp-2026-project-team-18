@@ -65,9 +65,9 @@ data class ArrivalVerdict(
      */
     val headline: String
         get() = when (status) {
-            Status.EARLY -> "${formatSpan(marginMinutes)} 일찍 도착했습니다"
-            Status.LATE -> "${formatSpan(-marginMinutes)} 늦게 도착했습니다"
-            Status.ON_TIME -> "정시에 도착했습니다"
+            Status.EARLY -> "${formatSpan(marginMinutes)} 일찍 도착했어요"
+            Status.LATE -> "${formatSpan(-marginMinutes)} 늦게 도착했어요"
+            Status.ON_TIME -> "정시에 도착했어요"
         }
 
     /**

@@ -1,6 +1,7 @@
 // Partly AI-generated (Claude)
 package com.swpp.wakeup.ui.help
 
+import com.swpp.wakeup.domain.model.ProbabilityRule
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -68,12 +69,15 @@ internal object OnTimeSheetText {
     /**
      * 원 10개 중 칠할 수(= "10번 중 n번"). 확률을 10% 단위로 **내린다** — 97% 는 9번이다. 반올림하면 95% 가 10번이
      * 되어 "늘 제시간" 처럼 읽힌다. 지나치게 장담하지 않는다(캡션).
+     *
+     * 100% 도 9번까지만 칠한다. 확률이 100으로 보이는 것은 소수점을 올린 결과일 뿐이고, "10번 중 10번" 은 늦는 아침이
+     * 없다는 약속처럼 읽힌다.
      */
-    fun timesOutOfTen(percent: Int): Int = percent.coerceIn(0, 100) / 10
+    fun timesOutOfTen(percent: Int): Int = (percent.coerceIn(0, 100) / 10).coerceAtMost(9)
 
     fun head(alarmLabel: String): String = "${alarmLabel}에 일어나면"
 
-    fun percentLabel(percent: Int): String = "정시 도착 확률 $percent%"
+    fun percentLabel(percent: Int): String = "정시 도착 확률 ${ProbabilityRule.displayLabel(percent)}"
 
     /** 문장. [emphasis] 만 굵게 확률 색으로 쓴다 */
     data class Sentence(val lead: String, val emphasis: String, val tail: String) {

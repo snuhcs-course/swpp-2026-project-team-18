@@ -34,12 +34,12 @@ internal data class SaveError(
     val retry: Boolean,
 )
 
-internal const val SAVE_NETWORK_LINE = "서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요"
+internal const val SAVE_NETWORK_LINE = "연결하지 못했어요. 잠시 뒤 다시 시도해 주세요"
 internal const val SAVE_AUTH_LINE = "로그인이 끝났어요. 다시 로그인하면 입력한 내용이 그대로 있어요"
 internal const val SAVE_GONE_LINE = "이 일정을 찾지 못했어요. 다른 기기에서 지웠을 수 있어요"
-internal const val SAVE_UNSUPPORTED_LINE = "아직 서버에서 지원하지 않아요"
+internal const val SAVE_UNSUPPORTED_LINE = "아직 지원하지 않는 기능이에요"
 internal const val SAVE_THROTTLED_LINE = "요청이 너무 잦아요. 잠시 뒤 다시 시도해 주세요"
-internal const val SAVE_SERVER_LINE = "서버에 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요"
+internal const val SAVE_SERVER_LINE = "잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요"
 
 private const val SAVE_FAILED = "일정을 저장하지 못했어요"
 private const val EDIT_FAILED = "일정을 고치지 못했어요"

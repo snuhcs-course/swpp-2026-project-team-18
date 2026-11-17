@@ -49,7 +49,7 @@ object WeeklyReportReminder {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "주간 리포트", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "일요일 낮 12시에 이번 주 결과를 알려 준다"
+                description = "일요일 낮 12시에 이번 주 결과를 알려 드려요"
                 // 배너로는 뜨되 소리는 내지 않는다. 일요일 낮에 소리까지 내면 채널을 끈다.
                 setSound(null, null)
                 enableVibration(true)

@@ -18,13 +18,13 @@ class LearningResetTest {
     @Test
     fun `서버에 아직 없으면 지원하지 않는다고 말한다`() {
         listOf(404, 405, 501).forEach { assertEquals(Outcome.UNSUPPORTED, LearningReset.outcome(it)) }
-        assertEquals("아직 서버에서 지원하지 않아요. 기록은 그대로예요", LearningReset.message(Outcome.UNSUPPORTED))
+        assertEquals("아직 지원하지 않는 기능이에요. 기록은 그대로예요", LearningReset.message(Outcome.UNSUPPORTED))
     }
 
     @Test
     fun `서버에 닿지 못하면 연결 문구`() {
         assertEquals(Outcome.OFFLINE, LearningReset.outcome(null))
-        assertEquals("서버에 연결되지 않아 기록을 지우지 못했어요", LearningReset.message(Outcome.OFFLINE))
+        assertEquals("인터넷에 연결되지 않아 기록을 지우지 못했어요", LearningReset.message(Outcome.OFFLINE))
     }
 
     @Test

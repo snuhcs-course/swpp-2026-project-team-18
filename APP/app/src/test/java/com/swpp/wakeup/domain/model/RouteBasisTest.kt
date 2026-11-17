@@ -38,7 +38,7 @@ class RouteBasisTest {
 
     @Test
     fun `안전 버퍼 줄은 지각 기록으로 조정됐는지 밝힌다`() {
-        assertTrue(bufferNote("learned").startsWith("지각 기록으로 조정됨"))
+        assertTrue(bufferNote("learned").startsWith("지각 기록으로 조정했어요"))
         assertTrue(bufferNote("fixed").startsWith("고정값"))
         assertTrue("모르는 값은 고정값으로 본다", bufferNote(null).startsWith("고정값"))
     }
@@ -57,7 +57,7 @@ class RouteBasisTest {
         val view = dto.toView(ZoneId.of("Asia/Seoul"))
 
         assertEquals(listOf("최근 5번 모두 먼저 도착했음. 버퍼를 10분에서 8분으로 줄임."), view.bufferNotes)
-        assertEquals("지금 안전 버퍼 8분 · 지각 기록으로 조정됨", view.bufferCurrentLabel)
+        assertEquals("지금 여유 시간 8분 · 지각 기록으로 조정했어요", view.bufferCurrentLabel)
     }
 
     @Test

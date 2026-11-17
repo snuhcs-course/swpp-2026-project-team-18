@@ -89,14 +89,14 @@ class SaveErrorsTest {
         val e = saveErrorOf(nested, editing = false)
         assertTrue(e.fields.isEmpty())
         assertEquals("장소 좌표가 올바르지 않다.", e.line)
-        assertEquals("입력값을 확인해야 한다.", saveErrorOf(failureFrom(400, null), false).line)
+        assertEquals("입력한 값을 확인해 주세요.", saveErrorOf(failureFrom(400, null), false).line)
     }
 
     @Test
     fun `통신 실패는 다시 시도를 둔다`() {
         val e = saveErrorOf(EventRepository.Result.Failure("연결 실패", network = true), editing = false)
         assertEquals(SaveErrorKind.NETWORK, e.kind)
-        assertEquals("서버에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요", e.line)
+        assertEquals("연결하지 못했어요. 잠시 뒤 다시 시도해 주세요", e.line)
         assertTrue(e.retry)
         assertEquals("일정을 저장하지 못했어요. 입력한 내용은 그대로 있어요", e.snackbar)
     }
@@ -118,7 +118,7 @@ class SaveErrorsTest {
 
         val unsupported = saveErrorOf(failureFrom(404, null), editing = false)
         assertEquals(SaveErrorKind.UNSUPPORTED, unsupported.kind)
-        assertEquals("아직 서버에서 지원하지 않아요", unsupported.line)
+        assertEquals("아직 지원하지 않는 기능이에요", unsupported.line)
         assertEquals(SaveErrorKind.UNSUPPORTED, saveErrorOf(failureFrom(405, null), false).kind)
     }
 
@@ -142,15 +142,15 @@ class SaveErrorsTest {
     @Test
     fun `500 HTML 은 일반 문구다`() {
         val e = saveErrorOf(failureFrom(500, "<html><body>Server Error (500)</body></html>"), editing = false)
-        assertEquals("서버에 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요", e.line)
+        assertEquals("잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요", e.line)
         assertTrue(e.retry)
     }
 
     @Test
     fun `상태도 통신 실패 표시도 없는 실패는 일반 서버 문구다`() {
-        val e = saveErrorOf(EventRepository.Result.Failure("알 수 없는 오류가 발생했다."), editing = false)
+        val e = saveErrorOf(EventRepository.Result.Failure("알 수 없는 문제가 생겼어요."), editing = false)
         assertEquals(SaveErrorKind.SERVER, e.kind)
-        assertEquals("서버에 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요", e.line)
+        assertEquals("잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요", e.line)
     }
 
     @Test

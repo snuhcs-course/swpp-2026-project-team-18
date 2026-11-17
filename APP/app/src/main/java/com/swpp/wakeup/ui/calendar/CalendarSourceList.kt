@@ -197,7 +197,7 @@ private fun CheckMark(on: Boolean) {
 fun CalendarLinkStatus(
     link: CalendarLinkState,
     onRequestPermission: () -> Unit,
-    /** "기기에 캘린더가 없음" 아래에 붙일 안내의 버튼. null 이면 안내 없이 한 줄만 둔다 */
+    /** "기기에 캘린더가 없어요" 아래에 붙일 안내의 버튼. null 이면 안내 없이 한 줄만 둔다 */
     help: CalendarHelpActions? = null,
 ) {
     when {
@@ -205,24 +205,24 @@ fun CalendarLinkStatus(
             link.permission == CalendarPermission.DENIED -> {
             JitCard(padding = 16.dp, gap = 9.dp) {
                 JitDotLabel(
-                    text = "캘린더 읽기 권한이 필요함",
+                    text = "캘린더 읽기 권한이 필요해요",
                     dotColor = JitColor.Amber,
                     fontSize = 13,
                     dotSize = 8.dp,
                 )
                 Text(
-                    text = "기기 캘린더 목록과 일정을 읽기만 함. 캘린더를 고치지 않음",
+                    text = "기기 캘린더 목록과 일정을 읽기만 해요. 캘린더를 고치지 않아요",
                     color = JitColor.TextSecondary,
                     fontSize = 11.sp,
                 )
                 Text(
-                    text = "권한 없이도 일정을 직접 입력해 쓸 수 있음",
+                    text = "권한 없이도 일정을 직접 입력해 쓸 수 있어요",
                     color = JitColor.TextSecondary,
                     fontSize = 10.sp,
                 )
                 if (link.permission == CalendarPermission.DENIED) {
                     Text(
-                        text = "권한이 거절됨 · 기기 설정의 앱 권한에서 켤 수 있음",
+                        text = "권한이 거절됐어요 · 기기 설정의 앱 권한에서 켤 수 있어요",
                         color = JitColor.Amber,
                         fontSize = 10.sp,
                     )
@@ -239,13 +239,13 @@ fun CalendarLinkStatus(
         link.noCalendars -> {
             JitCard(padding = 16.dp, gap = 7.dp) {
                 JitDotLabel(
-                    text = "기기에 캘린더가 없음",
+                    text = "기기에 캘린더가 없어요",
                     dotColor = JitColor.TextSecondary,
                     fontSize = 13,
                     dotSize = 8.dp,
                 )
                 Text(
-                    text = "기기 설정에서 구글 등 계정을 추가하면 그 캘린더가 여기 나옴",
+                    text = "기기 설정에서 구글 등 계정을 추가하면 그 캘린더가 여기 나와요",
                     color = JitColor.TextSecondary,
                     fontSize = 11.sp,
                 )
@@ -321,7 +321,7 @@ fun CalendarHelp(
         }
         HelpLine(
             label = "구글 캘린더",
-            text = "휴대폰 설정 > 계정에서 그 구글 계정의 캘린더 동기화를 켤 것. " +
+            text = "휴대폰 설정 > 계정에서 그 구글 계정의 캘린더 동기화를 켜 주세요. " +
                 "Google Calendar 앱 > 설정 > 일반 > ‘다른 앱과 Google Calendar 데이터 공유’도 " +
                 "켜져 있어야 함",
         )
@@ -334,8 +334,8 @@ fun CalendarHelp(
         if (showKakao) {
             HelpLine(
                 label = "카카오 톡캘린더",
-                text = "휴대폰 캘린더에 들어오지 않아 가져올 수 없음. 카카오가 다른 앱에는 " +
-                    "톡캘린더 일정의 제목·장소를 알려 주지 않음",
+                text = "휴대폰 캘린더에 들어오지 않아 가져올 수 없어요. 카카오가 다른 앱에는 " +
+                    "톡캘린더 일정의 제목·장소를 알려 주지 않아요",
             )
         }
     }

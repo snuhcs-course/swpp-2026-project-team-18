@@ -1,5 +1,6 @@
 package com.swpp.wakeup.data.remote
 
+import retrofit2.http.PUT
 import com.google.gson.JsonElement
 import com.google.gson.annotations.SerializedName
 import okhttp3.ResponseBody
@@ -41,6 +42,19 @@ interface EventsApi {
 
     @GET("api/events/{id}/risk-options")
     suspend fun riskOptions(@Path("id") id: Long): Response<RiskOptionsDto>
+
+    // Partly AI-generated (Claude)
+    /** 직접 정한 알람 시각 저장(BE-H3b, 서버 0.21.0). 응답은 일정 객체. 400 은 범위 밖 시각 */
+    @PUT("api/events/{id}/alarm/time")
+    suspend fun setAlarmTime(@Path("id") id: Long, @Body body: AlarmTimeRequest): Response<EventDto>
+
+    /** 이 시각으로 알람 맞추기(BE-H3a). 보낸 시각이 지금 울릴 시각과 다르면 409 `alarm_changed` */
+    @POST("api/events/{id}/alarm/confirm")
+    suspend fun confirmAlarm(@Path("id") id: Long, @Body body: AlarmConfirmRequest): Response<EventDto>
+
+    /** 추천 시각으로 되돌리기(BE-H3b). 직접 정한 시각이 없어도 200 */
+    @DELETE("api/events/{id}/alarm/time")
+    suspend fun clearAlarmTime(@Path("id") id: Long): Response<EventDto>
 
     @POST("api/events")
     suspend fun create(@Body body: EventCreateRequest): Response<EventDto>
@@ -648,6 +662,23 @@ data class AlarmPlanDto(
     @SerializedName("total_minutes") val totalMinutes: Int?,
     @SerializedName("tau_used") val tauUsed: Double?,
     @SerializedName("on_time_probability") val onTimeProbability: Int?,
+    // --- 알람 직접 제어(iter4 BE-H3, 서버 0.21.0). 구버전 서버는 보내지 않아 null 이다 — Partly AI-generated (Claude)
+    /**
+     * **실제로 울릴 시각.** 직접 정한 시각 → (제안에 답을 기다리는 동안) 원래 시각 → 추천 시각 순으로 서버가 고른다.
+     * 기기 알람과 화면의 알람 시각은 이것을 쓴다([ringAt]). [alarmAt] 은 추천 시각이다.
+     */
+    @SerializedName("effective_alarm_at") val effectiveAlarmAt: String? = null,
+    /** 추천 시각(= [alarmAt]) */
+    @SerializedName("recommended_alarm_at") val recommendedAlarmAt: String? = null,
+    /** `"recommended"` | `"user"`. `user` 면 "직접 정한 시각" */
+    @SerializedName("alarm_source") val alarmSource: String? = null,
+    @SerializedName("user_alarm_at") val userAlarmAt: String? = null,
+    @SerializedName("user_alarm_probability") val userAlarmProbability: Int? = null,
+    /** 울릴 시각에 일어날 때의 정시 도착 확률 */
+    @SerializedName("effective_on_time_probability") val effectiveOnTimeProbability: Int? = null,
+    /** 울릴 시각을 사용자가 확인했는가(BE-H3a). 이번에는 받기만 한다 */
+    @SerializedName("alarm_confirmed") val alarmConfirmed: Boolean? = null,
+    @SerializedName("alarm_confirmed_at") val alarmConfirmedAt: String? = null,
     /**
      * [onTimeProbability] 가 null 인 **이유**. 화면이 구체적으로 안내해야
      * 사용자가 할 행동이 정해진다. 값마다 사용자가 할 일이 다르다.
@@ -1082,3 +1113,23 @@ data class ProfileUpdateRequest(
     @SerializedName("intro_seen_at") val introSeenAt: String? = null,
     @SerializedName("coachmark_seen_at") val coachmarkSeenAt: String? = null,
 )
+
+// Partly AI-generated (Claude)
+/** `PUT /api/events/{id}/alarm/time` 본문. 시각에는 오프셋을 붙인다(`2026-11-17T08:10:00+09:00`) */
+data class AlarmTimeRequest(@SerializedName("alarm_at") val alarmAt: String)
+
+/** `POST …/alarm/confirm` 본문. 화면에 보인 울릴 시각. null 이면 지금 울릴 시각을 그대로 확인한다 */
+data class AlarmConfirmRequest(@SerializedName("alarm_at") val alarmAt: String?)
+
+/**
+ * 실제로 울릴 시각. 서버가 [AlarmPlanDto.effectiveAlarmAt] 을 주면 그것, 구버전 서버면 [AlarmPlanDto.alarmAt].
+ * 기기 알람 · 홈 · ④ 의 알람 시각은 모두 이것을 쓴다(iter4 BE-H3, 서버 계약 8절).
+ */
+val AlarmPlanDto.ringAt: String? get() = effectiveAlarmAt ?: alarmAt
+
+/** [ringAt] 에 일어날 때의 정시 도착 확률 */
+val AlarmPlanDto.ringProbability: Int?
+    get() = if (effectiveAlarmAt != null) effectiveOnTimeProbability else onTimeProbability
+
+/** 사용자가 직접 정한 시각으로 울리는가 */
+val AlarmPlanDto.isUserAlarm: Boolean get() = alarmSource == "user"

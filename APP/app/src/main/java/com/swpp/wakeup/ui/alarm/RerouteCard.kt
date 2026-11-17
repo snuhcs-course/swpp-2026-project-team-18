@@ -96,7 +96,7 @@ fun RerouteCard(
             }
         }
         Text(
-            text = "이번 이동만 바뀜. 일정에 저장한 경로는 그대로임",
+            text = "이번 이동만 바뀌어요. 일정에 저장한 경로는 그대로예요",
             color = JitColor.TextSecondary,
             fontSize = 9.sp,
         )
@@ -120,7 +120,7 @@ private fun RerouteCardPreview() {
             RerouteCard(
                 banner = RerouteBanner(
                     headline = "지금 경로로 가면 6분 늦어요",
-                    body = "더 일찍 닿는 경로가 없음",
+                    body = "더 일찍 닿는 경로가 없어요",
                     routeKey = null,
                 ),
                 onReroute = {},

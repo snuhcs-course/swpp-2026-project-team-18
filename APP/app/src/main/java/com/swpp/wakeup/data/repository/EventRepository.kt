@@ -1,5 +1,11 @@
 package com.swpp.wakeup.data.repository
 
+import com.swpp.wakeup.domain.model.ProbabilityRule
+import com.swpp.wakeup.data.remote.AlarmConfirmRequest
+import com.swpp.wakeup.data.remote.AlarmTimeRequest
+import com.swpp.wakeup.data.remote.isUserAlarm
+import com.swpp.wakeup.data.remote.ringProbability
+import com.swpp.wakeup.data.remote.ringAt
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.SystemClock
@@ -173,6 +179,8 @@ class EventRepository(
         val fromCache: Boolean = false,
         /** "12분 전 정보". 캐시에서 왔을 때만 채운다 */
         val ageLabel: String? = null,
+        /** 일정의 도착지들. 알람 추가의 최근 도착지 칩을 고른다([com.swpp.wakeup.domain.model.RecentDestinations]) */
+        val destinations: List<com.swpp.wakeup.domain.model.DestinationCandidate> = emptyList(),
     ) {
         // Partly AI-generated (Claude)
         /** [nowMillis] 시각의 홈 목록. 규칙은 [HomeList.view] 에 있다. */
@@ -204,7 +212,7 @@ class EventRepository(
         if (online is Result.Success) return online
 
         // 네트워크가 실패했다. 사본으로라도 화면을 채운다 — 아침에 집을 나서야
-        // 하는 사용자에게 "불러오지 못했음" 만 보여주는 것은 도움이 안 된다.
+        // 하는 사용자에게 "불러오지 못했어요" 만 보여주는 것은 도움이 안 된다.
         return loadHomeFromCache() ?: online
     }
 
@@ -287,6 +295,21 @@ class EventRepository(
             schedules = events.mapNotNull { it.toSchedule(zone, profile) },
             fromCache = fromCache,
             ageLabel = ageLabel,
+            destinations = events.mapNotNull { dto ->
+                val place = dto.place ?: return@mapNotNull null
+                com.swpp.wakeup.domain.model.DestinationCandidate(
+                    id = dto.id,
+                    place = PlaceSearchItem(
+                        kakaoPlaceId = place.kakaoPlaceId,
+                        name = place.name,
+                        address = place.address,
+                        lat = place.lat,
+                        lng = place.lng,
+                        category = null,
+                    ),
+                    destinationIsHome = dto.destinationIsHome,
+                )
+            },
         )
     }
 
@@ -393,7 +416,7 @@ class EventRepository(
         val fetchedAt = SystemClock.elapsedRealtime()
         val choice = body.toChoice(destination, origin, fetchedAt)
         if (choice.options.isEmpty()) {
-            return@guard Result.Failure("경로를 찾지 못했다. 장소를 다시 확인한다.")
+            return@guard Result.Failure("경로를 찾지 못했어요. 장소를 다시 확인해 주세요.")
         }
         Result.Success(choice)
     }
@@ -432,7 +455,7 @@ class EventRepository(
         // 없다" 로 읽고 이미 그려 둔 선을 지운다 — 1분에 한 번 실패할 때마다 선이
         // 깜빡인다. 실패는 실패로 알려 이전 값을 그대로 두게 한다.
         if (body.degraded) {
-            return@guard Result.Failure("경로를 확인하지 못했다.")
+            return@guard Result.Failure("경로를 확인하지 못했어요.")
         }
 
         val route = body.route ?: return@guard Result.Success(null)
@@ -441,7 +464,7 @@ class EventRepository(
         // 성공 응답인데 선이나 소요시간이 없으면 "경로 없음" 으로 지우지 않는다.
         // 깨진 응답은 실패로 올려 직전의 쓸 수 있는 선을 유지한다.
         if (path.size < 2 || minutes <= 0) {
-            return@guard Result.Failure("경로를 확인하지 못했다.")
+            return@guard Result.Failure("경로를 확인하지 못했어요.")
         }
         Result.Success(
             LiveRoute(
@@ -527,7 +550,7 @@ class EventRepository(
         val raw = response.errorBody()?.string()
         when (ApiClient.parseErrorCode(raw)) {
             "same_route" -> Result.Success(Unit)
-            "outside_trip" -> Result.Failure("일정 시작 6시간 전후에만 경로를 바꿀 수 있음")
+            "outside_trip" -> Result.Failure("일정 시작 6시간 전후에만 경로를 바꿀 수 있어요")
             else -> failureFrom(response.code(), raw)
         }
     }
@@ -596,7 +619,7 @@ class EventRepository(
                 val bytes = body.use { it.bytes() }
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
             }
-                ?: return@guard Result.Failure("지도 이미지를 읽지 못했다.")
+                ?: return@guard Result.Failure("지도 이미지를 불러오지 못했어요.")
 
             synchronized(mapCache) {
                 if (mapCache.size >= MAP_CACHE_MAX) {
@@ -612,7 +635,7 @@ class EventRepository(
         val response = api.reversePlace(lat, lng)
         val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
         if (body.degraded) {
-            return@guard Result.Failure("현재 위치의 주소를 불러오지 못했다.")
+            return@guard Result.Failure("현재 위치의 주소를 불러오지 못했어요.")
         }
         Result.Success(body.result)
     }
@@ -662,7 +685,7 @@ class EventRepository(
         )
         val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
         if (body.degraded) {
-            return@guard Result.Failure("장소 검색 결과를 불러오지 못했다.")
+            return@guard Result.Failure("장소 검색 결과를 불러오지 못했어요.")
         }
         Result.Success(body)
     }
@@ -818,7 +841,7 @@ class EventRepository(
                 ?: return@guard Result.Failure(errorMessage(response))
             cache?.saveEvent(dto)
             dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
-                ?: Result.Failure("알람이 아직 계산되지 않았다.")
+                ?: Result.Failure("알람을 아직 계산하지 못했어요.")
         }
         if (online is Result.Success) return online
 
@@ -847,12 +870,46 @@ class EventRepository(
         Result.Success(dto.toView(ZoneId.systemDefault()))
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 직접 정한 알람 시각 저장(BE-H3b). [alarmAt] 은 오프셋이 붙은 시각([com.swpp.wakeup.domain.model.UserAlarmRule.wire]).
+     * 400(지난 시각 · 시작 5분 전 이후 · 24시간 이전)은 서버 문구를 그대로 돌려준다.
+     */
+    suspend fun setUserAlarm(eventId: Long, alarmAt: String): Result<AlarmPlanView> = guard {
+        val response = api.setAlarmTime(eventId, AlarmTimeRequest(alarmAt))
+        val dto = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
+        cache?.saveEvent(dto)
+        dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
+            ?: Result.Failure("시각은 저장했지만 알람 계획을 읽을 수 없어요.")
+    }
+
+    /**
+     * "이 시각으로 알람 맞추기"(BE-H3a). [alarmAt] 은 화면에 보인 울릴 시각(오프셋 포함) — 그새 바뀌었으면
+     * 서버가 409 `alarm_changed` 로 알려 준다([Result.Failure.errorCode]).
+     */
+    suspend fun confirmAlarm(eventId: Long, alarmAt: String?): Result<AlarmPlanView> = guard {
+        val response = api.confirmAlarm(eventId, AlarmConfirmRequest(alarmAt))
+        val dto = unwrap(response) ?: return@guard failureFrom(response.code(), response.errorBody()?.string())
+        cache?.saveEvent(dto)
+        dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
+            ?: Result.Failure("확인했지만 알람 계획을 읽을 수 없어요.")
+    }
+
+    /** 추천 시각으로 되돌리기(BE-H3b) */
+    suspend fun clearUserAlarm(eventId: Long): Result<AlarmPlanView> = guard {
+        val response = api.clearAlarmTime(eventId)
+        val dto = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
+        cache?.saveEvent(dto)
+        dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
+            ?: Result.Failure("되돌렸지만 알람 계획을 읽을 수 없어요.")
+    }
+
     suspend fun saveRiskOption(eventId: Long, tau: Double): Result<AlarmPlanView> = guard {
         val response = api.update(eventId, EventUpdateRequest(tauOverride = tau))
         val dto = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
         cache?.saveEvent(dto)
         dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
-            ?: Result.Failure("선택은 저장했지만 알람 계획을 계산할 수 없습니다.")
+            ?: Result.Failure("선택은 저장했지만 알람을 계산하지 못했어요.")
     }
 
     /**
@@ -868,7 +925,7 @@ class EventRepository(
             ?: return@guard Result.Failure(errorMessage(response))
         cache?.saveEvent(dto)
         dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
-            ?: Result.Failure("다시 계산했지만 알람을 만들 수 없었다.")
+            ?: Result.Failure("다시 계산했지만 알람을 만들지 못했어요.")
     }
 
     /** 서버가 돌려준 일정을 캐시에 반영한다. 블록 체크 저장 응답이 이 경로다. */
@@ -917,7 +974,7 @@ class EventRepository(
     suspend fun importCalendar(
         candidates: List<ImportCandidate>,
     ): Result<CalendarImportResponse> = guard {
-        if (candidates.isEmpty()) return@guard Result.Failure("가져올 일정을 고르지 않았다.")
+        if (candidates.isEmpty()) return@guard Result.Failure("가져올 일정을 골라 주세요.")
 
         val body = CalendarImportRequest(
             events = candidates.map { candidate ->
@@ -1006,7 +1063,7 @@ class EventRepository(
         /** 일정 수정 본문. [updateEvent] 가 이미 만든 JSON 문자열을 싣는다 */
         val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
 
-        const val MESSAGE_NETWORK = "서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."
+        const val MESSAGE_NETWORK = "연결할 수 없어요. 인터넷 연결을 확인해 주세요."
 
         /**
          * 메모리에 들고 있을 지도 장수.
@@ -1031,7 +1088,7 @@ class EventRepository(
 // ---------------------------------------------------------------------------
 
 private const val TAG = "EventRepository"
-private const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
+private const val MESSAGE_UNKNOWN = "알 수 없는 문제가 생겼어요."
 
 /** `POST /api/routes/live` 본문의 `context`. 출발 전 확인(reroute-api.md §4-1) */
 internal const val LIVE_CONTEXT_PRE_DEPARTURE = "pre_departure"
@@ -1039,11 +1096,11 @@ internal const val LIVE_CONTEXT_PRE_DEPARTURE = "pre_departure"
 // AI-generated (Claude)
 /** 서버가 메시지를 주지 않았을 때(HTML 본문·빈 본문 등) 상태 코드별 문구. */
 private fun fallbackErrorMessage(code: Int): String = when (code) {
-    400 -> "입력값을 확인해야 한다."
-    401 -> "다시 로그인해야 한다."
-    404 -> "대상을 찾을 수 없다."
-    429 -> "요청이 너무 잦음. 잠시 뒤 다시 시도"
-    in 500..599 -> "서버에 문제가 생겼다."
+    400 -> "입력한 값을 확인해 주세요."
+    401 -> "다시 로그인해 주세요."
+    404 -> "찾을 수 없어요."
+    429 -> "요청이 너무 잦아요. 잠시 뒤 다시 시도해 주세요"
+    in 500..599 -> "잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요."
     else -> MESSAGE_UNKNOWN
 }
 
@@ -1277,7 +1334,8 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
     val local = start.atZoneSameInstant(zone)
     val plan = alarmPlan
 
-    val alarmLocal = plan?.alarmAt
+    // 울릴 시각(직접 정한 시각이면 그것). 추천 시각(`alarm_at`)이 아니다(iter4 BE-H3).
+    val alarmLocal = plan?.ringAt
         ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
         ?.atZoneSameInstant(zone)
 
@@ -1305,7 +1363,8 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
         title = title,
         placeAndRoute = routeText ?: "장소 없음",
         alarmAt = alarmLocal?.format(ALARM_FORMAT),
-        onTimeProbability = plan?.onTimeProbability,
+        onTimeProbability = plan?.ringProbability,
+        userAlarm = plan?.isUserAlarm == true,
         tag = tag?.label,
         planStatus = plan?.status ?: AlarmPlanDto.STATUS_NO_PLACE,
         planStatusLabel = plan?.statusLabel,
@@ -1379,21 +1438,21 @@ private fun prepSourceNote(plan: AlarmPlanDto, blockCount: Int): String {
     val blocks = if (blockCount > 0) "블록 ${blockCount}개" else "블록"
     return when (plan.prepSource) {
         AlarmPlanDto.PREP_OBSERVED ->
-            "실측 학습값 · $blocks 의 실제 소요로 갱신됨"
+            "기록으로 맞춤 · $blocks 의 실제 걸린 시간으로 맞췄어요"
 
         AlarmPlanDto.PREP_DECLARED_RANGE ->
-            "신고 범위 기반 · $blocks. 실제 소요가 쌓이면 학습값으로 바뀜"
+            "적어 둔 범위 기준 · $blocks. 실제 기록이 쌓이면 그 값으로 바뀌어요"
 
         // 준비 범위만으로는 확률이 나오지 않는다(이동 분산도 필요).
         AlarmPlanDto.PREP_DECLARED_POINT ->
-            "신고 고정값 · $blocks 의 범위가 한 점임. 범위를 주면 변동 폭이 반영됨"
+            "적어 둔 고정값 · $blocks 의 범위가 한 점이에요. 범위를 주면 달라지는 폭도 계산해요"
 
         // 준비 시간은 ⑮ 준비 시간 화면에서 받는다(집 설정이 아님).
         AlarmPlanDto.PREP_ONBOARDING ->
-            "고정값 · 평소 준비 시간으로 답한 값. 루틴 블록을 등록하면 항목별로 쪼개짐"
+            "고정값 · 평소 준비 시간으로 답한 값이에요. 루틴 항목을 등록하면 항목별로 나눠 보여요"
 
         else ->
-            "고정값 · 기본값을 씀. 루틴 블록을 등록하면 항목별로 쪼개짐"
+            "고정값 · 기본값을 써요. 루틴 항목을 등록하면 항목별로 나눠 보여요"
     }
 }
 
@@ -1414,7 +1473,7 @@ private fun PrepBlockDto.toLine(): PrepBlockLine {
             if (declaredMin == declaredMax) add("신고 ${declaredMin}분")
             else add("신고 ${declaredMin}~${declaredMax}분")
         }
-        if (learned) add("관측 ${observationCount}회로 학습됨")
+        if (learned) add("${observationCount}번 기록으로 맞췄어요")
         else add("관측 없음")
         if (parallelizable) add("병렬 진행")
     }
@@ -1450,7 +1509,7 @@ internal fun AlarmPlanDto.toConfidence(): ConfidenceView {
     if (percent != null) {
         return ConfidenceView(
             percent = percent.coerceIn(0, 100),
-            headline = "정시 도착 확률 ${percent.coerceIn(0, 100)}%",
+            headline = "정시 도착 확률 ${ProbabilityRule.displayLabel(percent)}",
             reason = null,
             action = null,
         )
@@ -1461,20 +1520,20 @@ internal fun AlarmPlanDto.toConfidence(): ConfidenceView {
     val travelNote = if (corrected) {
         "이동 시간은 기록으로 보정됐지만 변동 폭은 아직 모름"
     } else {
-        "이동 시간은 경로 조회값 하나뿐임"
+        "이동 시간은 경로 예상값 하나뿐이에요"
     }
 
     val (reason, action) = when (confidenceBasis) {
         // 준비 범위만으로는 확률이 나오지 않는다(이동 분산도 필요). 그래서 "확률 계산이
         // 시작됨" 이라고 약속하지 않는다.
         AlarmPlanDto.BASIS_POINT_ESTIMATE ->
-            "준비·이동 둘 다 단일 추정값이라 분포가 없음" to
-                "루틴 블록에 최소~최대 범위를 넣으면 준비 시간 변동이 반영됨"
+            "준비·이동 둘 다 한 가지 값뿐이라 얼마나 달라지는지 알 수 없어요" to
+                "루틴 항목에 최소~최대 범위를 넣으면 준비 시간이 달라지는 폭도 계산해요"
 
         AlarmPlanDto.BASIS_TRAVEL_UNKNOWN -> travelNote to TRAVEL_ACTION
 
         AlarmPlanDto.BASIS_PREP_UNKNOWN ->
-            "이동 시간은 변동 폭이 있지만 준비 시간이 고정값임" to
+            "이동 시간은 달라지는 폭이 있지만 준비 시간이 한 가지 값이에요" to
                 "루틴 블록에 최소~최대 범위를 넣으면 됨"
 
         // 집에서 출발하지 않는 일정이다. 준비 시간이 고정값인 것이 아니라
@@ -1482,19 +1541,19 @@ internal fun AlarmPlanDto.toConfidence(): ConfidenceView {
         AlarmPlanDto.BASIS_TRAVEL_ONLY -> "준비 단계가 없는 일정이고 $travelNote" to TRAVEL_ACTION
 
         // 확률도 근거도 없는 경우. status != ok 이면 이 카드는 그려지지 않는다.
-        else -> "아직 확률을 계산할 근거가 부족함" to null
+        else -> "아직 확률을 계산할 근거가 부족해요" to null
     }
 
     return ConfidenceView(
         percent = null,
-        headline = "정시 도착 확률 · 아직 계산할 수 없음",
+        headline = "정시 도착 확률 · 아직 계산할 수 없어요",
         reason = reason,
         action = action,
     )
 }
 
 /** 이동 변동성이 없을 때 사용자가 할 일. 서버 보정은 이동 기록에서 나온다(R-3). */
-private const val TRAVEL_ACTION = "이동 기록이 쌓이면 변동성이 생김"
+private const val TRAVEL_ACTION = "이동 기록이 쌓이면 계산할 수 있어요"
 
 // AI-generated (Claude)
 /**
@@ -1528,7 +1587,8 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null
     val startLocal = start.atZoneSameInstant(zone)
 
-    val alarmLocal = plan.alarmAt
+    // 울릴 시각(직접 정한 시각이면 그것, iter4 BE-H3)
+    val alarmLocal = plan.ringAt
         ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
         ?.atZoneSameInstant(zone)
     val arriveAt = plan.arriveAt?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
@@ -1589,7 +1649,7 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         Duration.between(OffsetDateTime.now(zone), it).toMinutes()
     }
     val remaining = minutesToAlarm?.let { minutes ->
-        if (minutes <= 0) "지난 알람" else "${minutes / 60}시간 ${minutes % 60}분 남음"
+        if (minutes <= 0) "지난 알람" else "${minutes / 60}시간 ${minutes % 60}분 남았어요"
     }
 
     return AlarmPlanView(
@@ -1602,11 +1662,19 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         } ?: "장소 없음",
         sensitivityTag = tag?.label,
         isFirstAlarm = isFirstAlarm,
+        title = title,
+        placeName = place?.name?.takeIf { it.isNotBlank() },
+        travelMode = plan.travelMode?.takeIf { it.isNotBlank() },
+        bufferSource = plan.bufferSource,
+        alarmConfirmed = plan.alarmConfirmed,
+        recommendedAlarmAtMillis = plan.alarmAt
+            ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
+            ?.toInstant()?.toEpochMilli(),
         latenessSensitive = latenessSensitivity == "high",
         alarmAt = alarmLocal?.format(ALARM_FORMAT),
         meridiem = alarmLocal?.let { if (it.hour < 12) "AM" else "PM" } ?: "",
         remaining = remaining,
-        onTimeProbability = plan.onTimeProbability,
+        onTimeProbability = plan.ringProbability,
         tauUsed = plan.tauUsed,
         tauSourceLabel = tauSourceLabel(tauOverride, tag?.label),
         confidence = plan.toConfidence(),
@@ -1627,6 +1695,7 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         // false 일 때만 알린다. null(고른 적 없음)과 true(그대로 쓰임)는
         // 사용자가 알 필요가 없다.
         alarmAtMillis = alarmLocal?.toInstant()?.toEpochMilli(),
+        userAlarm = plan.isUserAlarm,
         departByMillis = departBy?.toInstant()?.toEpochMilli(),
         arriveAtMillis = arriveAt?.toInstant()?.toEpochMilli(),
         altRouteKey = plan.altRouteKey?.takeIf { it.isNotBlank() },
@@ -1677,7 +1746,7 @@ internal fun SwitchSuggestionDto.toSuggestion(zone: ZoneId = ZoneId.systemDefaul
  * `learned`(지각 이력으로 조정, todo §1 안전 버퍼 조정)다. 모르는 값은 고정값으로 본다.
  */
 internal fun bufferNote(source: String?): String = when (source) {
-    AlarmPlanDto.BUFFER_LEARNED -> "지각 기록으로 조정됨 · 문 앞에서 실제 출발까지의 여유"
+    AlarmPlanDto.BUFFER_LEARNED -> "지각 기록으로 조정했어요 · 문 앞에서 실제 출발까지의 여유"
     else -> "고정값 · 문 앞에서 실제 출발까지의 여유"
 }
 
@@ -1708,7 +1777,8 @@ internal fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedu
     val plan = alarmPlan ?: return null
     if (plan.status != AlarmPlanDto.STATUS_OK) return null
 
-    val alarm = plan.alarmAt
+    // **기기 알람은 울릴 시각으로 건다**(iter4 BE-H3). `alarm_at`(추천)으로 걸면 직접 정한 시각이 무시된다.
+    val alarm = plan.ringAt
         ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
         ?: return null
     val start = runCatching { OffsetDateTime.parse(startAt) }.getOrNull() ?: return null

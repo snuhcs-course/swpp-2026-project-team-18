@@ -59,9 +59,9 @@ class RecurrenceScopeUiTest {
             editNoteOf(recurringEdit),
         )
         // 구버전 서버에서는 지금처럼 이 회차만 바뀐다고 말한다.
-        assertEquals("반복 일정의 이 회차만 바뀜. 요일은 고칠 수 없음", editNoteOf(recurringEdit.copy(scopeSupported = false)))
+        assertEquals("반복 일정의 이 회차만 바뀌어요. 요일은 고칠 수 없어요", editNoteOf(recurringEdit.copy(scopeSupported = false)))
         assertEquals(
-            "바꾼 항목만 저장함. 장소·출발지를 바꾸면 경로를 다시 고름",
+            "바꾼 항목만 저장해요. 장소나 출발지를 바꾸면 경로를 다시 골라요",
             editNoteOf(recurringEdit.copy(recurring = false)),
         )
     }

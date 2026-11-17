@@ -63,17 +63,20 @@ class BackendFeaturesTest {
         try {
             launch()
             ui.click(By.res("add_event"))
-            ui.input("event_title", "QA 집 도착")
+            ui.input("event_title", "QA 집 도착", "add_event_scroll")
             pickStart()
             // Close the default destination search before opening the origin search.
-            ui.click(By.res("destination_home"), "add_event_scroll")
-            ui.click(By.res("origin_search"), "add_event_scroll")
+            // 새 일정은 출발지 줄이 없고 "어디로 가요?" 옆 칩이 출발지 검색을 연다(H2-8).
+            ui.click(By.res("destination_chip_home"), "add_event_scroll")
+            ui.click(By.res("origin_chip"), "add_event_scroll")
+            // 출발지 변경 시트(H2-8 `658:2177`)의 "장소 검색" 이 같은 시트 안에 검색을 펼친다.
+            ui.click(By.res("origin_opt_search"), "origin_sheet")
             val query = config.getString("destination_query")
-            ui.input("place_query", query, "add_event_scroll")
-            ui.click(By.res("place_search"), "add_event_scroll")
-            ui.click(By.res("place_result_$query"), "add_event_scroll")
+            ui.input("place_query", query, "origin_sheet")
+            ui.click(By.res("place_search"), "origin_sheet")
+            ui.click(By.res("place_result_$query"), "origin_sheet")
             capture("feature-home-selected")
-            ui.click(By.textContains("경로 고르기"), "add_event_scroll")
+            ui.click(By.res("route_field"), "add_event_scroll")
             ui.click(By.text("도보"), "route_scroll")
             ui.click(By.res("route_walk"), "route_scroll")
             ui.await(By.res("route_guide"))
@@ -165,7 +168,7 @@ class BackendFeaturesTest {
         try {
             launch()
             ui.click(By.res("add_event"))
-            ui.input("event_title", title)
+            ui.input("event_title", title, "add_event_scroll")
             pickStart()
             for (day in days) {
                 ui.click(By.res("repeat_day_$day"), "add_event_scroll")
@@ -179,6 +182,12 @@ class BackendFeaturesTest {
             ui.input("place_query", query, "add_event_scroll")
             ui.click(By.res("place_search"), "add_event_scroll")
             ui.click(By.res("place_result_$query"), "add_event_scroll")
+            // 새 일정은 경로가 필수다(H2-8).
+            ui.click(By.res("route_field"), "add_event_scroll")
+            ui.click(By.text("도보"), "route_scroll")
+            ui.click(By.res("route_walk"), "route_scroll")
+            ui.await(By.res("route_guide"))
+            ui.click(By.res("route_preview_confirm"))
             ui.click(By.res("event_submit"), "add_event_scroll")
             ui.await(By.res("home_list"))
             val added = runBlocking { requireNotNull(api.list().body()).results.filter { it.title == title } }
@@ -242,14 +251,15 @@ class BackendFeaturesTest {
     }
 
     private fun pickStart() {
-        ui.click(By.res("event_date"))
+        // 새 일정은 날짜 칩(오늘 · 내일 · 다른 날, H2-8). 다른 날이 달력을 연다.
+        ui.click(By.res("arrival_date_other"), "add_event_scroll")
         val date = LocalDate.parse(config.getString("event_date"))
         if (YearMonth.from(date) != YearMonth.now())
             ui.click(By.desc(Pattern.compile("Change to next month|다음 달.*")))
         ui.click(By.textContains(date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL)
             .withLocale(Locale.getDefault()))))
         ui.click(By.text("확인"))
-        ui.click(By.res("event_time"))
+        ui.click(By.res("event_time"), "add_event_scroll")
         ui.pickTime(config.getString("event_time"))
         ui.click(By.text("확인"))
     }

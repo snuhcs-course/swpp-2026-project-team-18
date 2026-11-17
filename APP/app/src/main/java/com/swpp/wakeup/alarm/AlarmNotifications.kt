@@ -73,7 +73,7 @@ object AlarmNotifications {
                 "알람",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "계산된 기상 시각에 울린다"
+                description = "계산된 기상 시각에 울려요"
                 // 전체화면 인텐트가 막힌 기기에서는 이 채널 소리가 유일한
                 // 알림 수단이다. 그래서 채널에도 알람 소리를 건다.
                 // 화면이 뜨면 AlarmRinger 가 이어받아 계속 울린다.
@@ -97,7 +97,7 @@ object AlarmNotifications {
                 "이동 추적",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "출발·도착을 판별하는 동안 표시된다"
+                description = "출발·도착을 확인하는 동안 보여요"
                 setShowBadge(false)
             }
         )
@@ -108,7 +108,7 @@ object AlarmNotifications {
                 "도착 결과",
                 NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
-                description = "목적지에 닿았을 때 약속 시각과 비교해 알려 준다"
+                description = "도착했을 때 약속 시각과 비교해 알려 드려요"
                 // 소리는 내지 않는다. 도착 시점은 대개 강의실 앞이고, 거기서
                 // 울리면 사용자가 채널을 끈다 — 그러면 결과를 영영 못 본다.
                 // 진동만으로도 상단에 뜨는 것은 보장된다.
@@ -124,7 +124,7 @@ object AlarmNotifications {
                 "경로 바꾸기 제안",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "이동 중 지금 경로로 늦을 때 더 일찍 닿는 경로를 알려 준다"
+                description = "이동 중 지금 경로로 늦을 것 같으면 더 일찍 닿는 경로를 알려 드려요"
                 // 소리 없이 진동과 헤드업만. 이동 중 큰 소리는 방해가 된다.
                 setSound(null, null)
                 enableVibration(true)

@@ -11,6 +11,7 @@
     <string name="auth_email">이메일</string>
     <string name="auth_password">비밀번호</string>
     <string name="auth_password_confirm">비밀번호 확인</string>
+    <string name="auth_password_confirm_mismatch">비밀번호가 일치하지 않아요</string>
     <string name="auth_nickname">닉네임</string>
     <string name="auth_login">로그인</string>
     <string name="auth_signup">회원가입</string>
@@ -27,7 +28,7 @@
 
     <!-- 회원가입 (Figma ⑩) -->
     <string name="signup_heading">계정 만들기</string>
-    <string name="signup_sub">이메일과 비밀번호만으로 시작함</string>
+    <string name="signup_sub">이메일과 비밀번호만으로 시작해요</string>
     <string name="signup_submit">가입하고 시작하기</string>
     <string name="signup_have_account">이미 계정이 있으신가요?</string>
 
@@ -36,7 +37,7 @@
     <string name="signup_terms">이용약관 및 개인정보처리방침에 동의</string>
 
     <!-- 로그인·가입 성공 후 홈에서 한 번 보여준다 -->
-    <string name="auth_welcome">%1$s님 환영합니다</string>
+    <string name="auth_welcome">%1$s님 반가워요</string>
 
     <!-- 홈 (Figma ③) -->
     <string name="home_title">다가오는 일정</string>
@@ -70,5 +71,5 @@
       공용 서버(Render 무료)는 15분 무응답이면 잠든다. 깨는 데 수십 초가
       걸리는데 버튼만 돌고 있으면 앱이 멈춘 줄 안다. 무슨 일인지 알린다.
     -->
-    <string name="auth_waking_server">서버를 깨우는 중… 최대 1분 걸림</string>
+    <string name="auth_waking_server">연결하는 중이에요… 최대 1분 걸려요</string>
 </resources>

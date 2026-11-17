@@ -63,8 +63,8 @@ class ReportRepository(
     private fun failure(response: Response<*>): ReportResult.Failure {
         val message = ApiClient.parseErrorMessage(response.errorBody()?.string())
             ?: when (response.code()) {
-                401 -> "다시 로그인해야 한다."
-                in 500..599 -> "서버에 문제가 생겼다."
+                401 -> "다시 로그인해 주세요."
+                in 500..599 -> "잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요."
                 else -> MESSAGE_UNKNOWN
             }
         return ReportResult.Failure(message)
@@ -72,7 +72,7 @@ class ReportRepository(
 
     private companion object {
         const val TAG = "ReportRepository"
-        const val MESSAGE_NETWORK = "서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."
-        const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
+        const val MESSAGE_NETWORK = "연결할 수 없어요. 인터넷 연결을 확인해 주세요."
+        const val MESSAGE_UNKNOWN = "알 수 없는 문제가 생겼어요."
     }
 }

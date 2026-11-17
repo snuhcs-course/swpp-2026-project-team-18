@@ -50,7 +50,7 @@ class SkipMappingTest {
     @Test
     fun `뺀 일정이 있을 때만 리포트에 한 줄을 단다`() {
         assertEquals(
-            "안 감으로 표시한 일정 2건은 빼고 계산함",
+            "안 가요로 표시한 일정 2건은 빼고 계산했어요",
             week(2, outcome(1, "on_time")).toView(seoul).skippedNote,
         )
         assertNull(week(0, outcome(1, "on_time")).toView(seoul).skippedNote)

@@ -112,9 +112,9 @@ class SavedPlacesRepository(private val api: SavedPlacesApi = ApiClient.savedPla
     }
 
     private fun fallbackMessage(status: Int): String = when {
-        status == 401 -> "다시 로그인해야 합니다"
+        status == 401 -> "다시 로그인해 주세요"
         status == 429 -> "요청이 너무 잦아요. 잠시 뒤 다시 시도해 주세요"
-        status >= 500 -> "서버에 문제가 생겼어요"
+        status >= 500 -> "잠시 문제가 생겼어요"
         else -> MESSAGE_UNKNOWN
     }
 
@@ -122,9 +122,9 @@ class SavedPlacesRepository(private val api: SavedPlacesApi = ApiClient.savedPla
         const val CODE_NOT_FOUND = "not_found"
         const val CODE_SAME_AS_DEFAULT = "same_as_default"
         const val CODE_LIMIT = "saved_place_limit"
-        const val MESSAGE_NETWORK = "서버에 연결하지 못했어요"
+        const val MESSAGE_NETWORK = "연결하지 못했어요. 인터넷 연결을 확인해 주세요"
         private const val MESSAGE_UNKNOWN = "알 수 없는 오류가 났어요"
-        private const val MESSAGE_BAD_ROW = "서버 응답을 읽지 못했어요"
+        private const val MESSAGE_BAD_ROW = "응답을 읽지 못했어요"
         private const val TAG = "SavedPlacesRepository"
     }
 }
@@ -137,7 +137,7 @@ class SavedPlacesRepository(private val api: SavedPlacesApi = ApiClient.savedPla
 internal fun savedPlaceAddMessage(failure: SavedPlacesResult.Failure): String = when {
     failure.code == SavedPlacesRepository.CODE_SAME_AS_DEFAULT -> "기본 집과 같은 곳이에요(50m 안). 다른 곳을 골라 주세요"
     failure.code == SavedPlacesRepository.CODE_LIMIT -> "다른 집은 5곳까지 저장할 수 있어요"
-    failure.network -> "서버에 연결하지 못해 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요"
+    failure.network -> "연결하지 못해 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요"
     failure.status == 400 -> failure.fields["lat"] ?: failure.fields["lng"] ?: failure.message
     else -> failure.message
 }

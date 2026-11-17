@@ -14,6 +14,20 @@ enum class ProbabilityTone { GOOD, WARN, BAD, UNKNOWN }
  * 말하게 된다. 목표를 낮춰 잡았다고 해서 지각 위험이 사라지지는 않는다.
  */
 object ProbabilityRule {
+
+    // Partly AI-generated (Claude)
+    /**
+     * 화면에 보이는 정시 도착 확률 숫자. **90 을 넘으면 90** 으로 보인다(사용자 결정 11-16) — 안내 시트가
+     * "10번 중 9번" 까지만 말하므로([com.swpp.wakeup.ui.help.OnTimeSheetText.timesOutOfTen]) 숫자도 맞춘다.
+     * 색 · 70% 경고 · 추천 판정 · 서버로 보내는 값은 실제 값을 그대로 쓴다. 표시 문자열에만 쓴다.
+     */
+    fun displayPercent(percent: Int): Int = percent.coerceIn(0, 100).coerceAtMost(DISPLAY_MAX)
+
+    /** "90%" */
+    fun displayLabel(percent: Int): String = "${displayPercent(percent)}%"
+
+    const val DISPLAY_MAX = 90
+
     /** 이 아래면 빨강 · "지각할 수 있어요" */
     const val LATE_RISK_PERCENT = 70
     const val LATE_WARNING = "지각할 수 있어요"

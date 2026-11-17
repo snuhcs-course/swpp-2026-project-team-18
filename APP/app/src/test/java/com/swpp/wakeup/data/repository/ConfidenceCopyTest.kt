@@ -40,26 +40,26 @@ class ConfidenceCopyTest {
 
     /** basis × 출처 10칸. 기대 문자열은 phaseA-design.md "Review resolutions" 표와 같다. */
     private val table = listOf(
-        Triple("point_estimate", plain, "준비·이동 둘 다 단일 추정값이라 분포가 없음") to
-            "루틴 블록에 최소~최대 범위를 넣으면 준비 시간 변동이 반영됨",
-        Triple("point_estimate", corrected, "준비·이동 둘 다 단일 추정값이라 분포가 없음") to
-            "루틴 블록에 최소~최대 범위를 넣으면 준비 시간 변동이 반영됨",
-        Triple("travel_variance_unknown", plain, "이동 시간은 경로 조회값 하나뿐임") to
-            "이동 기록이 쌓이면 변동성이 생김",
+        Triple("point_estimate", plain, "준비·이동 둘 다 한 가지 값뿐이라 얼마나 달라지는지 알 수 없어요") to
+            "루틴 항목에 최소~최대 범위를 넣으면 준비 시간이 달라지는 폭도 계산해요",
+        Triple("point_estimate", corrected, "준비·이동 둘 다 한 가지 값뿐이라 얼마나 달라지는지 알 수 없어요") to
+            "루틴 항목에 최소~최대 범위를 넣으면 준비 시간이 달라지는 폭도 계산해요",
+        Triple("travel_variance_unknown", plain, "이동 시간은 경로 예상값 하나뿐이에요") to
+            "이동 기록이 쌓이면 계산할 수 있어요",
         Triple("travel_variance_unknown", corrected, "이동 시간은 기록으로 보정됐지만 변동 폭은 아직 모름") to
-            "이동 기록이 쌓이면 변동성이 생김",
-        Triple("prep_variance_unknown", plain, "이동 시간은 변동 폭이 있지만 준비 시간이 고정값임") to
+            "이동 기록이 쌓이면 계산할 수 있어요",
+        Triple("prep_variance_unknown", plain, "이동 시간은 달라지는 폭이 있지만 준비 시간이 한 가지 값이에요") to
             "루틴 블록에 최소~최대 범위를 넣으면 됨",
-        Triple("prep_variance_unknown", corrected, "이동 시간은 변동 폭이 있지만 준비 시간이 고정값임") to
+        Triple("prep_variance_unknown", corrected, "이동 시간은 달라지는 폭이 있지만 준비 시간이 한 가지 값이에요") to
             "루틴 블록에 최소~최대 범위를 넣으면 됨",
-        Triple("travel_only", plain, "준비 단계가 없는 일정이고 이동 시간은 경로 조회값 하나뿐임") to
-            "이동 기록이 쌓이면 변동성이 생김",
+        Triple("travel_only", plain, "준비 단계가 없는 일정이고 이동 시간은 경로 예상값 하나뿐이에요") to
+            "이동 기록이 쌓이면 계산할 수 있어요",
         Triple(
             "travel_only", corrected,
             "준비 단계가 없는 일정이고 이동 시간은 기록으로 보정됐지만 변동 폭은 아직 모름",
-        ) to "이동 기록이 쌓이면 변동성이 생김",
-        Triple("observed", plain, "아직 확률을 계산할 근거가 부족함") to null,
-        Triple("observed", corrected, "아직 확률을 계산할 근거가 부족함") to null,
+        ) to "이동 기록이 쌓이면 계산할 수 있어요",
+        Triple("observed", plain, "아직 확률을 계산할 근거가 부족해요") to null,
+        Triple("observed", corrected, "아직 확률을 계산할 근거가 부족해요") to null,
     )
 
     @Test
@@ -79,7 +79,7 @@ class ConfidenceCopyTest {
     fun `제목에 학습 중이 없다`() {
         table.forEach { (key, _) ->
             val headline = confidence(key.first, key.second).headline
-            assertEquals("정시 도착 확률 · 아직 계산할 수 없음", headline)
+            assertEquals("정시 도착 확률 · 아직 계산할 수 없어요", headline)
             assertFalse(headline.contains("학습"))
         }
     }
@@ -99,7 +99,7 @@ class ConfidenceCopyTest {
         val view = confidence(basis = null, source = null)
 
         assertNull(view.percent)
-        assertEquals("아직 확률을 계산할 근거가 부족함", view.reason)
+        assertEquals("아직 확률을 계산할 근거가 부족해요", view.reason)
         assertNull(view.action)
     }
 
@@ -108,7 +108,8 @@ class ConfidenceCopyTest {
         val view = confidence("observed", plain, probability = 92)
 
         assertEquals(92, view.percent)
-        assertEquals("정시 도착 확률 92%", view.headline)
+        // 보이는 숫자는 90 을 넘지 않는다(사용자 결정 11-16). 판단에 쓰는 percent 는 실제 값이다
+        assertEquals("정시 도착 확률 90%", view.headline)
         assertNull(view.reason)
         assertNull(view.action)
     }

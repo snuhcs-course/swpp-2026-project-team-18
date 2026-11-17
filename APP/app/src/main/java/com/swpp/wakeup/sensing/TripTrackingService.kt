@@ -343,7 +343,7 @@ class TripTrackingService : Service() {
         if (!recorded) return
         manualArrivedAtMillis = now
         scope.launch { queue.flush() }
-        updateNotification(TITLE_ARRIVED, "${current.eventLine} · 도착을 기록했다")
+        updateNotification(TITLE_ARRIVED, "${current.eventLine} · 도착을 기록했어요")
         handler.postDelayed(manualGraceRunnable, MANUAL_GRACE_MILLIS)
     }
 
@@ -724,7 +724,7 @@ class TripTrackingService : Service() {
             TripGeofence.isUsable(fix) -> armBlindTimer()
         }
 
-        // 수동으로 도착을 기록했으면 알림은 "도착 기록함" 에 둔다. GPS 도착만 더 기다린다.
+        // 수동으로 도착을 기록했으면 알림은 "도착을 기록했어요" 에 둔다. GPS 도착만 더 기다린다.
         if (manualArrivedAtMillis != null) return
         refreshProgressNotification(current, fence, fix.atMillis)
     }
@@ -777,7 +777,7 @@ class TripTrackingService : Service() {
 
             if (route == null) {
                 val reason = (result as? EventRepository.Result.Failure)?.message
-                    ?: "사용 가능한 경로가 없음"
+                    ?: "쓸 수 있는 경로가 없어요"
                 Log.w(TAG, "현재 위치 경로 갱신 실패: $reason")
                 // 직전 성공 경로는 유지한다. 잠깐의 지하 구간 때문에 지도를
                 // 출발지 경로로 되돌리는 것보다, 다음 1분 재시도까지 마지막으로
@@ -977,7 +977,7 @@ class TripTrackingService : Service() {
                     }
                 }
 
-                else -> append("도착을 기록했다")
+                else -> append("도착을 기록했어요")
             }
         }
         updateNotification(phase?.label ?: TITLE_TRACKING, text, phase)
@@ -1051,10 +1051,10 @@ class TripTrackingService : Service() {
         append(
             when {
                 current.canDetectDeparture && current.canDetectArrival ->
-                    "집을 나서는 시각과 도착 시각을 기록함"
+                    "집을 나서는 시각과 도착 시각을 기록해요"
 
-                current.canDetectArrival -> "도착 시각을 기록함"
-                else -> "집을 나서는 시각을 기록함"
+                current.canDetectArrival -> "도착 시각을 기록해요"
+                else -> "집을 나서는 시각을 기록해요"
             }
         )
     }
@@ -1087,7 +1087,7 @@ class TripTrackingService : Service() {
         private const val TITLE_TRACKING = "이동 기록 중"
 
         /** 수동 도착 뒤의 알림 제목 */
-        private const val TITLE_ARRIVED = "도착 기록함"
+        private const val TITLE_ARRIVED = "도착을 기록했어요"
 
         /** 수동 도착 뒤 GPS 도착을 더 기다리는 시간 */
         private const val MANUAL_GRACE_MILLIS = 3 * 60_000L

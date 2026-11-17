@@ -68,7 +68,7 @@ class PreDepartureCheckTest {
     fun `제안 없이 늦기만 하면 경로 없이 늦음만 알린다`() {
         val banner = PreDepartureCheck.banner(route(6, null))!!
         assertEquals("지금 나가도 6분 늦어요", banner.headline)
-        assertEquals("더 일찍 닿는 경로가 없음", banner.body)
+        assertEquals("더 일찍 닿는 경로가 없어요", banner.body)
         assertNull(banner.routeKey)
     }
 

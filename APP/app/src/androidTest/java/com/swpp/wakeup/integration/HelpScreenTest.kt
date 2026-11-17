@@ -83,7 +83,7 @@ class HelpScreenTest {
             }
         }
         compose.onNodeWithText("오전 7:40에 일어나면").assertExists()
-        compose.onNodeWithTag("on_time_percent").assertTextEquals("정시 도착 확률 97%")
+        compose.onNodeWithTag("on_time_percent").assertTextEquals("정시 도착 확률 90%")
         compose.onNodeWithTag("on_time_sentence")
             .assertTextEquals("같은 아침이 10번 온다면\n9번은 오전 9:00 전에 도착한다는 뜻이에요.")
         compose.onNodeWithTag("on_time_change_time").performClick()

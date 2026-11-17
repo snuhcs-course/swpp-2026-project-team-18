@@ -149,7 +149,7 @@ class SavedPlacesRepositoryTest {
             SavedPlacesResult.Failure("서버 문구", code = code, status = status, fields = fields, network = network)
         assertEquals("기본 집과 같은 곳이에요(50m 안). 다른 곳을 골라 주세요", savedPlaceAddMessage(f("same_as_default", 409)))
         assertEquals("다른 집은 5곳까지 저장할 수 있어요", savedPlaceAddMessage(f("saved_place_limit", 409)))
-        assertEquals("서버에 연결하지 못해 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요", savedPlaceAddMessage(f(network = true)))
+        assertEquals("연결하지 못해 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요", savedPlaceAddMessage(f(network = true)))
         assertEquals("한국 안의 좌표만", savedPlaceAddMessage(f("invalid", 400, fields = mapOf("lat" to "한국 안의 좌표만"))))
         assertEquals("서버 문구", savedPlaceAddMessage(f("invalid", 400)))
         assertEquals("서버 문구", savedPlaceAddMessage(f(status = 500)))

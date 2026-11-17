@@ -1,5 +1,6 @@
 package com.swpp.wakeup.ui.events
 
+import com.swpp.wakeup.ui.common.JitRetryButton
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -211,7 +212,7 @@ fun RouteChoiceScreen(
                     // 구버전 서버처럼 좌표가 없으면 고르기만 된다. 지도가 안 뜨는 이유를 밝힌다.
                     if (option.key == choice.selectedKey && !option.canPreviewMap) {
                         Text(
-                            text = "지도 미리보기를 받지 못했음",
+                            text = "지도 미리보기를 받지 못했어요",
                             color = JitColor.TextSecondary,
                             fontSize = 10.sp,
                         )
@@ -333,9 +334,9 @@ private fun emptyTabNotice(choice: RouteChoice): String? {
     if (empty.isEmpty()) return null
     val onlyWalk = choice.options.isNotEmpty() && choice.options.all { it.travelMode == RouteMode.WALK }
     return if (onlyWalk) {
-        "가까운 거리라 도보 경로만 받아왔음"
+        "가까운 거리라 도보 경로만 찾았어요"
     } else {
-        "${empty.joinToString("·") { it.label }} 는 이 구간에 경로가 없음"
+        "${empty.joinToString("·") { it.label }} 는 이 구간에 경로가 없어요"
     }
 }
 
@@ -556,7 +557,7 @@ private fun LoadingBlock() {
     ) {
         CircularProgressIndicator(color = JitColor.Accent, strokeWidth = 2.dp)
         Text(
-            text = "카카오에서 경로를 받아오는 중",
+            text = "경로를 찾는 중이에요",
             color = JitColor.TextSecondary,
             fontSize = 12.sp,
         )
@@ -592,23 +593,24 @@ private fun ErrorBlock(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "경로를 불러오지 못했음",
+                text = "경로를 불러오지 못했어요",
                 color = JitColor.TextPrimary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
         Text(text = message, color = JitColor.TextSecondary, fontSize = 12.sp)
-        Text(
-            text = if (retryable) "눌러서 다시 시도" else "출발지·도착지 다시 고르기",
-            color = JitColor.Accent,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(onClick = if (retryable) onRetry else onBack)
-                .padding(vertical = 4.dp),
-        )
+        // 다시 시도할 수 있으면 [다시 시도], 못 하면 같은 회색 버튼에 아이콘 없이 "출발지·도착지 다시 고르기"(HE 2-6)
+        if (retryable) {
+            JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 2.dp).testTag("route_retry"))
+        } else {
+            JitRetryButton(
+                onClick = onBack,
+                label = "출발지·도착지 다시 고르기",
+                icon = null,
+                modifier = Modifier.padding(top = 2.dp).testTag("route_reselect"),
+            )
+        }
     }
 }
 

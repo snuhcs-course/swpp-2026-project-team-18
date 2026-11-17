@@ -1,6 +1,7 @@
 // Partly AI-generated (Claude)
 package com.swpp.wakeup.ui.help
 
+import com.swpp.wakeup.ui.common.sheetScrollGuard
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -90,6 +91,7 @@ internal fun ContactSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .sheetScrollGuard()
                 .verticalScroll(rememberScrollState())
                 .imePadding()
                 .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 22.dp),

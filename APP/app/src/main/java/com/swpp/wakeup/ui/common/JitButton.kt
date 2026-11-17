@@ -1,5 +1,13 @@
 package com.swpp.wakeup.ui.common
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,6 +37,45 @@ import com.swpp.wakeup.ui.theme.JitRadius
  * [loading] 이면 라벨 자리에 진행 표시를 넣고 클릭을 막는다. 버튼이 사라지거나
  * 크기가 변하면 화면이 흔들리므로 높이를 유지한다.
  */
+// Partly AI-generated (Claude)
+/**
+ * 회색 채움 · 기본 버튼(iter4 H2-6, Figma 버튼 4단계의 "다시 시도"). 둥근 알약에 되돌이 화살표 + 굵은 흰 글자.
+ *
+ * 오류 · 오프라인 안내 안의 [다시 시도] 에 쓴다. 예전에는 주황 글자 "눌러서 다시 시도" 한 줄에 카드 전체가
+ * 눌려서 글자인지 버튼인지 구분되지 않았다(HE 2-6). 이제 이 버튼만 눌린다.
+ *
+ * 채움은 [JitColor.Track] 이다 — 안내 띠 바탕([JitColor.Surface2])보다 한 단계 밝아야 띠와 구분된다.
+ * 누르는 영역은 48dp 이상.
+ *
+ * @param icon null 이면 아이콘 없이 글자만(예: "출발지·도착지 다시 고르기")
+ */
+@Composable
+fun JitRetryButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    label: String = "다시 시도",
+    icon: ImageVector? = LineIcons.rotateCcw,
+    enabled: Boolean = true,
+) {
+    val shape = RoundedCornerShape(percent = 50)
+    Row(
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(JitColor.Track)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val tint = if (enabled) JitColor.TextPrimary else JitColor.TextSecondary
+        if (icon != null) {
+            Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(text = label, color = tint, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
 @Composable
 fun JitPrimaryButton(
     label: String,
@@ -36,6 +83,8 @@ fun JitPrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     loading: Boolean = false,
+    /** 진행 중에 돌림표 옆에 적을 글자. null 이면 돌림표만 보인다 */
+    loadingLabel: String? = null,
 ) {
     Button(
         onClick = onClick,
@@ -56,6 +105,10 @@ fun JitPrimaryButton(
                 color = JitColor.Bg,
                 strokeWidth = 2.dp
             )
+            if (loadingLabel != null) {
+                Spacer(Modifier.width(10.dp))
+                Text(text = loadingLabel, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
         } else {
             Text(text = label, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
