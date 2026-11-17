@@ -1,5 +1,7 @@
 package com.swpp.wakeup.ui.home
 
+import com.swpp.wakeup.domain.model.ProbabilityRule
+import com.swpp.wakeup.ui.common.JitRetryButton
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -177,7 +179,7 @@ fun HomeScreen(
             }
 
             if (state.isEmpty) {
-                item(key = "empty") { EmptyState() }
+                item(key = "empty") { EmptyState(onAdd = onAddEventClick) }
             }
 
             state.nextAlarm?.let { next ->
@@ -282,14 +284,14 @@ private fun NoHomeNotice(onClick: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         JitDotLabel(
-            text = "집 위치를 설정해야 알람이 계산됨",
+            text = "집 위치를 정해야 알람을 계산할 수 있어요",
             dotColor = JitColor.Amber,
             textColor = JitColor.TextPrimary,
             fontSize = 12,
             dotSize = 6.dp,
         )
         Text(
-            text = "이동 시간을 구하려면 출발지가 필요함. 눌러서 설정",
+            text = "이동 시간을 구하려면 출발지가 필요해요. 눌러서 정해 주세요",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
@@ -308,12 +310,13 @@ private fun NoHomeNotice(onClick: () -> Unit) {
  */
 @Composable
 private fun OfflineNotice(ageLabel: String?, onRetry: () -> Unit) {
+    // 띠 전체가 눌리지 않는다. [다시 시도] 버튼만 눌린다(HE 2-6).
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Hint))
             .background(JitColor.Surface2)
-            .clickable(onClick = onRetry)
+            .testTag("home_offline")
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
@@ -325,16 +328,11 @@ private fun OfflineNotice(ageLabel: String?, onRetry: () -> Unit) {
             dotSize = 6.dp,
         )
         Text(
-            text = "서버에 닿지 못해 마지막으로 받은 값을 보여줌. 이미 걸린 알람은 그대로 울림",
+            text = "인터넷에 연결되지 않아 마지막으로 받은 정보를 보여 드려요. 이미 맞춰 둔 알람은 그대로 울려요",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
-        Text(
-            text = "눌러서 다시 시도",
-            color = JitColor.Accent,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 3.dp).testTag("home_offline_retry"))
     }
 }
 
@@ -364,8 +362,8 @@ private fun MorningShortcut(blocksLeft: Int, onClick: () -> Unit) {
             dotSize = 6.dp,
         )
         Text(
-            text = "항목을 마칠 때마다 탭하면 실제 소요가 기록됨. 이 기록이 준비 시간 " +
-                "학습의 유일한 재료임",
+            text = "항목을 마칠 때마다 누르면 실제로 걸린 시간이 기록돼요. 이 기록이 준비 시간을 " +
+                "맞추는 유일한 재료예요",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
@@ -404,7 +402,7 @@ private fun MissedAlarmCard(
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         JitDotLabel(
-            text = "${notice.alarmLine} 알람이 울리지 않았음",
+            text = "${notice.alarmLine} 알람이 울리지 않았어요",
             dotColor = JitColor.Red,
             textColor = JitColor.TextPrimary,
             fontSize = 12,
@@ -418,9 +416,9 @@ private fun MissedAlarmCard(
         Text(
             text = when {
                 notice.canTrack -> (notice.departLabel?.let { "$it 출발 예정이라 " } ?: "") +
-                    "지금 이동 기록을 시작할 수 있음"
-                !notice.schedule.canTrack -> "출발지·목적지 좌표가 없어 이동 기록은 시작할 수 없음"
-                else -> "정밀 위치 권한이 없어 이동 기록은 시작할 수 없음"
+                    "지금 이동 기록을 시작할 수 있어요"
+                !notice.schedule.canTrack -> "출발지나 도착지 위치를 몰라 이동 기록은 시작할 수 없어요"
+                else -> "정밀 위치 권한이 없어 이동 기록은 시작할 수 없어요"
             },
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
@@ -459,19 +457,18 @@ private fun ErrorNotice(message: String, onRetry: () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Hint))
             .background(JitColor.Surface2)
-            .clickable(onClick = onRetry)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         JitDotLabel(
-            text = "불러오지 못했음",
+            text = "불러오지 못했어요",
             dotColor = JitColor.Red,
             textColor = JitColor.TextPrimary,
             fontSize = 12,
             dotSize = 6.dp,
         )
         Text(text = message, color = JitColor.TextSecondary, fontSize = 11.sp)
-        Text(text = "눌러서 다시 시도", color = JitColor.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 3.dp).testTag("home_error_retry"))
     }
 }
 
@@ -490,9 +487,9 @@ private fun LoadingRow() {
 }
 
 
-/** 일정이 하나도 없을 때. 새 계정이 처음 보는 화면이다. 추가 버튼은 아래에 떠 있는 것을 쓴다. */
+/** 일정이 하나도 없을 때. 새 계정이 처음 보는 화면이다. 가운데 + 를 누르면 알람 추가 시트가 열린다(11-17 사용자). */
 @Composable
-private fun EmptyState() {
+private fun EmptyState(onAdd: () -> Unit) {
     Column(
         // 다음 알람이 없는 날 홈 코치마크(H2-4)가 이 자리를 밝힌다. 위아래 여백은 빼고 글 묶음만 알린다.
         modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp).coachmarkTarget(CoachTarget.EMPTY),
@@ -503,22 +500,18 @@ private fun EmptyState() {
             modifier = Modifier
                 .size(56.dp)
                 .clip(CircleShape)
-                .background(JitColor.Surface),
+                .background(JitColor.Surface)
+                .clickable(role = Role.Button, onClickLabel = "알람 추가", onClick = onAdd)
+                .testTag("home_empty_add"),
             contentAlignment = Alignment.Center,
         ) {
-            Text("＋", color = JitColor.Accent, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            Icon(LineIcons.plus, contentDescription = "알람 추가", tint = JitColor.Accent, modifier = Modifier.size(26.dp))
         }
         Text(
-            text = "아직 일정이 없음",
+            text = "아직 일정이 없어요",
             color = JitColor.TextPrimary,
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
-        )
-        Text(
-            text = "일정을 추가하면 도착 시각을 거꾸로 계산해\n알람을 정해 줌",
-            color = JitColor.TextSecondary,
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center,
         )
     }
 }
@@ -578,7 +571,7 @@ private fun NextAlarmCard(
             event.onTimeProbability?.let { probability ->
                 val tone = riskColor(event.risk)
                 JitChip(
-                    label = "정시 도착 확률 $probability%",
+                    label = "정시 도착 확률 ${ProbabilityRule.displayLabel(probability)}",
                     contentColor = tone,
                     container = tone.copy(alpha = 0.15f),
                     modifier = Modifier

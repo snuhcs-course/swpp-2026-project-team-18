@@ -69,7 +69,7 @@ class AuthRepositoryEmailVerifyTest {
     fun `메일을 받을 수 없는 주소는 이유를 알린다`() = runTest {
         val api = VerifyApi(request = { httpError(409, errorBody("email_not_deliverable")) })
         assertEquals(
-            EmailVerifyResult.Failure("이 주소로는 메일을 보낼 수 없음"),
+            EmailVerifyResult.Failure("이 주소로는 메일을 보낼 수 없어요"),
             repository(api).requestEmailVerify(),
         )
     }
@@ -79,12 +79,12 @@ class AuthRepositoryEmailVerifyTest {
         listOf(404, 405).forEach { status ->
             val request = VerifyApi(request = { httpError(status) })
             assertEquals(
-                EmailVerifyResult.Failure("아직 서버에서 지원하지 않아요"),
+                EmailVerifyResult.Failure("아직 지원하지 않는 기능이에요"),
                 repository(request).requestEmailVerify(),
             )
             val confirm = VerifyApi(confirm = { httpError(status) })
             assertEquals(
-                EmailVerifyResult.Failure("아직 서버에서 지원하지 않아요"),
+                EmailVerifyResult.Failure("아직 지원하지 않는 기능이에요"),
                 repository(confirm).confirmEmailVerify("123456"),
             )
         }
@@ -94,12 +94,12 @@ class AuthRepositoryEmailVerifyTest {
     fun `429 나 throttled 면 요청이 많다고 알린다`() = runTest {
         val tooMany = VerifyApi(request = { httpError(429, errorBody("throttled")) })
         assertEquals(
-            EmailVerifyResult.Failure("요청이 많음. 잠시 뒤 다시 시도"),
+            EmailVerifyResult.Failure("요청이 많아요. 잠시 뒤 다시 시도해 주세요"),
             repository(tooMany).requestEmailVerify(),
         )
         val coded = VerifyApi(confirm = { httpError(400, errorBody("throttled")) })
         assertEquals(
-            EmailVerifyResult.Failure("요청이 많음. 잠시 뒤 다시 시도"),
+            EmailVerifyResult.Failure("요청이 많아요. 잠시 뒤 다시 시도해 주세요"),
             repository(coded).confirmEmailVerify("123456"),
         )
     }
@@ -140,10 +140,10 @@ class AuthRepositoryEmailVerifyTest {
     fun `확인 실패의 각 코드를 문구로 바꾼다`() = runTest {
         suspend fun message(status: Int, code: String): EmailVerifyResult =
             repository(VerifyApi(confirm = { httpError(status, errorBody(code)) })).confirmEmailVerify("111111")
-        assertEquals(EmailVerifyResult.Failure("코드가 맞지 않음"), message(400, "invalid_verify_code"))
-        assertEquals(EmailVerifyResult.Failure("코드가 만료됨. 다시 받아야 함"), message(400, "verify_code_expired"))
+        assertEquals(EmailVerifyResult.Failure("코드가 맞지 않아요"), message(400, "invalid_verify_code"))
+        assertEquals(EmailVerifyResult.Failure("코드가 만료됐어요. 코드를 다시 받아 주세요"), message(400, "verify_code_expired"))
         assertEquals(
-            EmailVerifyResult.Failure("시도가 너무 많음. 코드를 다시 받아야 함"),
+            EmailVerifyResult.Failure("시도가 너무 많아요. 코드를 다시 받아 주세요"),
             message(400, "too_many_attempts"),
         )
         assertEquals(EmailVerifyResult.AlreadyVerified, message(409, "email_already_verified"))
@@ -156,6 +156,6 @@ class AuthRepositoryEmailVerifyTest {
         val bare = VerifyApi(confirm = { httpError(500) })
         val failure = repository(bare).confirmEmailVerify("1")
         assertTrue(failure is EmailVerifyResult.Failure)
-        assertEquals("서버에 문제가 생겼다. 잠시 후 다시 시도한다.", (failure as EmailVerifyResult.Failure).message)
+        assertEquals("잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.", (failure as EmailVerifyResult.Failure).message)
     }
 }

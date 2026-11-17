@@ -133,19 +133,20 @@ class PublicSetupTest {
             }
             step("05_add_event_and_route") {
                 click(By.res("add_event"))
-                input("event_title", config.getString("event_title"))
-                click(By.res("event_date"))
+                input("event_title", config.getString("event_title"), "add_event_scroll")
+                click(By.res("arrival_date_other"), "add_event_scroll")
                 val date = LocalDate.parse(config.getString("event_date"))
                 if (YearMonth.from(date) != YearMonth.now()) click(By.desc(Pattern.compile("Change to next month|다음 달.*")))
                 click(By.textContains(date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(Locale.getDefault()))))
                 click(By.text("확인"))
                 // 기본 9시와 같은 시각·오전/오후·경계 분도 같은 휠로 확인한다.
                 for (time in listOf("21:02", "09:00", "12:30", "00:59", config.getString("event_time"))) {
-                    click(By.res("event_time"))
+                    click(By.res("event_time"), "add_event_scroll")
                     pickTime(time)
                     click(By.text("확인"))
                     val (hour, minute) = time.split(":").map(String::toInt)
-                    val display = "%02d:%02d".format(Locale.ROOT, if (hour % 12 == 0) 12 else hour % 12, minute)
+                    // 필드 카드는 "오전 9:00" 처럼 보인다(Figma `545:279`).
+                    val display = com.swpp.wakeup.domain.model.AlarmTimeChoice.clockLabel(hour * 60 + minute)
                     assertTrue("시각 선택 실패: $time", ui.withNode(By.res("event_time")) { it.findObject(By.text(display)) != null })
                 }
                 click(By.res("place_query"), "add_event_scroll")
@@ -154,7 +155,7 @@ class PublicSetupTest {
                 val destination = config.getString("destination_query")
                 click(By.res("place_result_$destination"), "add_event_scroll", 90_000)
                 find(By.text(destination).clazz("android.widget.TextView"), "add_event_scroll")
-                click(By.textContains("경로 고르기"), "add_event_scroll")
+                click(By.res("route_field"), "add_event_scroll")
                 click(By.text("도보"), "route_scroll", 90_000)
                 click(By.res("route_${config.getString("route_key")}"), "route_scroll", 90_000)
                 // 좌표가 있는 도보 카드는 누르면 전체 화면 지도 미리보기가 열린다(Phase A, A1).
@@ -170,7 +171,8 @@ class PublicSetupTest {
                 }
                 if (previewed) click(By.res("route_preview_confirm")) else click(By.res("route_confirm"), "route_scroll")
                 if (config.optBoolean("replay_routing")) {
-                    click(By.text("수업"), "add_event_scroll")
+                    // 새 일정의 종류는 "선택 안 함" 으로 시작한다(H2-8).
+                    click(By.text("선택 안 함"), "add_event_scroll")
                     click(By.text("시험"))
                 }
                 click(By.res("event_submit"), "add_event_scroll")

@@ -85,7 +85,7 @@ object SocialSignIn {
      */
     private suspend fun kakao(activity: Activity): Outcome = suspendCancellableCoroutine { cont ->
         val client = runCatching { UserApiClient.instance }.getOrElse {
-            cont.resume(Outcome.Failed("카카오 로그인을 준비하지 못했음"))
+            cont.resume(Outcome.Failed("카카오 로그인을 준비하지 못했어요"))
             return@suspendCancellableCoroutine
         }
         fun finish(outcome: Outcome) {
@@ -111,10 +111,10 @@ object SocialSignIn {
         error != null && error.isKakaoCancel() -> Outcome.Cancelled
         error != null -> {
             Log.w(TAG, "카카오 로그인 실패", error)
-            Outcome.Failed("카카오 로그인에 실패함. ${error.message.orEmpty()}".trim())
+            Outcome.Failed("카카오 로그인에 실패했어요. ${error.message.orEmpty()}".trim())
         }
         // 콘솔의 OpenID Connect 가 꺼져 있으면 ID 토큰이 오지 않는다(계약 §6-1).
-        token?.idToken.isNullOrBlank() -> Outcome.Failed("카카오가 ID 토큰을 주지 않았음. 카카오 콘솔의 OpenID Connect 를 켜야 함")
+        token?.idToken.isNullOrBlank() -> Outcome.Failed("카카오 로그인 정보를 받지 못했어요. 잠시 뒤 다시 시도해 주세요")
         else -> Outcome.Token(token!!.idToken!!)
     }
 
@@ -133,17 +133,17 @@ object SocialSignIn {
         ) {
             Outcome.Token(GoogleIdTokenCredential.createFrom(credential.data).idToken)
         } else {
-            Outcome.Failed("Google 계정 정보를 받지 못했음")
+            Outcome.Failed("Google 계정 정보를 받지 못했어요")
         }
     } catch (e: GetCredentialCancellationException) {
         Outcome.Cancelled
     } catch (e: NoCredentialException) {
-        Outcome.Failed("이 기기에 Google 계정이 없음. 기기 설정에서 계정을 추가해야 함")
+        Outcome.Failed("이 기기에 Google 계정이 없어요. 기기 설정에서 계정을 추가해 주세요")
     } catch (e: GetCredentialException) {
         Log.w(TAG, "Google 로그인 실패: ${e.type}", e)
-        Outcome.Failed("Google 로그인에 실패함. ${e.message.orEmpty()}".trim())
+        Outcome.Failed("Google 로그인에 실패했어요. ${e.message.orEmpty()}".trim())
     } catch (e: GoogleIdTokenParsingException) {
         Log.w(TAG, "Google ID 토큰을 읽지 못했다", e)
-        Outcome.Failed("Google 계정 정보를 읽지 못했음")
+        Outcome.Failed("Google 계정 정보를 읽지 못했어요")
     }
 }

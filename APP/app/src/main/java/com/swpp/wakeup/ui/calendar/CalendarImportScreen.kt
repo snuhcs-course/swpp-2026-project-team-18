@@ -1,5 +1,7 @@
 package com.swpp.wakeup.ui.calendar
 
+import androidx.compose.ui.platform.testTag
+import com.swpp.wakeup.ui.common.JitRetryButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -100,10 +102,10 @@ fun CalendarImportScreen(
                 )
                 Text(
                     text = if (state.linkedCount > 0) {
-                        "고른 것만 서버로 보냄. 연동한 캘린더 ${state.linkedCount}개의 " +
-                            "앞으로 2주 일정만 보여줌"
+                        "고른 것만 가져와요. 연동한 캘린더 ${state.linkedCount}개의 " +
+                            "앞으로 2주 일정만 보여 드려요"
                     } else {
-                        "고른 것만 서버로 보냄. 앞으로 2주 안의 시간 지정 일정만 보여줌"
+                        "고른 것만 가져와요. 앞으로 2주 안의 시간이 정해진 일정만 보여 드려요"
                     },
                     color = JitColor.TextSecondary,
                     fontSize = 13.sp,
@@ -165,8 +167,8 @@ fun CalendarImportScreen(
                     loading = state.importing,
                 )
                 Text(
-                    text = "장소를 찾은 일정만 알람 시각이 계산됨. 나머지는 목록에 남고 " +
-                        "나중에 장소를 넣을 수 있음",
+                    text = "장소를 찾은 일정만 알람 시각을 계산해요. 나머지는 목록에 남고 " +
+                        "나중에 장소를 넣을 수 있어요",
                     color = JitColor.TextSecondary,
                     fontSize = 10.sp,
                 )
@@ -191,15 +193,15 @@ private fun LinkPicker(
                 text = if (state.linkedCount > 0) {
                     "가져올 캘린더 · ${state.linkedCount}개 켜짐"
                 } else {
-                    "연동한 캘린더가 없음"
+                    "연동한 캘린더가 없어요"
                 },
                 dotColor = JitColor.Accent,
                 fontSize = 13,
                 dotSize = 8.dp,
             )
             Text(
-                text = "가져올 캘린더를 켜면 그 캘린더의 일정이 아래에 나옴.\n" +
-                    "여기서 켠 것은 설정에도 같이 켜짐",
+                text = "가져올 캘린더를 켜면 그 캘린더의 일정이 아래에 나와요.\n" +
+                    "여기서 켠 것은 설정에도 같이 켜져요",
                 color = JitColor.TextSecondary,
                 fontSize = 11.sp,
             )
@@ -241,7 +243,7 @@ private fun SummaryCard(state: CalendarImportState) {
             )
         }
         Text(
-            text = "이미 가져온 일정은 기본으로 꺼져 있음. 다시 켜면 서버 값이 갱신됨",
+            text = "이미 가져온 일정은 기본으로 꺼져 있어요. 다시 켜면 저장된 일정을 새 값으로 바꿔요",
             color = JitColor.TextSecondary,
             fontSize = 10.sp,
         )
@@ -335,19 +337,19 @@ private fun CandidateRow(
 private fun PermissionCard(onRequest: () -> Unit) {
     JitCard(padding = 16.dp, gap = 9.dp) {
         JitDotLabel(
-            text = "캘린더 읽기 권한이 필요함",
+            text = "캘린더 읽기 권한이 필요해요",
             dotColor = JitColor.Amber,
             fontSize = 13,
             dotSize = 8.dp,
         )
         Text(
-            text = "기기 캘린더의 앞으로 2주 일정을 **읽기만** 함. 캘린더를 고치지 않음.\n" +
-                "읽은 목록에서 고른 것만 서버로 보냄 — 전부 자동으로 올리지 않음",
+            text = "기기 캘린더의 앞으로 2주 일정을 **읽기만** 해요. 캘린더를 고치지 않아요.\n" +
+                "읽은 목록에서 고른 것만 가져와요. 전부 자동으로 올리지 않아요",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
         Text(
-            text = "권한 없이도 일정을 직접 입력해 쓸 수 있음",
+            text = "권한 없이도 일정을 직접 입력해 쓸 수 있어요",
             color = JitColor.TextSecondary,
             fontSize = 10.sp,
         )
@@ -360,14 +362,14 @@ private fun PermissionCard(onRequest: () -> Unit) {
 private fun EmptyCard() {
     JitCard(padding = 16.dp, gap = 7.dp) {
         JitDotLabel(
-            text = "가져올 일정이 없음",
+            text = "가져올 일정이 없어요",
             dotColor = JitColor.TextSecondary,
             fontSize = 13,
             dotSize = 8.dp,
         )
         Text(
-            text = "앞으로 2주 안에 시간이 정해진 일정이 없음. 종일 일정은 도착 시각이 " +
-                "없어서 제외함",
+            text = "앞으로 2주 안에 시간이 정해진 일정이 없어요. 종일 일정은 도착 시각이 " +
+                "없어서 빼요",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
@@ -377,23 +379,17 @@ private fun EmptyCard() {
 @Composable
 private fun ErrorCard(message: String, onRetry: () -> Unit) {
     JitCard(
-        modifier = Modifier.clickable(onClick = onRetry),
         padding = 14.dp,
         gap = 6.dp,
     ) {
         JitDotLabel(
-            text = "불러오지 못했음",
+            text = "불러오지 못했어요",
             dotColor = JitColor.Red,
             fontSize = 12,
             dotSize = 7.dp,
         )
         Text(text = message, color = JitColor.TextSecondary, fontSize = 11.sp)
-        Text(
-            text = "눌러서 다시 시도",
-            color = JitColor.Accent,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-        )
+        JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 2.dp).testTag("calendar_import_retry"))
     }
 }
 

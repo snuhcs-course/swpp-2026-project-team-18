@@ -98,4 +98,20 @@ class SignupContractTest {
             assertEquals(terms, json["terms_agreed"].asBoolean)
         }
     }
+
+    // 확인 칸은 적는 동안 바로 알려 준다: 다르면 빨간 표시, 완전히 같아지면 ✓
+    @Test
+    fun `확인 칸이 비어 있으면 아직 오류가 아니고 다르게 적히면 오류다`() {
+        val typing = state().copy(password = "Example123!", passwordConfirm = "")
+        assertFalse(typing.passwordConfirmMismatch)
+        assertFalse(typing.passwordsMatch)
+
+        val partial = typing.copy(passwordConfirm = "Example12")
+        assertTrue(partial.passwordConfirmMismatch)
+        assertFalse(partial.passwordsMatch)
+
+        val done = typing.copy(passwordConfirm = "Example123!")
+        assertFalse(done.passwordConfirmMismatch)
+        assertTrue(done.passwordsMatch)
+    }
 }

@@ -42,7 +42,7 @@ class HomeSetupErrorsTest {
 
         val next = HomeViewModel.HomeSetupState(submitting = true, labelError = "old").withAddFailure(failure)
 
-        assertEquals("서버에 연결하지 못해 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요", next.error)
+        assertEquals("연결하지 못해 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요", next.error)
         assertNull(next.labelError)
     }
 }

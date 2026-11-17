@@ -109,7 +109,7 @@ class NavStateTest {
             AppRoute.Homes, AppRoute.Permissions, AppRoute.AlarmDecision(1), AppRoute.ReportDay(day, null)).forEach {
             assertTrue("$it", it.showsTabBar)
         }
-        listOf(AppRoute.AddEvent, AppRoute.EditEvent(1), AppRoute.RouteChoice, AppRoute.MapPick,
+        listOf(AppRoute.EditEvent(1), AppRoute.RouteChoice, AppRoute.MapPick,
             AppRoute.HomeSetup, AppRoute.PrepOnboarding, AppRoute.CalendarLink, AppRoute.ChangePassword,
             AppRoute.VerifyEmail, AppRoute.MorningProgress, AppRoute.RoutineEditor,
             AppRoute.EventBlocks(1), AppRoute.CalendarImport, AppRoute.Intro, AppRoute.Help(),

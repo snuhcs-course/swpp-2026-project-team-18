@@ -1,6 +1,8 @@
 // Partly AI-generated (Claude)
 package com.swpp.wakeup.ui.trip
 
+import com.swpp.wakeup.domain.model.ProbabilityRule
+import com.swpp.wakeup.ui.common.JitRetryButton
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -213,7 +215,7 @@ private fun NextTripCard(event: UpcomingEvent, plan: AlarmPlanView, today: Local
             (plan.onTimeProbability ?: event.onTimeProbability)?.let { probability ->
                 val tone = riskColor(event.risk)
                 JitChip(
-                    label = "정시 도착 확률 $probability%",
+                    label = "정시 도착 확률 ${ProbabilityRule.displayLabel(probability)}",
                     contentColor = tone,
                     container = tone.copy(alpha = 0.15f),
                 )
@@ -550,12 +552,11 @@ private fun FailedCard(onRetry: () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Hint))
             .background(JitColor.Surface2)
-            .clickable(onClick = onRetry)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         JitDotLabel(text = "가는 길을 불러오지 못했어요", dotColor = JitColor.Red, fontSize = 12, dotSize = 6.dp)
-        Text(text = "눌러서 다시 시도", color = JitColor.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 3.dp).testTag("trip_retry"))
     }
 }
 

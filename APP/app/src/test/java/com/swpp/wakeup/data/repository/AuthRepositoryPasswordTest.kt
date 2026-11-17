@@ -87,7 +87,7 @@ class AuthRepositoryPasswordTest {
             val api = ResetApi(request = { httpError(status) })
             val result = repository(api).requestPasswordReset("me@snu.ac.kr")
             assertEquals(
-                ResetRequestResult.Failure("아직 서버에서 지원하지 않아요"),
+                ResetRequestResult.Failure("아직 지원하지 않는 기능이에요"),
                 result,
             )
         }
@@ -99,7 +99,7 @@ class AuthRepositoryPasswordTest {
 
         val result = repository(api).requestPasswordReset("me@snu.ac.kr")
 
-        assertEquals(ResetRequestResult.Failure("요청이 많음. 잠시 뒤 다시 시도"), result)
+        assertEquals(ResetRequestResult.Failure("요청이 많아요. 잠시 뒤 다시 시도해 주세요"), result)
     }
 
     @Test
@@ -135,9 +135,9 @@ class AuthRepositoryPasswordTest {
     @Test
     fun `코드 확인의 실패 코드는 문구로 바뀐다`() = runTest {
         val expected = mapOf(
-            "invalid_reset_code" to "코드가 맞지 않음",
-            "reset_code_expired" to "코드가 만료됨. 다시 받아야 함",
-            "too_many_attempts" to "시도가 너무 많음. 코드를 다시 받아야 함",
+            "invalid_reset_code" to "코드가 맞지 않아요",
+            "reset_code_expired" to "코드가 만료됐어요. 코드를 다시 받아 주세요",
+            "too_many_attempts" to "시도가 너무 많아요. 코드를 다시 받아 주세요",
         )
         expected.forEach { (code, message) ->
             val api = ResetApi(confirm = { httpError(400, errorBody(code)) })
@@ -160,7 +160,7 @@ class AuthRepositoryPasswordTest {
     fun `코드 확인이 404 면 지원하지 않는다고 알린다`() = runTest {
         val result = repository(ResetApi()).confirmPasswordReset("a@b.co", "123456", "Newpass123", "Newpass123")
 
-        assertEquals(AuthResult.Failure("아직 서버에서 지원하지 않아요"), result)
+        assertEquals(AuthResult.Failure("아직 지원하지 않는 기능이에요"), result)
     }
 
     // --- 변경 -------------------------------------------------------------------
@@ -195,7 +195,7 @@ class AuthRepositoryPasswordTest {
 
         val result = repository(api).changePassword("wrong", "Newpass123", "Newpass123")
 
-        assertEquals(PasswordChangeResult.Failure("지금 비밀번호가 맞지 않음", currentPasswordWrong = true), result)
+        assertEquals(PasswordChangeResult.Failure("지금 비밀번호가 맞지 않아요", currentPasswordWrong = true), result)
     }
 
     @Test
@@ -205,8 +205,8 @@ class AuthRepositoryPasswordTest {
         val social = repository(ResetApi(change = { httpError(409, errorBody("password_login_unavailable")) }))
             .changePassword("x", "Newpass123", "Newpass123")
 
-        assertEquals(PasswordChangeResult.Failure("지금 비밀번호와 같음"), same)
-        assertEquals(PasswordChangeResult.Failure("이 계정은 비밀번호로 로그인하지 않음"), social)
+        assertEquals(PasswordChangeResult.Failure("지금 비밀번호와 같아요"), same)
+        assertEquals(PasswordChangeResult.Failure("이 계정은 비밀번호로 로그인하지 않아요"), social)
     }
 
     @Test
@@ -215,7 +215,7 @@ class AuthRepositoryPasswordTest {
 
         val result = repository(ResetApi()).changePassword("Oldpass123", "Newpass123", "Newpass123")
 
-        assertEquals(PasswordChangeResult.Failure("아직 서버에서 지원하지 않아요"), result)
+        assertEquals(PasswordChangeResult.Failure("아직 지원하지 않는 기능이에요"), result)
         assertEquals("old-access", tokenStore.accessToken)
     }
 

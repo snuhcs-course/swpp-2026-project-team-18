@@ -57,7 +57,7 @@ class ImportCandidateTest {
             resolvedPlace = null,
         )
         assertFalse(candidate.willHavePlan)
-        assertTrue(candidate.placeNote.contains("찾지 못함"))
+        assertTrue(candidate.placeNote.contains("찾지 못해"))
         assertTrue(candidate.placeNote.contains("줌 회의실"))
     }
 
@@ -69,7 +69,7 @@ class ImportCandidateTest {
             alreadyImported = false,
         )
         assertFalse(candidate.willHavePlan)
-        assertTrue(candidate.placeNote.contains("캘린더에 장소가 없음"))
+        assertTrue(candidate.placeNote.contains("캘린더에 장소가 없어요"))
     }
 
     @Test
@@ -152,7 +152,7 @@ class CalendarImportStateTest {
 
         assertEquals(limit + 3, state.selectedCount)
         assertFalse(state.canImport)
-        assertEquals("한 번에 ${limit}건까지 가져올 수 있음. 3건을 해제할 것", state.tooManyNote)
+        assertEquals("한 번에 ${limit}건까지 가져올 수 있어요. 3건을 해제해 주세요", state.tooManyNote)
     }
 
     @Test
@@ -179,7 +179,7 @@ class CalendarImportStateTest {
     // Partly AI-generated (Claude)
     @Test
     fun `연동한 캘린더가 없으면 일정 없음이 아니라 연동 필요다`() {
-        // 아무 캘린더도 읽지 않았는데 "가져올 일정이 없음" 을 보이면 사용자는 캘린더가
+        // 아무 캘린더도 읽지 않았는데 "가져올 일정이 없어요" 을 보이면 사용자는 캘린더가
         // 비어 있다고 믿는다. 할 일은 캘린더를 켜는 것이다.
         val none = CalendarImportState(candidates = emptyList(), linkedCount = 0, linkPicker = true)
         assertFalse(none.isEmpty)

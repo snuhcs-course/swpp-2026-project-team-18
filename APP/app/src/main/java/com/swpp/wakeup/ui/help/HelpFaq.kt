@@ -53,7 +53,7 @@ internal data class AnswerLine(val text: String, val bullet: Boolean)
  * | 준비 시간 | `PrepOnboardingScreen`(5분~4시간), 아침 루틴 블록 범위(`RoutineEditorScreen`), 일정마다 블록 고르기(④), `planning/prep_observations.py`(알람 끄기 → GPS 출발, 정한 값의 0.5~1.5배만) |
  * | 쓸수록 | `.github/workflows/train-models.yml`(매일 23:17), `prediction/learning.py`(걷는 속도 · 시간대 · 경로), `planning/buffers.py`(4~15분, 늘릴 때 최대 5분 · 줄일 때 2분), `planning/refresh.py`(7일), 안 감 · 직접 누른 출발 · 도착은 학습에서 뺀다 |
  * | 여유 단계 | `planning/risk_options.py`(97 · 90 · 65%), 종류 기본값 `events/migrations/0002_seed_event_tags.py` |
- * | 직접 바꾸기 | 지금은 [시각 바꾸기] · "지각 위험 바꾸기" → ⑤ 세 단계. 분 단위로 고르는 H2-3 시트는 서버(BE-H3b · c) 뒤 |
+ * | 직접 바꾸기 | [시각 바꾸기] → H2-3 시트. 세 칸은 τ 로, 휠로 고른 다른 시각은 직접 정한 시각으로 저장(서버 0.21.0, BE-H3b). 그보다 낮은 서버에서는 세 칸만 |
  * | 캘린더 | `CalendarImportScreen`(앞으로 2주, 시각이 정해진 일정, 고른 것만, 읽기만, 장소는 줄마다 확인) |
  * | 안 울림 | `AlarmScheduler`(7일치 `setAlarmClock`, 상태 표시줄 아이콘), `BootReceiver`(재부팅 · 시간대), `MissedAlarms`(강제 중지) |
  */
@@ -112,8 +112,9 @@ internal object HelpFaq {
             "홈의 다음 알람 카드에서 [시각 바꾸기]를, 알람 화면에서 '지각 위험 바꾸기'를 누르면 아래에서 " +
                 "시트가 올라와요. 위의 빠르게 고르기 세 칸(여유 있게·보통·빠듯하게)은 울릴 시각과 정시 도착 " +
                 "확률을 함께 보여 주고, 고르면 그 시각으로 알람을 다시 정해요.\n\n" +
-                "아래 휠을 5분 단위로 돌리면 그 시각에 일어났을 때의 정시 도착 확률을 미리 볼 수 있어요. " +
-                "휠로 고른 시각을 알람으로 저장하는 기능은 준비 중이에요. 그 아침만 알람을 끄려면 홈 일정 " +
+                "아래 휠을 5분 단위로 돌리면 그 시각에 일어났을 때의 정시 도착 확률을 미리 볼 수 있고, " +
+                "[맞추기]를 누르면 그 시각을 알람으로 저장해요(직접 정한 시각). 직접 정한 시각은 다시 계산해도 " +
+                "바뀌지 않고, 시트의 [추천 시각으로 되돌리기]로 돌아갈 수 있어요. 그 아침만 알람을 끄려면 홈 일정 " +
                 "줄의 스위치를 꺼 주세요.",
         ),
         FaqItem(

@@ -244,9 +244,9 @@ class AuthRepository(
                 "social_email_in_use" -> SocialResult.EmailInUse(loginMethodsOf(error.details))
                 "social_not_configured" -> SocialResult.Unavailable
                 "social_token_invalid" ->
-                    SocialResult.Failure("${provider.label} 로그인을 확인하지 못했다. 다시 시도한다.")
+                    SocialResult.Failure("${provider.label} 로그인을 확인하지 못했어요. 다시 시도해 주세요.")
                 "social_unavailable" ->
-                    SocialResult.Failure("${provider.label} 확인 서버에 닿지 못했다. 잠시 뒤 다시 시도한다.")
+                    SocialResult.Failure("${provider.label}에 연결하지 못했어요. 잠시 뒤 다시 시도해 주세요.")
                 else -> SocialResult.Failure(
                     error?.message?.takeIf { it.isNotBlank() } ?: defaultMessage(response.code())
                 )
@@ -287,13 +287,13 @@ class AuthRepository(
             val label = provider?.label ?: "소셜"
             AccountResult.Failure(
                 when (error?.code) {
-                    "social_already_linked" -> "이 $label 계정은 다른 JustInTime 계정에 연결돼 있음"
-                    "social_provider_linked" -> "이미 다른 $label 계정이 연결돼 있음. 먼저 끊어야 함"
-                    "social_last_login_method" -> "유일한 로그인 방법이라 끊을 수 없음"
-                    "social_token_invalid" -> "$label 확인에 실패함. 다시 시도"
-                    "social_not_configured" -> "지금은 $label 연결을 쓸 수 없음"
+                    "social_already_linked" -> "이 $label 계정은 다른 JustInTime 계정에 연결돼 있어요"
+                    "social_provider_linked" -> "이미 다른 $label 계정이 연결돼 있어요. 먼저 끊어 주세요"
+                    "social_last_login_method" -> "하나뿐인 로그인 방법이라 끊을 수 없어요"
+                    "social_token_invalid" -> "$label 확인에 실패했어요. 다시 시도해 주세요"
+                    "social_not_configured" -> "지금은 $label 연결을 쓸 수 없어요"
                     else -> when {
-                        response.code() == 404 && provider != null -> "연결된 $label 계정이 없음"
+                        response.code() == 404 && provider != null -> "연결된 $label 계정이 없어요"
                         else -> error?.message?.takeIf { it.isNotBlank() } ?: defaultMessage(response.code())
                     }
                 }
@@ -407,12 +407,12 @@ class AuthRepository(
 
     private fun emailVerifyMessage(status: Int, error: ApiErrorBody?): String = when {
         status == 404 || status == 405 -> MESSAGE_UNSUPPORTED
-        status == 429 || error?.code == "throttled" -> "요청이 많음. 잠시 뒤 다시 시도"
+        status == 429 || error?.code == "throttled" -> "요청이 많아요. 잠시 뒤 다시 시도해 주세요"
         else -> when (error?.code) {
-            "email_not_deliverable" -> "이 주소로는 메일을 보낼 수 없음"
-            "invalid_verify_code" -> "코드가 맞지 않음"
-            "verify_code_expired" -> "코드가 만료됨. 다시 받아야 함"
-            "too_many_attempts" -> "시도가 너무 많음. 코드를 다시 받아야 함"
+            "email_not_deliverable" -> "이 주소로는 메일을 보낼 수 없어요"
+            "invalid_verify_code" -> "코드가 맞지 않아요"
+            "verify_code_expired" -> "코드가 만료됐어요. 코드를 다시 받아 주세요"
+            "too_many_attempts" -> "시도가 너무 많아요. 코드를 다시 받아 주세요"
             else -> error?.message?.takeIf { it.isNotBlank() } ?: defaultMessage(status)
         }
     }
@@ -421,38 +421,38 @@ class AuthRepository(
     /** 재설정·변경 호출의 실패를 사용자 문구로. 서버가 아직 없으면(404/405) 그렇게 알린다 */
     private fun passwordFlowMessage(status: Int, error: ApiErrorBody?): String = when {
         status == 404 || status == 405 -> MESSAGE_UNSUPPORTED
-        status == 429 || error?.code == "throttled" -> "요청이 많음. 잠시 뒤 다시 시도"
+        status == 429 || error?.code == "throttled" -> "요청이 많아요. 잠시 뒤 다시 시도해 주세요"
         else -> when (error?.code) {
-            "invalid_reset_code" -> "코드가 맞지 않음"
-            "reset_code_expired" -> "코드가 만료됨. 다시 받아야 함"
-            "too_many_attempts" -> "시도가 너무 많음. 코드를 다시 받아야 함"
-            "invalid_current_password" -> "지금 비밀번호가 맞지 않음"
-            "password_unchanged" -> "지금 비밀번호와 같음"
-            "password_login_unavailable" -> "이 계정은 비밀번호로 로그인하지 않음"
+            "invalid_reset_code" -> "코드가 맞지 않아요"
+            "reset_code_expired" -> "코드가 만료됐어요. 코드를 다시 받아 주세요"
+            "too_many_attempts" -> "시도가 너무 많아요. 코드를 다시 받아 주세요"
+            "invalid_current_password" -> "지금 비밀번호가 맞지 않아요"
+            "password_unchanged" -> "지금 비밀번호와 같아요"
+            "password_login_unavailable" -> "이 계정은 비밀번호로 로그인하지 않아요"
             else -> error?.message?.takeIf { it.isNotBlank() } ?: defaultMessage(status)
         }
     }
 
     private fun defaultMessage(code: Int): String = when (code) {
-        400 -> "입력값을 확인해야 한다."
-        401 -> "이메일 또는 비밀번호가 올바르지 않다."
-        409 -> "이미 가입된 이메일이다."
-        in 500..599 -> "서버에 문제가 생겼다. 잠시 후 다시 시도한다."
+        400 -> "입력한 값을 확인해 주세요."
+        401 -> "이메일 또는 비밀번호가 맞지 않아요."
+        409 -> "이미 가입된 이메일이에요."
+        in 500..599 -> "잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요."
         else -> MESSAGE_UNKNOWN
     }
 
     internal companion object {
-        const val MESSAGE_NETWORK = "서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."
-        const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
+        const val MESSAGE_NETWORK = "연결할 수 없어요. 인터넷 연결을 확인해 주세요."
+        const val MESSAGE_UNKNOWN = "알 수 없는 문제가 생겼어요."
 
         /** 재설정·변경 API 가 서버에 아직 없을 때(404/405). 계약은 backend-requests.md R3-9 */
-        const val MESSAGE_UNSUPPORTED = "아직 서버에서 지원하지 않아요"
+        const val MESSAGE_UNSUPPORTED = "아직 지원하지 않는 기능이에요"
 
         /** 2xx 인데 토큰이 비어 있을 때. 서버 배포 버전이 낮으면 이렇게 온다. */
-        const val MESSAGE_NO_TOKEN = "서버가 토큰을 주지 않았다. 서버 버전을 확인한다."
+        const val MESSAGE_NO_TOKEN = "로그인 정보를 받지 못했어요. 잠시 뒤 다시 시도해 주세요."
 
         /** 기기 보안 저장소에 토큰을 쓰지 못했을 때 */
-        const val MESSAGE_STORAGE = "이 기기에 로그인 정보를 안전하게 저장하지 못했다. 다시 시도한다."
+        const val MESSAGE_STORAGE = "이 기기에 로그인 정보를 안전하게 저장하지 못했어요. 다시 시도해 주세요."
     }
 }
 

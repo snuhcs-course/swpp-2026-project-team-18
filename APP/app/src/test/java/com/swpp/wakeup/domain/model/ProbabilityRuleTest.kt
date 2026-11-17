@@ -46,4 +46,30 @@ class ProbabilityRuleTest {
         assertEquals("지각할 수 있어요", ProbabilityRule.warning(65))
         assertNull(ProbabilityRule.warning(70))
     }
+
+    // Partly AI-generated (Claude) — 사용자 결정 11-16: "10번 중 9번" 이면 숫자도 90%
+    @Test
+    fun `보이는 숫자는 90 을 넘지 않고 그 아래는 그대로다`() {
+        assertEquals(90, ProbabilityRule.displayPercent(100))
+        assertEquals(90, ProbabilityRule.displayPercent(97))
+        assertEquals(90, ProbabilityRule.displayPercent(90))
+        assertEquals(89, ProbabilityRule.displayPercent(89))
+        assertEquals(0, ProbabilityRule.displayPercent(0))
+        assertEquals(0, ProbabilityRule.displayPercent(-3))
+        assertEquals("90%", ProbabilityRule.displayLabel(98))
+    }
+
+    @Test
+    fun `보이는 숫자는 안내 시트의 10번 중 n번과 늘 맞는다`() {
+        for (p in 0..100) {
+            val shown = ProbabilityRule.displayPercent(p)
+            assertEquals("$p%", shown / 10, com.swpp.wakeup.ui.help.OnTimeSheetText.timesOutOfTen(p))
+        }
+    }
+
+    @Test
+    fun `색과 경고는 실제 값으로 판단한다`() {
+        // 98% 는 90% 로 보이지만 목표 0.95 를 넘으므로 초록이다
+        assertEquals(ProbabilityTone.GOOD, ProbabilityRule.tone(98, 0.95))
+    }
 }

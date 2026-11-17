@@ -1,5 +1,7 @@
 package com.swpp.wakeup.integration
 
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -76,7 +78,7 @@ class AlarmDecisionScreenTest {
 
     private val calls = mutableListOf<String>()
 
-    private fun show(plan: AlarmPlanView?) {
+    private fun show(plan: AlarmPlanView?, supportsConfirm: Boolean = false) {
         compose.setContent {
             JitTheme {
                 AlarmDecisionScreen(
@@ -85,26 +87,32 @@ class AlarmDecisionScreenTest {
                     onChangeRisk = { calls += "risk" },
                     onEditBlocks = { calls += "blocks" },
                     onDelete = { calls += "delete" },
+                    serverSupportsConfirm = supportsConfirm,
                 )
             }
         }
     }
 
+    // ④ 다시 그림(iter4 H2-3 · H2-6, Figma `545:920`) — Partly AI-generated (Claude)
+
     @Test
-    fun `계산된 알람은 시각과 함께 준비 이동 버퍼 근거와 합계를 보여준다`() {
+    fun `계산된 알람은 시각과 함께 준비 이동 여유 근거를 보여준다`() {
         show(planFrom(eventJson(computedPlan)))
 
-        compose.onNodeWithText("7:00").assertExists()
-        compose.onNodeWithText("AM").assertExists()
-        compose.onNodeWithText("09:00 1교시 수업").assertExists()
-        compose.onNodeWithText("서울대 · 관악로 1").assertExists()
+        compose.onNodeWithTag("plan_alarm_time").assertTextEquals("7:00")
+        compose.onNodeWithText("오전").assertExists()
+        compose.onNodeWithText("1교시 수업").assertExists()
+        compose.onNodeWithText("서울대 · 지하철 40분").assertExists()
+        compose.onNodeWithTag("plan_pill").assertTextEquals("추천")
+        compose.onNodeWithTag("plan_probability").assertTextEquals("정시 도착 확률 90%")
 
-        compose.onNodeWithText("준비 시간").assertExists()
-        compose.onNodeWithText("지하철 이동").assertExists()
-        compose.onNodeWithText("안전 버퍼").assertExists()
-        compose.onAllNodesWithText("30분").assertCountEquals(1)
-        compose.onAllNodesWithText("40분").assertCountEquals(1)
-        compose.onNodeWithText("합계 80분").performScrollTo()
+        compose.onNodeWithText("왜 오전 7:00인가요?").performScrollTo()
+        compose.onNodeWithText("준비 30분").assertExists()
+        compose.onNodeWithText("이동 40분").assertExists()
+        compose.onNodeWithText("여유 10분").assertExists()
+        compose.onNodeWithText("기본 여유 시간이에요").assertExists()
+        // 내부 말은 이 화면에서 뺐다
+        compose.onNodeWithText("적용 τ", substring = true).assertDoesNotExist()
     }
 
     @Test
@@ -113,8 +121,8 @@ class AlarmDecisionScreenTest {
 
         show(planFrom(eventJson(plan)))
 
-        compose.onNodeWithText("준비 시간").assertDoesNotExist()
-        compose.onNodeWithText("지하철 이동").assertExists()
+        compose.onNodeWithText("준비 30분").assertDoesNotExist()
+        compose.onNodeWithText("이동 40분").performScrollTo().assertExists()
     }
 
     @Test
@@ -122,28 +130,46 @@ class AlarmDecisionScreenTest {
         show(planFrom(eventJson(computedPlan)))
 
         compose.onNodeWithText("다시 계산").assertDoesNotExist()
-        compose.onNodeWithText("지각 위험 바꾸기").performScrollTo().performClick()
-        compose.onNodeWithText("일정 삭제").performScrollTo().performClick()
-        compose.onNodeWithText("확인").performScrollTo().performClick()
+        compose.onNodeWithTag("risk_entry").performScrollTo().performClick()
+        compose.onNodeWithTag("plan_blocks").performScrollTo().performClick()
+        compose.onNodeWithTag("event_delete").performScrollTo().performClick()
 
-        assertEquals(listOf("risk", "delete", "back"), calls)
+        assertEquals(listOf("risk", "blocks", "delete"), calls)
+    }
+
+    @Test
+    fun `승인 버튼 없이 울리는 시각을 한 줄로 말한다`() {
+        val unconfirmed = computedPlan.replace("\"status\":\"ok\"", "\"status\":\"ok\",\"alarm_confirmed\":false")
+        show(planFrom(eventJson(unconfirmed)), supportsConfirm = true)
+
+        compose.onNodeWithTag("plan_alarm_status").assertExists()
+        compose.onNodeWithText("오전 7:00에 알람이 울려요").assertExists()
+        compose.onNodeWithText("이 시각으로 알람 맞추기").assertDoesNotExist()
+    }
+
+    @Test
+    fun `확인한 알람은 초록 상태 줄`() {
+        val confirmed = computedPlan.replace("\"status\":\"ok\"", "\"status\":\"ok\",\"alarm_confirmed\":true")
+        show(planFrom(eventJson(confirmed)), supportsConfirm = true)
+
+        compose.onNodeWithTag("plan_confirmed").assertExists()
+        compose.onNodeWithText("알람이 맞춰져 있어요").assertExists()
     }
 
     @Test
     fun `계산되지 않은 알람은 이유를 말하고 계산된 알람용 버튼을 숨긴다`() {
         val plan = """{"status":"no_home","status_label":"집 위치 필요","alarm_at":null}"""
 
-        show(planFrom(eventJson(plan)))
+        show(planFrom(eventJson(plan)), supportsConfirm = true)
 
         compose.onNodeWithText("집 위치 필요").assertExists()
         compose.onNodeWithText(
-            "이동 시간을 구하려면 출발지가 필요함. 홈 화면 안내에서 집 위치를 설정하면 바로 계산됨"
+            "이동 시간을 구하려면 출발지가 필요해요. 홈 화면 안내에서 집 위치를 정하면 바로 계산해요"
         ).assertExists()
         compose.onNodeWithText("다시 계산").assertDoesNotExist()
-        compose.onNodeWithText("지각 위험 바꾸기").assertDoesNotExist()
-        compose.onNodeWithText("확인").assertDoesNotExist()
-
-        compose.onNodeWithText("일정 삭제").performScrollTo().performClick()
+        compose.onNodeWithTag("risk_entry").assertDoesNotExist()
+        
+        compose.onNodeWithTag("event_delete").performScrollTo().performClick()
         assertEquals(listOf("delete"), calls)
     }
 
@@ -151,8 +177,7 @@ class AlarmDecisionScreenTest {
     fun `불러오는 중에는 제목만 두고 동작 버튼을 내놓지 않는다`() {
         show(plan = null)
 
-        compose.onNodeWithText("알람 결정").assertExists()
-        compose.onNodeWithText("일정 삭제").assertDoesNotExist()
-        compose.onNodeWithText("확인").assertDoesNotExist()
-    }
+        compose.onNodeWithText("알람").assertExists()
+        compose.onNodeWithTag("event_delete").assertDoesNotExist()
+            }
 }

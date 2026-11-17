@@ -72,10 +72,10 @@ data class RoutineBlockView(
  * 제안 목록에서 아예 빼야 한다.
  */
 enum class DropCost(val wire: String, val label: String, val hint: String) {
-    NONE("none", "없음", "건너뛰어도 무관함"),
-    SMALL("small", "작음", "아쉽지만 건너뛸 수 있음"),
-    MEDIUM("medium", "보통", "가능하면 지키고 싶음"),
-    LARGE("large", "큼", "건너뛰면 하루가 틀어짐"),
+    NONE("none", "없음", "건너뛰어도 괜찮아요"),
+    SMALL("small", "작음", "아쉽지만 건너뛸 수 있어요"),
+    MEDIUM("medium", "보통", "가능하면 지키고 싶어요"),
+    LARGE("large", "큼", "건너뛰면 하루가 틀어져요"),
     IMPOSSIBLE("impossible", "불가", "반드시 해야 함");
 
     companion object {
@@ -186,23 +186,23 @@ data class BlockDraft(
         val found = mutableMapOf<String, String>()
 
         val trimmed = name.trim()
-        if (trimmed.isEmpty()) found["name"] = "이름을 입력해야 한다."
-        else if (trimmed.length > MAX_NAME) found["name"] = "${MAX_NAME}자 이내로 입력한다."
+        if (trimmed.isEmpty()) found["name"] = "이름을 입력해 주세요."
+        else if (trimmed.length > MAX_NAME) found["name"] = "${MAX_NAME}자 이내로 입력해 주세요."
 
         val lo = minText.trim().toIntOrNull()
         val hi = maxText.trim().toIntOrNull()
 
-        if (lo == null) found["min"] = "숫자를 입력해야 한다."
-        else if (lo < 0) found["min"] = "0분 이상이어야 한다."
-        else if (lo > MAX_MINUTES) found["min"] = "${MAX_MINUTES}분을 넘을 수 없다."
+        if (lo == null) found["min"] = "숫자를 입력해 주세요."
+        else if (lo < 0) found["min"] = "0분 이상이어야 해요."
+        else if (lo > MAX_MINUTES) found["min"] = "${MAX_MINUTES}분을 넘을 수 없어요."
 
-        if (hi == null) found["max"] = "숫자를 입력해야 한다."
-        else if (hi > MAX_MINUTES) found["max"] = "${MAX_MINUTES}분을 넘을 수 없다."
+        if (hi == null) found["max"] = "숫자를 입력해 주세요."
+        else if (hi > MAX_MINUTES) found["max"] = "${MAX_MINUTES}분을 넘을 수 없어요."
 
         // 뒤집힌 범위는 표준편차를 음수로 만들어 서버의 분포 생성이 터진다.
         // 서버에도 DB 제약이 있지만 여기서 막아야 왕복 없이 알려줄 수 있다.
         if (lo != null && hi != null && lo > hi) {
-            found["max"] = "최대가 최소보다 작을 수 없다."
+            found["max"] = "최대가 최소보다 작을 수 없어요."
         }
 
         return copy(name = trimmed, errors = found)

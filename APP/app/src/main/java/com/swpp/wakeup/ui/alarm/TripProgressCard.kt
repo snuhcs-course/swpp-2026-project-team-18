@@ -99,8 +99,8 @@ fun TripProgressCard(
         // 얼마나 낡았는지, 마지막이 왜 진행률이 없는지다.
         val note = when {
             progress != null && !progress.onRoute ->
-                "경로에서 ${progress.offRouteLabel} 떨어져 있음. 다른 길로 가는 중이면 " +
-                    "진행률을 계산할 수 없음" to JitColor.Amber
+                "경로에서 ${progress.offRouteLabel} 떨어져 있어요. 다른 길로 가는 중이면 " +
+                    "진행률을 계산할 수 없어요" to JitColor.Amber
 
             freshness != null -> freshness to JitColor.TextSecondary
             else -> stageHint(stage) to JitColor.TextSecondary
@@ -122,7 +122,7 @@ fun TripProgressCard(
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
             Text(
-                text = "도착이 확인되면(자동·수동) 사라짐. 추적 알림에도 같은 버튼이 있음",
+                text = "도착이 확인되면 사라져요. 이동 알림에도 같은 버튼이 있어요",
                 color = JitColor.TextSecondary,
                 fontSize = 9.sp,
             )
@@ -335,14 +335,14 @@ internal fun trailingLine(
 
 /** 진행률을 못 그리는 이유. 상태마다 다르다. */
 internal fun stageHint(stage: TripStage): String = when (stage) {
-    TripStage.BEFORE_ALARM -> "알람이 울리면 추적이 시작됨"
-    TripStage.PREPARING -> "집을 나서면 이동 거리가 표시됨"
-    TripStage.IN_TRANSIT -> "위치를 아직 받지 못했음"
+    TripStage.BEFORE_ALARM -> "알람이 울리면 이동 기록을 시작해요"
+    TripStage.PREPARING -> "집을 나서면 이동 거리가 보여요"
+    TripStage.IN_TRANSIT -> "위치를 아직 받지 못했어요"
     TripStage.ARRIVED -> "도착함"
     // 지난 일정이다. "추적이 시작됨" 같은 앞날 이야기를 하면 안 된다.
-    TripStage.PAST -> "일정 시각이 지났고 이동 기록이 없음"
+    TripStage.PAST -> "일정 시각이 지났고 이동 기록이 없어요"
     // Partly AI-generated (Claude) — 추적은 알람을 끌 때 시작한다. 울리지 않으면 기록도 없다.
-    TripStage.ALARM_OFF -> "알람이 꺼진 일정이라 이동을 기록하지 않음"
+    TripStage.ALARM_OFF -> "알람이 꺼진 일정이라 이동을 기록하지 않아요"
     // 추적이 멈췄거나 위치가 오지 않는다. 어디 있는지 지어내지 않는다.
-    TripStage.DEPARTURE_UNKNOWN -> "위치 기록이 없어 출발했는지 알 수 없음"
+    TripStage.DEPARTURE_UNKNOWN -> "위치 기록이 없어 출발했는지 알 수 없어요"
 }

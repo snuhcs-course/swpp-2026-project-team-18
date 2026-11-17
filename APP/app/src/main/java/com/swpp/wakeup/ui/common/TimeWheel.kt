@@ -1,6 +1,7 @@
 // Partly AI-generated (Claude)
 package com.swpp.wakeup.ui.common
 
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -115,6 +116,19 @@ internal object TimeWheelMath {
     /** 가운데 줄의 값. 끝이 있는 열은 끝 값으로 붙잡는다(밀어 올리는 동안 잠깐 빈 줄이 가운데 와도) */
     fun centeredValue(centerRow: Int, size: Int, loop: Boolean): Int =
         if (loop) centerRow.mod(size) else (centerRow - CENTER_ROW).coerceIn(0, size - 1)
+
+    // Partly AI-generated (Claude)
+    /**
+     * 밖에서 값이 바뀌었을 때(예: 알람 시각 시트의 빠르게 고르기 칸) [value] 가 가운데 오도록 맨 위에 둘 줄 번호.
+     * 끝없이 도는 열은 지금 가운데([centerRow])에서 **가장 가까운** 같은 값의 줄로 간다 — 멀리 있는 줄로 가면
+     * 수백 바퀴를 굴러 보인다.
+     */
+    fun nearestFirstRow(value: Int, centerRow: Int, size: Int, loop: Boolean): Int {
+        if (!loop) return firstRowFor(value, size, loop)
+        val base = centerRow - centerRow.mod(size) + value
+        val target = listOf(base - size, base, base + size).minBy { kotlin.math.abs(it - centerRow) }
+        return (target - CENTER_ROW).coerceIn(0, rowCount(size, loop) - VISIBLE_ROWS)
+    }
 }
 
 private val ROW_HEIGHT = 36.dp
@@ -240,10 +254,23 @@ internal fun WheelColumn(
     // 효과는 한 번만 띄우므로 지금 값과 콜백은 최신 것을 읽는다 — 다른 열에서 바꾼 값을 되돌리지 않게.
     val latestSelected by rememberUpdatedState(selected)
     val latestOnSelect by rememberUpdatedState(onSelect)
+    // 밖에서 값을 바꿔 굴리는 동안에는 지나가는 값을 알리지 않는다 — 알리면 그 값이 다시 들어와 굴림이 중간에 멈춘다.
+    var programmatic by remember { mutableStateOf(false) }
     LaunchedEffect(state, size, loop) {
         snapshotFlow { TimeWheelMath.centeredValue(centerRow, size, loop) }
             .distinctUntilChanged()
-            .collect { if (it != latestSelected) latestOnSelect(it) }
+            .collect { if (!programmatic && it != latestSelected) latestOnSelect(it) }
+    }
+    // 밖에서 [selected] 가 바뀌면(빠르게 고르기 칸 등) 그 값으로 부드럽게 굴린다. 사용자가 굴리는 중에는 건드리지 않는다.
+    LaunchedEffect(selected, size, loop) {
+        if (state.isScrollInProgress) return@LaunchedEffect
+        if (TimeWheelMath.centeredValue(centerRow, size, loop) == selected) return@LaunchedEffect
+        programmatic = true
+        try {
+            state.animateScrollToItem(TimeWheelMath.nearestFirstRow(selected, centerRow, size, loop))
+        } finally {
+            programmatic = false
+        }
     }
 
     LazyColumn(
@@ -253,6 +280,8 @@ internal fun WheelColumn(
         modifier = Modifier
             .width(width)
             .height(ROW_HEIGHT * TimeWheelMath.VISIBLE_ROWS)
+            // 휠 끝에서 남은 플링이 시트를 끌지 않게(11-16 흔들림). 휠은 시트를 닫는 데도 쓰지 않는다
+            .sheetScrollGuard(bothWays = true)
             .testTag(tag)
             .semantics { contentDescription = "$label ${values[centered]}" },
     ) {

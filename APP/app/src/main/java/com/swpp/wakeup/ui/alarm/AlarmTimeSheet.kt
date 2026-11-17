@@ -1,6 +1,9 @@
 // Partly AI-generated (Claude)
 package com.swpp.wakeup.ui.alarm
 
+import androidx.compose.runtime.key
+import androidx.compose.foundation.layout.Spacer
+import com.swpp.wakeup.domain.model.UserAlarmRule
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,9 +49,11 @@ import com.swpp.wakeup.ui.theme.JitColor
  * 위는 "빠르게 고르기" 세 칸(서버가 준 risk-options 그대로, 라벨만 "여유 있게·보통·빠듯하게"),
  * 아래는 5분 단위 휠과 결과 한 줄이다. ⑤ 지각 위험 화면을 대신한다.
  *
- * **저장되는 것은 세 칸뿐이다.** 서버에는 아직 임의 시각을 저장할 길이 없어서(백엔드 BE-H3b),
- * 휠은 고른 시각의 확률을 **미리 보는** 자리로 두고, 세 칸 중 하나와 같은 시각일 때만 [확인]
- * 이 켜진다. 세 칸을 누르면 휠도 그 시각으로 움직인다.
+ * **휠로 고른 시각을 그대로 저장한다**(서버 0.21.0, BE-H3b). 세 칸과 같은 시각이면 예전처럼 그 칸(τ)으로,
+ * 아니면 직접 정한 시각(`PUT …/alarm/time`)으로 저장한다 — 길은 [UserAlarmRule.choose] 가 정한다.
+ * 서버가 0.21.0 미만이면 세 칸만 저장되고, 휠이 칸 밖이면 버튼을 끄고 이유 한 줄([UserAlarmRule.LOCKED_NOTE])을
+ * 보인다. 직접 정한 알람이면 위에 "직접 정한 시각" 과 [추천 시각으로 되돌리기] 가 붙는다.
+ * 세 칸을 누르면 휠도 그 시각으로 움직인다.
  *
  * @param recommendedKey "추천" 을 붙일 칸. 일정 종류 기본값에서 온 τ 다
  * @param goalTau 색을 가르는 목표치. 적용 중인 τ
@@ -73,6 +78,14 @@ fun AlarmTimeSheet(
     onRetry: () -> Unit = {},
     /** 제목 줄 오른쪽 i. 도움말 › "여유 있게·보통·빠듯하게는 뭐가 달라요?" 를 펼쳐 연다(⑤ 에 있던 i) */
     onHelp: (() -> Unit)? = null,
+    /** 서버가 직접 정한 시각을 받는가(0.21.0 이상, [UserAlarmRule.supported]) */
+    customSupported: Boolean = false,
+    /** 세 칸 밖의 시각(0~1439 분)으로 맞추기 */
+    onConfirmCustom: (minutesOfDay: Int) -> Unit = {},
+    /** 지금 알람이 직접 정한 시각인가(서버 `alarm_source == "user"`) */
+    userAlarm: Boolean = false,
+    /** [추천 시각으로 되돌리기]. [userAlarm] 이고 [customSupported] 일 때만 보인다 */
+    onRevert: () -> Unit = {},
 ) {
     val cells = options?.options.orEmpty()
     val recommended = recommendedKey?.let { key -> cells.firstOrNull { it.key == key } }
@@ -80,13 +93,22 @@ fun AlarmTimeSheet(
     val recommendedMinutes = recommended?.let { AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) }
     val start = initialMinutesOfDay ?: recommendedMinutes ?: DEFAULT_WHEEL_MINUTES
 
+    // 세 칸이나 지금 알람이 5분 단위가 아니면 1분 휠 — 반올림해 다른 시각을 보이거나 저장하지 않는다.
+    val step = AlarmTimeChoice.wheelStep(
+        cells.map { AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) } + initialMinutesOfDay,
+    )
     var picked by rememberSaveable(start) {
-        mutableIntStateOf(TimeWheelMath.snapMinute(start % 60, AlarmTimeChoice.MINUTE_STEP) + start / 60 * 60)
+        mutableIntStateOf(TimeWheelMath.snapMinute(start % 60, step) + start / 60 * 60)
     }
     val pickedLabel = AlarmTimeChoice.clockLabel(picked)
 
-    // 휠이 가리키는 시각과 같은 칸. 이 칸이 있어야 저장할 수 있다.
+    // 휠이 가리키는 시각과 같은 칸. 있으면 그 칸(τ)으로, 없으면 직접 정한 시각으로 저장한다.
     val match = cells.firstOrNull { AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) == picked }
+    val save = UserAlarmRule.choose(
+        picked = picked,
+        presets = cells.associate { it.key to AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) },
+        supported = customSupported,
+    )
     val percent = match?.probability
         ?: startMinutesOfDay?.let {
             AlarmTimeChoice.estimate(
@@ -128,6 +150,7 @@ fun AlarmTimeSheet(
                     subtitle?.let { Text(it, color = JitColor.TextSecondary, fontSize = 12.sp) }
                 }
                 // Figma 시트에는 없지만, ⑤ 를 지우면서 "단계는 뭐가 달라요?" 로 가는 길이 사라지지 않게 둔다.
+                // (직접 정한 시각 줄은 제목 줄 아래에 따로 그린다)
                 onHelp?.let {
                     InfoButton(
                         contentDescription = "단계는 뭐가 달라요?",
@@ -135,6 +158,39 @@ fun AlarmTimeSheet(
                         onClick = it,
                         iconSize = 18,
                     )
+                }
+            }
+
+            // 직접 정한 알람이면 그렇다고 말하고 되돌리는 길을 둔다(Figma `546:2398`).
+            if (userAlarm) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().testTag("alarm_time_user"),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = UserAlarmRule.USER_LABEL,
+                        color = JitColor.TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(JitColor.Surface2)
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    if (customSupported) {
+                        Text(
+                            text = "추천 시각으로 되돌리기",
+                            color = JitColor.Accent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = !saving, role = Role.Button, onClick = onRevert)
+                                .testTag("alarm_time_revert")
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                        )
+                    }
                 }
             }
 
@@ -185,21 +241,23 @@ fun AlarmTimeSheet(
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("직접 정하기", color = JitColor.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                JitTimeWheel(
+                // 칸을 누르면 휠도 그 시각으로 굴러간다(JitTimeWheel 이 바뀐 값을 따라간다). 간격이 바뀌면 열을 새로 만든다.
+                key(step) { JitTimeWheel(
                     hour24 = picked / 60,
                     minute = picked % 60,
-                    minuteStep = AlarmTimeChoice.MINUTE_STEP,
+                    minuteStep = step,
                     onChange = { hour, minute -> picked = AlarmTimeChoice.minutesOfDay(hour, minute) },
                     modifier = Modifier.fillMaxWidth(),
-                )
+                ) }
                 ResultLine(pickedLabel, percent, goalTau, recommendedMinutes, picked)
             }
 
             error?.let { Text(it, color = JitColor.Red, fontSize = 12.sp) }
-            // 세 칸 밖의 시각은 아직 서버에 저장할 수 없다. 버튼만 흐려 두면 고장으로 읽혀서 이유를 적는다.
-            if (match == null && cells.isNotEmpty()) {
+            // 서버가 아직 직접 정한 시각을 받지 않으면(0.21.0 미만) 세 칸 밖은 저장할 수 없다.
+            // 버튼만 흐려 두면 고장으로 읽혀서 이유를 적는다.
+            if (save is UserAlarmRule.Save.Locked) {
                 Text(
-                    text = "직접 정한 시각으로 맞추는 기능은 준비 중이에요. 위 세 칸 중 하나를 골라 주세요.",
+                    text = UserAlarmRule.LOCKED_NOTE,
                     color = JitColor.TextSecondary,
                     fontSize = 11.sp,
                     modifier = Modifier.testTag("alarm_time_pending"),
@@ -220,8 +278,14 @@ fun AlarmTimeSheet(
                     container = JitColor.Accent,
                     content = JitColor.Bg,
                     tag = "alarm_time_confirm",
-                    onClick = { match?.let { onConfirm(it.key) } },
-                    enabled = match != null && !saving,
+                    onClick = {
+                        when (save) {
+                            is UserAlarmRule.Save.Preset -> onConfirm(save.key)
+                            is UserAlarmRule.Save.Custom -> onConfirmCustom(save.minutesOfDay)
+                            UserAlarmRule.Save.Locked -> Unit
+                        }
+                    },
+                    enabled = save !is UserAlarmRule.Save.Locked && !saving,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -279,7 +343,7 @@ private fun QuickPickCell(
         }
         // 확률이 없으면 자리를 비운다. 빈 0% 도 숫자처럼 읽힌다.
         Text(
-            text = option.probability?.let { "$it%" } ?: "—",
+            text = option.probability?.let { ProbabilityRule.displayLabel(it) } ?: "—",
             color = probabilityColor(option.probability, goalTau),
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
@@ -328,7 +392,7 @@ private fun ResultLine(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                     )
-                    Text(text = "$percent%", color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(text = ProbabilityRule.displayLabel(percent), color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
             ProbabilityRule.warning(percent)?.let {

@@ -162,7 +162,7 @@ class RerouteRepositoryTest {
     fun `이동 범위 밖이면 그 이유를 말한다`() = runTest {
         val result = EventRepository(RerouteApi { conflict("outside_trip") }, FakeProfileApi())
             .reroute(7L, "transit:2호선", fromSuggestion = true)
-        assertEquals(Result.Failure("일정 시작 6시간 전후에만 경로를 바꿀 수 있음"), result)
+        assertEquals(Result.Failure("일정 시작 6시간 전후에만 경로를 바꿀 수 있어요"), result)
     }
 
     @Test

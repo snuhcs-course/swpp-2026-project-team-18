@@ -92,7 +92,7 @@ fun SettingsScreen(
                 } else {
                     SettingRow(
                         label = "이메일 인증",
-                        value = "아직 인증하지 않음 · 로그인에는 필요 없음",
+                        value = "아직 인증하지 않았어요 · 로그인에는 필요 없어요",
                         action = if (emailVerifySending) "보내는 중…" else "인증",
                         onClick = if (emailVerifySending) null else onVerifyEmail,
                     )
@@ -123,7 +123,7 @@ fun SettingsScreen(
                 onRetry = onRetryLoginMethods,
             )
             Text(
-                text = "마지막 로그인 방법은 끊을 수 없음(버튼을 숨김). 소셜로만 가입한 계정은 비밀번호가 없음",
+                text = "마지막 로그인 방법은 끊을 수 없어요. 소셜로만 가입한 계정은 비밀번호가 없어요",
                 color = JitColor.TextSecondary,
                 fontSize = 9.sp,
             )
@@ -184,7 +184,7 @@ fun SettingsScreen(
                         .padding(horizontal = 12.dp, vertical = 6.dp),
                 )
                 Text(
-                    text = "다른 기기에 남은 로그인도 모두 끝남. 연결돼 있어야 함",
+                    text = "다른 기기에 남은 로그인도 모두 끝나요. 인터넷에 연결돼 있어야 해요",
                     color = JitColor.TextSecondary,
                     fontSize = 9.sp,
                 )
@@ -292,9 +292,9 @@ private fun LoginConnections(
             val linked = methods?.contains(provider.path) == true
             val lastMethod = linked && methods.orEmpty().distinct().size <= 1
             val status = when {
-                methods == null && failed -> "연결 상태를 확인하지 못함"
+                methods == null && failed -> "연결 상태를 확인하지 못했어요"
                 methods == null -> "확인 중"
-                linked -> "연결됨 · 이 계정으로 로그인할 수 있음"
+                linked -> "연결됨 · 이 계정으로 로그인할 수 있어요"
                 else -> "연결 안 됨"
             }
             val action: Pair<String, (() -> Unit)?>? = when {

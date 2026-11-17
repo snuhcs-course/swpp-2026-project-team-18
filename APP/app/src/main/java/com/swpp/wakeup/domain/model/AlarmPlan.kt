@@ -112,6 +112,21 @@ data class AlarmPlanView(
 
     /** 알람 시각(epoch ms). 계산 못 했으면 null. 알람이 울렸는지 클릭 시점에 다시 확인하는 데 쓴다 */
     val alarmAtMillis: Long? = null,
+    /** 사용자가 직접 정한 시각으로 울린다(서버 `alarm_source == "user"`, BE-H3b). ④ 알약 · 시트 [추천 시각으로 되돌리기] */
+    val userAlarm: Boolean = false,
+    // --- ④ 다시 그림(iter4 H2-3 · H2-6, Figma `545:920`) — Partly AI-generated (Claude)
+    /** 일정 제목만(시각 없이). [eventTitle] 은 "09:00 제목" 이다 */
+    val title: String = "",
+    /** 장소 이름만. 없으면 null */
+    val placeName: String? = null,
+    /** 서버 수단 문자열("지하철+버스" 등) */
+    val travelMode: String? = null,
+    /** 여유 시간의 출처(`fixed` · `learned`) */
+    val bufferSource: String? = null,
+    /** 울릴 시각을 사용자가 확인했는가(BE-H3a). 서버가 이 필드를 모르면 null */
+    val alarmConfirmed: Boolean? = null,
+    /** 추천 시각(직접 정한 시각과의 차이를 말할 때) */
+    val recommendedAlarmAtMillis: Long? = null,
     /** 계획한 출발 시각(`depart_by`, epoch ms). 모르면 null */
     val departByMillis: Long? = null,
     /** 계획한 도착 시각(`arrive_at`, epoch ms). 모르면 null */
@@ -258,7 +273,7 @@ data class PlanRow(
 data class ConfidenceView(
     /** 0~100. null 이면 아직 계산할 수 없다 */
     val percent: Int?,
-    /** "정시 도착 확률 92%" / "정시 도착 확률 · 아직 계산할 수 없음" */
+    /** "정시 도착 확률 92%" / "정시 도착 확률 · 아직 계산할 수 없어요" */
     val headline: String,
     /** [percent] 가 null 일 때 그 이유. 있으면 null */
     val reason: String?,

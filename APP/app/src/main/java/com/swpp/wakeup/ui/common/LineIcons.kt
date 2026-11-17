@@ -178,6 +178,34 @@ object LineIcons {
         )
     }
 
+    /** 시트 닫기 X(iter4 H2-8, Partly AI-generated (Claude)) */
+    val close: ImageVector by lazy { icon("X", "M18 6L6 18", "M6 6l12 12") }
+
+    /** ④ 타일 [안 가요] — 달력에 x(iter4 H2-6, Partly AI-generated (Claude)) */
+    val calendarX: ImageVector by lazy {
+        icon(
+            "CalendarX",
+            "M8 2v4",
+            "M16 2v4",
+            "M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
+            "M3 10h18",
+            "M10 14l4 4",
+            "M14 14l-4 4",
+        )
+    }
+
+    /** ④ 타일 [일정 삭제] — 휴지통(iter4 H2-6, Partly AI-generated (Claude)) */
+    val trash: ImageVector by lazy {
+        icon(
+            "Trash2",
+            "M3 6h18",
+            "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
+            "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2",
+            "M10 11v6",
+            "M14 11v6",
+        )
+    }
+
     /** "캘린더에서 가져오기" */
     val calendar: ImageVector by lazy {
         icon(

@@ -134,7 +134,7 @@ class ReportRepositoryTest {
         assertFalse("한 번 지각한 것과 계통 오차는 다르다", thin.overconfident)
 
         assertEquals("과신 중", view.verdictLabel)
-        assertEquals("지각 위험을 낮추면 알람이 앞당겨짐", view.action)
+        assertEquals("지각 위험을 낮추면 알람이 앞당겨져요", view.action)
         assertEquals(6, view.scoredCount)
     }
 
@@ -146,7 +146,7 @@ class ReportRepositoryTest {
 
         val conservative = calibrationView("""{"verdict":"conservative"}""")
         assertEquals("지나치게 이름", conservative.verdictLabel)
-        assertEquals("지각 위험을 높이면 더 잘 수 있음", conservative.action)
+        assertEquals("지각 위험을 높이면 더 잘 수 있어요", conservative.action)
     }
 
     @Test
@@ -154,7 +154,7 @@ class ReportRepositoryTest {
         val view = calibrationView("""{"verdict":"insufficient","min_samples_for_reliable":4}""")
 
         assertEquals("표본 부족", view.verdictLabel)
-        assertEquals("판정하려면 같은 구간에서 4번 이상의 결과가 필요함", view.verdictNote)
+        assertEquals("판정하려면 같은 구간에서 4번 이상의 결과가 필요해요", view.verdictNote)
         assertFalse(view.isTrustworthy)
     }
 
@@ -167,11 +167,11 @@ class ReportRepositoryTest {
         }
 
         assertEquals(
-            ReportResult.Failure("다시 로그인해야 한다."),
+            ReportResult.Failure("다시 로그인해 주세요."),
             ReportRepository(failing { httpError(401) }).weekly(),
         )
         assertEquals(
-            ReportResult.Failure("서버에 문제가 생겼다."),
+            ReportResult.Failure("잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요."),
             ReportRepository(failing { httpError(500) }).weekly(),
         )
         assertEquals(
@@ -179,6 +179,6 @@ class ReportRepositoryTest {
             ReportRepository(failing { httpError(404, errorJson("이번 주 리포트가 아직 없다.")) }).weekly(),
         )
         val offline = ReportRepository(failing { throw IOException("offline") }).weekly()
-        assertTrue((offline as ReportResult.Failure).message.startsWith("서버에 연결할 수 없다"))
+        assertTrue((offline as ReportResult.Failure).message.startsWith("연결할 수 없어요"))
     }
 }

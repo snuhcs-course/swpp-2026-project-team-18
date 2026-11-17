@@ -16,7 +16,7 @@ data class PasswordChangeState(
     val busy: Boolean = false,
     /** 화면 아래 오류 줄 */
     val error: String? = null,
-    /** 서버가 "지금 비밀번호가 맞지 않음" 이라고 한 경우. 지금 비밀번호 칸 아래에 그린다 */
+    /** 서버가 "지금 비밀번호가 맞지 않아요" 이라고 한 경우. 지금 비밀번호 칸 아래에 그린다 */
     val currentWrong: Boolean = false,
 ) {
     val passwordsMatch: Boolean

@@ -20,6 +20,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.swpp.wakeup.ui.common.JitDurationWheelSheet
 import com.swpp.wakeup.ui.events.PrepOnboardingScreen
@@ -72,18 +73,22 @@ class PrepTimeScreenTest {
     @Test
     fun 칩을_고르면_값이_생기고_빼기_더하기는_5분씩이다() {
         openScreen()
-        tag("prep_chip_30").performClick()
+        tag("prep_chip_30").performScrollTo().performClick()
+        compose.waitForIdle()
         tag("prep_display").assertTextEquals("30분")
         tag("prep_chip_30").assertIsSelected()
         tag("prep_submit").assertIsEnabled()
 
-        tag("prep_plus").performClick()
+        tag("prep_plus").performScrollTo().performClick()
+        compose.waitForIdle()
         tag("prep_display").assertTextEquals("35분")
         tag("prep_chip_30").assertIsNotSelected()
 
-        tag("prep_chip_60").performClick()
+        tag("prep_chip_60").performScrollTo().performClick()
+        compose.waitForIdle()
         tag("prep_display").assertTextEquals("1시간")
-        tag("prep_minus").performClick()
+        tag("prep_minus").performScrollTo().performClick()
+        compose.waitForIdle()
         tag("prep_display").assertTextEquals("55분")
     }
 
@@ -111,7 +116,9 @@ class PrepTimeScreenTest {
     @Test
     fun 항목으로_나눠_적기는_루틴으로_간다() {
         openScreen()
-        tag("prep_split").performClick()
+        // 화면이 스크롤된다. CI 의 작은 에뮬레이터에서는 이 칸이 화면 밖이라 누르기가 빗나갔다.
+        tag("prep_split").performScrollTo().performClick()
+        compose.waitForIdle()
         assertTrue(split)
     }
 
@@ -166,6 +173,7 @@ class PrepTimeScreenTest {
         openWheel(35)
         tag("wheel_confirm").assertIsEnabled()
         tag("wheel_cancel").performClick()
+        compose.waitForIdle()
         assertNull(confirmed)
     }
 }

@@ -106,7 +106,7 @@ fun ReportDayScreen(
         )
 
         if (day == null || day.outcomes.isEmpty()) {
-            Text("이 날의 기록을 찾지 못했음", color = JitColor.TextSecondary, fontSize = 12.sp)
+            Text("이 날의 기록을 찾지 못했어요", color = JitColor.TextSecondary, fontSize = 12.sp)
             return@Column
         }
 
@@ -251,7 +251,7 @@ private fun ResultCard(
                     .alpha(if (skipEnabled) 1f else 0.5f),
             )
             Text(
-                text = "가지 않은 일정이면 표시함. 리포트와 학습에서 빠지고 이 화면에서도 사라짐",
+                text = "가지 않은 일정이면 표시해 주세요. 리포트와 학습에서 빠지고 이 화면에서도 사라져요",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )

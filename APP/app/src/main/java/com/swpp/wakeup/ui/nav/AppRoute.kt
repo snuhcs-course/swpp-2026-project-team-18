@@ -32,8 +32,8 @@ sealed interface AppRoute {
     /** Figma ④ 알람 결정 */
     data class AlarmDecision(val eventId: Long) : AppRoute
 
-    /** Figma ⑫ 일정 추가 */
-    data object AddEvent : AppRoute
+    // 새 일정 추가(Figma ⑫ · H2-8 `545:192`)는 경로가 아니라 탭 첫 화면 위의 바텀시트다
+    // (`HomeViewModel.addSheetOpen`). 경로 고르기 · 지도 · 집 주소로 갔다 오면 시트가 다시 보인다.
 
     /**
      * Figma ⑫ 변형 · 일정 수정(`488:9`). ④ 의 "일정 수정" 에서 들어온다. 화면은 ⑫ 을 수정

@@ -143,6 +143,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val passwordsMatch: Boolean
             get() = passwordConfirm.isNotEmpty() && password == passwordConfirm
 
+        /**
+         * 확인 칸에 무언가 적혀 있는데 위 비밀번호와 다르다. 다 적기를 기다리지 않고 적는 동안 빨갛게 보여 준다 —
+         * 끝까지 적고 버튼이 꺼진 이유를 찾게 하는 것보다 낫다. 확인 칸이 비어 있으면 아직 오류가 아니다.
+         */
+        val passwordConfirmMismatch: Boolean
+            get() = passwordConfirm.isNotEmpty() && password != passwordConfirm
+
         /** 이메일 형식 · 닉네임 1~20자 · 서버 비밀번호 검사 · 확인 일치 · 약관 동의가 모두 필요하다. */
         val canSubmitSignup: Boolean
             get() = !loading && EmailRule.isValid(email) && NicknameRule.isValid(nickname) &&
@@ -345,7 +352,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         screen = Screen.SOCIAL_TERMS,
                         socialBusy = null,
-                        error = if (termsAgreed) "약관 동의를 확인하지 못했다. 다시 시도한다." else null,
+                        error = if (termsAgreed) "약관 동의를 확인하지 못했어요. 다시 시도해 주세요." else null,
                         socialTerms = it.socialTerms?.takeIf { draft -> draft.idToken == idToken }
                             ?: SocialTermsDraft(
                                 provider = provider,
