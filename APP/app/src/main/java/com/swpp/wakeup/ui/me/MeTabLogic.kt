@@ -28,6 +28,10 @@ internal object MeTabLogic {
         val fullScreen: Boolean,
         val preciseLocation: Boolean,
         val coarseOnly: Boolean = false,
+        /** 위치 "항상 허용". 앱이 꺼진 뒤 스스로 다시 켠 추적이 위치를 받으려면 필요하다(11-17) */
+        val backgroundLocation: Boolean = true,
+        /** 배터리 최적화에서 빠졌는가. 빠져 있어야 아침에 시스템이 앱을 덜 멈춘다 */
+        val batteryUnrestricted: Boolean = true,
     ) {
         val allOn: Boolean get() = notifications && fullScreen && preciseLocation
     }
@@ -91,7 +95,7 @@ internal object MeTabLogic {
     /** 알림·권한 화면의 한 줄. [on] 이 false 면 값을 주황으로, 오른쪽에 [켜기] 를 둔다 */
     data class PermissionRow(val kind: PermissionKind, val label: String, val value: String, val on: Boolean)
 
-    enum class PermissionKind { NOTIFICATIONS, FULL_SCREEN, LOCATION }
+    enum class PermissionKind { NOTIFICATIONS, FULL_SCREEN, LOCATION, BACKGROUND_LOCATION, BATTERY }
 
     fun permissionRows(p: Permissions): List<PermissionRow> = listOf(
         PermissionRow(
@@ -115,6 +119,28 @@ internal object MeTabLogic {
                 else -> "꺼짐 · 출발과 도착이 기록되지 않아요"
             },
             p.preciseLocation,
+        ),
+    ) + listOfNotNull(
+        // 정밀 위치가 있을 때만 다음 단계로 묻는다. 거부해도 앱은 동작한다 — 앱이 켜져 있는 동안은 기록된다.
+        PermissionRow(
+            PermissionKind.BACKGROUND_LOCATION,
+            "앱이 꺼져도 기록",
+            if (p.backgroundLocation) {
+                "켜짐 · 앱이 꺼져도 출발과 도착을 이어서 기록해요"
+            } else {
+                "꺼짐 · 위치를 '항상 허용'으로 바꾸면 아침에 앱이 꺼져도 출발을 기록해요"
+            },
+            p.backgroundLocation,
+        ).takeIf { p.preciseLocation },
+        PermissionRow(
+            PermissionKind.BATTERY,
+            "배터리 최적화 제외",
+            if (p.batteryUnrestricted) {
+                "켜짐 · 아침에 기기가 앱을 멈추지 않아요"
+            } else {
+                "꺼짐 · 기기가 절전하며 앱을 멈추면 기록이 끊길 수 있어요"
+            },
+            p.batteryUnrestricted,
         ),
     )
 

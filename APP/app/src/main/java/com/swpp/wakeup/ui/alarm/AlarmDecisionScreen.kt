@@ -155,6 +155,9 @@ fun AlarmDecisionScreen(
     fasterRouteBusy: Boolean = false,
     /** [이 경로로 바꾸기] (알람 전) */
     onSwitchFasterRoute: (FasterRouteOffer) -> Unit = {},
+    /** "바꿀까요" 제안에 답하기(BE-H3d). true = 받아들이기 */
+    onAnswerProposal: (Boolean) -> Unit = {},
+    proposalBusy: Boolean = false,
     /**
      * 반복 일정 삭제 범위(iter4 A2, [com.swpp.wakeup.data.repository.RecurrenceScope.deleteChoices]). 비어 있으면
      * 묻지 않고 [onDelete] 를 부른다(반복이 아니거나 서버가 범위 삭제를 모름).
@@ -265,6 +268,16 @@ fun AlarmDecisionScreen(
                     onProbabilityClick = openProbability,
                     canRevert = serverSupportsConfirm && !confirmBusy,
                     onRevert = onRevertAlarm,
+                )
+            }
+            // 답을 기다리는 "바꿀까요" 제안(BE-H3d). 알람 카드 바로 아래 — 바뀔 시각과 같이 읽힌다.
+            plan.proposal?.takeIf { !plan.skipped }?.let { proposal ->
+                ProposalCard(
+                    proposal = proposal,
+                    busy = proposalBusy,
+                    onAccept = { onAnswerProposal(true) },
+                    onKeep = { onAnswerProposal(false) },
+                    tag = "plan_proposal",
                 )
             }
             // 알람이 울리기 전에만 나온다(Figma ④ 변형 `512:30`). 그 뒤에는 일정에 저장한 경로를 바꾸지 않는다.
@@ -593,14 +606,8 @@ private fun AlarmCard(
             }
         }
         // 확률이 없으면 알약 대신 이유 한 줄(숫자를 지어내지 않는다)
-        if (plan.confidence.isUnavailable) {
-            Text(
-                text = listOfNotNull(plan.confidence.headline, plan.confidence.reason).joinToString(" · "),
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
-                modifier = Modifier.testTag("plan_probability_unavailable"),
-            )
-        }
+        // 확률을 아직 못 낼 때의 이유 · 할 일 문구는 보이지 않는다(11-17 사용자: 빼 달라고 함). 알약도 없다 —
+        // 숫자를 지어내지 않는다.
 
         // 직접 정한 시각: 추천과의 차이 + [추천 시각으로 되돌리기](주황 글자, 꽉 찬 버튼 아님)
         if (plan.userAlarm) {
@@ -871,8 +878,6 @@ private fun AlarmDecisionPreview() {
                 confidence = ConfidenceView(
                     percent = null,
                     headline = "정시 도착 확률 · 아직 계산할 수 없어요",
-                    reason = "이동 시간은 경로 예상값 하나뿐이에요",
-                    action = "이동 기록이 쌓이면 계산할 수 있어요",
                 ),
                 tauSourceLabel = "수업 일정 기본값",
                 breakdown = listOf(

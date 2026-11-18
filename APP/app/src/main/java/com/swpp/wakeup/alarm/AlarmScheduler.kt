@@ -54,6 +54,7 @@ class AlarmScheduler(private val context: Context) {
         rememberMissed(dropped = before, upcoming = upcoming, nowMillis = now)
         store.replaceAll(upcoming)
         upcoming.forEach { register(it) }
+        syncProposalDeadlines(before, upcoming, now)
 
         // Partly AI-generated (Claude) — 등록 시각이 새로 생기거나 바뀐 일정만 기록한다
         // (db-schema.md A3 `scheduled`). 같은 시각으로 다시 등록한 것은 남기지 않는다.
@@ -110,6 +111,7 @@ class AlarmScheduler(private val context: Context) {
         }
 
         alive.forEach { register(it) }
+        syncProposalDeadlines(emptyList(), alive, now)
         Log.i(TAG, "알람 복원: ${alive.size}건 (만료 ${expired.size}건 버림)")
         return alive.size
     }
@@ -134,6 +136,7 @@ class AlarmScheduler(private val context: Context) {
         val now = System.currentTimeMillis()
         val alive = store.all().filter { it.alarmAtMillis > now }
         alive.forEach { register(it) }
+        syncProposalDeadlines(emptyList(), alive, now)
         Log.i(TAG, "앱 시작 재등록: ${alive.size}건")
         return alive.size
     }
@@ -235,7 +238,60 @@ class AlarmScheduler(private val context: Context) {
         return store.all().filter { it.alarmAtMillis > now }
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * "바꿀까요" 제안의 마감([AlarmSchedule.proposalAnswerByMillis])이 됐다(BE-H3d, 서버 계약 6절). 답이 없었으니
+     * 기기가 정한다 — **더 이른 쪽**으로 다시 걸되, 이미 지났거나 1분도 안 남았으면 지금 시각을 지킨다
+     * ([AlarmProposalRule.settledAlarm]). 서버에 알리지 않는다 — 서버도 다음에 읽을 때 같은 결론이다.
+     * 바꿨으면 그 사본을, 아니면 null 을 돌려준다. 제안은 사본에서 지운다(다시 정하지 않는다).
+     */
+    fun settleProposal(eventId: Long, nowMillis: Long = System.currentTimeMillis()): AlarmSchedule? {
+        val current = store.find(eventId) ?: return null
+        val proposed = current.proposedAlarmAtMillis ?: return null
+        val cleared = current.copy(proposedAlarmAtMillis = null, proposalAnswerByMillis = null)
+        val at = com.swpp.wakeup.domain.model.AlarmProposalRule.settledAlarm(current.alarmAtMillis, proposed, nowMillis)
+        if (at == current.alarmAtMillis) {
+            store.upsert(cleared)
+            Log.i(TAG, "제안 마감: 일정 $eventId 는 지금 시각을 지킨다 (${current.alarmLabel})")
+            return null
+        }
+        val local = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault())
+        val next = cleared.copy(
+            alarmAtMillis = at,
+            alarmLabel = local.format(LABEL_FORMAT),
+            meridiem = if (local.hour < 12) "AM" else "PM",
+        )
+        cancelPendingIntent(eventId)
+        store.upsert(next)
+        register(next)
+        Log.i(TAG, "제안 마감: 일정 $eventId 알람을 ${next.alarmLabel} 로 다시 걸었다")
+        return next
+    }
+
     // --- 내부 -------------------------------------------------------------
+
+    /** 답을 기다리는 제안마다 마감에 깨어나는 작업을 건다. 이전 것은 지운다(제안이 사라졌거나 답했으면 다시 걸지 않음) */
+    private fun syncProposalDeadlines(before: List<AlarmSchedule>, upcoming: List<AlarmSchedule>, nowMillis: Long) {
+        val am = manager ?: return
+        (before + upcoming).map { it.eventId }.distinct().forEach { am.cancel(deadlinePendingIntent(it)) }
+        upcoming.forEach { s ->
+            val at = s.proposalAnswerByMillis ?: return@forEach
+            if (s.proposedAlarmAtMillis == null || at <= nowMillis) return@forEach
+            runCatching { am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, deadlinePendingIntent(s.eventId)) }
+                .onFailure { Log.w(TAG, "제안 마감 작업을 걸지 못했다: 일정 ${s.eventId}", it) }
+        }
+    }
+
+    private fun deadlinePendingIntent(eventId: Long): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            DEADLINE_REQUEST_OFFSET + eventId.toInt(),
+            Intent(context, ProposalDeadlineReceiver::class.java).apply {
+                putExtra(AlarmReceiver.EXTRA_EVENT_ID, eventId)
+                data = android.net.Uri.parse("jit://proposal/$eventId")
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
     private fun register(schedule: AlarmSchedule) {
         val am = manager ?: run {
@@ -297,6 +353,8 @@ class AlarmScheduler(private val context: Context) {
 
         /** showIntent 의 requestCode 가 발화용과 겹치지 않게 띄운다. */
         const val SHOW_REQUEST_OFFSET = 1_000_000
+        /** 제안 마감 작업의 requestCode 구간. 알람 · 표시와 겹치지 않게 */
+        const val DEADLINE_REQUEST_OFFSET = 4_000_000
 
         /** 알람 화면의 큰 시각. `EventRepository` 의 형식과 같아야 한다. */
         val LABEL_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm")

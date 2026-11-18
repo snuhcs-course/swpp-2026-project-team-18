@@ -28,17 +28,6 @@ object AlarmTimeChoice {
     /** [AlarmPlanView.tauSourceLabel] 이 이것이면 사용자가 τ 를 직접 골랐다는 뜻이다 */
     const val MANUAL_TAU_SOURCE = "직접 고른 값"
 
-    /**
-     * "추천" 을 붙일 칸.
-     *
-     * 서버가 지금 적용 중인 칸([selectedKey])이 곧 일정 종류의 기본값이다 — 사용자가 직접
-     * 고른 값이면([MANUAL_TAU_SOURCE]) 종류 기본값이 무엇이었는지 앱은 알 수 없어서 프로필
-     * 기본값인 "보통" 에 붙인다.
-     */
-    fun recommendedKey(selectedKey: String?, tauSourceLabel: String?): String =
-        if (selectedKey == null || tauSourceLabel == MANUAL_TAU_SOURCE) RiskOptionView.KEY_NORMAL
-        else selectedKey
-
     /** "7:20" + "AM" → 0~1439 분. 읽지 못하면 null */
     fun minutesOfDay(clock: String, meridiem: String): Int? {
         val parts = clock.trim().split(":")
@@ -103,7 +92,6 @@ object AlarmTimeChoice {
     fun resultPrefix(clockLabel: String): String = "${clockLabel}에 일어나면 정시 도착 확률 "
 
     /** 확률을 낼 수 없을 때의 결과 줄 */
-    fun resultUnknown(clockLabel: String): String = "${clockLabel}에 일어났을 때의 정시 도착 확률은 아직 계산할 수 없어요"
 
     /** 추천 시각과의 차이 한 줄. 추천을 모르면 null */
     fun gapLine(pickedMinutes: Int, recommendedMinutes: Int?): String? {

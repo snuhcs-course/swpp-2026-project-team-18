@@ -206,6 +206,8 @@ fun RouteMapCard(
                         RouteOverlay(
                             path = state.path,
                             altPath = if (state.hasAltPath) state.altPath else emptyList(),
+                            walkHead = if (state.pathFromCurrent) emptyList() else state.walkHead,
+                            walkTail = if (state.pathFromCurrent) emptyList() else state.walkTail,
                             viewport = frameViewport,
                             travelRatio = if (state.pathFromCurrent) 0f
                             else progress?.takeIf { it.onRoute }?.ratio ?: 0f,
@@ -358,8 +360,27 @@ private fun RouteOverlay(
     viewport: RouteMapProjection.Viewport,
     travelRatio: Float,
     pathFromCurrent: Boolean,
+    walkHead: List<GeoPoint> = emptyList(),
+    walkTail: List<GeoPoint> = emptyList(),
 ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
+        // 앞뒤 도보 구간: 회색 점선(실제 걷는 길이 아니라 출발지 · 도착지와 경로선 끝을 이은 것이다, 11-17)
+        listOf(walkHead, walkTail).filter { it.size >= 2 }.forEach { leg ->
+            val px = leg.map { RouteMapProjection.toPx(it, viewport) }
+            drawPath(
+                path = Path().apply {
+                    moveTo(px.first().x, px.first().y)
+                    for (i in 1..px.lastIndex) lineTo(px[i].x, px[i].y)
+                },
+                color = JitColor.TextSecondary,
+                style = Stroke(
+                    width = 3.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8.dp.toPx(), 6.dp.toPx())),
+                ),
+            )
+        }
+
         // 고른 경로보다 먼저 그려서 아래에 깔린다.
         if (altPath.size >= 2) {
             val altPx = altPath.map { RouteMapProjection.toPx(it, viewport) }
@@ -453,7 +474,10 @@ private fun RouteOverlay(
         // 의도와 반대로 보인다(실기기에서 확인했다. 출발이 꽉 찬 점, 도착이 빈
         // 링으로 보였다).
         val markerColor = JitColor.TextPrimary
-        listOf(points.first() to false, points.last() to true)
+        // 출발 · 도착 표식은 도보 구간이 있으면 그 바깥 끝(실제 출발지 · 도착지)에 찍는다
+        val startPx = walkHead.firstOrNull()?.let { RouteMapProjection.toPx(it, viewport) } ?: points.first()
+        val endPx = walkTail.lastOrNull()?.let { RouteMapProjection.toPx(it, viewport) } ?: points.last()
+        listOf(startPx to false, endPx to true)
             .forEach { (px, heavy) ->
                 drawCircle(
                     // 어두운 속 = 무겁게 보인다. 흰 속 = 비어 보인다.

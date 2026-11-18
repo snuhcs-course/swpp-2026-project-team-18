@@ -361,6 +361,8 @@ private fun ResultLine(
     recommendedMinutes: Int?,
     pickedMinutes: Int,
 ) {
+    // 확률을 아직 못 내면 이 줄을 두지 않는다(11-17 사용자: 설명 문구를 빼 달라고 함)
+    if (percent == null) return
     val color = probabilityColor(percent, goalTau)
     Row(
         modifier = Modifier
@@ -377,14 +379,7 @@ private fun ResultLine(
                 .background(color),
         )
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (percent == null) {
-                Text(
-                    text = AlarmTimeChoice.resultUnknown(pickedLabel),
-                    color = JitColor.TextPrimary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            } else {
+            run {
                 Row {
                     Text(
                         text = AlarmTimeChoice.resultPrefix(pickedLabel),

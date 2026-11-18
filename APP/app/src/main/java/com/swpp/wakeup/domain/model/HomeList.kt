@@ -42,6 +42,11 @@ object HomeList {
         val nextChangeMillis: Long,
         /** 행에 "안 감으로 표시" 를 내놓는 일정 id. 오늘까지의 일정 중 도착하지 않은 것 */
         val markable: Set<Long>,
+        /**
+         * 울렸고 아직 끝나지 않은 아침([TripResume.ongoing]). 있으면 홈 맨 위 큰 카드가 이 일정이고
+         * [nextAlarm] 은 그 아래 작게 이어진다(11-17 사용자).
+         */
+        val ongoing: UpcomingEvent? = null,
     )
 
     // Partly AI-generated (Claude)
@@ -119,6 +124,7 @@ object HomeList {
                 .filter { !it.skipped && !it.startDate.isAfter(today) && it.id !in arrived }
                 .map { it.id }
                 .toSet(),
+            ongoing = TripResume.ongoing(visible, nowMillis, arrived, device),
         )
     }
 

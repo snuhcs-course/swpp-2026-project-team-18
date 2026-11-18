@@ -15,6 +15,8 @@ data class RiskOptionsView(
     val options: List<RiskOptionView>,
     /** 현재 τ와 정확히 일치하는 옵션. null이면 사용자가 직접 골라야 한다. */
     val selectedKey: String?,
+    /** "추천" 을 붙일 칸(서버 `recommended_key`, BE-H3e). null 이면 어디에도 붙이지 않는다 */
+    val recommendedKey: String? = null,
     /** 직접 지정 없이 일정 종류의 τ가 프로필 기본값 대신 적용됐는지 */
     val autoAdjusted: Boolean,
     /** 실제 적용된 일정 종류·프로필 기본값에 대한 서버 설명 */

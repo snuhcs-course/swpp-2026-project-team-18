@@ -52,7 +52,14 @@ class AuthRepository(
          * @param fields 칸별 이유(400 `details`, 예 `nickname`). 가입만 채운다 — 화면이 칸 아래에 붙인다
          *   (iter4 H2-11). Partly AI-generated (Claude)
          */
-        data class Failure(val message: String, val fields: Map<String, String> = emptyMap()) : AuthResult
+        data class Failure(
+            val message: String,
+            val fields: Map<String, String> = emptyMap(),
+            /** 423 `account_locked` 면 풀리는 시각(epoch ms, BE-A3). 아니면 null */
+            val lockedUntilMillis: Long? = null,
+            /** 401 `details.remaining_attempts`. 구버전 서버면 null */
+            val remainingAttempts: Int? = null,
+        ) : AuthResult
     }
 
     // Partly AI-generated (Claude)
@@ -132,8 +139,40 @@ class AuthRepository(
         Result.failure(IOException(MESSAGE_NETWORK))
     }
 
-    suspend fun login(email: String, password: String): AuthResult = call {
-        api.login(LoginRequest(email = email.trim(), password = password))
+    suspend fun login(email: String, password: String): AuthResult {
+        val result = call(onError = ::loginFailureOf) {
+            api.login(LoginRequest(email = email.trim(), password = password))
+        }
+        return result
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 로그인 실패를 읽는다(BE-A3). 423 `account_locked` 는 풀리는 시각을, 401 은 남은 횟수를 함께 싣는다. 문구는 서버
+     * `message` 그대로(본문을 못 읽으면 상태 코드 문구). 잠금 시각은 `locked_until`, 없으면 `retry_after_seconds` 또는
+     * `Retry-After` 헤더로 계산한다.
+     */
+    private fun loginFailureOf(response: retrofit2.Response<*>, raw: String?): AuthResult.Failure {
+        val error = errorBodyOf(raw)
+        val message = error?.message?.takeIf { it.isNotBlank() } ?: defaultMessage(response.code())
+        val details = error?.details
+        return when {
+            response.code() == 423 || error?.code == "account_locked" -> AuthResult.Failure(
+                message = message,
+                lockedUntilMillis = com.swpp.wakeup.domain.model.LoginLock.lockedUntil(
+                    lockedUntilIso = details?.get("locked_until") as? String,
+                    retryAfterSeconds = (details?.get("retry_after_seconds") as? Number)?.toLong()
+                        ?: response.headers()["Retry-After"]?.trim()?.toLongOrNull(),
+                    nowMillis = System.currentTimeMillis(),
+                ),
+            )
+            response.code() == 429 || error?.code == "throttled" ->
+                AuthResult.Failure("요청이 많아요. 잠시 뒤 다시 시도해 주세요")
+            else -> AuthResult.Failure(
+                message = message,
+                remainingAttempts = (details?.get("remaining_attempts") as? Number)?.toInt(),
+            )
+        }
     }
 
     fun logout() = tokenStore.clear()
@@ -313,6 +352,8 @@ class AuthRepository(
      */
     private suspend fun call(
         errorMessage: ((Int, ApiErrorBody?) -> String)? = null,
+        /** 실패를 통째로 만드는 쪽(로그인 잠금처럼 문구 밖의 값이 필요할 때). 있으면 [errorMessage] 보다 먼저다 */
+        onError: ((retrofit2.Response<*>, String?) -> AuthResult.Failure)? = null,
         /** 400 `details` 의 칸별 이유를 [AuthResult.Failure.fields] 에 싣는다(가입) */
         withFields: Boolean = false,
         block: suspend () -> retrofit2.Response<com.swpp.wakeup.data.remote.AuthResponse>,
@@ -320,7 +361,9 @@ class AuthRepository(
         return try {
             val response = block()
             val body = response.body()
-            if (!response.isSuccessful && errorMessage != null) {
+            if (!response.isSuccessful && onError != null) {
+                onError(response, response.errorBody()?.string())
+            } else if (!response.isSuccessful && errorMessage != null) {
                 AuthResult.Failure(errorMessage(response.code(), errorBodyOf(response.errorBody()?.string())))
             } else if (!response.isSuccessful || body == null) {
                 val raw = response.errorBody()?.string()
@@ -436,6 +479,7 @@ class AuthRepository(
     private fun defaultMessage(code: Int): String = when (code) {
         400 -> "입력한 값을 확인해 주세요."
         401 -> "이메일 또는 비밀번호가 맞지 않아요."
+        423 -> "비밀번호를 여러 번 틀려서 잠시 로그인할 수 없어요."
         409 -> "이미 가입된 이메일이에요."
         in 500..599 -> "잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요."
         else -> MESSAGE_UNKNOWN

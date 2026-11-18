@@ -75,6 +75,28 @@ internal object TripTabLogic {
         )
     }
 
+    // Partly AI-generated (Claude)
+    /** 저장된 가는 길 띠의 머리. "오프라인 · 12분 전 정보" / 사본이 없으면 "오프라인 · 가는 길을 받지 못했어요" */
+    fun savedRouteLabel(savedAtMillis: Long?, nowMillis: Long): String {
+        val at = savedAtMillis ?: return "오프라인 · 가는 길을 받지 못했어요"
+        val minutes = ((nowMillis - at) / 60_000L).coerceAtLeast(0)
+        val age = when {
+            minutes < 1 -> "방금 정보"
+            minutes < 60 -> "${minutes}분 전 정보"
+            minutes < 60 * 24 -> "${minutes / 60}시간 전 정보"
+            else -> "${minutes / (60 * 24)}일 전 정보"
+        }
+        return "오프라인 · $age"
+    }
+
+    /** 띠의 이유 한 줄 */
+    fun savedRouteBody(hasSaved: Boolean): String =
+        if (hasSaved) {
+            "인터넷에 연결되지 않아 마지막으로 받은 가는 길을 보여 드려요. 실시간 도착 정보는 연결되면 다시 보여요"
+        } else {
+            "인터넷에 연결되지 않아 정류장별 가는 길을 받지 못했어요. 아래는 일정에 저장된 요약이에요"
+        }
+
     /** "10:00AM" → "오전 10:00". 붙은 말이 없으면 그대로 */
     fun koreanClock(startClock: String): String {
         val (clock, ampm) = HomeLabels.splitClock(startClock)

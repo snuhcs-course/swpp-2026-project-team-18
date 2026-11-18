@@ -895,6 +895,20 @@ class EventRepository(
             ?: Result.Failure("확인했지만 알람 계획을 읽을 수 없어요.")
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * "바꿀까요" 제안에 답한다(BE-H3d). [accept] 면 바꾸고, 아니면 지금 시각을 지킨다. 409(제안이 바뀜 · 마감 지남 ·
+     * 제안 없음)는 [Result.Failure.errorCode] 로 돌려준다 — 부르는 쪽이 일정을 다시 받는다.
+     */
+    suspend fun answerAlarmProposal(eventId: Long, accept: Boolean, proposedAlarmAt: String?): Result<AlarmPlanView> = guard {
+        val body = com.swpp.wakeup.data.remote.AlarmProposalAnswer(proposedAlarmAt)
+        val response = if (accept) api.acceptAlarmProposal(eventId, body) else api.rejectAlarmProposal(eventId, body)
+        val dto = unwrap(response) ?: return@guard failureFrom(response.code(), response.errorBody()?.string())
+        cache?.saveEvent(dto)
+        dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
+            ?: Result.Failure("답했지만 알람 계획을 읽을 수 없어요.")
+    }
+
     /** 추천 시각으로 되돌리기(BE-H3b) */
     suspend fun clearUserAlarm(eventId: Long): Result<AlarmPlanView> = guard {
         val response = api.clearAlarmTime(eventId)
@@ -1390,6 +1404,28 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
                 altFasterMinutes = it.altFasterMinutes,
             )
         },
+        proposal = plan?.alarmProposal?.toProposal(),
+    )
+}
+
+// Partly AI-generated (Claude)
+/** 서버 제안 → 화면 · 기기용. 시각을 읽지 못하면 null(제안이 없는 것으로 본다) */
+internal fun com.swpp.wakeup.data.remote.AlarmProposalDto.toProposal(): com.swpp.wakeup.domain.model.AlarmProposal? {
+    fun millis(raw: String?) = raw?.let { runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() }
+    val current = millis(currentAlarmAt) ?: return null
+    val proposedRaw = proposedAlarmAt ?: return null
+    val proposed = millis(proposedRaw) ?: return null
+    return com.swpp.wakeup.domain.model.AlarmProposal(
+        kind = kind.orEmpty(),
+        currentAtMillis = current,
+        proposedAtMillis = proposed,
+        proposedAt = proposedRaw,
+        moveMinutes = moveMinutes ?: ((proposed - current) / 60_000L).toInt(),
+        reasonText = reasonText?.trim()?.takeIf { it.isNotEmpty() },
+        keepProbability = keepProbability,
+        changeProbability = changeProbability,
+        answerByMillis = millis(answerBy),
+        createdAt = createdAt,
     )
 }
 
@@ -1510,50 +1546,11 @@ internal fun AlarmPlanDto.toConfidence(): ConfidenceView {
         return ConfidenceView(
             percent = percent.coerceIn(0, 100),
             headline = "정시 도착 확률 ${ProbabilityRule.displayLabel(percent)}",
-            reason = null,
-            action = null,
         )
     }
-
-    // 이동 시간이 기록으로 보정됐는가. 보정돼도 변동 폭(표준편차)은 따로 쌓여야 한다.
-    val corrected = travelTimeSource?.contains("+observed") == true
-    val travelNote = if (corrected) {
-        "이동 시간은 기록으로 보정됐지만 변동 폭은 아직 모름"
-    } else {
-        "이동 시간은 경로 예상값 하나뿐이에요"
-    }
-
-    val (reason, action) = when (confidenceBasis) {
-        // 준비 범위만으로는 확률이 나오지 않는다(이동 분산도 필요). 그래서 "확률 계산이
-        // 시작됨" 이라고 약속하지 않는다.
-        AlarmPlanDto.BASIS_POINT_ESTIMATE ->
-            "준비·이동 둘 다 한 가지 값뿐이라 얼마나 달라지는지 알 수 없어요" to
-                "루틴 항목에 최소~최대 범위를 넣으면 준비 시간이 달라지는 폭도 계산해요"
-
-        AlarmPlanDto.BASIS_TRAVEL_UNKNOWN -> travelNote to TRAVEL_ACTION
-
-        AlarmPlanDto.BASIS_PREP_UNKNOWN ->
-            "이동 시간은 달라지는 폭이 있지만 준비 시간이 한 가지 값이에요" to
-                "루틴 블록에 최소~최대 범위를 넣으면 됨"
-
-        // 집에서 출발하지 않는 일정이다. 준비 시간이 고정값인 것이 아니라
-        // 아예 없으므로 "루틴 블록을 등록하라" 고 하면 안 된다.
-        AlarmPlanDto.BASIS_TRAVEL_ONLY -> "준비 단계가 없는 일정이고 $travelNote" to TRAVEL_ACTION
-
-        // 확률도 근거도 없는 경우. status != ok 이면 이 카드는 그려지지 않는다.
-        else -> "아직 확률을 계산할 근거가 부족해요" to null
-    }
-
-    return ConfidenceView(
-        percent = null,
-        headline = "정시 도착 확률 · 아직 계산할 수 없어요",
-        reason = reason,
-        action = action,
-    )
+    // 확률을 아직 못 내면 이유 문구 없이 자리만 비운다(11-17 사용자).
+    return ConfidenceView(percent = null, headline = "정시 도착 확률 · 아직 계산할 수 없어요")
 }
-
-/** 이동 변동성이 없을 때 사용자가 할 일. 서버 보정은 이동 기록에서 나온다(R-3). */
-private const val TRAVEL_ACTION = "이동 기록이 쌓이면 계산할 수 있어요"
 
 // AI-generated (Claude)
 /**
@@ -1712,6 +1709,8 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         alarmOn = alarmOn == true,
         routeDetail = plan.routeDetail?.takeIf { it.isNotBlank() },
         routePath = plan.routePoints.toGeoPoints(),
+        originPoint = originLat?.let { lat -> originLng?.let { lng -> GeoPoint(lat, lng) } },
+        destinationPoint = place?.let { GeoPoint(it.lat, it.lng) },
         routeDistanceM = plan.routeDistanceM,
         // 지금 더 빠른 대안. 고른 경로는 위에서 그대로 넘겼고, 이건 지도에
         // 겹쳐 보여 주기만 한다.
@@ -1721,6 +1720,7 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         skipped = skipped,
         routeBasis = routeBasis,
         recurring = recurrenceId != null,
+        proposal = plan.alarmProposal?.toProposal(),
     )
 }
 
@@ -1822,6 +1822,10 @@ internal fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedu
                 parallelizable = row.parallelizable,
             )
         },
-    )
+    ).let { s ->
+        // 답을 기다리는 제안이면 마감에 기기가 스스로 정할 수 있게 함께 둔다(BE-H3d, 6절)
+        val p = plan.alarmProposal?.toProposal() ?: return@let s
+        s.copy(proposedAlarmAtMillis = p.proposedAtMillis, proposalAnswerByMillis = p.answerByMillis, proposalReason = p.reasonText)
+    }
 }
 

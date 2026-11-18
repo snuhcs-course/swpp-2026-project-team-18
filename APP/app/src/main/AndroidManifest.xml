@@ -38,6 +38,11 @@
       대화상자가 위협적이고, 없어도 핵심 흐름이 동작한다.
     -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!--
+      알림·권한 › "배터리 최적화 제외" 의 시스템 대화상자(11-17). 알람 앱이라 정책상 허용된다.
+      강요하지 않는다 — 사용자가 그 줄을 눌렀을 때만 연다.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!--
       기기 캘린더에서 일정을 가져온다.
@@ -182,6 +187,21 @@
         -->
         <receiver
             android:name=".sensing.TripArrivalReceiver"
+            android:exported="false" />
+
+        <!--
+          "바꿀까요" 제안의 마감(answer_by). 답이 없으면 더 이른 쪽으로 기기 알람을 다시 건다(BE-H3d).
+          exported=false — 우리 알람에서만 온다.
+        -->
+        <receiver
+            android:name=".alarm.ProposalDeadlineReceiver"
+            android:exported="false" />
+
+        <!--
+          추적이 죽었으면 앱을 열지 않고 다시 띄우는 10분 점검(11-17). exported=false — 우리 알람에서만 온다.
+        -->
+        <receiver
+            android:name=".sensing.TripWatchdogReceiver"
             android:exported="false" />
 
         <!--

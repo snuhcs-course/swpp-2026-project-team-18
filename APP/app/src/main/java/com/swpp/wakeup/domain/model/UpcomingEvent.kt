@@ -55,6 +55,8 @@ data class UpcomingEvent(
     val skipped: Boolean = false,
     /** 알람 전 더 빠른 경로 제안([FasterRoute.offer]). 없으면 null. 화면을 그릴 때 [FasterRouteOffer.isOpen] 으로 다시 거른다 */
     val fasterRoute: FasterRouteOffer? = null,
+    /** 답을 기다리는 "바꿀까요" 제안(BE-H3d). 홈 다음 알람 카드 아래에 보인다 */
+    val proposal: AlarmProposal? = null,
 ) {
     val hasAlarm: Boolean get() = alarmAt != null
 

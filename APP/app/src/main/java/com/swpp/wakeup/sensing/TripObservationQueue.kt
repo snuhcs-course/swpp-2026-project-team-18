@@ -146,6 +146,20 @@ class TripObservationQueue(
         prefs.stampOwner(appContext)
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 기록 초기화(서버 계약 `server-learning-reset.md` 7절 2) 뒤에 부른다. [resetAt] 보다 이른 기록(`observed_at`)을
+     * 지운다 — 서버도 버리지만, 올리기 전에 지우면 업로드 한 번을 아끼고 배포 전 서버와 섞여도 지운 아침이 다시 학습되지 않는다.
+     *
+     * @return 지운 건수
+     */
+    fun dropBefore(resetAt: String): Int {
+        val items = pending()
+        val keep = items.filterNot { com.swpp.wakeup.domain.model.LearningReset.isBeforeReset(it.observedAt, resetAt) }
+        if (keep.size != items.size) write(keep)
+        return items.size - keep.size
+    }
+
     /** 큐를 통째로 비운다. **로그아웃·계정 전환에서 부른다.** */
     fun wipe() {
         prefs.edit { clear() }

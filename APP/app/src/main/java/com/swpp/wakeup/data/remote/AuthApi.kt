@@ -110,7 +110,13 @@ interface AuthApi {
 data class LogoutAllResponse(val revoked: Int? = null)
 
 /** 지운 건수(종류 → 건수). 화면에는 쓰지 않고 로그로만 남긴다. 서버가 주지 않아도 된다 */
-data class LearningResetResponse(val deleted: Map<String, Int>? = null)
+data class LearningResetResponse(
+    val deleted: Map<String, Int>? = null,
+    /** 다시 섞지 못한 앞으로의 계획 수(곧 울릴 알람 · 이미 시작한 일정 등). 서버 0.21.0 */
+    @SerializedName("skipped_plans") val skippedPlans: Int? = null,
+    /** 서버가 지운 시각(ISO 8601). 이보다 이른 기록 업로드는 서버가 버린다 */
+    @SerializedName("reset_at") val resetAt: String? = null,
+)
 
 // Partly AI-generated (Claude)
 data class PasswordResetRequest(val email: String)

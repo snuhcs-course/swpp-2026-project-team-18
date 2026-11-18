@@ -28,17 +28,16 @@ class FasterRouteTest {
     )
 
     @Test
-    fun `5분 빠르면 제안한다`() {
-        val offer = offer(faster = 5)
+    fun `1분이라도 빠르면 제안한다 - 서버가 대안을 붙이는 기준이자 지도 대안 선의 기준`() {
+        val offer = offer(faster = 1)
         assertNotNull(offer)
         assertEquals("transit:2호선", offer!!.routeKey)
-        assertEquals(5, offer.fasterMinutes)
+        assertEquals(1, offer.fasterMinutes)
         assertEquals(alarmAt, offer.alarmAtMillis)
     }
 
     @Test
-    fun `4분이하나 값이 없으면 제안하지 않는다`() {
-        assertNull(offer(faster = 4))
+    fun `빠르지 않거나 값이 없으면 제안하지 않는다`() {
         assertNull(offer(faster = 0))
         assertNull(offer(faster = null))
     }

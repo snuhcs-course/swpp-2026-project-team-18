@@ -62,8 +62,9 @@ class FasterRouteSwitchTest {
         assertEquals("walk", v.routeKey)
         // 대안이 없으면 지어내지 않는다
         assertNull(confirm(plan(""))!!.faster)
-        // 5분보다 덜 빠르면 제안하지 않는다
-        assertNull(confirm(plan(""","alt_route_key":"transit","alt_faster_minutes":3"""))!!.faster)
+        // 서버가 대안을 붙이는 기준(1분 이상)과 같다 — 지도에 대안 선이 있으면 버튼도 있다(11-17)
+        assertEquals(3, confirm(plan(""","alt_route_key":"transit","alt_faster_minutes":3"""))!!.faster?.fasterMinutes)
+        assertNull(confirm(plan(""","alt_route_key":"transit","alt_faster_minutes":0"""))!!.faster)
         // 이미 그 경로면 제안하지 않는다
         assertNull(confirm(plan(""","alt_route_key":"walk","alt_faster_minutes":9"""), routeKey = "walk")!!.faster)
     }

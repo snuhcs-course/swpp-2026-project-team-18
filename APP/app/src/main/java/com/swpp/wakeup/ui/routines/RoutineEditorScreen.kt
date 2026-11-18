@@ -1,5 +1,12 @@
 package com.swpp.wakeup.ui.routines
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.border
+import androidx.compose.material3.Icon
+import com.swpp.wakeup.ui.common.JitSectionTitle
+import com.swpp.wakeup.ui.common.JitPillChip
+import com.swpp.wakeup.ui.common.LineIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -76,6 +83,8 @@ fun RoutineEditorScreen(
     onSaveEventBlocks: () -> Unit,
     onDismissMessages: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 항목이 없는 "이 아침 할 일" 의 [아침 루틴 만들러 가기](내 정보 › 아침 루틴) */
+    onOpenRoutine: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -97,10 +106,11 @@ fun RoutineEditorScreen(
             enabled = !state.saving,
         )
 
+        // 11-17: 지금 UI 기준(제목 20sp · 해요체)
         Text(
-            text = if (state.isEventMode) "이 아침에 무엇을 하는가?" else "아침에 무엇을 하는가?",
+            text = if (state.isEventMode) "이 아침에 무엇을 하나요?" else "아침에 무엇을 하나요?",
             color = JitColor.TextPrimary,
-            fontSize = 24.sp,
+            fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
         )
         Text(
@@ -110,7 +120,7 @@ fun RoutineEditorScreen(
                 "항목을 쪼개면 준비 시간의 근거가 생기고, 늦었을 때 무엇을 줄일지 고를 수 있어요"
             },
             color = JitColor.TextSecondary,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
         )
 
         if (state.loading) {
@@ -118,7 +128,8 @@ fun RoutineEditorScreen(
             return@Column
         }
 
-        SummaryCard(state)
+        // 항목이 없으면 "0개 중 0개 할게요 · 더하면 0분" 은 뜻이 없다 — 빈 안내만 둔다(11-17 사용자)
+        if (state.blocks.isNotEmpty()) SummaryCard(state)
 
         if (state.outOfRangeCount > 0) {
             NoticeCard(
@@ -129,7 +140,7 @@ fun RoutineEditorScreen(
         }
 
         if (state.blocks.isEmpty()) {
-            EmptyCard()
+            EmptyCard(onOpenRoutine = onOpenRoutine.takeIf { state.isEventMode })
         } else {
             state.blocks.forEach { block ->
                 BlockCard(
@@ -154,7 +165,9 @@ fun RoutineEditorScreen(
 
         Spacer(Modifier.height(4.dp))
 
-        if (state.isEventMode) {
+        if (state.isEventMode && state.blocks.isEmpty()) {
+            // 고를 항목이 없으니 저장 버튼도 없다. 바로가기는 빈 안내 카드 안에 있다.
+        } else if (state.isEventMode) {
             JitPrimaryButton(
                 label = if (state.dirty) "저장하고 알람에 반영" else "바뀐 항목 없음",
                 onClick = onSaveEventBlocks,
@@ -162,9 +175,9 @@ fun RoutineEditorScreen(
                 loading = state.saving,
             )
             Text(
-                text = "체크는 이 일정에만 적용돼요. 기본값을 바꾸려면 내 정보 › 아침 루틴에서 고쳐 주세요",
+                text = "켜고 끈 것은 이 일정에만 적용돼요. 기본값을 바꾸려면 내 정보 › 아침 루틴에서 고쳐 주세요",
                 color = JitColor.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         } else {
             JitPrimaryButton(
@@ -177,7 +190,7 @@ fun RoutineEditorScreen(
             Text(
                 text = "항목을 고치면 앞으로의 알람에 자동으로 반영돼요. 이미 울린 알람은 그대로예요",
                 color = JitColor.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         }
     }
@@ -192,14 +205,14 @@ fun RoutineEditorScreen(
  */
 @Composable
 private fun SummaryCard(state: RoutineEditorState) {
-    JitCard(padding = 14.dp, gap = 7.dp) {
+    JitCard(padding = 16.dp, gap = 8.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             JitDotLabel(
-                text = "포함 ${state.includedCount} / ${state.blocks.size}개",
+                text = "${state.blocks.size}개 중 ${state.includedCount}개 할게요",
                 dotColor = JitColor.Accent,
                 fontSize = 13,
                 dotSize = 7.dp,
@@ -209,10 +222,9 @@ private fun SummaryCard(state: RoutineEditorState) {
             }
         }
         Text(
-            text = "합계는 단순히 더한 값이에요. 함께 하는 항목과 순서는 알람 계산에 반영되므로 " +
-                "실제 준비 시간은 이보다 짧을 수 있어요",
+            text = "그냥 더한 시간이에요. 함께 할 수 있는 항목은 겹쳐 계산하므로 실제 준비 시간은 이보다 짧을 수 있어요",
             color = JitColor.TextSecondary,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
         )
     }
 }
@@ -225,7 +237,7 @@ private fun BlockCard(
     onToggle: () -> Unit,
     onEdit: () -> Unit,
 ) {
-    JitCard(padding = 14.dp, gap = 7.dp, accented = block.rangeMismatch) {
+    JitCard(padding = 16.dp, gap = 10.dp, accented = block.rangeMismatch) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -255,30 +267,35 @@ private fun BlockCard(
                             text = block.name,
                             color = if (block.checked) JitColor.TextPrimary
                             else JitColor.TextSecondary,
-                            fontSize = 14.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                         )
-                        Spacer(Modifier.width(7.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text(
                             text = block.rangeLabel,
                             color = JitColor.TextSecondary,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                         )
+                        // 기본 루틴에서는 눌러서 고친다 — "눌러서 수정" 글 대신 연필 아이콘(11-17)
+                        if (!eventMode) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(LineIcons.pencil, contentDescription = "수정", tint = JitColor.TextSecondary, modifier = Modifier.size(14.dp))
+                        }
                     }
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (block.parallelizable) JitChip("병렬", JitColor.Blue, fontSize = 9)
+                        if (block.parallelizable) JitChip("다른 일과 함께", JitColor.Blue, fontSize = 11)
                         if (block.dropCost == DropCost.IMPOSSIBLE) {
-                            JitChip("필수", JitColor.Red, fontSize = 9)
+                            JitChip("꼭 해요", JitColor.Red, fontSize = 11)
                         } else if (block.dropCost == DropCost.NONE) {
-                            JitChip("생략 가능", JitColor.TextSecondary, fontSize = 9)
+                            JitChip("건너뛰어도 돼요", JitColor.TextSecondary, fontSize = 11)
                         }
                         // 이 일정에서 기본값을 덮어썼다는 표시. "기본은 포함인데
                         // 이번엔 뺐다" 를 사용자가 알아야 다음에 헷갈리지 않는다.
                         if (eventMode && block.explicit) {
-                            JitChip("직접 바꿈", JitColor.Accent, fontSize = 9)
+                            JitChip("이번만 바꿈", JitColor.Accent, fontSize = 11)
                         }
                     }
                 }
@@ -303,16 +320,8 @@ private fun BlockCard(
         Text(
             text = block.learningNote,
             color = if (block.rangeMismatch) JitColor.Amber else JitColor.TextSecondary,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
         )
-
-        if (!eventMode) {
-            Text(
-                text = "눌러서 수정",
-                color = JitColor.TextSecondary,
-                fontSize = 9.sp,
-            )
-        }
     }
 }
 
@@ -399,37 +408,29 @@ fun BlockDraftSheet(
             } else {
                 JitColor.Blue
             },
-            title = "범위가 있어야 얼마나 달라지는지 알 수 있어요",
-            body = "최소와 최대를 다르게 주면 그 폭만큼 준비 시간이 달라질 수 있다고 보고 계산해요. " +
+            title = "최소와 최대를 다르게 넣어 주세요",
+            body = "그 차이만큼 아침마다 준비 시간이 달라질 수 있다고 보고 계산해요. " +
                 "정시 도착 확률은 이동 기록도 쌓여야 나와요",
         )
 
-        Text("포기 시 손실", color = JitColor.TextSecondary, fontSize = 11.sp)
+        JitSectionTitle("늦을 때 건너뛰면 얼마나 아쉬워요?")
+        // 높이 32 알약 칩(알람 추가 시트와 같은 부품)
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             DropCost.entries.forEach { cost ->
-                val selected = cost == draft.dropCost
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(if (selected) JitColor.Accent else JitColor.Surface2)
-                        .clickable(enabled = !saving) { onDropCost(cost) }
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                ) {
-                    Text(
-                        text = cost.label,
-                        color = if (selected) JitColor.Bg else JitColor.TextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                }
+                JitPillChip(
+                    text = cost.label,
+                    selected = cost == draft.dropCost,
+                    onClick = { onDropCost(cost) },
+                    enabled = !saving,
+                    fontSize = 13,
+                    tag = "block_drop_${cost.name.lowercase()}",
+                )
             }
         }
-        Text(draft.dropCost.hint, color = JitColor.TextSecondary, fontSize = 10.sp)
+        Text(draft.dropCost.hint, color = JitColor.TextSecondary, fontSize = 12.sp)
 
         ToggleRow(
-            title = "병렬로 진행 가능",
+            title = "다른 일과 함께 할 수 있어요",
             body = "다른 일과 겹쳐 할 수 있어요. 총 준비 시간에 더하지 않고 겹쳐 계산해요",
             checked = draft.parallelizable,
             enabled = !saving,
@@ -455,24 +456,26 @@ fun BlockDraftSheet(
         )
 
         draft.id?.let { id ->
+            // 삭제는 테두리 버튼(빨간 글자 · 휴지통). 꽉 찬 버튼은 [저장] 하나뿐이다.
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .border(1.dp, JitColor.Track, RoundedCornerShape(12.dp))
+                    .clickable(enabled = !saving, role = Role.Button) { onDelete(id) }
+                    .testTag("block_delete"),
                 horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = "항목 삭제",
-                    color = JitColor.Red,
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(enabled = !saving) { onDelete(id) }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
+                Icon(LineIcons.trash, contentDescription = null, tint = JitColor.Red, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("항목 삭제", color = JitColor.Red, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
             Text(
                 text = "지금까지 쌓인 이 항목의 기록도 함께 사라져요",
                 color = JitColor.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -487,13 +490,13 @@ private fun ToggleRow(
     enabled: Boolean,
     onChange: (Boolean) -> Unit,
 ) {
-    JitCard(padding = 14.dp, gap = 4.dp) {
+    JitCard(padding = 16.dp, gap = 4.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, color = JitColor.TextPrimary, fontSize = 13.sp)
+            Text(title, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Switch(
                 checked = checked,
                 onCheckedChange = onChange,
@@ -507,7 +510,7 @@ private fun ToggleRow(
                 ),
             )
         }
-        Text(body, color = JitColor.TextSecondary, fontSize = 10.sp)
+        Text(body, color = JitColor.TextSecondary, fontSize = 12.sp)
     }
 }
 
@@ -516,7 +519,7 @@ private fun FieldError(text: String) {
     Text(
         text = text,
         color = JitColor.Red,
-        fontSize = 10.sp,
+        fontSize = 12.sp,
         modifier = Modifier.padding(start = 4.dp, top = 3.dp),
     )
 }
@@ -530,7 +533,7 @@ private fun MessageLine(
     Text(
         text = text,
         color = color,
-        fontSize = 11.sp,
+        fontSize = 12.sp,
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
@@ -540,8 +543,8 @@ private fun MessageLine(
 }
 
 @Composable
-private fun EmptyCard() {
-    JitCard(padding = 16.dp, gap = 7.dp) {
+private fun EmptyCard(onOpenRoutine: (() -> Unit)? = null) {
+    JitCard(padding = 16.dp, gap = 10.dp) {
         JitDotLabel(
             text = "등록된 항목이 없어요",
             dotColor = JitColor.TextSecondary,
@@ -551,11 +554,29 @@ private fun EmptyCard() {
         Text(
             // 준비 시간은 ⑮ 에서 받고, 답하지 않았으면 서버 기본값을 쓴다. 그 숫자는
             // 서버 소유라 앱에 적지 않는다.
-            text = "항목이 없으면 평소 준비 시간 하나를 한 덩어리로 씀. " +
-                "쪼개면 왜 그 시각인지 설명할 수 있어요",
+            text = "항목이 없으면 평소 준비 시간 하나를 한 덩어리로 써요. " +
+                "나눠 두면 왜 그 시각인지 설명할 수 있어요",
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
+        // 이 아침 할 일에서만: 항목은 내 정보 › 아침 루틴에서 만든다. 회색 채움(가벼운 이동, HE 2-6)
+        onOpenRoutine?.let { open ->
+            Row(
+                modifier = Modifier
+                    .testTag("routine_open_from_event")
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(JitColor.Surface2)
+                    .clickable(role = Role.Button, onClick = open),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(LineIcons.plus, contentDescription = null, tint = JitColor.TextPrimary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("아침 루틴 만들러 가기", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 
@@ -565,9 +586,9 @@ private fun NoticeCard(
     title: String,
     body: String,
 ) {
-    JitCard(padding = 14.dp, gap = 5.dp) {
-        JitDotLabel(text = title, dotColor = dot, fontSize = 12, dotSize = 7.dp)
-        Text(body, color = JitColor.TextSecondary, fontSize = 10.sp)
+    JitCard(padding = 16.dp, gap = 6.dp) {
+        JitDotLabel(text = title, dotColor = dot, fontSize = 13, dotSize = 7.dp)
+        Text(body, color = JitColor.TextSecondary, fontSize = 12.sp)
     }
 }
 
@@ -587,7 +608,7 @@ private fun LoadingBlock() {
 
 // ---------------------------------------------------------------------------
 
-private fun previewBlocks() = listOf(
+internal fun previewBlocks() = listOf(
     RoutineBlockView(
         id = 1,
         name = "샤워",

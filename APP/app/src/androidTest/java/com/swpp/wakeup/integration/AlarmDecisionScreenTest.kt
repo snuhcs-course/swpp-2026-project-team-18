@@ -142,8 +142,9 @@ class AlarmDecisionScreenTest {
         val unconfirmed = computedPlan.replace("\"status\":\"ok\"", "\"status\":\"ok\",\"alarm_confirmed\":false")
         show(planFrom(eventJson(unconfirmed)), supportsConfirm = true)
 
-        compose.onNodeWithTag("plan_alarm_status").assertExists()
-        compose.onNodeWithText("오전 7:00에 알람이 울려요").assertExists()
+        // "…에 알람이 울려요" 는 큰 시각과 같은 말이라 두지 않는다(11-17 사용자)
+        compose.onNodeWithTag("plan_alarm_status").assertDoesNotExist()
+        compose.onNodeWithText("오전 7:00에 알람이 울려요").assertDoesNotExist()
         compose.onNodeWithText("이 시각으로 알람 맞추기").assertDoesNotExist()
     }
 

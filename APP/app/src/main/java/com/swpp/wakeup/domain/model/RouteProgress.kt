@@ -187,6 +187,29 @@ data class RouteProgress(
  * 꺼짐·출발 확인 안 됨)는 "막대로 말할 것이 없다" 는 상태다. 알람이 울리기 전과
  * 준비 중은 판정 관점에서 같지만(둘 다 집에 있다) 사용자에게는 전혀 다른 상태다.
  */
+// Partly AI-generated (Claude)
+/**
+ * 경로선 앞뒤의 도보 구간(11-17 사용자: 지도에 걸어가는 구간이 빠져 있었다).
+ *
+ * 서버 경로선은 대중교통 구간의 좌표라 집 → 첫 정류장, 마지막 정류장 → 목적지 도보가 빠질 때가 있다. 그 간격이
+ * [MIN_GAP_M] 보다 크면 출발지 · 도착지와 경로선 끝을 직선으로 잇는다. 실제 걷는 길이 아니라는 것을 화면이
+ * 점선으로 드러낸다. 반환은 앞 구간 · 뒤 구간(없으면 null).
+ */
+object WalkLegs {
+    const val MIN_GAP_M = 40.0
+
+    data class Legs(val head: List<GeoPoint>?, val tail: List<GeoPoint>?) {
+        val all: List<GeoPoint> get() = head.orEmpty() + tail.orEmpty()
+    }
+
+    fun of(path: List<GeoPoint>, origin: GeoPoint?, destination: GeoPoint?): Legs {
+        if (path.isEmpty()) return Legs(null, null)
+        val head = origin?.takeIf { RouteProgress.distanceM(it, path.first()) > MIN_GAP_M }?.let { listOf(it, path.first()) }
+        val tail = destination?.takeIf { RouteProgress.distanceM(path.last(), it) > MIN_GAP_M }?.let { listOf(path.last(), it) }
+        return Legs(head, tail)
+    }
+}
+
 enum class TripStage(val label: String) {
     /** 알람이 아직 울리지 않았다 */
     BEFORE_ALARM("알람 전"),

@@ -1,5 +1,7 @@
 package com.swpp.wakeup.ui.home
 
+import com.swpp.wakeup.domain.model.AlarmTimeChoice
+import com.swpp.wakeup.domain.model.TripResume
 import com.swpp.wakeup.domain.model.ProbabilityRule
 import com.swpp.wakeup.ui.common.JitRetryButton
 import androidx.compose.animation.core.animateDpAsState
@@ -52,7 +54,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.UpcomingEvent
-import com.swpp.wakeup.ui.alarm.FasterRouteRow
 import com.swpp.wakeup.ui.common.JitChip
 import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.LineIcons
@@ -103,6 +104,15 @@ fun HomeScreen(
     onMissedDismiss: () -> Unit = {},
     /** 알람 전 "이 경로로 바꾸기"(다음 알람 카드) */
     onSwitchRoute: (UpcomingEvent) -> Unit = {},
+    /** 지금 추적 중인 일정 id(`TripLiveState.trackingEventId`). 진행 중 카드의 단계를 정한다 */
+    trackingEventId: Long? = null,
+    /** 추적 중인 일정이 집을 나섰는가 */
+    trackingInTransit: Boolean = false,
+    /** 진행 중 카드의 [기록 다시 시작] */
+    onRestartTracking: () -> Unit = {},
+    /** 다음 알람의 "바꿀까요" 제안에 답하기(BE-H3d). true = 받아들이기 */
+    onAnswerProposal: (UpcomingEvent, Boolean) -> Unit = { _, _ -> },
+    proposalBusyId: Long? = null,
 ) {
     // Partly AI-generated (Claude) — 확률 칩을 누르면 "정시 도착 확률이 뭐예요?"(iter4 H2-4, Figma `548:1798`)
     var onTimeFor by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -182,7 +192,26 @@ fun HomeScreen(
                 item(key = "empty") { EmptyState(onAdd = onAddEventClick) }
             }
 
-            state.nextAlarm?.let { next ->
+            // 울렸고 아직 끝나지 않은 아침이 맨 위 큰 카드다(11-17 사용자). 다음 알람은 그 아래 작게.
+            state.ongoing?.let { ongoing ->
+                item(key = "ongoing") {
+                    OngoingTripCard(
+                        event = ongoing,
+                        schedule = state.ongoingSchedule,
+                        stage = TripResume.stage(ongoing.id, trackingEventId, trackingInTransit),
+                        onClick = { onEventClick(ongoing) },
+                        onRestartTracking = onRestartTracking,
+                    )
+                }
+            }
+
+            state.nextAlarm?.takeIf { state.ongoing != null }?.let { next ->
+                item(key = "next-alarm-compact") {
+                    NextAlarmRow(event = next, today = state.today, onClick = { onEventClick(next) })
+                }
+            }
+
+            state.nextAlarm?.takeIf { state.ongoing == null }?.let { next ->
                 item(key = "next-alarm") {
                     NextAlarmCard(
                         event = next,
@@ -190,10 +219,24 @@ fun HomeScreen(
                         onClick = { onEventClick(next) },
                         onChangeTime = onChangeAlarmTime?.let { change -> { change(next) } },
                         onProbabilityClick = { onTimeFor = next.id },
-                        onProbabilityPendingClick = onHelpClick,
                         switchBusy = state.switchRouteBusyId == next.id,
                         onSwitchRoute = { onSwitchRoute(next) },
                     )
+                }
+            }
+
+            // 다음 알람의 "바꿀까요" 제안(BE-H3d). 진행 중 아침이 있어도 다음 알람에 걸린 제안이면 보인다.
+            state.nextAlarm?.let { next ->
+                next.proposal?.let { proposal ->
+                    item(key = "next-alarm-proposal-${next.id}") {
+                        com.swpp.wakeup.ui.alarm.ProposalCard(
+                            proposal = proposal,
+                            busy = proposalBusyId == next.id,
+                            onAccept = { onAnswerProposal(next, true) },
+                            onKeep = { onAnswerProposal(next, false) },
+                            tag = "home_proposal",
+                        )
+                    }
                 }
             }
 
@@ -220,6 +263,137 @@ fun HomeScreen(
                 .align(Alignment.BottomEnd)
                 .padding(end = JitSpace.ScreenHorizontal, bottom = FAB_BOTTOM),
         )
+    }
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 울렸고 아직 끝나지 않은 아침(11-17 사용자). 다음 알람 카드와 같은 틀(Surface · 주황 테두리 · 모서리 16 · 여백 16)에
+ * 지금 단계(준비 중 · 이동 중)를 크게, 다음 할 일을 한 줄로. 추적이 멈춰 있으면 그렇다고 말하고 [기록 다시 시작] 을 준다.
+ * 누르면 ④ 알람 상세(진행 · 지도)로 간다.
+ */
+@Composable
+private fun OngoingTripCard(
+    event: UpcomingEvent,
+    schedule: com.swpp.wakeup.domain.model.AlarmSchedule?,
+    stage: TripResume.Stage,
+    onClick: () -> Unit,
+    onRestartTracking: () -> Unit,
+) {
+    val shape = RoundedCornerShape(JitRadius.Card)
+    val zone = ZoneId.systemDefault()
+    fun clockOf(millis: Long?): String? = millis?.let {
+        val t = Instant.ofEpochMilli(it).atZone(zone)
+        AlarmTimeChoice.clockLabel(t.hour * 60 + t.minute)
+    }
+    val startClock = clockOf(event.startAtMillis) ?: event.startClock
+    val stopped = stage == TripResume.Stage.NOT_TRACKING
+    Column(
+        modifier = Modifier
+            .testTag("home_ongoing")
+            .fillMaxWidth()
+            .clip(shape)
+            .background(JitColor.Surface)
+            .border(1.dp, JitColor.Accent, shape)
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            JitDotLabel(text = "진행 중 · 알람이 울렸어요", dotColor = JitColor.Accent, modifier = Modifier.weight(1f))
+            JitChip(
+                label = if (stopped) "기록 멈춤" else stage.label,
+                contentColor = if (stopped) JitColor.Amber else JitColor.Green,
+                container = (if (stopped) JitColor.Amber else JitColor.Green).copy(alpha = 0.15f),
+                modifier = Modifier.testTag("home_ongoing_stage"),
+            )
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = "$startClock ${event.title}",
+                color = JitColor.TextPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            event.placeName?.takeIf { it.isNotBlank() }?.let { place ->
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(LineIcons.mapPin, contentDescription = null, tint = JitColor.TextSecondary, modifier = Modifier.size(14.dp))
+                    Text(place, color = JitColor.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Text(
+            text = if (stopped) stage.label else stage.label.let { "지금은 $it" },
+            color = if (stopped) JitColor.Amber else JitColor.Accent,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = TripResume.nextLine(stage, clockOf(schedule?.departByMillis), clockOf(schedule?.arriveAtMillis), startClock),
+            color = JitColor.TextSecondary,
+            fontSize = 13.sp,
+            modifier = Modifier.testTag("home_ongoing_next"),
+        )
+        if (stopped) {
+            Row(
+                modifier = Modifier
+                    .testTag("home_ongoing_restart")
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(JitColor.Surface2)
+                    .clickable(role = Role.Button, onClick = onRestartTracking),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(LineIcons.rotateCcw, contentDescription = null, tint = JitColor.TextPrimary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("기록 다시 시작", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+// Partly AI-generated (Claude)
+/** 진행 중 카드 아래의 작은 "다음 알람" 한 줄. 누르면 그 일정의 ④ */
+@Composable
+private fun NextAlarmRow(event: UpcomingEvent, today: LocalDate, onClick: () -> Unit) {
+    val alarmDate = event.alarmAtMillis
+        ?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() }
+        ?: event.startDate
+    val clock = listOfNotNull(HomeLabels.koreanMeridiem(event.alarmMeridiem), event.alarmClock ?: event.alarmAt)
+        .joinToString(" ")
+    Row(
+        modifier = Modifier
+            .testTag("next_alarm_compact")
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Card))
+            .background(JitColor.Surface)
+            .clickable(onClick = onClick)
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Icon(LineIcons.alarm, contentDescription = null, tint = JitColor.Accent, modifier = Modifier.size(18.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = "다음 알람 · ${HomeLabels.alarmDayWord(alarmDate, today)} $clock",
+                color = JitColor.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "${event.startClock} ${event.title}",
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Icon(LineIcons.chevronRight, contentDescription = null, tint = JitColor.TextSecondary, modifier = Modifier.size(16.dp))
     }
 }
 
@@ -533,8 +707,6 @@ private fun NextAlarmCard(
     onClick: () -> Unit,
     onChangeTime: (() -> Unit)?,
     onProbabilityClick: (() -> Unit)? = null,
-    /** 확률이 아직 없을 때의 회색 칩을 누르면(도움말) */
-    onProbabilityPendingClick: (() -> Unit)? = null,
     switchBusy: Boolean = false,
     onSwitchRoute: () -> Unit = {},
 ) {
@@ -584,7 +756,8 @@ private fun NextAlarmCard(
                             } else Modifier
                         ),
                 )
-            } ?: PendingProbabilityChip(onClick = onProbabilityPendingClick, tag = "next_alarm_probability_pending")
+            }
+            // 확률을 아직 못 내면 칩 자리를 비운다(11-17 사용자: 설명을 빼 달라고 함)
         }
 
         Row(
@@ -644,10 +817,7 @@ private fun NextAlarmCard(
             }
         }
 
-        // 알람 전에 더 빠른 경로가 있으면 바꿀 수 있게 한다(Figma ③ 변형 `512:10`). 알람이 울린 뒤에는 없다.
-        event.fasterRoute?.takeIf { it.isOpen(System.currentTimeMillis()) }?.let {
-            FasterRouteRow(offer = it, busy = switchBusy, onSwitch = onSwitchRoute)
-        }
+        // 더 빠른 경로 바꾸기는 홈에 두지 않는다(11-17 사용자). ④ 알람 상세 · 이동 탭 · 알람 확인 시트에서 바꾼다.
     }
 }
 
@@ -908,31 +1078,6 @@ private fun AddEventFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Text(text = "일정 추가", color = JitColor.Bg, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
-
-// Partly AI-generated (Claude)
-/**
- * 서버가 아직 정시 도착 확률을 주지 않을 때(준비 · 이동 기록이 쌓이기 전, `on_time_probability = null`) 칩 자리에
- * 두는 회색 칩. 자리를 비워 두면 기능이 없는 것처럼 보인다. 숫자를 지어내지는 않는다. 홈 · 이동 탭이 함께 쓴다.
- */
-@Composable
-internal fun PendingProbabilityChip(onClick: (() -> Unit)?, tag: String) {
-    JitChip(
-        label = PENDING_PROBABILITY_LABEL,
-        contentColor = JitColor.TextSecondary,
-        container = JitColor.Surface2,
-        modifier = Modifier
-            .testTag(tag)
-            .then(
-                if (onClick != null) {
-                    Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable(role = Role.Button, onClickLabel = "정시 도착 확률이 뭐예요?", onClick = onClick)
-                } else Modifier
-            ),
-    )
-}
-
-internal const val PENDING_PROBABILITY_LABEL = "정시 도착 확률 계산 전"
 
 // Partly AI-generated (Claude)
 /** 확률 칩 → i 시트에 넣을 값. 확률이나 알람 시각이 없으면 null */

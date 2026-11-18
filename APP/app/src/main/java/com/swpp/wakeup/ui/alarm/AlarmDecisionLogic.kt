@@ -40,16 +40,16 @@ object AlarmDecisionLogic {
     )
 
     /**
-     * 알람 줄 옆 알약. 직접 정한 시각이면 "직접 정한 시각", 적용 칸이 추천 칸이면 "추천", 아니면 그 칸 이름.
-     * 추천 칸은 지금 규칙([AlarmTimeChoice.recommendedKey])을 그대로 쓴다(서버 `recommended_key` 는 이번 범위 밖).
+     * 알람 줄 옆 알약. 직접 정한 시각이면 "직접 정한 시각", 사용자가 세 칸 중 하나를 골랐으면 그 칸 이름,
+     * 아니면(일정 종류 · 프로필 기본값을 그대로 쓰는 중) "추천". 추천 칸이 무엇인지 앱이 짐작하지 않는다 —
+     * 시각 바꾸기 시트의 "추천" 표시는 서버 `recommended_key` 를 쓴다(BE-H3e).
      */
     fun pill(plan: AlarmPlanView): Pill {
         if (plan.userAlarm) return Pill(UserAlarmRule.USER_LABEL, PillKind.USER)
         val appliedKey = plan.tauUsed?.let { tau -> PRESET_TAUS.entries.firstOrNull { kotlin.math.abs(it.value - tau) < 1e-6 }?.key }
-        // 세 칸에 없는 τ(종류 기본값)이면 사용자가 고른 칸이 없는 것이다 — 그 일정의 추천이다.
-        val recommended = AlarmTimeChoice.recommendedKey(appliedKey, plan.tauSourceLabel)
-        return if (appliedKey == null || appliedKey == recommended) Pill("추천", PillKind.RECOMMENDED)
-        else Pill(AlarmTimeChoice.quickLabel(appliedKey, appliedKey), PillKind.PRESET)
+        val picked = plan.tauSourceLabel == AlarmTimeChoice.MANUAL_TAU_SOURCE
+        return if (picked && appliedKey != null) Pill(AlarmTimeChoice.quickLabel(appliedKey, appliedKey), PillKind.PRESET)
+        else Pill("추천", PillKind.RECOMMENDED)
     }
 
     // ---------------------------------------------------------------- 문구
@@ -170,7 +170,8 @@ object AlarmDecisionLogic {
         val clock = plan.alarmAtMillis?.let { OnTimeSheetText.clock(it, zone) } ?: return null
         if (!plan.alarmOn) return AlarmStatus("알람이 꺼져 있어요. 홈에서 켤 수 있어요")
         if (plan.alarmConfirmed == true) return AlarmStatus(CONFIRMED_TEXT, confirmed = true)
-        return AlarmStatus("${clock}에 알람이 울려요")
+        // "오전 7:31에 알람이 울려요" 는 바로 위 큰 시각과 같은 말이라 두지 않는다(11-17 사용자)
+        return null
     }
 
     // ---------------------------------------------------------------- 눈금 글자 자리
