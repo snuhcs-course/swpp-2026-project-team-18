@@ -164,13 +164,41 @@ def test_custom_tau_is_unselected_and_metadata_tracks_actual_default(context):
     assert data["auto_adjusted"] is False and data["auto_reason"] is None
 
 
-def test_partial_variance_keeps_unknown_probability(context):
+def wheel_estimate(distribution, available):
+    """앱 `AlarmTimeChoice.estimate` 와 같은 식: 구간 안은 균등으로 본 누적 확률(%)."""
+    bins = [b for b in distribution["bins"] if b["mass"] > 0 and b["max"] > b["min"]]
+    total = sum(b["mass"] for b in bins)
+    covered = sum(
+        b["mass"] * min(1, max(0, (available - b["min"]) / (b["max"] - b["min"]))) for b in bins
+    )
+    return round(covered / total * 100)
+
+
+# Partly AI-generated (Claude) — PM 피드백(iter4): 빠르게 고르기에 도착 확률이 안 뜬다.
+def test_partial_variance_still_shows_option_probabilities(context):
     client, event = context
-    add_variance(event, travel=False)
-    services.compute_and_store(event)
-    options = get_options(client, event)["options"]
+    add_variance(event, travel=False)  # 준비만 흔들린다(이동 기록 없는 새 사용자)
+    plan = services.compute_and_store(event)
+    assert plan.on_time_probability is None  # 계획 확률은 그대로 비운다
+    data = get_options(client, event)
+    options = data["options"]
     assert len(options) == 3
-    assert all(o["probability"] is None for o in options)
+    probs = [o["probability"] for o in options]
+    assert all(isinstance(p, int) and 0 <= p <= 100 for p in probs)
+    assert probs[0] >= probs[1] >= probs[2]
+    # 휠로 같은 시각을 고르면 앱이 분포로 읽는 값과 거의 같아야 한다(구간 균등 가정만큼 차이).
+    for option in options:
+        available = (event.start_at - datetime.fromisoformat(option["alarm_at"])).total_seconds() / 60
+        assert abs(option["probability"] - wheel_estimate(data["distribution"], available)) <= 5
+
+
+def test_full_variance_option_probability_is_the_plan_math(context):
+    client, event = context
+    add_variance(event)
+    plan = services.compute_and_store(event)
+    normal = get_options(client, event)["options"][1]
+    assert plan.on_time_probability is not None
+    assert normal["probability"] == plan.on_time_probability
 
 
 def test_unmatched_latest_revision_does_not_reuse_an_old_raw_route(context):
