@@ -122,6 +122,8 @@ data class RouteChoice(
     val preferredKey: String? = null,
     /** "지난번에 고른 경로" / "자주 쓰는 수단". [preferredKey] 카드에만 단다 */
     val preferredCaption: String? = null,
+    /** 서버 `preferred_basis`(`same_destination` / `recent_mode`). 경로 칸 자동 채우기가 본다(C8) */
+    val preferredBasis: String? = null,
 ) {
     /** 사용자가 집 대신 다른 출발지를 고른 상태인지. */
     val hasCustomOrigin: Boolean get() = originLat != null && originLng != null

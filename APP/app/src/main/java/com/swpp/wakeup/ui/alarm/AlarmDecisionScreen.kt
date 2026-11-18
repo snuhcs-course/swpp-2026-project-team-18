@@ -442,9 +442,7 @@ private fun onTimeSpecOf(plan: AlarmPlanView): OnTimeSheetSpec? {
 }
 
 private fun koreanMeridiem(ampm: String): String? = when (ampm) {
-    "AM" -> "오전"
-    "PM" -> "오후"
-    else -> null
+    else -> com.swpp.wakeup.domain.model.ClockText.meridiemOf(ampm)
 }
 
 // Partly AI-generated (Claude)
@@ -536,12 +534,9 @@ private fun AlarmCard(
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("알람", color = JitColor.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(6.dp))
-            val pill = AlarmDecisionLogic.pill(plan)
-            Pill(
-                text = pill.text,
-                color = if (pill.kind == AlarmDecisionLogic.PillKind.USER) JitColor.TextSecondary else JitColor.Accent,
-                tag = "plan_pill",
-            )
+            AlarmDecisionLogic.pill(plan)?.let { pill ->
+                Pill(text = pill.text, color = JitColor.Accent, tag = "plan_pill")
+            }
             Spacer(Modifier.weight(1f))
             plan.confidence.percent?.let { percent ->
                 val color = planProbabilityColor(plan)
@@ -587,23 +582,14 @@ private fun AlarmCard(
         AlarmDecisionLogic.remainingLine(plan.alarmAtMillis, plan.startAtMillis, nowMillis)?.let {
             Text(it, color = JitColor.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         }
-        // 작은 상태 한 줄(확인함이면 초록 ✓). 승인 버튼은 이 화면에 두지 않는다(사용자 피드백 11-16).
+        // 작은 상태 한 줄("알람이 꺼져 있어요"). 승인 버튼은 이 화면에 두지 않는다(사용자 피드백 11-16).
         AlarmDecisionLogic.alarmStatus(plan)?.let { status ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.testTag(if (status.confirmed) "plan_confirmed" else "plan_alarm_status"),
-            ) {
-                if (status.confirmed) {
-                    Icon(LineIcons.check, contentDescription = null, tint = JitColor.Green, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                }
-                Text(
-                    text = status.text,
-                    color = if (status.confirmed) JitColor.Green else JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = if (status.confirmed) FontWeight.Bold else FontWeight.Normal,
-                )
-            }
+            Text(
+                text = status.text,
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.testTag("plan_alarm_status"),
+            )
         }
         // 확률이 없으면 알약 대신 이유 한 줄(숫자를 지어내지 않는다)
         // 확률을 아직 못 낼 때의 이유 · 할 일 문구는 보이지 않는다(11-17 사용자: 빼 달라고 함). 알약도 없다 —

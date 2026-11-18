@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -420,6 +421,7 @@ private fun emptyTabNotice(choice: RouteChoice): String? {
  * 구간 막대(도보 합계 · 탄 구간 · 대기 합계) + "도보 14분 · 대기 4분은 전체 합계" / 탄 구간 목록 + "○○ 도착".
  * 자동차 · 도보 · 자전거는 막대와 목록 대신 서버 요약(자전거는 지표 칸).
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun RouteCard(
     option: RouteOption,
@@ -439,62 +441,77 @@ private fun RouteCard(
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Card))
             .clickable(onClickLabel = if (cardOpensMap) "지도로 보기" else "이 경로 고르기", onClick = onClick)
-            .padding(vertical = 12.dp, horizontal = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(vertical = 10.dp, horizontal = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // 배지: 지난번에 고른 길 + 서버 배지(문구 그대로). 해당하는 것만
-        val badges = listOfNotNull(caption) + option.badges
-        if (badges.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                badges.forEachIndexed { i, text ->
+        // 11-18 사용자: 글씨를 한 단계 줄이고, 배지는 소요 시간 · 설명 오른쪽에 작게, 예전 색(주황 글자)으로.
+        // 한 줄에 다 안 들어가면 다음 줄로 넘긴다(FlowRow) — 자르지 않는다.
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = option.minutesLabel,
+                    color = JitColor.TextPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                )
+                RouteChoiceLogic.subtitle(option)?.let {
                     Text(
-                        text = text,
+                        it,
                         color = JitColor.TextSecondary,
                         fontSize = 12.sp,
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                    )
+                }
+                // "지난번에 고른 경로" — 예전처럼 주황 굵은 글자(배경 없음)
+                caption?.let {
+                    Text(
+                        text = it,
+                        color = JitColor.Accent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterVertically).testTag("route_preferred"),
+                    )
+                }
+                // 서버 배지("최단 시간" 등, 문구 그대로) — 예전 [RouteBadges] 와 같은 주황 글자 · 회색 알약
+                option.badges.forEach { badge ->
+                    Text(
+                        text = badge,
+                        color = JitColor.Accent,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Medium,
+                        maxLines = 1,
                         modifier = Modifier
+                            .align(Alignment.CenterVertically)
                             .clip(RoundedCornerShape(999.dp))
                             .background(JitColor.Surface2)
-                            .then(if (i == 0 && caption != null) Modifier.testTag("route_preferred") else Modifier)
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
                     )
                 }
             }
-        }
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = option.minutesLabel,
-                color = JitColor.TextPrimary,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            RouteChoiceLogic.subtitle(option)?.let {
-                Spacer(Modifier.width(14.dp))
-                Text(
-                    it,
-                    color = JitColor.TextSecondary,
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-            } ?: Spacer(Modifier.weight(1f))
             if (selected) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag("route_selected")) {
-                    Text("선택", color = JitColor.Accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(6.dp))
-                    Icon(LineIcons.check, contentDescription = null, tint = JitColor.Accent, modifier = Modifier.size(18.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 8.dp, top = 4.dp).testTag("route_selected"),
+                ) {
+                    Text("선택", color = JitColor.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(4.dp))
+                    Icon(LineIcons.check, contentDescription = null, tint = JitColor.Accent, modifier = Modifier.size(16.dp))
                 }
             }
         }
         RouteChoiceLogic.timeLine(option, arriveBy)?.let {
-            Text(it, color = JitColor.TextSecondary, fontSize = 13.sp)
+            Text(it, color = JitColor.TextSecondary, fontSize = 12.sp)
         }
         if (option.travelMode == RouteMode.BICYCLE) {
             MetricCells(bicycleMetrics(option))
         } else if (!RouteChoiceLogic.isTransit(option) && option.detailLine.isNotBlank()) {
             // 자동차 · 도보는 서버 요약 한 줄 그대로("택시 예상액 · 4.3km · 7,600원", "1.2km")
-            Text(text = option.detailLine, color = JitColor.TextSecondary, fontSize = 12.sp)
+            Text(text = option.detailLine, color = JitColor.TextSecondary, fontSize = 11.sp)
         }
         if (RouteChoiceLogic.isTransit(option)) {
             val cells = RouteChoiceLogic.barCells(option)
@@ -539,7 +556,7 @@ private fun SegmentBar(cells: List<RouteChoiceLogic.BarCell>) {
     val total = cells.sumOf { it.minutes }.coerceAtLeast(1).toFloat()
     val weights = labeledWeights(cells.map { RouteSegment(it.kind, it.minutes * 60, "") }, minShare = 0.12f)
     Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 28.dp).clip(RoundedCornerShape(6.dp)).testTag("route_bar"),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 24.dp).clip(RoundedCornerShape(6.dp)).testTag("route_bar"),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         cells.forEachIndexed { i, cell ->
@@ -554,7 +571,7 @@ private fun SegmentBar(cells: List<RouteChoiceLogic.BarCell>) {
             }
             val share = weights.getOrElse(i) { cell.minutes / total }
             Row(
-                modifier = Modifier.weight(share).heightIn(min = 28.dp).background(fill).padding(horizontal = 6.dp),
+                modifier = Modifier.weight(share).heightIn(min = 24.dp).background(fill).padding(horizontal = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.Start),
             ) {
@@ -564,12 +581,12 @@ private fun SegmentBar(cells: List<RouteChoiceLogic.BarCell>) {
                     RouteSegment.Kind.BUS -> LineIcons.bus
                     else -> null
                 }
-                if (icon != null && share >= 0.14f) Icon(icon, contentDescription = null, tint = on, modifier = Modifier.size(14.dp))
+                if (icon != null && share >= 0.14f) Icon(icon, contentDescription = null, tint = on, modifier = Modifier.size(12.dp))
                 if (share >= 0.10f) {
                     Text(
                         text = "${cell.minutes}분",
                         color = on,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         softWrap = false,
@@ -588,10 +605,10 @@ private fun StepList(steps: List<RouteChoiceLogic.Step>, destination: String) {
         steps.forEach { step ->
             val line = Color(SegmentPalette.fill(step.ride))
             Row(verticalAlignment = Alignment.Top) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(28.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(24.dp)) {
                     Box(
                         modifier = Modifier
-                            .size(28.dp)
+                            .size(24.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .border(1.5.dp, line, RoundedCornerShape(8.dp)),
                         contentAlignment = Alignment.Center,
@@ -600,24 +617,24 @@ private fun StepList(steps: List<RouteChoiceLogic.Step>, destination: String) {
                             if (step.ride.kind == RouteSegment.Kind.BUS) LineIcons.bus else LineIcons.train,
                             contentDescription = null,
                             tint = line,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(14.dp),
                         )
                     }
-                    Box(Modifier.width(2.dp).height(14.dp).background(JitColor.Track))
+                    Box(Modifier.width(2.dp).height(10.dp).background(JitColor.Track))
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(step.name, color = JitColor.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text(step.sub, color = JitColor.TextSecondary, fontSize = 12.sp)
+                    Text(step.name, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(step.sub, color = JitColor.TextSecondary, fontSize = 11.sp)
                 }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.width(24.dp), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(8.dp).clip(CircleShape).background(JitColor.TextSecondary))
             }
-            Spacer(Modifier.width(12.dp))
-            Text("$destination 도착", color = JitColor.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(10.dp))
+            Text("$destination 도착", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

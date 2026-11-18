@@ -995,6 +995,27 @@ data class PlaceReverseResponse(
     val degraded: Boolean = false,
 )
 
+// Partly AI-generated (Claude)
+/** `GET /api/routes/history` 응답. 앱이 지금 쓰는 필드만 받는다 */
+data class RouteHistoryResponse(val results: List<RouteHistoryItemDto> = emptyList())
+
+data class RouteHistoryItemDto(
+    val destination: RouteHistoryEndpointDto? = null,
+    @SerializedName("route_key") val routeKey: String? = null,
+    @SerializedName("last_trip_at") val lastTripAt: String? = null,
+)
+
+/** `kind` 는 도착지면 `home` · `place` */
+data class RouteHistoryEndpointDto(
+    val kind: String? = null,
+    val name: String? = null,
+    val label: String? = null,
+    val address: String? = null,
+    val lat: Double? = null,
+    val lng: Double? = null,
+    @SerializedName("kakao_place_id") val kakaoPlaceId: String? = null,
+)
+
 data class PlaceSearchItem(
     @SerializedName("kakao_place_id") val kakaoPlaceId: String?,
     val name: String,

@@ -104,7 +104,7 @@ class AlarmDecisionScreenTest {
         compose.onNodeWithText("1교시 수업").assertExists()
         compose.onNodeWithText("서울대 · 지하철 40분").assertExists()
         compose.onNodeWithTag("plan_pill").assertTextEquals("추천")
-        compose.onNodeWithTag("plan_probability").assertTextEquals("정시 도착 확률 90%")
+        compose.onNodeWithTag("plan_probability").assertTextEquals("정시 도착 확률 92%")
 
         compose.onNodeWithText("왜 오전 7:00인가요?").performScrollTo()
         compose.onNodeWithText("준비 30분").assertExists()
@@ -149,12 +149,13 @@ class AlarmDecisionScreenTest {
     }
 
     @Test
-    fun `확인한 알람은 초록 상태 줄`() {
+    fun `확인한 알람에도 맞춰져 있다는 줄은 없다`() {
         val confirmed = computedPlan.replace("\"status\":\"ok\"", "\"status\":\"ok\",\"alarm_confirmed\":true")
         show(planFrom(eventJson(confirmed)), supportsConfirm = true)
 
-        compose.onNodeWithTag("plan_confirmed").assertExists()
-        compose.onNodeWithText("알람이 맞춰져 있어요").assertExists()
+        // 11-18 사용자: "알람이 맞춰져 있어요" 는 필요 없다
+        compose.onNodeWithText("알람이 맞춰져 있어요").assertDoesNotExist()
+        compose.onNodeWithTag("plan_alarm_status").assertDoesNotExist()
     }
 
     @Test

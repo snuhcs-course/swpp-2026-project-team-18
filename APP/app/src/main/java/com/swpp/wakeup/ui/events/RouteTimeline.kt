@@ -37,17 +37,15 @@ internal data class TimelineRow(
 internal fun departAt(arriveBy: LocalDateTime?, minutes: Int): LocalDateTime? =
     arriveBy?.minusMinutes(minutes.toLong())
 
-private val CLOCK = DateTimeFormatter.ofPattern("h:mm")
+private fun meridiem(time: LocalTime) = com.swpp.wakeup.domain.model.ClockText.meridiem(time.hour)
 
-private fun meridiem(time: LocalTime) = if (time.hour < 12) "오전" else "오후"
-
-/** "오전 8:31" */
-internal fun clockLabel(time: LocalTime): String = "${meridiem(time)} ${time.format(CLOCK)}"
+/** "오전 8:31" ([com.swpp.wakeup.domain.model.ClockText]) */
+internal fun clockLabel(time: LocalTime): String = com.swpp.wakeup.domain.model.ClockText.label(time)
 
 /** "오전 8:31 - 9:00", 오전·오후가 바뀌면 "오전 11:40 - 오후 12:09". */
 internal fun timeRangeLabel(depart: LocalTime, arrive: LocalTime): String =
     if (meridiem(depart) == meridiem(arrive)) {
-        "${clockLabel(depart)} - ${arrive.format(CLOCK)}"
+        "${clockLabel(depart)} - ${com.swpp.wakeup.domain.model.ClockText.clock(arrive)}"
     } else {
         "${clockLabel(depart)} - ${clockLabel(arrive)}"
     }

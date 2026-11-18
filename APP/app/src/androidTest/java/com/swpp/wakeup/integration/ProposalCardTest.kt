@@ -47,7 +47,7 @@ class ProposalCardTest {
             JitTheme { ProposalCard(proposal, busy = false, onAccept = { answers += true }, onKeep = { answers += false }) }
         }
         compose.onNodeWithText("이동 시간이 12분 늘었어요").assertExists()
-        compose.onNodeWithText("그대로 두면 정시 도착 확률 61% · 바꾸면 90%").assertExists()
+        compose.onNodeWithText("그대로 두면 정시 도착 확률 61% · 바꾸면 95%").assertExists()
         compose.onNodeWithText("오전 7:28로 앞당기기").performClick()
         compose.onNodeWithText("그대로 두기").performClick()
         assertEquals(listOf(true, false), answers)

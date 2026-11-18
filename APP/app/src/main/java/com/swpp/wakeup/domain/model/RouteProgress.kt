@@ -107,7 +107,39 @@ data class RouteProgress(
          * 사용자가 두 점 사이 한가운데 있으면 진행률이 그 간격만큼 계단처럼
          * 튄다.
          */
-        fun of(path: List<GeoPoint>, here: GeoPoint): RouteProgress? {
+        fun of(path: List<GeoPoint>, here: GeoPoint): RouteProgress? = ofWithSlack(path, here) { 0.0 }
+
+        // Partly AI-generated (Claude)
+        /**
+         * 집 → 경로선 → 목적지 전체로 진행률을 낸다(11-18 사용자: 지하철에서 내려 걸어가는 중에 "경로 이탈" 이 떴다).
+         *
+         * 서버 경로선은 대중교통 구간 좌표라 마지막 정류장에서 끝날 때가 있다. 그 선만 보면 목적지까지 걸어가는
+         * 동안 선 끝에서 멀어지므로 [OFF_ROUTE_LIMIT_M] 을 넘는 순간 이탈이 된다. 그래서 [WalkLegs] 의 앞뒤 도보
+         * 구간을 붙여서 잰다. 도보 구간은 실제 걷는 길이 아니라 직선이므로, 그 구간에서는 구간 길이의 절반만큼
+         * 더 벗어나도 이탈로 보지 않는다(골목을 돌아가도 직선에서 그만큼은 떨어질 수 있다).
+         */
+        fun ofJourney(path: List<GeoPoint>, origin: GeoPoint?, destination: GeoPoint?, here: GeoPoint): RouteProgress? {
+            if (path.size < 2) return null
+            val legs = WalkLegs.of(path, origin, destination)
+            val head = legs.head
+            val tail = legs.tail
+            val full = buildList {
+                if (head != null) add(head.first())
+                addAll(path)
+                if (tail != null) add(tail.last())
+            }
+            val headIndex = if (head != null) 1 else -1
+            val tailIndex = if (tail != null) full.size - 1 else -1
+            return ofWithSlack(full, here) { i ->
+                when (i) {
+                    headIndex, tailIndex -> distanceM(full[i - 1], full[i]) / 2
+                    else -> 0.0
+                }
+            }
+        }
+
+        /** [slackM] 은 선분 i(점 i-1 → i)에서 이탈로 보지 않을 추가 거리 */
+        private fun ofWithSlack(path: List<GeoPoint>, here: GeoPoint, slackM: (Int) -> Double): RouteProgress? {
             if (path.size < 2) return null
 
             var bestOff = Double.MAX_VALUE
@@ -126,7 +158,7 @@ data class RouteProgress(
                         lat = a.lat + (b.lat - a.lat) * t,
                         lng = a.lng + (b.lng - a.lng) * t,
                     )
-                    val off = distanceM(here, foot)
+                    val off = (distanceM(here, foot) - slackM(i)).coerceAtLeast(0.0)
                     if (off < bestOff) {
                         bestOff = off
                         bestTraveled = walked + segment * t

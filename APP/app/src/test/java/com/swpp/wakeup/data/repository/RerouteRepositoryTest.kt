@@ -62,7 +62,7 @@ class RerouteRepositoryTest {
             SwitchSuggestion(
                 routeKey = "transit:2호선",
                 label = "9호선 → 2호선",
-                arriveAtLabel = "8:57",
+                arriveAtLabel = "오전 8:57",
                 lateMinutes = 0,
                 savesMinutes = 6,
             ),
@@ -70,7 +70,7 @@ class RerouteRepositoryTest {
         )
         assertEquals(
             "UTC 로 와도 기기 시간대로 읽는다",
-            "8:57",
+            "오전 8:57",
             fromJson<SwitchSuggestionDto>("""{"route_key":"walk","arrive_at":"2026-11-01T23:57:00Z"}""")
                 .toSuggestion(seoul)?.arriveAtLabel,
         )

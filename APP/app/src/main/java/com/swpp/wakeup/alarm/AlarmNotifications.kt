@@ -234,7 +234,7 @@ object AlarmNotifications {
 
         return NotificationCompat.Builder(context, CHANNEL_ALARM)
             .setSmallIcon(R.drawable.ic_notification_alarm)
-            .setContentTitle("${schedule.alarmLabel} ${schedule.meridiem} · 지금 일어날 시각")
+            .setContentTitle("${com.swpp.wakeup.domain.model.ClockText.label(schedule.alarmLabel, schedule.meridiem) ?: schedule.alarmLabel} · 지금 일어날 시각")
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_MAX)

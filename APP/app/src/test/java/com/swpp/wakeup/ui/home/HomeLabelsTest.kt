@@ -93,10 +93,10 @@ class HomeLabelsTest {
     }
 
     @Test
-    fun `시작 시각은 줄에서는 AM PM 을 띄어 쓴다`() {
-        assertEquals("9:00 AM", HomeLabels.rowStartClock("9:00AM"))
-        assertEquals("12:00 PM", HomeLabels.rowStartClock("12:00PM"))
-        assertEquals("붙은 말이 없으면 그대로", "09:00", HomeLabels.rowStartClock("09:00"))
+    fun `시작 시각은 줄에서도 오전 오후로 쓴다`() {
+        assertEquals("오전 9:00", HomeLabels.rowStartClock("9:00AM"))
+        assertEquals("오후 12:00", HomeLabels.rowStartClock("12:00PM"))
+        assertEquals("붙은 말이 없으면 24시간제로 읽는다", "오전 9:00", HomeLabels.rowStartClock("09:00"))
     }
 
     @Test

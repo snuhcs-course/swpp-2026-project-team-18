@@ -108,6 +108,7 @@ fun AlarmTimeSheet(
         picked = picked,
         presets = cells.associate { it.key to AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) },
         supported = customSupported,
+        startMinutes = startMinutesOfDay,
     )
     val percent = match?.probability
         ?: startMinutesOfDay?.let {
@@ -263,6 +264,16 @@ fun AlarmTimeSheet(
                     modifier = Modifier.testTag("alarm_time_pending"),
                 )
             }
+            // 일정 시작과 같거나 그 뒤에 울리는 시각은 맞추지 않는다(11-18). 위와 같이 버튼을 끄고 이유를 적는다.
+            if (save is UserAlarmRule.Save.AfterStart) {
+                Text(
+                    text = UserAlarmRule.AFTER_START_NOTE,
+                    color = JitColor.Red,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.testTag("alarm_time_after_start"),
+                )
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SheetButton(
@@ -282,10 +293,10 @@ fun AlarmTimeSheet(
                         when (save) {
                             is UserAlarmRule.Save.Preset -> onConfirm(save.key)
                             is UserAlarmRule.Save.Custom -> onConfirmCustom(save.minutesOfDay)
-                            UserAlarmRule.Save.Locked -> Unit
+                            UserAlarmRule.Save.Locked, UserAlarmRule.Save.AfterStart -> Unit
                         }
                     },
-                    enabled = save !is UserAlarmRule.Save.Locked && !saving,
+                    enabled = (save is UserAlarmRule.Save.Preset || save is UserAlarmRule.Save.Custom) && !saving,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -323,7 +334,7 @@ private fun QuickPickCell(
     ) {
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
-                text = if (option.meridiem == "PM") "오후" else "오전",
+                text = com.swpp.wakeup.domain.model.ClockText.meridiemOf(option.meridiem) ?: "",
                 color = JitColor.TextSecondary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,

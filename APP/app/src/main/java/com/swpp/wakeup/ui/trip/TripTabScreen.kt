@@ -307,7 +307,7 @@ private fun NextTripCard(event: UpcomingEvent, plan: AlarmPlanView, today: Local
             } else {
                 // 출발 시각을 서버가 주지 않았다. 숫자를 만들지 않고 알람 시각으로 대신한다.
                 Text(
-                    text = "알람 ${event.alarmClock ?: event.alarmAt ?: "—"}",
+                    text = "알람 ${(event.alarmClock ?: event.alarmAt)?.let { com.swpp.wakeup.domain.model.ClockText.label(it, event.alarmMeridiem) ?: it } ?: "—"}",
                     color = JitColor.Accent,
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,

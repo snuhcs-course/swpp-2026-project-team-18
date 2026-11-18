@@ -79,14 +79,11 @@ class AlarmDecisionLogicTest {
             AlarmDecisionLogic.Pill("여유 있게", AlarmDecisionLogic.PillKind.PRESET),
             AlarmDecisionLogic.pill(plan(tau = .97, tauSource = AlarmTimeChoice.MANUAL_TAU_SOURCE)),
         )
-        assertEquals("빠듯하게", AlarmDecisionLogic.pill(plan(tau = .65, tauSource = AlarmTimeChoice.MANUAL_TAU_SOURCE)).text)
-        assertEquals("보통", AlarmDecisionLogic.pill(plan(tau = .90, tauSource = AlarmTimeChoice.MANUAL_TAU_SOURCE)).text)
+        assertEquals("빠듯하게", AlarmDecisionLogic.pill(plan(tau = .65, tauSource = AlarmTimeChoice.MANUAL_TAU_SOURCE))?.text)
+        assertEquals("보통", AlarmDecisionLogic.pill(plan(tau = .90, tauSource = AlarmTimeChoice.MANUAL_TAU_SOURCE))?.text)
         // 종류 기본값(세 칸에 없는 τ)은 그 일정의 추천이다
-        assertEquals("추천", AlarmDecisionLogic.pill(plan(tau = .95, tauSource = "시험 일정 기본값")).text)
-        assertEquals(
-            AlarmDecisionLogic.Pill("직접 정한 시각", AlarmDecisionLogic.PillKind.USER),
-            AlarmDecisionLogic.pill(plan(userAlarm = true)),
-        )
+        assertEquals("추천", AlarmDecisionLogic.pill(plan(tau = .95, tauSource = "시험 일정 기본값"))?.text)
+        assertNull("직접 정한 시각에는 알약을 달지 않는다(11-18)", AlarmDecisionLogic.pill(plan(userAlarm = true)))
     }
 
     @Test
@@ -130,7 +127,7 @@ class AlarmDecisionLogicTest {
 
     @Test
     fun `알람 상태 한 줄 - 확인함 · 울림 · 꺼짐 · 해당 없음`() {
-        assertEquals(AlarmDecisionLogic.AlarmStatus("알람이 맞춰져 있어요", confirmed = true), AlarmDecisionLogic.alarmStatus(plan(confirmed = true), zone))
+        assertNull("확인한 알람에도 상태 줄을 달지 않는다(11-18)", AlarmDecisionLogic.alarmStatus(plan(confirmed = true), zone))
         // "…에 알람이 울려요" 는 큰 시각과 같은 말이라 두지 않는다(11-17 사용자)
         assertNull(AlarmDecisionLogic.alarmStatus(plan(confirmed = false), zone))
         assertNull(AlarmDecisionLogic.alarmStatus(plan(confirmed = null), zone))

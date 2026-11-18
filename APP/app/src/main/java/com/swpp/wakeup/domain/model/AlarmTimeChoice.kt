@@ -56,13 +56,7 @@ object AlarmTimeChoice {
         ((hour24 * 60 + minute) % MINUTES_PER_DAY + MINUTES_PER_DAY) % MINUTES_PER_DAY
 
     /** 0~1439 분 → "오전 7:50" */
-    fun clockLabel(minutesOfDay: Int): String {
-        val normalized = ((minutesOfDay % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY
-        val hour24 = normalized / 60
-        val minute = normalized % 60
-        val hour12 = (hour24 % 12).let { if (it == 0) 12 else it }
-        return "${if (hour24 < 12) "오전" else "오후"} $hour12:${"%02d".format(minute)}"
-    }
+    fun clockLabel(minutesOfDay: Int): String = ClockText.label(minutesOfDay)
 
     /** 분 길이 → "10분" / "1시간 10분" */
     fun minutesLabel(minutes: Int): String {
@@ -105,14 +99,26 @@ object AlarmTimeChoice {
         }
     }
 
+    // Partly AI-generated (Claude)
     /**
      * 알람 [alarmMinutes] 부터 일정 시작 [startMinutes] 까지 쓸 수 있는 분.
-     * 시작이 알람보다 이르게 보이면 전날 밤에 울리는 알람이다(하루를 더한다).
+     *
+     * 시작이 알람보다 이르게 보이면 두 경우다(시트는 시각만 알고 날짜는 모른다):
+     * - 알람이 시작보다 [LATE_WINDOW_MINUTES](12시간) 안쪽으로 늦다 → **시작 뒤에 일어나는 알람**이다. 음수를 그대로
+     *   돌려준다(11-18 사용자: 9:00 일정에 9:30 알람이 "90%" 로 보였다 — 예전에는 하루를 더해 23시간 반으로 셌다).
+     * - 그보다 더 늦다 → 전날 밤에 울리는 알람이다(하루를 더한다). 예: 9:00 일정에 23:00 알람 = 10시간.
      */
     fun availableMinutes(alarmMinutes: Int, startMinutes: Int): Int {
         val raw = startMinutes - alarmMinutes
-        return if (raw >= 0) raw else raw + MINUTES_PER_DAY
+        return when {
+            raw >= 0 -> raw
+            -raw < LATE_WINDOW_MINUTES -> raw
+            else -> raw + MINUTES_PER_DAY
+        }
     }
+
+    /** 이만큼 안쪽으로 시작보다 늦은 알람은 "같은 날 늦게 일어난 것" 으로 본다 */
+    const val LATE_WINDOW_MINUTES = 12 * 60
 
     /**
      * 서버가 준 총 소요시간 분포로 "[available] 분 안에 준비·이동을 마칠 확률"(%).
@@ -120,9 +126,11 @@ object AlarmTimeChoice {
      * 서버는 세 단계의 확률만 주고 그 사이 시각의 확률은 주지 않는다(백엔드 BE-H3c).
      * 그동안 휠로 고른 시각의 확률은 **같은 분포**에서 읽어 낸다 — 숫자를 지어내는 것이
      * 아니라 서버가 옵션 확률을 낼 때 쓴 분포의 누적값이다. 구간 안은 균등하다고 본다.
-     * 분포가 없으면 null 이고, 화면은 확률 자리를 비운다.
+     * 분포가 없으면 null 이고, 화면은 확률 자리를 비운다. 남은 시간이 0 이하면 분포와 상관없이 0 이다.
      */
     fun estimate(distribution: DurationDistributionView?, available: Int): Int? {
+        // 시작 시각이 됐거나 지나서 일어나면 정시 도착은 불가능하다. 분포가 없어도 0 이다.
+        if (available <= 0) return 0
         val bins = distribution?.bins?.filter { it.mass > 0 && it.maxMinutes > it.minMinutes }
         if (bins.isNullOrEmpty()) return null
         val total = bins.sumOf { it.mass }

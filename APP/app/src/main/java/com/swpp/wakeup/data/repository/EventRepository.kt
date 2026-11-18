@@ -1146,8 +1146,8 @@ internal fun failureFrom(code: Int, raw: String?): EventRepository.Result.Failur
 // 매핑
 // ---------------------------------------------------------------------------
 
-private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
-private val ALARM_FORMAT = DateTimeFormatter.ofPattern("H:mm")
+/** 알람 시각 숫자(12시간제). "AM"/"PM" 코드와 짝으로 들고 다니고, 화면에서는 [ClockText] 로 낸다 */
+private val ALARM_FORMAT = DateTimeFormatter.ofPattern("h:mm")
 private val DATE_FORMAT = DateTimeFormatter.ofPattern("M월 d일")
 private val DAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 
@@ -1176,7 +1176,7 @@ internal fun relativeDayLabel(days: Long): String = when {
 private fun importWhenLabel(startAtMillis: Long, zone: ZoneId): String {
     val local = java.time.Instant.ofEpochMilli(startAtMillis).atZone(zone)
     return "${local.format(DATE_FORMAT)} ${dayLabel(local.toLocalDate())} " +
-        local.format(TIME_FORMAT)
+        com.swpp.wakeup.domain.model.ClockText.label(local)
 }
 
 /** 새 수단별 응답과 구버전 results를 같은 선택 상태로 바꾼다. */
@@ -1208,6 +1208,7 @@ internal fun RouteCandidateResponse.toChoice(
         originLat = origin?.lat,
         originLng = origin?.lng,
         preferredKey = preferred,
+        preferredBasis = preferred?.let { preferredBasis },
         preferredCaption = preferred?.let {
             when (preferredBasis) {
                 RouteCandidateResponse.BASIS_SAME_DESTINATION -> "지난번에 고른 경로"
@@ -1372,7 +1373,7 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
 
     return UpcomingEvent(
         id = id,
-        startTime = local.format(TIME_FORMAT),
+        startTime = com.swpp.wakeup.domain.model.ClockText.label(local),
         dayLabel = dayLabel(local.toLocalDate()),
         title = title,
         placeAndRoute = routeText ?: "장소 없음",
@@ -1653,7 +1654,7 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         eventId = id,
         whenLabel = whenLabel,
         dateLabel = "${startLocal.format(DATE_FORMAT)} ${dayLabel(startLocal.toLocalDate())}",
-        eventTitle = "${startLocal.format(TIME_FORMAT)} $title",
+        eventTitle = "${com.swpp.wakeup.domain.model.ClockText.label(startLocal)} $title",
         eventPlace = place?.let { p ->
             listOfNotNull(p.name, p.address?.takeIf(String::isNotBlank)).joinToString(" · ")
         } ?: "장소 없음",
@@ -1678,8 +1679,8 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         breakdown = rows,
         prepBlocks = prepBlocks,
         totalMinutes = plan.totalMinutes,
-        arrivalLine = arriveLocal?.let { "${it.format(ALARM_FORMAT)} 도착 예정" },
-        arrivalAt = arriveLocal?.format(ALARM_FORMAT),
+        arrivalLine = arriveLocal?.let { "${com.swpp.wakeup.domain.model.ClockText.label(it)} 도착 예정" },
+        arrivalAt = arriveLocal?.let { com.swpp.wakeup.domain.model.ClockText.label(it) },
         startAtMillis = start.toInstant().toEpochMilli(),
         travelMinutes = plan.travelMinutes,
         prepApplies = prepApplies,
@@ -1734,7 +1735,7 @@ internal fun SwitchSuggestionDto.toSuggestion(zone: ZoneId = ZoneId.systemDefaul
         arriveAtLabel = arriveAt
             ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
             ?.atZoneSameInstant(zone)
-            ?.format(ALARM_FORMAT),
+            ?.let { com.swpp.wakeup.domain.model.ClockText.label(it) },
         lateMinutes = (lateMinutes ?: 0).coerceAtLeast(0),
         savesMinutes = (savesMinutes ?: 1).coerceAtLeast(1),
     )
@@ -1801,11 +1802,11 @@ internal fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedu
         startAtMillis = start.toInstant().toEpochMilli(),
         alarmLabel = alarmLocal.format(ALARM_FORMAT),
         meridiem = if (alarmLocal.hour < 12) "AM" else "PM",
-        eventLine = "${startLocal.format(TIME_FORMAT)} $title",
+        eventLine = "${com.swpp.wakeup.domain.model.ClockText.label(startLocal)} $title",
         placeName = place?.let { p ->
             listOfNotNull(p.name, p.address?.takeIf(String::isNotBlank)).joinToString(" · ")
         },
-        arrivalLine = arriveLocal?.let { "${it.format(ALARM_FORMAT)} 도착 예정" },
+        arrivalLine = arriveLocal?.let { "${com.swpp.wakeup.domain.model.ClockText.label(it)} 도착 예정" },
         homeLat = originLat ?: profile.homeLat,
         homeLng = originLng ?: profile.homeLng,
         destLat = place?.lat,

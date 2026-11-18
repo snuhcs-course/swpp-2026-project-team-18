@@ -126,6 +126,9 @@ fun WeeklyReportScreen(
 
         // 로딩 중에는 누르지 못하게 한다. 새 주가 도착한 뒤 ⑨ 가 "찾지 못했음" 이 된다.
         HeadlineCard(report, today, enabled = !loading, onOpenDay = onOpenDay)
+        // 서버가 쓴 주간 요약(LLM 또는 같은 수치의 템플릿). 11-12 개편 때 빠졌다가 되살렸다(11-18 사용자).
+        // 정시율 · 요일(머리 카드) 바로 아래 — 그 주 전체를 말로 풀고, 아래 카드들은 그중 한 가지씩 자세히 본다.
+        report.summary?.let { SummaryCard(it.text) }
         report.probability?.let { ProbabilityCard(it, report.bufferChangeMinutes, report.inProgress) }
         report.prep?.let { PrepCard(it) }
     }
@@ -366,6 +369,25 @@ private fun ProbabilityCard(compare: ProbabilityCompare, bufferChangeMinutes: In
         if (title != null || body.isNotEmpty()) {
             Note(icon = LineIcons.alarm, bold = title, body = body, tag = "report_verdict")
         }
+    }
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 주간 요약 한 단락(2~5문장). **서버 문장 그대로**다 — 앱에서 만들거나 고치지 않는다. 누가 썼는지(LLM · 템플릿)는
+ * 사용자에게 보이지 않는다(11-18). 여러 줄로 감기고 높이는 내용만큼이다.
+ */
+@Composable
+private fun SummaryCard(text: String) {
+    JitCard(padding = 16.dp, gap = 8.dp, modifier = Modifier.testTag("report_summary")) {
+        Text("이번 주 요약", color = JitColor.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = text,
+            color = JitColor.TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+            modifier = Modifier.testTag("report_summary_text"),
+        )
     }
 }
 

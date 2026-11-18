@@ -77,7 +77,7 @@ import com.swpp.wakeup.domain.model.TripEta
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
 import com.swpp.wakeup.ui.alarm.arrivalClockLabel
-import com.swpp.wakeup.ui.alarm.freshnessLabel
+import com.swpp.wakeup.ui.alarm.liveNote
 import com.swpp.wakeup.ui.calendar.CalendarHelpActions
 import com.swpp.wakeup.ui.calendar.CalendarImportScreen
 import com.swpp.wakeup.ui.calendar.CalendarLinkScreen
@@ -829,7 +829,11 @@ private fun MainHost(
                     }
                     val progress = plan
                         ?.takeIf { it.hasRoutePath }
-                        ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
+                        ?.let { p ->
+                            // 앞뒤 도보 구간까지 붙여 잰다(11-18: 마지막 도보 중 "경로 이탈" 오판)
+                            val home = state.homePlace?.let { h -> com.swpp.wakeup.sensing.GeoPoint(h.lat, h.lng) }
+                            live?.let { RouteProgress.ofJourney(p.routePath, p.originPoint ?: home, p.destinationPoint, it.point) }
+                        }
                     val arrival = tripArrivals[route.eventId]
                     val stage = plan?.let { viewModel.stageOf(it, arrival, nowMillis) }
                         ?: TripStage.BEFORE_ALARM
@@ -957,7 +961,8 @@ private fun MainHost(
                         progress = progress,
                         outlook = outlook,
                         arrivalClock = outlook?.let { arrivalClockLabel(it.predictedMillis) },
-                        freshness = live?.let { freshnessLabel(it.atMillis) },
+                        // 이 이동에서 받은 마지막 위치 기준(11-18). 새 위치가 없다고 "아직 못 받음" 으로 말하지 않는다.
+                        freshness = liveNote(tripOfEvent?.atMillis, usable = live != null, nowMillis = nowMillis),
                         routeMap = routeMap?.takeIf { it.eventId == route.eventId },
                         onRouteMapViewport = viewModel::loadRouteMapImage,
                         onRouteMapFit = viewModel::fitRouteMap,

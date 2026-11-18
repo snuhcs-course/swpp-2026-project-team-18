@@ -100,7 +100,7 @@ internal object TripTabLogic {
     /** "10:00AM" → "오전 10:00". 붙은 말이 없으면 그대로 */
     fun koreanClock(startClock: String): String {
         val (clock, ampm) = HomeLabels.splitClock(startClock)
-        return HomeLabels.koreanMeridiem(ampm)?.let { "$it $clock" } ?: clock
+        return com.swpp.wakeup.domain.model.ClockText.label(clock, ampm) ?: clock
     }
 
     /** "…예요" / "…이에요". 받침이 있는 한글로 끝나면 "이에요" */

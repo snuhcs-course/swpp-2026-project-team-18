@@ -71,8 +71,8 @@ class AlarmProposalTest {
         val p = event(true).toUpcoming(zone)!!.proposal!!
         assertEquals("오전 7:54로 앞당기기", AlarmProposalRule.acceptLabel(p, zone))
         assertEquals("오전 8:20으로 늦추기", AlarmProposalRule.acceptLabel(p.copy(moveMinutes = 10, proposedAtMillis = ms("2030-11-17T08:20:00+09:00")), zone))
-        // 90% 상한 규칙
-        assertEquals("그대로 두면 정시 도착 확률 46% · 바꾸면 90%", AlarmProposalRule.probabilityLine(p))
+        // 서버 원값 그대로(11-18 90% 상한을 풀었다)
+        assertEquals("그대로 두면 정시 도착 확률 46% · 바꾸면 97%", AlarmProposalRule.probabilityLine(p))
         assertNull(AlarmProposalRule.probabilityLine(p.copy(keepProbability = null, changeProbability = null)))
     }
 

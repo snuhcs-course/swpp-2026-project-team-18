@@ -80,11 +80,9 @@ data class ArrivalVerdict(
         "${formatClock(arrivedAtMillis, zone)} 도착 · 약속 ${formatClock(appointmentMillis, zone)}"
 
     private fun formatClock(millis: Long, zone: ZoneId): String =
-        CLOCK.format(Instant.ofEpochMilli(millis).atZone(zone))
+        ClockText.label(millis, zone)
 
     companion object {
-        /** 앱의 다른 곳과 같은 모양. "9:05", "14:30" */
-        private val CLOCK: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm")
 
         /**
          * 분을 사람이 읽는 길이로.

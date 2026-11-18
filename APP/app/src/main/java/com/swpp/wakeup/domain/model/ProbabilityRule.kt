@@ -17,16 +17,13 @@ object ProbabilityRule {
 
     // Partly AI-generated (Claude)
     /**
-     * 화면에 보이는 정시 도착 확률 숫자. **90 을 넘으면 90** 으로 보인다(사용자 결정 11-16) — 안내 시트가
-     * "10번 중 9번" 까지만 말하므로([com.swpp.wakeup.ui.help.OnTimeSheetText.timesOutOfTen]) 숫자도 맞춘다.
-     * 색 · 70% 경고 · 추천 판정 · 서버로 보내는 값은 실제 값을 그대로 쓴다. 표시 문자열에만 쓴다.
+     * 화면에 보이는 정시 도착 확률 숫자. **서버가 준 값 그대로**다(사용자 결정 11-18: 11-16 에 넣은 90 상한을 풀었다 —
+     * 상한 때문에 99 / 96 / 82 가 90 / 90 / 82 로 보여 세 칸이 같아 보였다). 0 ~ 100 밖의 값만 잘라 낸다.
      */
-    fun displayPercent(percent: Int): Int = percent.coerceIn(0, 100).coerceAtMost(DISPLAY_MAX)
+    fun displayPercent(percent: Int): Int = percent.coerceIn(0, 100)
 
-    /** "90%" */
+    /** "97%" */
     fun displayLabel(percent: Int): String = "${displayPercent(percent)}%"
-
-    const val DISPLAY_MAX = 90
 
     /** 이 아래면 빨강 · "지각할 수 있어요" */
     const val LATE_RISK_PERCENT = 70

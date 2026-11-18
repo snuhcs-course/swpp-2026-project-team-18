@@ -49,6 +49,6 @@ class ConfidenceCopyTest {
     fun `확률이 있으면 그 값만 쓴다`() {
         val view = confidence("observed", "kakao_transit", probability = 92)
         assertEquals(92, view.percent)
-        assertEquals("정시 도착 확률 90%", view.headline)
+        assertEquals("정시 도착 확률 92%", view.headline)
     }
 }

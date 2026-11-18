@@ -44,6 +44,50 @@ object RecentDestinations {
         return picked
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 다녀온 경로 기록(`GET /api/routes/history?sort=recent`, 서버가 최근에 다녀온 순으로 준다)의 도착지로 칩을 채운다.
+     * 순서는 서버 그대로, 집(`kind == home` · 집 좌표 근처)과 같은 장소는 빼고 [limit] 곳. 좌표 · 이름이 없는 줄은 건너뛴다.
+     * 홈 일정 목록으로 뽑는 [pick] 과 달리 지난 일정의 도착지도 나온다.
+     */
+    fun fromHistory(
+        results: List<com.swpp.wakeup.data.remote.RouteHistoryItemDto>,
+        home: PlaceSearchItem?,
+        limit: Int = LIMIT,
+    ): List<PlaceSearchItem> {
+        val picked = mutableListOf<PlaceSearchItem>()
+        for (row in results) {
+            if (picked.size >= limit) break
+            val d = row.destination ?: continue
+            if (d.kind != "place") continue
+            val lat = d.lat ?: continue
+            val lng = d.lng ?: continue
+            val name = d.name?.takeIf { it.isNotBlank() } ?: continue
+            val place = PlaceSearchItem(
+                kakaoPlaceId = d.kakaoPlaceId, name = name, address = d.address, lat = lat, lng = lng, category = null,
+            )
+            if (home != null && samePlace(place, home)) continue
+            if (picked.any { samePlace(it, place) }) continue
+            picked += place
+        }
+        return picked
+    }
+
+    /**
+     * 기록 응답 → 칩. 2xx 가 아니면(배포 전 404 · 오류 · 연결 안 됨 = [status] null) null 이고, 화면은 홈 목록에서 뽑은
+     * 칩([pick])을 그대로 쓴다. 2xx 여도 쓸 도착지가 없으면 빈 목록이다(이때도 화면은 홈 목록 칩을 쓴다, [choose]).
+     */
+    fun fromHistoryResponse(
+        status: Int?,
+        body: com.swpp.wakeup.data.remote.RouteHistoryResponse?,
+        home: PlaceSearchItem?,
+    ): List<PlaceSearchItem>? =
+        if (status == null || status !in 200..299) null else fromHistory(body?.results.orEmpty(), home)
+
+    /** 칩에 쓸 목록. 기록에서 뽑은 것이 있으면 그것, 없으면 홈 일정 목록에서 뽑은 것 */
+    fun choose(fromHistory: List<PlaceSearchItem>?, fromHome: List<PlaceSearchItem>): List<PlaceSearchItem> =
+        fromHistory?.takeIf { it.isNotEmpty() } ?: fromHome
+
     /** 카카오 장소 id 가 같거나, 좌표가 [SAME_PLACE_METERS] 안이면 같은 장소 */
     fun samePlace(a: PlaceSearchItem, b: PlaceSearchItem): Boolean {
         if (!a.kakaoPlaceId.isNullOrBlank() && a.kakaoPlaceId == b.kakaoPlaceId) return true

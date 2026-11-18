@@ -139,22 +139,23 @@ class HelpFaqTest {
         assertEquals(9, OnTimeSheetText.timesOutOfTen(90))
         assertEquals(8, OnTimeSheetText.timesOutOfTen(89))
         assertEquals(6, OnTimeSheetText.timesOutOfTen(65))
-        // 100% 도 9번까지만 — "10번 중 10번" 은 늦는 아침이 없다는 약속처럼 읽힌다
-        assertEquals(9, OnTimeSheetText.timesOutOfTen(100))
-        assertEquals("9번", OnTimeSheetText.sentence(100, "오전 9:00").emphasis)
+        // 서버가 100 을 주면 10개(11-18 상한을 풀었다)
+        assertEquals(10, OnTimeSheetText.timesOutOfTen(100))
+        assertEquals("100번", OnTimeSheetText.sentence(100, "오전 9:00").emphasis)
         assertEquals(0, OnTimeSheetText.timesOutOfTen(9))
         assertEquals(0, OnTimeSheetText.timesOutOfTen(-3))
     }
 
     @Test
-    fun `문장은 10번 중 n번이고 n번만 강조한다`() {
+    fun `문장은 100번 중 확률 그대로이고 그 숫자만 강조한다`() {
         val s = OnTimeSheetText.sentence(97, "오전 9:00")
-        assertEquals("9번", s.emphasis)
-        assertEquals("같은 아침이 10번 온다면\n9번은 오전 9:00 전에 도착한다는 뜻이에요.", s.text)
+        assertEquals("97번", s.emphasis)
+        assertEquals("같은 아침이 100번 온다면\n97번은 오전 9:00 전에 도착한다는 뜻이에요.", s.text)
         assertEquals("오전 7:40에 일어나면", OnTimeSheetText.head("오전 7:40"))
-        assertEquals("정시 도착 확률 90%", OnTimeSheetText.percentLabel(90))
-        // 0번은 어색하다
-        assertEquals("한 번도", OnTimeSheetText.sentence(5, "오전 9:00").emphasis)
+        assertEquals("정시 도착 확률 97%", OnTimeSheetText.percentLabel(97))
+        // 0번은 어색하다. 5% 는 5번 그대로
+        assertEquals("한 번도", OnTimeSheetText.sentence(0, "오전 9:00").emphasis)
+        assertEquals("5번", OnTimeSheetText.sentence(5, "오전 9:00").emphasis)
     }
 
     @Test

@@ -83,11 +83,11 @@ class ArrivalVerdictTest {
     fun `근거 줄에 실제 도착과 약속 시각이 함께 있다`() {
         // 제목만 있으면 사용자가 판정을 검산할 수 없다. 앱이 엉뚱한 시각을
         // 잡았을 때 이 줄에서 드러나야 한다.
-        assertEquals("9:25 도착 · 약속 9:30", arriveAt(9, 25).detail(seoul))
+        assertEquals("오전 9:25 도착 · 약속 오전 9:30", arriveAt(9, 25).detail(seoul))
     }
 
     @Test
-    fun `근거 줄은 24시간제로 적는다`() {
+    fun `근거 줄은 오전 오후 12시간제로 적는다`() {
         val afternoon = ArrivalVerdict(
             arrivedAtMillis = ZonedDateTime
                 .of(2026, 9, 23, 14, 5, 0, 0, seoul).toInstant().toEpochMilli(),
@@ -96,7 +96,7 @@ class ArrivalVerdictTest {
         )
 
         // 오전·오후를 붙이지 않으므로 14:05 가 2:05 로 보이면 안 된다.
-        assertEquals("14:05 도착 · 약속 14:00", afternoon.detail(seoul))
+        assertEquals("오후 2:05 도착 · 약속 오후 2:00", afternoon.detail(seoul))
         assertEquals("5분 늦게 도착했어요", afternoon.headline)
     }
 
@@ -123,7 +123,7 @@ class ArrivalVerdictTest {
 
         assertEquals(20, midnight.marginMinutes)
         assertEquals("20분 일찍 도착했어요", midnight.headline)
-        assertEquals("23:50 도착 · 약속 0:10", midnight.detail(seoul))
+        assertEquals("오후 11:50 도착 · 약속 오전 12:10", midnight.detail(seoul))
     }
 
     @Test

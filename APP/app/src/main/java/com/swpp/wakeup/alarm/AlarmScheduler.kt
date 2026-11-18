@@ -357,6 +357,7 @@ class AlarmScheduler(private val context: Context) {
         const val DEADLINE_REQUEST_OFFSET = 4_000_000
 
         /** 알람 화면의 큰 시각. `EventRepository` 의 형식과 같아야 한다. */
-        val LABEL_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("H:mm")
+        /** 알람 숫자(12시간제). "AM"/"PM" 코드와 짝이고, 화면에서는 ClockText 로 낸다 */
+        val LABEL_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm")
     }
 }

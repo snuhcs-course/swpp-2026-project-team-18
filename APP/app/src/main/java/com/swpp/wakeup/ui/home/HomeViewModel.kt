@@ -115,6 +115,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -368,14 +369,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val canTrack: Boolean,
     ) {
         /** "8:25 AM" */
-        val alarmLine: String get() = "${schedule.alarmLabel} ${schedule.meridiem}"
+        val alarmLine: String get() = com.swpp.wakeup.domain.model.ClockText.label(schedule.alarmLabel, schedule.meridiem) ?: schedule.alarmLabel
 
         /** 계획된 출발 시각 "9:25". 계산 못 했으면 null */
         val departLabel: String?
             get() = schedule.departByMillis?.let {
-                java.time.Instant.ofEpochMilli(it)
-                    .atZone(ZoneId.systemDefault())
-                    .format(DateTimeFormatter.ofPattern("H:mm"))
+                com.swpp.wakeup.domain.model.ClockText.label(it)
             }
     }
 
@@ -913,7 +912,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 homeLabel = data.homeLabel,
                 onboardingPrepMin = data.onboardingPrepMin,
                 homePlace = data.toHomePlace(),
-                recentDestinations = com.swpp.wakeup.domain.model.RecentDestinations.pick(data.destinations, data.toHomePlace()),
+                recentDestinations = com.swpp.wakeup.domain.model.RecentDestinations.choose(
+                    historyDestinations,
+                    com.swpp.wakeup.domain.model.RecentDestinations.pick(data.destinations, data.toHomePlace()),
+                ),
                 offline = data.fromCache,
                 offlineAgeLabel = data.ageLabel,
             )
@@ -1351,7 +1353,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _state.update {
             it.copy(
                 registeredAlarms = registered.size,
-                nextRegisteredLabel = registered.firstOrNull()?.alarmLabel,
+                nextRegisteredLabel = registered.firstOrNull()?.let { com.swpp.wakeup.domain.model.ClockText.label(it.alarmLabel, it.meridiem) ?: it.alarmLabel },
                 pendingObservations = pendingObservationCount(),
             )
         }
@@ -2029,6 +2031,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (!UserAlarmRule.supported(ServerWarmup.serverVersion)) return
         val startMillis = state.plan?.takeIf { it.eventId == eventId }?.startAtMillis ?: return
         val start = java.time.Instant.ofEpochMilli(startMillis).atZone(ZoneId.systemDefault())
+        // 시트가 버튼을 끄지만 한 번 더 막는다. 그대로 보내면 하루 전 같은 시각으로 맞춰진다([UserAlarmRule.alarmDateTime]).
+        if (UserAlarmRule.isAfterStart(minutesOfDay, start.hour * 60 + start.minute)) {
+            notify(UserAlarmRule.AFTER_START_NOTE)
+            return
+        }
         val at = UserAlarmRule.alarmDateTime(minutesOfDay, start)
         val label = AlarmTimeChoice.clockLabel(minutesOfDay)
         // 바꾸기 전 울릴 시각으로 [되돌리기](C1-9)
@@ -2171,8 +2178,33 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 온다. 실기기에서 "GS25" 를 검색했더니 전북 익산·남양주가 상위에 왔다.
         primeCurrentLocation()
         loadEventTags()
+        loadRecentFromHistory()
         // 새 일정은 화면을 쌓지 않고 지금 탭 첫 화면 위의 바텀시트로 연다(H2-8 `545:192`).
         _addSheet.value = true
+    }
+
+    // Partly AI-generated (Claude)
+    /** 다녀온 경로 기록의 도착지. null 이면 아직 못 받았거나 서버에 API 가 없다(배포 전 404) */
+    private var historyDestinations: List<PlaceSearchItem>? = null
+
+    /**
+     * "최근 설정한 위치" 칩을 다녀온 경로 기록(`sort=recent`)의 도착지로 채운다(C8). 시트는 기다리지 않는다 —
+     * 404 · 오류 · 기록 없음이면 지금처럼 홈 일정 목록에서 뽑은 칩 그대로다.
+     */
+    private fun loadRecentFromHistory() {
+        viewModelScope.launch {
+            val response = runCatching { withContext(Dispatchers.IO) { ApiClient.routeHistory.recent() } }
+                .getOrNull()
+            val picked = com.swpp.wakeup.domain.model.RecentDestinations.fromHistoryResponse(
+                response?.code(), response?.body(), _state.value.homePlace,
+            )
+            if (picked == null) {
+                Log.i(TAG, "경로 기록을 받지 못해 칩은 홈 목록 그대로(${response?.code()})")
+                return@launch
+            }
+            historyDestinations = picked
+            if (picked.isNotEmpty()) _state.update { it.copy(recentDestinations = picked) }
+        }
     }
 
     // Partly AI-generated (Claude)
@@ -4112,6 +4144,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 routeKey = option?.key,
                 routeLabel = option?.let { o -> "${o.minutesLabel} · ${o.mode}" },
                 routeMinutes = option?.minutes,
+                // 사용자가 직접 골랐다. 자동 표시는 뗀다(C8)
+                routeAutoCaption = null,
                 // 집 외의 출발지는 경로 선택 때의 좌표를 그대로 보존한다.
                 origin = eventOrigin,
                 originLabel = current.origin?.name ?: choice.originLabel,
@@ -4646,6 +4680,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val routeLabel: String? = null,
         /** 고른 경로의 이동 시간(분). 저장 전에 "지금 출발해도 늦는가" 를 본다([PastTimeRule.travelTooLate]) */
         val routeMinutes: Int? = null,
+        /**
+         * 경로를 앱이 자동으로 채웠을 때 경로 칸에 다는 말("지난번에 고른 경로", C8). 사용자가 경로 선택 화면에서
+         * 고르면 null 이 된다.
+         */
+        val routeAutoCaption: String? = null,
 
         /**
          * 출발지. **null 이면 집**이다 — 서버가 `origin_*` 이 비어 있으면 프로필 집을 쓴다.
@@ -4877,11 +4916,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 routeKey = null,
                 routeLabel = null,
                 routeMinutes = null,
+                routeAutoCaption = null,
                 fieldErrors = it.fieldErrors - AddField.DESTINATION - AddField.ORIGIN - AddField.ROUTE,
                 destinationUndo = undo,
             )
         }
         _routeChoice.value = null
+        prefillRoute()
         destinationUndoJob?.cancel()
         if (undo != null) {
             destinationUndoJob = viewModelScope.launch {
@@ -4897,7 +4938,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** [되돌리기]. 바꾸기 전 도착지 · 경로를 한꺼번에 되살린다(H2-9) */
     fun undoDestinationChange() {
         destinationUndoJob?.cancel()
-        _add.update { DestinationUndo.restore(it) }
+        routePrefillJob?.cancel()
+        _add.update { DestinationUndo.restore(it).copy(routeAutoCaption = null) }
         _routeChoice.value = null
     }
 
@@ -4946,6 +4988,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 routeKey = null,
                 routeLabel = null,
                 routeMinutes = null,
+                routeAutoCaption = null,
                 fieldErrors = it.fieldErrors - AddField.DESTINATION - AddField.ORIGIN - AddField.ROUTE,
                 // 집으로 되돌리면 스위치가 사라진다. 값도 지운다(include-prep-api.md §5 ①).
                 includePrep = if (item == null) false else it.includePrep,
@@ -4954,6 +4997,52 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         _routeChoice.value = null
+        prefillRoute()
+    }
+
+    // --- 경로 칸 자동 채우기 (C8) — Partly AI-generated (Claude) ---------------------------
+
+    private var routePrefillJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 출발지 · 도착지가 정해지면 경로 후보를 뒤에서 받아, 서버가 "같은 도착지에 간 지난 선택" 으로 준 경로가
+     * 있으면 경로 칸을 채운다([RoutePrefill]). 화면을 막지 않는다 — 기다리는 동안 다른 칸을 쓸 수 있고, 실패 ·
+     * 느림([RoutePrefill.TIMEOUT_MS]) · 근거 없음이면 지금처럼 빈 칸이다. 받은 후보는 경로 선택 화면이 다시 부르지
+     * 않게 남겨 둔다(같은 출발지 · 도착지일 때만).
+     */
+    private fun prefillRoute() {
+        routePrefillJob?.cancel()
+        val add = _add.value
+        if (add.routeKey != null) return
+        if (!add.canPickRoute(_state.value.hasHome, _state.value.homePlace)) return
+        val place = add.selectedPlace ?: return
+        val origin = add.origin
+        routePrefillJob = viewModelScope.launch {
+            val result = withTimeoutOrNull(com.swpp.wakeup.ui.events.RoutePrefill.TIMEOUT_MS) {
+                runCatching { repository.routeCandidates(place, origin) }.getOrNull()
+            }
+            val choice = (result as? EventRepository.Result.Success)?.data ?: return@launch
+            val now = _add.value
+            if (now.selectedPlace != place || now.origin != origin) return@launch
+            // 경로 선택 화면이 아직 후보를 부르지 않았으면 이 결과를 쓰게 둔다.
+            if (_routeChoice.value == null) {
+                _routeChoice.value = RouteState(loading = false, choice = choice, origin = origin)
+            }
+            val option = com.swpp.wakeup.ui.events.RoutePrefill.pick(choice) ?: return@launch
+            _add.update { cur ->
+                val ok = com.swpp.wakeup.ui.events.RoutePrefill.stillApplies(
+                    cur.routeKey, cur.submitting, cur.selectedPlace, cur.origin, place, origin,
+                )
+                if (!ok) cur else cur.copy(
+                    routeKey = option.key,
+                    routeLabel = com.swpp.wakeup.ui.events.RoutePrefill.label(option),
+                    routeMinutes = option.minutes,
+                    routeAutoCaption = com.swpp.wakeup.ui.events.RoutePrefill.CAPTION,
+                    fieldErrors = cur.fieldErrors - AddField.ROUTE,
+                )
+            }
+            Log.i(TAG, "경로 칸 자동 채우기: ${option.key} (같은 도착지 지난 선택)")
+        }
     }
 
     /** "여기서 자고 출발해요 (준비 시간 포함)" */

@@ -47,23 +47,25 @@ class ProbabilityRuleTest {
         assertNull(ProbabilityRule.warning(70))
     }
 
-    // Partly AI-generated (Claude) — 사용자 결정 11-16: "10번 중 9번" 이면 숫자도 90%
+    // Partly AI-generated (Claude) — 사용자 결정 11-18: 90 상한을 풀고 서버 원값 그대로
     @Test
-    fun `보이는 숫자는 90 을 넘지 않고 그 아래는 그대로다`() {
-        assertEquals(90, ProbabilityRule.displayPercent(100))
-        assertEquals(90, ProbabilityRule.displayPercent(97))
-        assertEquals(90, ProbabilityRule.displayPercent(90))
-        assertEquals(89, ProbabilityRule.displayPercent(89))
+    fun `보이는 숫자는 서버 원값 그대로다`() {
+        assertEquals(100, ProbabilityRule.displayPercent(100))
+        assertEquals(99, ProbabilityRule.displayPercent(99))
+        assertEquals(96, ProbabilityRule.displayPercent(96))
+        assertEquals(82, ProbabilityRule.displayPercent(82))
         assertEquals(0, ProbabilityRule.displayPercent(0))
         assertEquals(0, ProbabilityRule.displayPercent(-3))
-        assertEquals("90%", ProbabilityRule.displayLabel(98))
+        assertEquals(100, ProbabilityRule.displayPercent(130))
+        assertEquals("99%", ProbabilityRule.displayLabel(99))
+        assertEquals("100%", ProbabilityRule.displayLabel(100))
     }
 
     @Test
-    fun `보이는 숫자는 안내 시트의 10번 중 n번과 늘 맞는다`() {
+    fun `안내 시트 문장의 숫자는 보이는 확률과 늘 같다`() {
         for (p in 0..100) {
-            val shown = ProbabilityRule.displayPercent(p)
-            assertEquals("$p%", shown / 10, com.swpp.wakeup.ui.help.OnTimeSheetText.timesOutOfTen(p))
+            val s = com.swpp.wakeup.ui.help.OnTimeSheetText.sentence(p, "오전 9:00")
+            if (p > 0) assertEquals("$p%", "${ProbabilityRule.displayPercent(p)}번", s.emphasis)
         }
     }
 
