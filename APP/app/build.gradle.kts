@@ -87,6 +87,17 @@ logger.lifecycle(
         }
 )
 
+// AI-generated (Claude) — A-5 릴리스 서명(11-19)
+/**
+ * 팀 공용 릴리스 키. `local.properties` 의 네 값이 모두 있고 키 파일이 있을 때만 쓴다. 없으면 지금처럼 서명 없이
+ * 빌드한다 — 키가 없는 팀원 · CI 의 빌드가 깨지지 않는다. 키와 비밀번호는 저장소에 넣지 않는다.
+ */
+val releaseSigning: Map<String, String>? = run {
+    val keys = listOf("releaseStoreFile", "releaseStorePassword", "releaseKeyAlias", "releaseKeyPassword")
+    val values = keys.associateWith { localProps.getProperty(it)?.trim().orEmpty() }
+    values.takeIf { v -> v.values.all { it.isNotEmpty() } && file(v.getValue("releaseStoreFile")).isFile }
+}
+
 android {
     // QA 앱은 개인 앱 데이터와 분리한다. 공용 서버 확인은 명시적으로 선택한다.
     testBuildType = if (providers.gradleProperty("jitE2e").orNull == "true") "e2e" else "debug"
@@ -142,6 +153,17 @@ android {
         compose = true
     }
 
+    signingConfigs {
+        releaseSigning?.let { v ->
+            create("release") {
+                storeFile = file(v.getValue("releaseStoreFile"))
+                storePassword = v.getValue("releaseStorePassword")
+                keyAlias = v.getValue("releaseKeyAlias")
+                keyPassword = v.getValue("releaseKeyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // testDebugUnitTest 에 JaCoCo 에이전트를 붙인다.
@@ -160,6 +182,7 @@ android {
             buildConfigField("boolean", "DEV_TOOLS", "true")
         }
         release {
+            releaseSigning?.let { signingConfig = signingConfigs.getByName("release") }
             buildConfigField("String", "BASE_URL", "\"$apiBaseUrl\"")
             buildConfigField("String", "EMULATOR_BASE_URL", "\"$apiBaseUrl\"")
             buildConfigField("boolean", "DEV_TOOLS", "false")

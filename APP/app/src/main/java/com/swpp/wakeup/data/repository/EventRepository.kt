@@ -1542,7 +1542,9 @@ private fun PrepBlockDto.toLine(): PrepBlockLine {
  * internal 인 이유는 테스트다(Gson 을 거친 DTO 로 문구를 고정한다, [toOption] 과 같다).
  */
 internal fun AlarmPlanDto.toConfidence(): ConfidenceView {
-    val percent = onTimeProbability
+    // 실제로 울릴 시각([ringAt])의 확률. 예전에는 서버가 처음 추천한 알람의 확률(on_time_probability)을 써서, 시각을
+    // 바꾼 일정은 홈(97%)과 이 화면(100%)이 달랐다(11-19). 홈 · 시트와 같은 [ringProbability] 하나를 쓴다.
+    val percent = ringProbability
     if (percent != null) {
         return ConfidenceView(
             percent = percent.coerceIn(0, 100),

@@ -1,7 +1,6 @@
 // AI-generated (Claude)
 package com.swpp.wakeup.domain.model
 
-import kotlin.math.roundToInt
 
 /**
  * 알람 시각 바꾸기 바텀시트(iter4 H2-3, Figma `546:1595`)의 계산과 문구.
@@ -120,28 +119,25 @@ object AlarmTimeChoice {
     /** 이만큼 안쪽으로 시작보다 늦은 알람은 "같은 날 늦게 일어난 것" 으로 본다 */
     const val LATE_WINDOW_MINUTES = 12 * 60
 
+    // AI-generated (Claude) — 11-19 세 화면 확률 통일
     /**
-     * 서버가 준 총 소요시간 분포로 "[available] 분 안에 준비·이동을 마칠 확률"(%).
+     * 시트가 휠로 고른 시각 [picked] 에 보일 정시 도착 확률. **서버가 준 값만** 쓴다(11-18 사용자: 앱이 숫자를 만들지 않는다).
      *
-     * 서버는 세 단계의 확률만 주고 그 사이 시각의 확률은 주지 않는다(백엔드 BE-H3c).
-     * 그동안 휠로 고른 시각의 확률은 **같은 분포**에서 읽어 낸다 — 숫자를 지어내는 것이
-     * 아니라 서버가 옵션 확률을 낼 때 쓴 분포의 누적값이다. 구간 안은 균등하다고 본다.
-     * 분포가 없으면 null 이고, 화면은 확률 자리를 비운다. 남은 시간이 0 이하면 분포와 상관없이 0 이다.
+     * - 시작 시각이 됐거나 지나서 일어나면 0 이다. 계산이 아니라 정시 도착이 불가능하다는 사실이다(저장도 막는다).
+     * - 지금 알람 시각([current])이면 서버가 그 알람에 준 확률([currentProbability], 홈 카드 · 알람 화면과 같은 값).
+     * - 서버의 세 칸 중 하나와 같은 시각이면 그 칸의 확률([cellProbability]).
+     * - 그 밖의 시각은 서버가 확률을 주지 않으므로 null — 화면은 확률 줄을 비운다. 예전에는 분포에서 앱이 직접
+     *   계산해 9:21 알람이 시트에서만 90% 로 보였다(홈 97% · 알람 화면 100%). 임의 시각의 확률은 서버 요청(BE-H3c)이다.
      */
-    fun estimate(distribution: DurationDistributionView?, available: Int): Int? {
-        // 시작 시각이 됐거나 지나서 일어나면 정시 도착은 불가능하다. 분포가 없어도 0 이다.
-        if (available <= 0) return 0
-        val bins = distribution?.bins?.filter { it.mass > 0 && it.maxMinutes > it.minMinutes }
-        if (bins.isNullOrEmpty()) return null
-        val total = bins.sumOf { it.mass }
-        if (total <= 0.0) return null
-        val below = bins.sumOf { bin ->
-            when {
-                available >= bin.maxMinutes -> bin.mass
-                available <= bin.minMinutes -> 0.0
-                else -> bin.mass * (available - bin.minMinutes) / (bin.maxMinutes - bin.minMinutes)
-            }
-        }
-        return ((below / total) * 100).roundToInt().coerceIn(0, 100)
+    fun shownProbability(
+        picked: Int,
+        current: Int?,
+        currentProbability: Int?,
+        cellProbability: Int?,
+        startMinutes: Int?,
+    ): Int? {
+        if (startMinutes != null && availableMinutes(picked, startMinutes) <= 0) return 0
+        if (current != null && picked == current && currentProbability != null) return currentProbability
+        return cellProbability
     }
 }

@@ -549,6 +549,7 @@ private fun MainHost(
                 p.alarmAt?.let { AlarmTimeChoice.minutesOfDay(it, p.meridiem) }
             },
             startMinutesOfDay = sheetPlan?.startAtMillis?.let { minutesOfDay(it) },
+            currentProbability = sheetPlan?.onTimeProbability,
             loading = alarmTimeSheet.loading,
             saving = alarmTimeSheet.saving,
             error = alarmTimeSheet.error,
