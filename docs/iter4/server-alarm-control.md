@@ -215,6 +215,8 @@ PATCH 로 고르고 기기 알람을 `alarm_at` 으로 걸며 확인 API 를 부
 
 저장 뒤에는 서버 값(`user_alarm_probability`)을 보여 준다.
 
+**risk-options 세 칸의 `probability`** 는 준비 · 이동 중 한쪽만 변동성을 알아도 채운다. 응답의 `distribution` 과 같은 분포에서 그 칸의 시각까지 쓸 수 있는 시간의 누적값이다(휠 값과 맞추려는 것, PM 피드백 iter4). 한쪽 변동성을 모르는 만큼 낙관적인 값이다. 계획의 `on_time_probability` · `effective_on_time_probability` 는 그대로 null 이다. 분포를 낼 수 없으면 지금처럼 `options` 가 비고 `unavailable_reason` 을 준다.
+
 ## 6. 답이 없을 때 (잠정, Figma 캡션의 예시)
 
 **마감 `answer_by` = `min(current_alarm_at, proposed_alarm_at)` − 10분** — 두 시각 중 **더 이른 쪽**의 10분 전이다.
