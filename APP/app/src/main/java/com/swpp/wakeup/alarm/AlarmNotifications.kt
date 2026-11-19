@@ -1,14 +1,17 @@
 package com.swpp.wakeup.alarm
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.swpp.wakeup.R
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ArrivalVerdict
@@ -173,6 +176,12 @@ object AlarmNotifications {
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
+        // 권한 확인을 여기에 펼쳐 쓴다(AlarmReceiver 와 같은 이유 — lint MissingPermission 이 도우미 함수를 넘어 보지 못한다).
+        val canPost = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!canPost) return
         runCatching {
             androidx.core.app.NotificationManagerCompat.from(context)
                 .notify(NOTIFICATION_PROPOSAL_BASE + eventId.toInt(), notification)
