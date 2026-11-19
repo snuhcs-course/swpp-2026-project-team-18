@@ -73,10 +73,10 @@ data class RoutineBlockView(
  */
 enum class DropCost(val wire: String, val label: String, val hint: String) {
     NONE("none", "없음", "건너뛰어도 괜찮아요"),
-    SMALL("small", "작음", "아쉽지만 건너뛸 수 있어요"),
+    SMALL("small", "조금", "아쉽지만 건너뛸 수 있어요"),
     MEDIUM("medium", "보통", "가능하면 지키고 싶어요"),
-    LARGE("large", "큼", "건너뛰면 하루가 틀어져요"),
-    IMPOSSIBLE("impossible", "불가", "반드시 해야 함");
+    LARGE("large", "많이", "건너뛰면 하루가 틀어져요"),
+    IMPOSSIBLE("impossible", "불가", "반드시 해야 해요");
 
     companion object {
         /**
@@ -128,6 +128,15 @@ data class RoutineEditorState(
     val editing: BlockDraft? = null,
 ) {
     val includedCount: Int get() = blocks.count { it.checked }
+
+    // AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+    /**
+     * [requested] 일정(null 이면 블록 정의)으로 받은 블록 목록을 이 화면에 써도 되는가.
+     *
+     * 받는 동안 다른 화면(블록 정의 ↔ 다른 일정의 블록)을 열었으면 버린다. 쓰면 다른 일정의 체크가 이 화면의
+     * 일정 이름 아래 보이고, 저장할 때 그 체크를 기준선으로 삼아 이 일정에 보낸다.
+     */
+    fun acceptsBlocksFor(requested: Long?): Boolean = eventId == requested
 
     /** "더하면 42~68분". 포함된 블록만 단순히 더한다(11-17: 내부 용어 "단순 합" 대신 해요체 화면 말) */
     val simpleSumLabel: String?

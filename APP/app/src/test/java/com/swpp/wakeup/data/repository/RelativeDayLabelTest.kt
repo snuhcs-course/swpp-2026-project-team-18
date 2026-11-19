@@ -15,7 +15,7 @@ class RelativeDayLabelTest {
     @Test
     fun `앞날은 며칠 뒤로 적는다`() {
         assertEquals("오늘", relativeDayLabel(0))
-        assertEquals("내일 아침", relativeDayLabel(1))
+        assertEquals("저녁 일정에도 맞게 \"아침\" 은 붙이지 않는다", "내일", relativeDayLabel(1))
         assertEquals("2일 뒤", relativeDayLabel(2))
         assertEquals("30일 뒤", relativeDayLabel(30))
     }

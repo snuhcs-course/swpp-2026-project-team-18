@@ -92,6 +92,10 @@ object ServerVersion {
      * "버전이 다릅니다" 만으로는 아무도 행동하지 않는다. 고치는 곳을 같이 적어야
      * 다음 사람이 대시보드를 찾아 헤매지 않는다.
      */
+    // AI-generated (Claude) — H2-1(11-19)
+    /** 서버가 앱보다 뒤처졌을 때 화면의 오류 줄에 붙이는 말. 버전 · 배포 같은 개발 이야기는 [behindMessage] 로 로그에만 쓴다 */
+    const val BEHIND_USER_LINE = "서비스가 아직 업데이트 중이라 일부 기능이 안 될 수 있어요. 잠시 뒤 다시 열어 주세요"
+
     fun behindMessage(appVersion: String?, serverVersion: String?): String =
         "서버가 구버전입니다 (서버 ${serverVersion ?: "알 수 없음"} · 앱 ${appVersion ?: "알 수 없음"}). " +
             "새 기능이 404 로 실패합니다. Render 대시보드 > Manual Deploy > " +

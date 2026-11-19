@@ -228,4 +228,17 @@ class RoutineEditorStateTest {
         )
         assertEquals(2, state.outOfRangeCount)
     }
+
+    // AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+    @Test
+    fun `받는 동안 다른 블록 화면을 열었으면 늦게 온 목록을 쓰지 않는다`() {
+        // Given 일정 5 의 블록을 받는 중에 일정 6 의 블록 화면을 열었다
+        val now = RoutineEditorState(loading = true, eventId = 6)
+
+        // When / Then 5 의 목록은 버리고 6 · 정의 편집은 제 것만 받는다
+        assertFalse(now.acceptsBlocksFor(5))
+        assertFalse(now.acceptsBlocksFor(null))
+        assertTrue(now.acceptsBlocksFor(6))
+        assertTrue(RoutineEditorState(loading = true).acceptsBlocksFor(null))
+    }
 }

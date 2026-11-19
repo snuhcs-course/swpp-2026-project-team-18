@@ -154,17 +154,11 @@ private fun AuthHost(
         }
     }
 
-    // 처음 가입 화면에서 뒤로 가면 로그인으로 돌아온다.
-    BackHandler(enabled = state.screen == AuthViewModel.Screen.SOCIAL_TERMS && !state.busy) {
-        viewModel.cancelSocialTerms()
-    }
-
-    // 비밀번호 찾기에서 뒤로 가면 한 단계씩 돌아간다(코드 확인 → 코드 요청 → 로그인).
-    BackHandler(
-        enabled = (state.screen == AuthViewModel.Screen.RESET_REQUEST ||
-            state.screen == AuthViewModel.Screen.RESET_CONFIRM) && !state.loading
-    ) {
-        viewModel.goBackFromReset()
+    // 가입 · 처음 가입 · 비밀번호 찾기에서 시스템 뒤로는 화면의 ‹ 와 같다(코드 확인 → 코드 요청 → 로그인).
+    // 서버를 기다리는 동안에도 켜 두고(STAY) 움직이지 않는다 — 꺼 두면 시스템 기본 동작이 앱을 닫는다(11-19 이식,
+    // PM A-3). 로그인 화면은 받지 않아 뒤로가 앱을 닫는다. (Partly AI-generated (Claude))
+    BackHandler(enabled = state.handlesSystemBack) {
+        viewModel.onSystemBack()
     }
 
     // 인증 성공을 한 번만 소비한다. 재구성마다 화면이 뛰지 않게 한다.

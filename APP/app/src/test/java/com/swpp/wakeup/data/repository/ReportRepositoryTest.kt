@@ -141,11 +141,11 @@ class ReportRepositoryTest {
     @Test
     fun `판정마다 다른 안내를 준다`() = runTest {
         val calibrated = calibrationView("""{"verdict":"calibrated"}""")
-        assertEquals("잘 맞음", calibrated.verdictLabel)
+        assertEquals("잘 맞아요", calibrated.verdictLabel)
         assertNull("맞는데 고칠 것을 권하지 않는다", calibrated.action)
 
         val conservative = calibrationView("""{"verdict":"conservative"}""")
-        assertEquals("지나치게 이름", conservative.verdictLabel)
+        assertEquals("너무 일러요", conservative.verdictLabel)
         assertEquals("지각 위험을 높이면 더 잘 수 있어요", conservative.action)
     }
 

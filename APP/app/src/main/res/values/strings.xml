@@ -41,7 +41,6 @@
 
     <!-- 홈 (Figma ③) -->
     <string name="home_title">다가오는 일정</string>
-    <string name="home_sample_notice">표본 데이터. 일정 연동은 아직 없음</string>
     <string name="home_next_alarm">다음 알람</string>
     <string name="home_add_event">+  일정 추가</string>
     <string name="home_on_time_probability">정시 도착 확률 %1$d%%</string>
@@ -51,7 +50,6 @@
     <!-- 알람 결정 (Figma ④) -->
     <string name="alarm_first_event">첫 일정</string>
     <string name="alarm_recommended">추천 알람</string>
-    <string name="alarm_how_computed">이렇게 계산했음</string>
     <string name="alarm_total">합계 %1$d분</string>
     <string name="alarm_minutes">%1$d분</string>
     <string name="alarm_confirm">확인</string>
@@ -64,7 +62,6 @@
     <string name="risk_auto_title">자동 조정</string>
     <string name="risk_auto_body">시험·발표 일정은 자동으로 안전 모드로 올림</string>
     <string name="risk_dist_title">총 소요시간 분포 · 최근 30일</string>
-    <string name="risk_dist_footer">평균이 아니라 분포를 쓰기 때문에 확률로 말할 수 있음</string>
     <string name="risk_continue">%1$s으로 계속하기</string>
 
     <!--

@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.swpp.wakeup.ui.common.rememberTextWidth
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.EventSection
 import com.swpp.wakeup.domain.model.UpcomingEvent
@@ -529,7 +531,7 @@ private fun MorningShortcut(blocksLeft: Int, onClick: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         JitDotLabel(
-            text = if (blocksLeft > 0) "아침 기록 ${blocksLeft}개 남음" else "아침 기록 정리 필요",
+            text = if (blocksLeft > 0) "아침 기록이 ${blocksLeft}개 남았어요" else "아침 기록을 정리해 주세요",
             dotColor = JitColor.Accent,
             textColor = JitColor.TextPrimary,
             fontSize = 12,
@@ -938,7 +940,11 @@ private fun EventRow(
     ) {
         Text(
             text = HomeLabels.rowStartClock(event.startClock),
-            modifier = Modifier.width(68.dp),
+            // 가장 넓은 시각("오후 12:00")을 지금 글자 크기로 잰 폭. 고정 68dp 는 "오전 11:00" 의 끝을 잘랐다(11-19).
+            // 그보다 넓은 값이 와도 칸이 늘어나고, 줄어드는 쪽은 제목(weight 1, 말줄임)이다.
+            modifier = Modifier
+                .testTag("event_row_clock_${event.id}")
+                .widthIn(min = maxOf(68.dp, rememberTextWidth("오후 12:00", 15.sp, FontWeight.Bold))),
             color = JitColor.TextPrimary,
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,

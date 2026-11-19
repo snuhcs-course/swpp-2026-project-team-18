@@ -99,6 +99,9 @@ fun ChangePasswordScreen(
             mixPassed = state.passwordCheck?.lettersAndDigits,
         )
         state.passwordCheckError?.let { ErrorText(it) }
+        state.passwordCheck?.extraReason?.let { ErrorText(it) }
+        // 지금 비밀번호와 같으면 버튼만 꺼지고 이유가 없었다(fix/iter4-he-bugs 이식)
+        if (state.sameAsCurrent) ErrorText(PasswordChangeState.SAME_AS_CURRENT)
 
         JitTextField(
             label = "새 비밀번호 확인",

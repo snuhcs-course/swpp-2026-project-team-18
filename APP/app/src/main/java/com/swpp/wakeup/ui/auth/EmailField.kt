@@ -16,13 +16,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.swpp.wakeup.domain.model.EmailRule
 import com.swpp.wakeup.ui.common.JitTextField
 import com.swpp.wakeup.ui.theme.JitColor
 
 // Partly AI-generated (Claude)
 /**
- * 이메일 입력칸. 칸을 한 번 벗어난 뒤에 형식이 틀리면 빨간 테두리와 "이메일 형식이 아님" 한 줄을
+ * 이메일 입력칸. 칸을 한 번 벗어난 뒤에 형식이 틀리면 빨간 테두리와 "이메일 형식을 확인해 주세요" 한 줄을
  * 보인다(Figma F-37 `505:14`). 입력하는 도중에는 보이지 않는다. 막는 일은 이 칸이 아니라 호출자의
  * 버튼 조건이 한다(로그인은 막지 않는다 — 서버에 로그인 형식 규칙이 없다).
  */
@@ -40,7 +39,9 @@ internal fun EmailField(
 ) {
     var hadFocus by remember { mutableStateOf(false) }
     var blurred by remember { mutableStateOf(false) }
-    val showError = blurred && value.isNotBlank() && !EmailRule.isValid(value)
+    var focused by remember { mutableStateOf(false) }
+    // 손대지 않은 값(로그인에서 가져온 이메일)도 칸 밖에 있으면 판정한다(fix/iter4-he-bugs 이식, [emailFormatErrorVisible])
+    val showError = emailFormatErrorVisible(value, focused, blurred)
 
     Column(modifier = modifier) {
         JitTextField(
@@ -53,14 +54,15 @@ internal fun EmailField(
             imeAction = imeAction,
             onImeAction = onImeAction,
             isError = showError,
-            onFocusChange = { focused ->
-                if (focused) hadFocus = true else if (hadFocus) blurred = true
+            onFocusChange = { now ->
+                focused = now
+                if (now) hadFocus = true else if (hadFocus) blurred = true
             },
         )
         if (showError) {
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "이메일 형식이 아님",
+                text = EMAIL_FORMAT_ERROR,
                 modifier = Modifier.testTag(errorTag),
                 color = JitColor.Red,
                 fontSize = 11.sp,

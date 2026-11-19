@@ -345,6 +345,11 @@ fun BlockDraftSheet(
     onDelete: (Long) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * 칸에 붙지 않는 저장 · 삭제 실패(통신 · 5xx · 다른 기기에서 지운 항목). 폼이 열려 있는 동안에는 목록이 그려지지 않아
+     * 예전에는 이 실패가 어디에도 보이지 않았다. 저장 버튼 위에 한 줄로 둔다(fix/iter4-he-bugs 이식).
+     */
+    formError: String? = null,
 ) {
     Column(
         modifier = modifier
@@ -446,6 +451,10 @@ fun BlockDraftSheet(
         )
 
         Spacer(Modifier.height(4.dp))
+
+        formError?.let {
+            Text(text = it, color = JitColor.Red, fontSize = 12.sp, modifier = Modifier.testTag("block_form_error"))
+        }
 
         JitPrimaryButton(
             label = "저장",

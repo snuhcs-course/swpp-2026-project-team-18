@@ -184,6 +184,15 @@ data class PasswordCheckResponse(
 ) {
     val valid: Boolean
         get() = minLength == true && lettersAndDigits == true && messages?.isEmpty() == true
+
+    // AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+    /**
+     * 조건 카드의 두 점(8자 이상 · 영문과 숫자)으로는 말할 수 없는 거절 이유. 두 점이 다 통과했는데 [messages] 가 남았으면
+     * 그 첫 줄이다(서버의 흔한 비밀번호 검사). 없으면 점이 다 초록인데 버튼만 꺼져 있고 이유가 어디에도 없었다. 점이 하나라도
+     * 빨간 동안은 null 이다 — 점이 이미 말하는 내용을 글로 되풀이하지 않는다(사용자 결정 10-06).
+     */
+    val extraReason: String?
+        get() = if (minLength == true && lettersAndDigits == true) messages?.firstOrNull { it.isNotBlank() } else null
 }
 
 data class LoginRequest(

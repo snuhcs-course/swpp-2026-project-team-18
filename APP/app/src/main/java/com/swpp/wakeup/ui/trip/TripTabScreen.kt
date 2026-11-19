@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.swpp.wakeup.ui.common.rememberTextWidth
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.RouteSegment
@@ -196,14 +198,14 @@ private fun SavedRouteNotice(savedAtMillis: Long?, onRetry: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         JitDotLabel(
-            text = TripTabLogic.savedRouteLabel(savedAtMillis, System.currentTimeMillis()),
+            text = TripTabLogic.savedRouteLabel(savedAtMillis),
             dotColor = JitColor.Amber,
             textColor = JitColor.TextPrimary,
             fontSize = 12,
             dotSize = 6.dp,
         )
         Text(
-            text = TripTabLogic.savedRouteBody(savedAtMillis != null),
+            text = TripTabLogic.savedRouteBody(savedAtMillis),
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
@@ -441,7 +443,10 @@ private fun StepRow(step: TripTabLogic.Step, last: Boolean) {
     ) {
         Text(
             text = step.time?.format(CLOCK) ?: "",
-            modifier = Modifier.width(34.dp).padding(top = 4.dp),
+            // "12:00" 을 지금 글자 크기로 잰 폭 이상. 고정 34dp 는 두 자리 시에서 끝이 잘릴 수 있었다(11-19).
+            modifier = Modifier
+                .widthIn(min = maxOf(34.dp, rememberTextWidth("12:00", 13.sp, FontWeight.Bold)))
+                .padding(top = 4.dp),
             color = JitColor.TextPrimary,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,

@@ -295,7 +295,7 @@ data class CalibrationView(
     val points: List<CalibrationPoint>,
     val scoredCount: Int,
     val unscoredCount: Int,
-    /** "잘 맞음" / "과신 중" / "지나치게 이름" / "표본 부족" */
+    /** "잘 맞아요" / "과신 중" / "너무 일러요" / "표본 부족" */
     val verdictLabel: String,
     /** 결론을 풀어 쓴 한 줄 */
     val verdictNote: String,

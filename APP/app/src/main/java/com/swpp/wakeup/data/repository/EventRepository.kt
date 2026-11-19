@@ -1161,7 +1161,7 @@ private fun dayLabel(date: LocalDate): String = DAY_NAMES[date.dayOfWeek.value -
  */
 internal fun relativeDayLabel(days: Long): String = when {
     days == 0L -> "오늘"
-    days == 1L -> "내일 아침"
+    days == 1L -> "내일" // 저녁 일정에 "아침" 이 붙었다(fix/iter4-he-bugs 이식, 11-19)
     days == -1L -> "어제"
     days < 0L -> "${-days}일 전"
     else -> "${days}일 뒤"

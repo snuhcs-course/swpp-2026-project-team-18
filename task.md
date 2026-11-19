@@ -18,6 +18,66 @@
 
 ---
 
+## 🟢 프론트 할 일 — PM 추가 요청 (11-16, `iter4-additional-requests.md`)
+
+PM(김진호)이 11-16 `main` `d296ce4` 기준으로 정리한 앱 쪽 요청이다. 서버 쪽(S-0 ~ S-6)은 빼고 앱만 옮겼다.
+"지금 상태" 는 11-18 로컬 작업 트리(아직 커밋 전)에서 확인한 것이다.
+우선순위: **P0** UAT 2차(11-18) 전 · **P1** Iteration 5 알파(11-23 주) 전 · **P2** Iteration 5 안.
+
+### P0
+- [ ] **A-0. AI 협업 리포트 Iteration 4 본인 파트** (코드 아님) — 위키 [AI Collaboration Report — Iteration 4](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/AI-Collaboration-Report-%E2%80%94-Iteration-4)
+  - 본문의 `_기울임_` 칸: 쓴 도구, 1절 표의 내 줄, 3 ~ 6절의 내 항목(잘된 점, 틀린 주장, 고친 프롬프트, 손으로 고친 것과 그 이유)
+  - 5절 프롬프트 로그: `4ae1b27`, `47ee685`, `d296ce4` 뒤의 프롬프트를 원문 그대로 + 한 줄 영어 해설 + 결과
+  - 근거는 커밋 해시나 파일:줄로
+- [ ] **A-1. 기기 통합 테스트 1개 실패(CI run 94)** — `SignupScreenTest` "서버가 닉네임을 거절하면 … 고치면 칸의 이유가 사라진다"(`SignupScreenTest.kt:202`)
+  - 지금 상태: 로컬 작업 트리에서는 integration 64/64 통과(11-18, 에뮬레이터). 커밋해서 올린 뒤 CI 가 초록인지 확인한다.
+  - 끝난 기준: CI 초록, `jacocoDebugAndroidTestReport -Pandroid.testInstrumentationRunnerArguments.package=com.swpp.wakeup.integration` 보고서가 나온다.
+- [ ] **A-2. todo 에 [x] 인데 원격 어느 브랜치에도 없는 것 2건** — 커밋해서 올리거나, 안 올릴 거면 [x] 를 되돌린다
+  1. 이동 탭 오프라인 "가는 길"(H2-2): `cached_route` 사본과 "네트워크가 없어 받아 둔 경로를 보여 줘요" 안내
+     - 지금 상태: 작업 트리에도 `cached_route` 가 없고 `JitDatabase` 는 `version = 1` 이다. **아직 안 만든 것으로 보인다** → 만들지, [x] 를 되돌릴지 정한다.
+  2. 반복 회차 수정의 요일 칩(A2): 숨기지 말고 꺼진 채로 보이기 + 안내 문구
+     - 지금 상태: 문구는 해요체로 바뀌었다(`editNoteOf`, `AddEventScreen.kt:794`). 칩을 꺼진 채로 보이는지는 확인이 더 필요하다. 커밋하면 올라간다.
+
+### P1
+- [ ] **A-3. `fix/iter4-he-bugs` 합치기** — 11-19 시작, **11-22 까지**. UAT 2차(11-18)가 끝난 뒤에 한다.
+  - 순서: 아래 네 건 먼저, 나머지는 커밋 메시지의 영역별로
+    - [ ] 알람 시각이 "17:50 PM" 처럼 보인다 — `EventRepository.kt` 의 `ALARM_FORMAT = "H:mm"` + `meridiem` "AM/PM"(작업 트리 `:1150`, `:1437`, `:1672`, `:1803`)
+    - [ ] 두 번째 알람이 울려도 화면에 첫 알람이 남는다 — `AlarmActivity.kt:70` `private var schedule` 이 상태가 아니라서 `onNewIntent` 뒤 다시 그리지 않는다
+    - [ ] 서버 응답을 기다리는 동안 뒤로 가면 앱이 닫힌다 — `LoginActivity.kt:158`, `:163` 의 `BackHandler` 가 busy/loading 동안 꺼진다
+    - [ ] 캘린더 가져오기 안내에 별표가 보인다 — `CalendarImportScreen.kt:346` `**읽기만**`
+  - 충돌 16개 파일: 겹치는 화면(가입 닉네임, 뒤로 가기, 일정 추가)은 `main` 기준, 브랜치에서는 버그 수정과 그 테스트만. `RiskChoiceScreen.kt` 는 지운다.
+  - 합친 뒤 단위 + 기기 테스트를 다시 돌리고 PR 로 `main` 에
+- [ ] **A-4. 앱 버전 올리기** — 지금 `0.14.0` / `14`(`APP/app/build.gradle.kts:102, 125`)
+  - A-3 를 합친 첫 빌드를 **0.15.0 / 15**, 그 뒤 고친 빌드는 0.15.1 / 16 처럼 하나씩
+- [ ] **A-5. 릴리스 서명 키** — 지금 `release` 에 `signingConfig` 가 없다
+  - 팀 공용 키를 하나 만들어 팀 구글 드라이브 비공개 폴더에(저장소에 넣지 않음)
+  - `local.properties` 의 `releaseStoreFile` · `releaseStorePassword` · `releaseKeyAlias` · `releaseKeyPassword` 를 읽고, 없으면 지금처럼 서명 없이
+  - 카카오 · 구글 콘솔에 키 해시와 SHA-1 등록(안 하면 릴리스 빌드에서 소셜 로그인 안 됨)
+  - 알파부터는 이 키로 서명한 빌드만 배포
+- [ ] **A-6. 크래시 보고(Firebase Crashlytics)** — 지금 없음. Firebase 는 이미 연결돼 있다(`google-services.json`, `firebase-messaging`)
+  - Crashlytics Gradle 플러그인 + `firebase-crashlytics`(BOM 으로 버전 고정)
+  - Firebase 콘솔에서 켜고 팀원 세 명이 볼 수 있게
+  - 개인정보 금지: `setUserId` 에 이메일 X(서버 사용자 id 숫자만 또는 비움), 커스텀 키에 좌표 · 장소 이름 · 토큰 X
+  - `e2e`(QA) 빌드는 FCM 처럼 끈다
+  - 확인: 테스트용 크래시를 한 번 내서 콘솔에 뜨는지(알파 전 조건)
+  - 핵심 이벤트는 앱에서 보내지 않는다(서버 기록에서 뽑음, S-4)
+- [ ] **A-7. "문제 신고" 입구** — 지금 입구는 도움말 › [문의하기] 하나(`ui/help/HelpScreen.kt:184`, `ContactSheet`)
+  - 내 정보 탭에 "문제 신고" 줄 → 같은 시트, 첫 줄에 "[문제 신고]" 를 붙인다(`app_version` · `device` 는 이미 실린다)
+  - 서버 연결은 S-1 배포(11-19) 뒤
+
+### P2
+- [ ] **A-8. `HomeViewModel` 나누기** — 지금 6,073줄(PM 기준 5,487줄), ViewModel 커버리지 7.1%(목표 30%)
+  - 기록 초기화 · 문의가 저장소를 거치지 않고 `ApiClient` 를 바로 부른다 → 저장소로
+  - Iteration 5 디자인 패턴 리팩터링과 묶어 탭별 ViewModel 로, 상태 전이는 가짜 저장소로 테스트
+  - 계획 초안: 위키 [Design Documentation](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter1%E2%80%90design) 2.3절 → 나누는 단위와 패턴을 보고 고칠 곳을 PM 에게 알려 준다
+- [ ] **A-9. `qa/demo/run.py`(UI 실행기)를 탭 구조에 맞추기** — 하단 탭 뒤로 안 돌려 봤다. `run.py --replay-routing` 으로 돌려서 고치거나, 안 쓰면 지운다(알파 "테스트 초록" 조건)
+- [ ] **A-10. 커버리지 요약에 `reminder` 넣기** — `APP/scripts/coverage_summary.py` 의 Platform 판정(`"alarm", "sensing", "background", "calendar"`)에 `reminder` 추가
+
+### 참고: H2-1 문구 줄 번호
+PM 이 `d296ce4` 기준으로 짚은 "~함 · ~음" 남은 곳(홈 `HomeScreen.kt:285 · 407 · 421 ~ 423 · 467 · 512`, `AlarmDecisionScreen.kt:533 · 687 ~ 690`, `CalendarImportScreen.kt:168 · 244 · 338 · 344`)은 작업 트리에서 다시 찾았을 때 해당 문구가 나오지 않았다. 다만 `HomeScreen.kt:532` "아침 기록 N개 남음" · "아침 기록 정리 필요" 같은 짧은 명사형 라벨이 남아 있어, 바꿀지 정한다. 커밋 뒤 한 번 더 확인한다(`CalendarImportScreen` 의 `**읽기만**` 별표는 A-3 에 있다).
+
+---
+
 ## 🟢 프론트 할 일 (11-04 정리)
 
 서버는 끝났고 앱만 남은 것. 서버 버전이 배포돼 있어야 한다(`/api/health` 의 `version`).

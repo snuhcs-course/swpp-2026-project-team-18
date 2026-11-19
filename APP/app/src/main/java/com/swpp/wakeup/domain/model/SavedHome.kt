@@ -86,7 +86,7 @@ object SavedHomes {
 
     /** 이름이 비면 장소 이름을 쓴다. 너무 길면 자른다 */
     fun labelOf(input: String, placeName: String): String =
-        input.trim().ifEmpty { placeName.trim() }.take(LABEL_MAX)
+        input.trim().ifEmpty { placeName.trim() }.takeCodePoints(LABEL_MAX)
 
     /** 두 점이 [SAME_PLACE_METERS] 안인가(가까운 거리라 평면 근사로 충분하다) */
     fun samePlace(a: GeoPoint, b: GeoPoint): Boolean {

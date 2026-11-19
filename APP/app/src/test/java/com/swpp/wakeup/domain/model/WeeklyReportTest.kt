@@ -101,7 +101,7 @@ class CalibrationViewTest {
 
     @Test
     fun `표본 부족은 신뢰할 수 없는 판정이다`() {
-        // "잘 맞음" 을 표본 2건으로 말하면 사용자가 그 말을 믿고 여유를 줄인다.
+        // "잘 맞아요" 을 표본 2건으로 말하면 사용자가 그 말을 믿고 여유를 줄인다.
         assertFalse(view("insufficient").isTrustworthy)
         assertTrue(view("calibrated").isTrustworthy)
         assertTrue(view("overconfident").isTrustworthy)
@@ -233,7 +233,7 @@ class WeeklyReportViewTest {
         val days = (0..6).map {
             ReportDay(LocalDate.of(2026, 10, 5 + it), "월", DayStatus.NONE, null, "", "", emptyList())
         }
-        val line = DeviationLine("준비", "측정 안 됨", Tone.UNKNOWN)
+        val line = DeviationLine("준비", "재지 못했어요", Tone.UNKNOWN)
         assertFalse(report(0, 0, 0, days = days, deviations = listOf(line)).showDays)
         assertFalse(report(0, 0, 0, days = days, deviations = listOf(line)).showDeviations)
         assertTrue(report(1, 0, 1, days = days, deviations = listOf(line)).showDays)

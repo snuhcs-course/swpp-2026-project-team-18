@@ -95,6 +95,8 @@ import com.swpp.wakeup.ui.help.HelpScreen
 import com.swpp.wakeup.ui.help.HelpTopic
 import com.swpp.wakeup.ui.home.HomeScreen
 import com.swpp.wakeup.ui.home.HomeViewModel
+import com.swpp.wakeup.ui.home.forEvent
+import com.swpp.wakeup.ui.home.messageFor
 import com.swpp.wakeup.ui.me.LearningResetDialog
 import com.swpp.wakeup.ui.me.MeTabScreen
 import com.swpp.wakeup.reminder.WeeklyReportReminder
@@ -158,14 +160,24 @@ class MainActivity : ComponentActivity() {
             isAppearanceLightNavigationBars = false
         }
 
+        // Partly AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19). 시스템이 화면을 다시 만들 때 넘기는 인텐트는 처음 띄운
+        // 그대로라, 이미 열고 나간 아침 기록 · 알람 결정 · 리포트와 환영 문구가 다시 나왔다(removeExtra 는 이 프로세스 안의 사본만
+        // 지운다). 다시 만들 때는 onSaveInstanceState 가 남긴 "아직 열지 못한 화면" 만 쓴다.
         // 로그인 직후에만 환영 문구를 띄운다. 앱을 다시 열 때는 띄우지 않는다.
-        val welcomeNickname = intent.getStringExtra(EXTRA_WELCOME_NICKNAME)
-        // 알람을 해제하고 넘어온 경우. 아침 기록 화면으로 바로 들어간다.
-        openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
-        // 경로 바꾸기 제안 알림을 눌러 온 경우. 그 일정의 알람 결정 화면으로 간다.
-        openEventId = intent.openEventExtra()
-        // 일요일 주간 리포트 알림을 눌러 온 경우. 리포트 탭의 그 주로 간다.
-        openReportWeek = intent.reportWeekExtra()
+        val welcomeNickname = if (savedInstanceState == null) intent.getStringExtra(EXTRA_WELCOME_NICKNAME) else null
+        if (savedInstanceState == null) {
+            // 알람을 해제하고 넘어온 경우. 아침 기록 화면으로 바로 들어간다.
+            openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
+            // 경로 바꾸기 제안 알림을 눌러 온 경우. 그 일정의 알람 결정 화면으로 간다.
+            openEventId = intent.openEventExtra()
+            // 일요일 주간 리포트 알림을 눌러 온 경우. 리포트 탭의 그 주로 간다.
+            openReportWeek = intent.reportWeekExtra()
+        } else {
+            openMorning = savedInstanceState.getBoolean(STATE_OPEN_MORNING, false)
+            openEventId = savedInstanceState.getLong(STATE_OPEN_EVENT, -1L).takeIf { it > 0L }
+            openReportWeek = savedInstanceState.getString(STATE_OPEN_REPORT_WEEK)
+                ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        }
 
         setContent {
             JitTheme {
@@ -190,6 +202,14 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /** 아직 열지 못한 화면만 남긴다. 연 화면은 false · null 이라 다시 만들어져도 다시 열지 않는다 */
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_OPEN_MORNING, openMorning)
+        openEventId?.let { outState.putLong(STATE_OPEN_EVENT, it) }
+        openReportWeek?.let { outState.putString(STATE_OPEN_REPORT_WEEK, it.toString()) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -220,6 +240,11 @@ class MainActivity : ComponentActivity() {
 
         /** 알람 해제 후 아침 기록 화면으로 바로 들어갈지. */
         const val EXTRA_OPEN_MORNING = "open_morning"
+
+        // 다시 만들 때 남기는 "아직 열지 못한 화면"(onSaveInstanceState)
+        private const val STATE_OPEN_MORNING = "state_open_morning"
+        private const val STATE_OPEN_EVENT = "state_open_event"
+        private const val STATE_OPEN_REPORT_WEEK = "state_open_report_week"
 
         /**
          * 알람 해제 직후 아침 기록으로 들어가는 인텐트.
@@ -278,6 +303,9 @@ private fun MainHost(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val nav by viewModel.nav.collectAsStateWithLifecycle()
     val plan by viewModel.plan.collectAsStateWithLifecycle()
+    val planError by viewModel.planError.collectAsStateWithLifecycle()
+    val editLoadingId by viewModel.editLoadingId.collectAsStateWithLifecycle()
+    val deletingEventId by viewModel.deletingEventId.collectAsStateWithLifecycle()
     val alarmTimeSheet by viewModel.alarmTimeSheet.collectAsStateWithLifecycle()
     val routeMap by viewModel.routeMap.collectAsStateWithLifecycle()
     // 홈 진행 중 카드의 단계(11-17)
@@ -412,11 +440,34 @@ private fun MainHost(
     val draftOpen = routineState.editing != null
     val routePreviewOpen = nav.current == AppRoute.RouteChoice && routeState?.previewKey != null
     // 홈이 아닌 탭의 첫 화면에서 뒤로 가면 홈 탭으로 간다(iter4 H2-2, NavState.back).
-    BackHandler(enabled = nav.handlesBack || draftOpen || routePreviewOpen) {
-        when {
-            draftOpen -> viewModel.dismissBlockDraft()
-            routePreviewOpen -> viewModel.closeRoutePreview()
-            else -> viewModel.goBack()
+    // 시스템 뒤로는 화면의 ‹ 와 같은 일을 한다(fix/iter4-he-bugs 이식, 11-19). 저장을 기다리는 동안에는 받되 움직이지
+    // 않고, 캘린더 연동 · 준비 시간은 "나중에" 와 같게, 지도는 정리하고 닫는다. 판단은 ui/home/SystemBack.kt.
+    val systemBack = com.swpp.wakeup.ui.home.systemBackOf(
+        nav = nav,
+        waiting = com.swpp.wakeup.ui.home.waitingOn(
+            top = nav.current,
+            editSubmitting = addState.submitting,
+            homeSetupSubmitting = homeSetupState.submitting,
+            prepSubmitting = prepOnboardingState.submitting,
+            calendarImporting = importState.importing,
+            routineSaving = routineState.saving,
+        ),
+        blockDraftOpen = draftOpen,
+        routePreviewOpen = routePreviewOpen,
+    )
+    BackHandler(enabled = systemBack != com.swpp.wakeup.ui.home.SystemBack.SYSTEM) {
+        when (systemBack) {
+            com.swpp.wakeup.ui.home.SystemBack.STAY -> Unit
+            com.swpp.wakeup.ui.home.SystemBack.CLOSE_BLOCK_DRAFT -> viewModel.dismissBlockDraft()
+            com.swpp.wakeup.ui.home.SystemBack.CLOSE_ROUTE_PREVIEW -> viewModel.closeRoutePreview()
+            com.swpp.wakeup.ui.home.SystemBack.SKIP_CALENDAR_LINK -> viewModel.skipCalendarOnboarding()
+            com.swpp.wakeup.ui.home.SystemBack.SKIP_PREP -> viewModel.skipPrepOnboarding()
+            com.swpp.wakeup.ui.home.SystemBack.CLOSE_MAP -> {
+                viewModel.closeMapPick()
+                viewModel.goBack()
+            }
+            com.swpp.wakeup.ui.home.SystemBack.POP -> viewModel.goBack()
+            com.swpp.wakeup.ui.home.SystemBack.SYSTEM -> Unit
         }
     }
 
@@ -428,7 +479,7 @@ private fun MainHost(
             // 알람을 계산하지 못한 채 저장했으면 결정 화면의 "다시 계산" 으로 잇는다(A6).
             val recomputeId = addState.routeFailedEventId
             // 수정(전체 화면)만 화면을 뺀다. 새 일정은 시트라 resetAdd 가 시트를 닫는다.
-            if (addState.isEditing) viewModel.goBack()
+            if (addState.isEditing) viewModel.closeScreen { it is AppRoute.EditEvent }
             viewModel.resetAdd()
             // resetAdd 가 done 을 false 로 돌려 이 효과를 취소하므로, 스낵바는 화면 범위(scope)에서 띄운다.
             // Partly AI-generated (Claude)
@@ -520,7 +571,8 @@ private fun MainHost(
             // 확인 문구를 띄우지 않는다 — 저장되지 않은 것을 저장했다고 말한다.
             val saved = homeSetupState.saved
             val extra = homeSetupState.target == HomeViewModel.HomeTarget.EXTRA
-            viewModel.goBack()
+            // 저장을 마친 그 화면만 닫는다(fix/iter4-he-bugs 이식). 위에 다른 화면이 열렸으면 그 화면은 그대로다.
+            viewModel.closeScreen { it == AppRoute.HomeSetup }
             viewModel.resetHomeSetup()
             if (saved) snackbarHostState.showSnackbar(if (extra) "다른 집을 저장했어요" else "집 주소를 저장했어요")
         }
@@ -530,7 +582,7 @@ private fun MainHost(
             // 건너뛴 경우에는 저장한 값이 없으므로 확인 문구를 띄우지 않는다.
             // "저장했습니다" 를 띄우면 저장되지 않은 것을 저장했다고 말한다.
             val saved = prepOnboardingState.parsed
-            viewModel.goBack()
+            viewModel.closeScreen { it == AppRoute.PrepOnboarding }
             viewModel.resetPrepOnboarding()
             if (saved != null) {
                 // "1시간 5분" 처럼 화면 · 휠과 같은 표기. "분"·"간" 모두 받침이 있어 "으로" 고정.
@@ -541,7 +593,7 @@ private fun MainHost(
     LaunchedEffect(importState.done) {
         if (importState.done) {
             val label = importState.resultLabel
-            viewModel.goBack()
+            viewModel.closeScreen { it == AppRoute.CalendarImport }
             viewModel.resetCalendarImport()
             snackbarHostState.showSnackbar(label ?: "캘린더에서 가져왔어요")
         }
@@ -550,7 +602,7 @@ private fun MainHost(
     LaunchedEffect(calendarOnboardingState.done) {
         if (calendarOnboardingState.done) {
             val saved = calendarOnboardingState.savedCount
-            viewModel.goBack()
+            viewModel.closeScreen { it == AppRoute.CalendarLink }
             viewModel.resetCalendarOnboarding()
             if (saved != null) snackbarHostState.showSnackbar("캘린더 ${saved}개를 연동했어요")
         }
@@ -820,7 +872,14 @@ private fun MainHost(
                 is AppRoute.AlarmDecision -> {
                     // 진행률은 계획(경로)과 추적 위치가 **둘 다** 있어야 낼 수
                     // 있다. 하나라도 없으면 null 로 두고 화면이 이유를 말한다.
-                    val nowMillis = System.currentTimeMillis()
+                    // 30초마다 다시 그린다(fix/iter4-he-bugs 이식, 11-19). 예전에는 다른 값이 바뀔 때까지 "n시간 n분 남았어요" ·
+                    // 위치 갱신 줄이 멈춰 있었다.
+                    val nowMillis by androidx.compose.runtime.produceState(System.currentTimeMillis(), route.eventId) {
+                        while (true) {
+                            delay(30_000)
+                            value = System.currentTimeMillis()
+                        }
+                    }
                     val live = tripLive?.takeIf {
                         it.eventId == route.eventId &&
                             it.accuracyM.isFinite() &&
@@ -931,7 +990,15 @@ private fun MainHost(
                         ?.segments
                         ?.let { checkpointRows(it, plan?.eventPlace.orEmpty().substringBefore(" · "), departedAt) }
                     AlarmDecisionScreen(
-                        plan = plan,
+                        // 다른 일정의 계획을 이 화면에 그리지 않는다(fix/iter4-he-bugs 이식)
+                        plan = plan.forEvent(route.eventId),
+                        planError = planError.messageFor(route.eventId),
+                        onRetryPlan = { viewModel.retryPlan(route.eventId) },
+                        editBusy = editLoadingId == route.eventId,
+                        deleteBusy = deletingEventId == route.eventId,
+                        canTrack = com.swpp.wakeup.sensing.LocationPermissions.granted(context),
+                        coarseOnly = com.swpp.wakeup.sensing.LocationPermissions.coarseOnly(context),
+                        nowMillis = nowMillis,
                         onAnswerProposal = { accept ->
                             plan?.proposal?.let { viewModel.answerProposal(route.eventId, it, accept) }
                         },
@@ -1185,6 +1252,11 @@ private fun MainHost(
                     onHelp = { viewModel.openHelp() },
                     onReplayIntro = viewModel::replayIntro,
                     onResetLearning = viewModel::askLearningReset,
+                    onSendReport = { message, email ->
+                        viewModel.sendInquiry(message, email, com.swpp.wakeup.domain.model.Inquiry.Source.PROBLEM_REPORT)
+                    },
+                    contactEmail = state.accountEmail,
+                    onReportSent = viewModel::onInquirySent,
                 )
                 AppRoute.Homes -> HomesScreen(
                     state = state,
@@ -1411,6 +1483,7 @@ private fun RoutineHost(
             onDelete = viewModel::deleteBlock,
             onDismiss = viewModel::dismissBlockDraft,
             modifier = modifier,
+            formError = state.error,
         )
         return
     }
