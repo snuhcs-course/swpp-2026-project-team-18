@@ -67,13 +67,11 @@ internal object OnTimeSheetText {
     const val OK = "알겠어요"
 
     /**
-     * 원 10개 중 칠할 수(= "10번 중 n번"). 확률을 10% 단위로 **내린다** — 97% 는 9번이다. 반올림하면 95% 가 10번이
-     * 되어 "늘 제시간" 처럼 읽힌다. 지나치게 장담하지 않는다(캡션).
-     *
-     * 100% 도 9번까지만 칠한다. 확률이 100으로 보이는 것은 소수점을 올린 결과일 뿐이고, "10번 중 10번" 은 늦는 아침이
-     * 없다는 약속처럼 읽힌다.
+     * 원 10개 중 칠할 수(그림일 뿐 숫자로 쓰지 않는다). 확률을 10% 단위로 **내린다** — 97% 는 9개다. 반올림하면 95% 가
+     * 10개가 되어 "늘 제시간" 처럼 보인다. 100% 는 서버가 100 을 준 것이므로 10개다(11-18 상한을 풀었다).
+     * 문장의 숫자는 이 값이 아니라 확률 그대로다([sentence]).
      */
-    fun timesOutOfTen(percent: Int): Int = (percent.coerceIn(0, 100) / 10).coerceAtMost(9)
+    fun timesOutOfTen(percent: Int): Int = percent.coerceIn(0, 100) / 10
 
     fun head(alarmLabel: String): String = "${alarmLabel}에 일어나면"
 
@@ -84,8 +82,13 @@ internal object OnTimeSheetText {
         val text: String get() = lead + emphasis + tail
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * "같은 아침이 100번 온다면 97번은 …". 숫자는 서버 확률 그대로다(11-18 사용자: 앱이 숫자를 만들어 넣지 않는다 —
+     * 예전 "10번 중 9번" 은 97% 를 내려 다른 숫자를 보였다).
+     */
     fun sentence(percent: Int, startLabel: String): Sentence {
-        val n = timesOutOfTen(percent)
+        val n = ProbabilityRule.displayPercent(percent)
         return if (n == 0) {
             Sentence(LEAD, "한 번도", " $startLabel 전에 도착하기 어렵다는 뜻이에요.")
         } else {
@@ -94,14 +97,9 @@ internal object OnTimeSheetText {
     }
 
     /** "오전 7:40" · "오후 12:05" · 자정은 "오전 12:00" */
-    fun clock(millis: Long, zone: ZoneId = ZoneId.systemDefault()): String {
-        val time = Instant.ofEpochMilli(millis).atZone(zone).toLocalTime()
-        val word = if (time.hour < 12) "오전" else "오후"
-        val hour = (time.hour % 12).let { if (it == 0) 12 else it }
-        return "$word $hour:%02d".format(time.minute)
-    }
+    fun clock(millis: Long, zone: ZoneId = ZoneId.systemDefault()): String = com.swpp.wakeup.domain.model.ClockText.label(millis, zone)
 
-    private const val LEAD = "같은 아침이 10번 온다면\n"
+    private const val LEAD = "같은 아침이 100번 온다면\n"
 }
 
 /**

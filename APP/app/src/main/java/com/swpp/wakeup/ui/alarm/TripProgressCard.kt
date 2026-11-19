@@ -11,6 +11,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Icon
+import com.swpp.wakeup.ui.common.LineIcons
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -83,105 +86,41 @@ fun TripProgressCard(
     /** "도착했어요". null 이면 그리지 않는다. 가는 중일 때만 보인다([TripStage.canMarkArrived]) */
     onArrive: (() -> Unit)? = null,
 ) {
-    JitCard(padding = 14.dp, gap = 8.dp) {
-        Text("개인 진행률", color = JitColor.TextSecondary, fontSize = 11.sp)
-
-        ProgressRow(
-            nickname = nickname,
-            initials = initials,
-            stage = stage,
-            progress = progress,
-            outlook = outlook,
-            arrivalAt = arrivalAt,
-        )
-
-        // 바 아래는 **한 줄만** 쓴다. 경로 이탈이 가장 급하고, 그다음이 위치가
-        // 얼마나 낡았는지, 마지막이 왜 진행률이 없는지다.
-        val note = when {
-            progress != null && !progress.onRoute ->
-                "경로에서 ${progress.offRouteLabel} 떨어져 있어요. 다른 길로 가는 중이면 " +
-                    "진행률을 계산할 수 없어요" to JitColor.Amber
-
-            freshness != null -> freshness to JitColor.TextSecondary
-            else -> stageHint(stage) to JitColor.TextSecondary
-        }
-        Text(text = note.first, color = note.second, fontSize = 10.sp)
-
-        // GPS 가 도착을 못 잡았을 때의 보조(todo §2 "도착 판정 버튼", Figma ④-c `471:9`).
-        // 도착이 확인되면 단계가 ARRIVED 로 바뀌어 사라진다.
-        if (onArrive != null && stage.canMarkArrived) {
+    // 11-17 사용자: 바뀐 UI(④ · 알람 추가 시트)와 맞춘다 — 카드 여백 16, 제목 13sp 굵게, 본문 12sp, 막대는 ④ 와 같은
+    // 높이 10 · 둥근 끝, 버튼은 회색 채움, 높이는 최소값만.
+    val accent = rowColor(stage, progress, outlook)
+    val ratio = fillRatio(stage, progress)
+    JitCard(padding = 16.dp, gap = 12.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = "도착했어요",
-                color = JitColor.Accent,
+                "내 이동",
+                color = JitColor.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            // 칩은 판단이 있을 때만(정시 · +4분 · 경로 이탈). 없으면 오른쪽 시각 아래 말과 겹치므로 두지 않는다.
+            val verdict = trailingLine(stage, progress, outlook).takeIf { outlook != null || (progress != null && !progress.onRoute) }
+            if (verdict != null) Text(
+                text = verdict,
+                color = if (accent != JitColor.Track) accent else JitColor.TextSecondary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .testTag("trip_arrive")
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(role = Role.Button, onClick = onArrive)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-            )
-            Text(
-                text = "도착이 확인되면 사라져요. 이동 알림에도 같은 버튼이 있어요",
-                color = JitColor.TextSecondary,
-                fontSize = 9.sp,
+                    .clip(RoundedCornerShape(999.dp))
+                    .background((if (accent == JitColor.Track) JitColor.Surface2 else accent.copy(alpha = 0.15f)))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
             )
         }
-    }
-}
 
-/**
- * 진행 바 한 줄.
- *
- * 왼쪽부터 아바타 · 이름 · 상태, 오른쪽에 도착 시각 · 지각 전망이다. 바탕의
- * 채움이 진행률이라 **글씨가 채움 위에 얹힌다** — 그래서 채움을 불투명하게 두지
- * 않는다. 불투명하면 경계를 넘는 글자의 대비가 급변해 읽기 어려워진다.
- */
-@Composable
-private fun ProgressRow(
-    nickname: String,
-    initials: String,
-    stage: TripStage,
-    progress: RouteProgress?,
-    outlook: ArrivalOutlook?,
-    arrivalAt: String?,
-) {
-    val accent = rowColor(stage, progress, outlook)
-    val ratio = fillRatio(stage, progress)
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(ROW_HEIGHT)
-            .clip(RoundedCornerShape(12.dp))
-            .background(JitColor.Surface2)
-            .border(1.5.dp, accent, RoundedCornerShape(12.dp)),
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth(ratio)
-                .fillMaxHeight()
-                .background(accent.copy(alpha = 0.2f))
-        )
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight()
-                .padding(horizontal = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Avatar(initials = initials, color = accent)
-            Spacer(Modifier.width(9.dp))
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
                     text = nickname,
                     color = JitColor.TextPrimary,
-                    fontSize = 13.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -190,54 +129,102 @@ private fun ProgressRow(
                     text = statusLine(stage, progress),
                     modifier = Modifier.testTag("trip_status"),
                     color = if (accent == JitColor.Track) JitColor.TextSecondary else accent,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-
-            Spacer(Modifier.width(6.dp))
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    // 도착 시각을 모르면 자리만 비운다. 지어낸 시각을 넣으면
-                    // 사용자가 그 시각을 기준으로 움직인다.
+                    // 도착 시각을 모르면 자리만 비운다. 지어낸 시각을 넣으면 사용자가 그 시각을 기준으로 움직인다.
                     text = arrivalAt ?: "—",
                     modifier = Modifier.testTag("trip_arrival_time"),
                     color = JitColor.TextPrimary,
-                    fontSize = 14.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                 )
                 Text(
-                    text = trailingLine(stage, progress, outlook),
-                    // 지각 분수는 색을 함께 쓴다. 이 줄이 색의 근거다.
-                    color = if (outlook != null && accent != JitColor.Track) {
-                        accent
-                    } else {
-                        JitColor.TextSecondary
+                    text = when {
+                        stage == TripStage.ARRIVED -> "도착"
+                        outlook != null -> "예상 도착"
+                        else -> "도착 예정"
                     },
-                    fontSize = 9.sp,
-                    fontWeight = if (outlook != null) FontWeight.Bold else FontWeight.Normal,
+                    color = JitColor.TextSecondary,
+                    fontSize = 11.sp,
                     textAlign = TextAlign.End,
                     maxLines = 1,
+                )
+            }
+        }
+
+        // 진행 막대(④ 근거 막대와 같은 높이 10 · 둥근 끝). 채움이 경로를 따라 온 거리다. 못 재면 비워 둔다.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(JitColor.Track)
+                .testTag("trip_bar"),
+        ) {
+            if (ratio > 0f) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(ratio)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(if (accent == JitColor.Track) JitColor.TextSecondary else accent),
+                )
+            }
+        }
+
+        // 막대 아래는 한 줄만. 경로 이탈이 가장 급하고, 그다음이 위치가 얼마나 낡았는지, 마지막이 왜 진행률이 없는지다.
+        val note = when {
+            progress != null && !progress.onRoute ->
+                "경로에서 ${progress.offRouteLabel} 떨어져 있어요. 다른 길로 가는 중이면 " +
+                    "진행률을 계산할 수 없어요" to JitColor.Amber
+
+            freshness != null -> freshness to JitColor.TextSecondary
+            else -> stageHint(stage) to JitColor.TextSecondary
+        }
+        Text(text = note.first, color = note.second, fontSize = 12.sp)
+
+        // GPS 가 도착을 못 잡았을 때의 보조(todo §2 "도착 판정 버튼"). 도착이 확인되면 단계가 ARRIVED 로 바뀌어 사라진다.
+        // HE 2-6: 가벼운 동작은 꽉 찬 주황을 쓰지 않는다 — 회색 채움.
+        if (onArrive != null && stage.canMarkArrived) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier
+                        .testTag("trip_arrive")
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(JitColor.Surface2)
+                        .clickable(role = Role.Button, onClick = onArrive),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(LineIcons.check, contentDescription = null, tint = JitColor.TextPrimary, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("도착했어요", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    text = "도착이 확인되면 사라져요. 이동 알림에도 같은 버튼이 있어요",
+                    color = JitColor.TextSecondary,
+                    fontSize = 11.sp,
                 )
             }
         }
     }
 }
 
-/** 진행 바 높이. 두 줄 글씨와 34dp 아바타가 들어가는 최소값이다 */
-private val ROW_HEIGHT = 52.dp
-
 @Composable
 private fun Avatar(initials: String, color: Color) {
     Box(
         modifier = Modifier
-            .size(34.dp)
+            .size(36.dp)
             .clip(CircleShape)
             .background(color),
         contentAlignment = Alignment.Center,
@@ -246,7 +233,7 @@ private fun Avatar(initials: String, color: Color) {
             text = initials,
             // 밝은 원 위에는 어두운 글씨. Track 은 어두우므로 반대로 간다.
             color = if (color == JitColor.Track) JitColor.TextPrimary else JitColor.Bg,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             style = JitTextStyle.TightCentered,
             maxLines = 1,
@@ -338,7 +325,7 @@ internal fun stageHint(stage: TripStage): String = when (stage) {
     TripStage.BEFORE_ALARM -> "알람이 울리면 이동 기록을 시작해요"
     TripStage.PREPARING -> "집을 나서면 이동 거리가 보여요"
     TripStage.IN_TRANSIT -> "위치를 아직 받지 못했어요"
-    TripStage.ARRIVED -> "도착함"
+    TripStage.ARRIVED -> "도착했어요"
     // 지난 일정이다. "추적이 시작됨" 같은 앞날 이야기를 하면 안 된다.
     TripStage.PAST -> "일정 시각이 지났고 이동 기록이 없어요"
     // Partly AI-generated (Claude) — 추적은 알람을 끌 때 시작한다. 울리지 않으면 기록도 없다.

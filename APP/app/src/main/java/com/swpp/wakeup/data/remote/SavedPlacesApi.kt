@@ -49,6 +49,14 @@ data class SavedPlacesListDto(
     val default: SavedPlaceDto? = null,
     val results: List<SavedPlaceDto>? = null,
     val skipped: List<SavedPlaceSkippedDto>? = null,
+    /** `bulk` 가 이름이 겹쳐 번호를 붙여 저장한 항목(BE-H9). 구버전 서버면 null */
+    val renamed: List<SavedPlaceRenamedDto>? = null,
+)
+
+data class SavedPlaceRenamedDto(
+    @SerializedName("client_uuid") val clientUuid: String? = null,
+    val label: String? = null,
+    @SerializedName("requested_label") val requestedLabel: String? = null,
 )
 
 data class SavedPlaceSkippedDto(

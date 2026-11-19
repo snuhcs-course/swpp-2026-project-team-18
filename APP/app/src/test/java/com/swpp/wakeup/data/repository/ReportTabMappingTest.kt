@@ -88,12 +88,12 @@ class ReportTabMappingTest {
         assertEquals(LocalDate.of(2026, 9, 15), tuesday.date)
         assertEquals(2L, tuesday.eventId)
         assertEquals(6, tuesday.lateMinutes)
-        assertEquals("9:00", tuesday.startClock)
+        assertEquals("오전 9:00", tuesday.startClock)
         assertEquals("자료구조 및 알고리즘", tuesday.title)
 
         val wednesday = view.lateRows[1]
         assertEquals("늦었으면 최소 1분", 1, wednesday.lateMinutes)
-        assertEquals("14:30", wednesday.startClock)
+        assertEquals("오후 2:30", wednesday.startClock)
         assertEquals("제목이 비면 '일정'", "일정", wednesday.title)
     }
 

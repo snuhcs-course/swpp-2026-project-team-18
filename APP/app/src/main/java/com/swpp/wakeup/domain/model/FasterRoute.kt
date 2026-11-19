@@ -22,8 +22,11 @@ data class FasterRouteOffer(
 
 /** 알람 전 "더 빠른 경로로 바꾸기" 판정과 문구. 순수 함수다(JVM 테스트 대상). */
 object FasterRoute {
-    /** 이보다 적게 빠르면 제안하지 않는다(경로를 바꿀 만한 차이가 아니다) */
-    const val MIN_FASTER_MINUTES = 5
+    /**
+     * 이보다 적게 빠르면 제안하지 않는다. 서버가 대안을 붙이는 기준(1분 이상 빠름)과 같다 — 지도에는 대안 선이
+     * 그려지는데 버튼은 없던 어긋남을 없앴다(11-17 사용자: "더 빠른 경로가 있을 때 바꿀 버튼이 없음").
+     */
+    const val MIN_FASTER_MINUTES = 1
 
     /**
      * 제안할 수 있으면 제안, 아니면 null.

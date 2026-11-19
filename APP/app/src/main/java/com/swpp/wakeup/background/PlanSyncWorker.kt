@@ -70,6 +70,7 @@ class PlanSyncWorker(
                             Log.i(TAG, "알람 동기화 완료: 후보 ${data.schedules.size}건")
                         }
                         .onFailure { Log.e(TAG, "알람 등록 실패", it) }
+                    runCatching { com.swpp.wakeup.alarm.ProposalHeadsUp.notifyNew(applicationContext, data.events) }
                     Result.success()
                 } else {
                     // 캐시로 채워진 성공이다. 서버에 닿지 못했다는 뜻이므로

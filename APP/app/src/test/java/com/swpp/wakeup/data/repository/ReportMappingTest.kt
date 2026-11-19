@@ -184,8 +184,8 @@ class ReportMappingTest {
         assertEquals(OutcomeResult.LATE, morning.result)
         assertEquals("10분 지각", morning.headline)
         assertNull(morning.headlineNote)
-        assertEquals("09:00 자료구조", morning.chipLabel)
-        assertEquals("09:00 자료구조 · 알람 7:40", morning.contextLine)
+        assertEquals("오전 9:00 자료구조", morning.chipLabel)
+        assertEquals("오전 9:00 자료구조 · 알람 오전 7:40", morning.contextLine)
         assertEquals("앱이 본 정시 확률 90%", morning.confidenceLine)
         assertTrue("이 주 지각이 이것 하나뿐이다", morning.isOnlyLateOfWeek)
         assertEquals(0.9, morning.tauBucketLower!!, 1e-9)
@@ -203,8 +203,8 @@ class ReportMappingTest {
 
         assertEquals("출발", depart.label)
         assertEquals(RowKind.TIME, depart.kind)
-        assertEquals("계획 8:08", depart.plannedLabel)
-        assertEquals("실제 8:15", depart.actualLabel)
+        assertEquals("계획 오전 8:08", depart.plannedLabel)
+        assertEquals("실제 오전 8:15", depart.actualLabel)
         assertEquals("+7분", depart.deltaLabel)
 
         assertEquals("이동", travel.label)
@@ -213,8 +213,8 @@ class ReportMappingTest {
         assertEquals(1f, travel.actualFraction!!, 1e-4f)
 
         val arrival = morning.arrival!!
-        assertEquals("계획 8:50", arrival.plannedLabel)
-        assertEquals("실제 9:10", arrival.actualLabel)
+        assertEquals("계획 오전 8:50", arrival.plannedLabel)
+        assertEquals("실제 오전 9:10", arrival.actualLabel)
         assertEquals(Tone.BAD, arrival.actualTone)
         assertEquals("", arrival.deltaLabel)
 
@@ -231,7 +231,7 @@ class ReportMappingTest {
         assertEquals(OutcomeResult.UNOBSERVED, morning.result)
         assertEquals("도착 기록 없음", morning.headline)
         assertEquals("도착을 기록하지 못해 채점하지 않았어요", morning.headlineNote)
-        assertEquals("10:00 실험 · 알람 8:35", morning.contextLine)
+        assertEquals("오전 10:00 실험 · 알람 오전 8:35", morning.contextLine)
         assertEquals("적용 τ 0.90", morning.confidenceLine)
         assertNull(morning.cause)
         assertFalse(morning.isOnlyLateOfWeek)
@@ -243,10 +243,10 @@ class ReportMappingTest {
         assertEquals(1f, prep.plannedFraction!!, 1e-4f)
         assertEquals("측정 안 됨", prep.deltaLabel)
         assertEquals(Tone.UNKNOWN, prep.deltaTone)
-        assertEquals("계획 9:15", depart.plannedLabel)
+        assertEquals("계획 오전 9:15", depart.plannedLabel)
         assertNull(depart.actualLabel)
         assertEquals("계획 35분", travel.plannedLabel)
-        assertEquals("계획 9:50", morning.arrival!!.plannedLabel)
+        assertEquals("계획 오전 9:50", morning.arrival!!.plannedLabel)
         assertNull(morning.arrival!!.actualLabel)
     }
 
@@ -271,7 +271,7 @@ class ReportMappingTest {
 
         val thursday = days[3].outcomes.single()
         assertEquals("9분 전 도착", thursday.headline)
-        assertEquals("09:00 아주 긴 일정…", thursday.chipLabel)
+        assertEquals("오전 9:00 아주 긴 일정…", thursday.chipLabel)
         val travel = thursday.rows[2]
         assertEquals("${MINUS}1분", travel.deltaLabel)
         assertEquals(Tone.GOOD, travel.deltaTone)
@@ -559,7 +559,7 @@ class ReportMappingTest {
                  "date":"2026-10-05","result":"unobserved","alarm_on":false,
                  "planned":{"alarm_at":"2026-10-05T04:40:00Z"}}]}"""
         ).days[0].outcomes.single()
-        assertEquals("15:00 동아리 · 알람 꺼짐", morning.contextLine)
+        assertEquals("오후 3:00 동아리 · 알람 꺼짐", morning.contextLine)
         assertEquals("알람이 울리지 않은 일정이라 출발·도착을 기록하지 않았어요", morning.headlineNote)
     }
 

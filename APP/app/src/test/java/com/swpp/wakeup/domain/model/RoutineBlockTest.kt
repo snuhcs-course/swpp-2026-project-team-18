@@ -84,8 +84,6 @@ class ConfidenceViewTest {
     private fun confidence(percent: Int?) = ConfidenceView(
         percent = percent,
         headline = "headline",
-        reason = null,
-        action = null,
     )
 
     @Test
@@ -197,14 +195,14 @@ class RoutineEditorStateTest {
                 block(3, min = 30, max = 40, checked = false),
             ),
         )
-        assertEquals("단순 합 15~25분", state.simpleSumLabel)
+        assertEquals("더하면 15~25분", state.simpleSumLabel)
         assertEquals(2, state.includedCount)
     }
 
     @Test
     fun `범위가 한 점이면 물결표를 쓰지 않는다`() {
         val state = RoutineEditorState(blocks = listOf(block(1, min = 7, max = 7)))
-        assertEquals("단순 합 7분", state.simpleSumLabel)
+        assertEquals("더하면 7분", state.simpleSumLabel)
     }
 
     @Test

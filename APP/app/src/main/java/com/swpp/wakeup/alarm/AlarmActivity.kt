@@ -239,20 +239,26 @@ private fun AlarmRingingScreen(
                     fontSize = 14.sp,
                 )
                 Spacer(Modifier.height(10.dp))
+                // "오전 7:32" — 앱 전체 표기와 같게 오전/오후를 앞에(11-18, 예전에는 "7:32 AM" · 오후는 "17:50 PM")
+                val (word, digits) = com.swpp.wakeup.domain.model.ClockText.split(schedule.alarmLabel, schedule.meridiem)
+                    ?: ("" to schedule.alarmLabel)
                 Row(verticalAlignment = Alignment.Bottom) {
+                    if (word.isNotEmpty()) {
+                        Text(
+                            text = word,
+                            color = JitColor.TextSecondary,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 12.dp).testTag("alarm_meridiem"),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
                     Text(
-                        text = schedule.alarmLabel,
+                        text = digits,
                         color = JitColor.TextPrimary,
                         fontSize = 68.sp,
                         fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = schedule.meridiem,
-                        color = JitColor.TextSecondary,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 12.dp),
+                        modifier = Modifier.testTag("alarm_clock"),
                     )
                 }
             }

@@ -45,7 +45,7 @@ class AlarmDecisionLogicTest {
         onTimeProbability = 90,
         tauUsed = tau,
         tauSourceLabel = tauSource,
-        confidence = ConfidenceView(percent = 90, headline = "정시 도착 확률 90%", reason = null, action = null),
+        confidence = ConfidenceView(percent = 90, headline = "정시 도착 확률 90%"),
         breakdown = listOf(
             PlanRow("준비 시간", prep, null, PlanRow.Kind.PREP),
             PlanRow("이동", travel, null, PlanRow.Kind.TRAVEL),
@@ -74,18 +74,16 @@ class AlarmDecisionLogicTest {
     @Test
     fun `알약 글자 - 추천 칸 · 다른 칸 · 직접 정한 시각`() {
         assertEquals(AlarmDecisionLogic.Pill("추천", AlarmDecisionLogic.PillKind.RECOMMENDED), AlarmDecisionLogic.pill(plan()))
-        // 사용자가 τ 를 직접 골랐으면 추천은 보통 — 여유 있게를 골랐으면 그 이름
+        // 사용자가 세 칸 중 하나를 골랐으면 그 칸 이름(추천 칸을 짐작하지 않는다, BE-H3e)
         assertEquals(
             AlarmDecisionLogic.Pill("여유 있게", AlarmDecisionLogic.PillKind.PRESET),
             AlarmDecisionLogic.pill(plan(tau = .97, tauSource = AlarmTimeChoice.MANUAL_TAU_SOURCE)),
         )
-        assertEquals("빠듯하게", AlarmDecisionLogic.pill(plan(tau = .65, tauSource = AlarmTimeChoice.MANUAL_TAU_SOURCE)).text)
+        assertEquals("빠듯하게", AlarmDecisionLogic.pill(plan(tau = .65, tauSource = AlarmTimeChoice.MANUAL_TAU_SOURCE))?.text)
+        assertEquals("보통", AlarmDecisionLogic.pill(plan(tau = .90, tauSource = AlarmTimeChoice.MANUAL_TAU_SOURCE))?.text)
         // 종류 기본값(세 칸에 없는 τ)은 그 일정의 추천이다
-        assertEquals("추천", AlarmDecisionLogic.pill(plan(tau = .95, tauSource = "시험 일정 기본값")).text)
-        assertEquals(
-            AlarmDecisionLogic.Pill("직접 정한 시각", AlarmDecisionLogic.PillKind.USER),
-            AlarmDecisionLogic.pill(plan(userAlarm = true)),
-        )
+        assertEquals("추천", AlarmDecisionLogic.pill(plan(tau = .95, tauSource = "시험 일정 기본값"))?.text)
+        assertNull("직접 정한 시각에는 알약을 달지 않는다(11-18)", AlarmDecisionLogic.pill(plan(userAlarm = true)))
     }
 
     @Test
@@ -129,10 +127,10 @@ class AlarmDecisionLogicTest {
 
     @Test
     fun `알람 상태 한 줄 - 확인함 · 울림 · 꺼짐 · 해당 없음`() {
-        assertEquals(AlarmDecisionLogic.AlarmStatus("알람이 맞춰져 있어요", confirmed = true), AlarmDecisionLogic.alarmStatus(plan(confirmed = true), zone))
-        assertEquals(AlarmDecisionLogic.AlarmStatus("오전 8:25에 알람이 울려요"), AlarmDecisionLogic.alarmStatus(plan(confirmed = false), zone))
-        // 확인을 모르는 서버(필드 없음)도 울리는 시각만 말한다
-        assertEquals(AlarmDecisionLogic.AlarmStatus("오전 8:25에 알람이 울려요"), AlarmDecisionLogic.alarmStatus(plan(confirmed = null), zone))
+        assertNull("확인한 알람에도 상태 줄을 달지 않는다(11-18)", AlarmDecisionLogic.alarmStatus(plan(confirmed = true), zone))
+        // "…에 알람이 울려요" 는 큰 시각과 같은 말이라 두지 않는다(11-17 사용자)
+        assertNull(AlarmDecisionLogic.alarmStatus(plan(confirmed = false), zone))
+        assertNull(AlarmDecisionLogic.alarmStatus(plan(confirmed = null), zone))
         assertEquals("알람이 꺼져 있어요. 홈에서 켤 수 있어요", AlarmDecisionLogic.alarmStatus(plan(alarmOn = false), zone)?.text)
         assertNull(AlarmDecisionLogic.alarmStatus(plan(skipped = true), zone))
         assertNull(AlarmDecisionLogic.alarmStatus(plan(alarmPassed = true), zone))

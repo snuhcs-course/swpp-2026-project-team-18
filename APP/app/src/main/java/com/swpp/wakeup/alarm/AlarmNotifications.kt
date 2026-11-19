@@ -40,6 +40,11 @@ object AlarmNotifications {
      */
     const val CHANNEL_REROUTE = "jit.reroute"
 
+    /** "알람을 바꿀까요?" 제안 · 마감에 바꿨다는 알림(BE-H3d). 헤드업 */
+    const val CHANNEL_PROPOSAL = "jit.proposal"
+    private const val NOTIFICATION_PROPOSAL_BASE = 5_000
+    private const val REQUEST_PROPOSAL_OPEN = 3_005
+
     /** 알람 알림 id. 한 번에 하나만 울리므로 고정값을 쓴다. */
     const val NOTIFICATION_ALARM = 1001
 
@@ -131,6 +136,47 @@ object AlarmNotifications {
                 vibrationPattern = longArrayOf(0, 250, 150, 250)
             }
         )
+
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_PROPOSAL,
+                "알람 바꾸기 제안",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "길이나 준비 시간이 바뀌어 알람을 옮기는 게 좋을 때 알려 드려요"
+                setSound(null, null)
+                enableVibration(true)
+            }
+        )
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * "알람을 바꿀까요?" 헤드업 · 마감에 기기가 바꿨다는 알림(BE-H3d). 누르면 그 일정의 ④ 로 간다 — 거기서 답한다.
+     * 일정마다 한 장(같은 id 로 덮는다).
+     */
+    fun postProposal(context: Context, eventId: Long, title: String, text: String) {
+        ensureChannels(context)
+        val open = PendingIntent.getActivity(
+            context,
+            REQUEST_PROPOSAL_OPEN + eventId.toInt(),
+            com.swpp.wakeup.MainActivity.eventIntent(context, eventId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_PROPOSAL)
+            .setSmallIcon(R.drawable.ic_notification_alarm)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        runCatching {
+            androidx.core.app.NotificationManagerCompat.from(context)
+                .notify(NOTIFICATION_PROPOSAL_BASE + eventId.toInt(), notification)
+        }
     }
 
     // Partly AI-generated (Claude)
@@ -188,7 +234,7 @@ object AlarmNotifications {
 
         return NotificationCompat.Builder(context, CHANNEL_ALARM)
             .setSmallIcon(R.drawable.ic_notification_alarm)
-            .setContentTitle("${schedule.alarmLabel} ${schedule.meridiem} · 지금 일어날 시각")
+            .setContentTitle("${com.swpp.wakeup.domain.model.ClockText.label(schedule.alarmLabel, schedule.meridiem) ?: schedule.alarmLabel} · 지금 일어날 시각")
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_MAX)

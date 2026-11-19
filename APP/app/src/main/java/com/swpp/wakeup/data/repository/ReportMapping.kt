@@ -49,8 +49,6 @@ import java.time.temporal.ChronoUnit
  */
 
 private val RANGE_FORMAT = DateTimeFormatter.ofPattern("M월 d일")
-private val START_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
-private val TIME_FORMAT = DateTimeFormatter.ofPattern("H:mm")
 private val WEEKDAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 
 /** 음수 부호. 하이픈(-)은 숫자 옆에서 짧아 보여 놓치기 쉽다. */
@@ -89,7 +87,7 @@ private fun parseInstant(raw: String?): Instant? =
     raw?.let { runCatching { Instant.parse(it.trim()) }.getOrNull() }
 
 private fun clock(raw: String?, zone: ZoneId): String? =
-    parseInstant(raw)?.atZone(zone)?.format(TIME_FORMAT)
+    parseInstant(raw)?.atZone(zone)?.let { com.swpp.wakeup.domain.model.ClockText.label(it) }
 
 private fun weekdayName(date: LocalDate): String = WEEKDAY_NAMES[date.dayOfWeek.value - 1]
 
@@ -492,7 +490,7 @@ internal fun OutcomeDto.toMorning(zone: ZoneId, weekLateCount: Int): MorningOutc
         // 모르는 값은 기록 없음으로 본다. 정시로 세면 정시율을 부풀린다.
         else -> OutcomeResult.UNOBSERVED
     }
-    val startLabel = parseInstant(startAt)?.atZone(zone)?.format(START_FORMAT)
+    val startLabel = parseInstant(startAt)?.atZone(zone)?.let { com.swpp.wakeup.domain.model.ClockText.label(it) }
     val name = title?.trim()?.takeIf { it.isNotEmpty() } ?: "일정"
     val shortName = if (name.length > CHIP_TITLE_MAX) {
         name.take(CHIP_TITLE_MAX).trimEnd() + "…"

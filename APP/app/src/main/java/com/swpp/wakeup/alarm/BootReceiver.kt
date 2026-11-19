@@ -33,6 +33,10 @@ class BootReceiver : BroadcastReceiver() {
         Log.i(TAG, "$action → 알람 ${restored}건 재등록")
         // 주간 리포트 알림도 다시 건다. 시간대가 바뀌면 그 시간대의 일요일 12:00 으로 맞춘다. (Partly AI-generated (Claude))
         WeeklyReportReminder.scheduleNext(context)
+        // 재부팅 · 앱 업데이트로 끊긴 추적을 앱을 열지 않고 잇는다(11-17). 이 두 방송은 포그라운드 서비스 시작이 허용된다.
+        if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            com.swpp.wakeup.sensing.TripWatchdog.resumeIfCut(context.applicationContext, action)
+        }
     }
 
     private companion object {

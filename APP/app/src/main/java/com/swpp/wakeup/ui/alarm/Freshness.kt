@@ -27,6 +27,25 @@ internal fun freshnessLabel(
     }
 }
 
+// Partly AI-generated (Claude)
+/**
+ * 진행 카드 아래 줄의 위치 상태(11-18 사용자: 이동은 기록되는데 "위치를 아직 받지 못했어요" 가 오래 떠 있었다).
+ *
+ * 위치는 GPS 라 네트워크 없이도 잡히고, 기록은 기기에 쌓였다가 연결되면 올라간다 — 네트워크는 이 줄과 상관없다.
+ * 예전에는 "2분 안 · 오차 50m 안" 의 위치만 보고, 그런 위치가 없으면(지하철 · 건물 안) 이 이동에서 위치를 한 번도
+ * 못 받은 것처럼 "아직 받지 못했어요" 라고 했다. 이제 셋을 나눈다.
+ * - 이 이동의 위치가 아직 하나도 없다 → null(화면은 단계 안내 "위치를 아직 받지 못했어요")
+ * - 쓸 만한 새 위치가 있다 → "방금 갱신" / "40초 전 갱신"
+ * - 받긴 했지만 오래됐거나 흐리다 → "5분 전 갱신 · 지하나 건물 안에서는 위치가 늦게 잡혀요"
+ */
+internal fun liveNote(lastFixAtMillis: Long?, usable: Boolean, nowMillis: Long = System.currentTimeMillis()): String? {
+    val at = lastFixAtMillis ?: return null
+    val age = freshnessLabel(at, nowMillis) ?: return null
+    return if (usable) age else "$age · $WEAK_SIGNAL_NOTE"
+}
+
+internal const val WEAK_SIGNAL_NOTE = "지하나 건물 안에서는 위치가 늦게 잡혀요"
+
 /**
  * epoch ms 를 진행 바에 쓰는 "8:50" 으로.
  *
@@ -39,11 +58,8 @@ internal fun freshnessLabel(
 internal fun arrivalClockLabel(
     millis: Long,
     zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
-): String = java.time.Instant.ofEpochMilli(millis)
-    .atZone(zone)
-    .format(CLOCK_FORMAT)
+): String = com.swpp.wakeup.domain.model.ClockText.label(millis, zone)
 
-private val CLOCK_FORMAT = java.time.format.DateTimeFormatter.ofPattern("H:mm")
 
 /**
  * 이 계획을 계산한 지 얼마나 됐는지. "12분 전 계산"

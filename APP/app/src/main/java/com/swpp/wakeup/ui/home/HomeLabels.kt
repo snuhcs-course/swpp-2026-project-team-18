@@ -60,11 +60,7 @@ internal object HomeLabels {
     }
 
     /** "AM"/"PM" → "오전"/"오후". 모르면 null */
-    fun koreanMeridiem(ampm: String?): String? = when (ampm) {
-        "AM" -> "오전"
-        "PM" -> "오후"
-        else -> null
-    }
+    fun koreanMeridiem(ampm: String?): String? = com.swpp.wakeup.domain.model.ClockText.meridiemOf(ampm)
 
     /** "9:00AM" → ("9:00", "AM"). 붙은 말이 없으면("09:00") 두 번째가 null */
     fun splitClock(clock: String): Pair<String, String?> = when {
@@ -73,10 +69,10 @@ internal object HomeLabels {
         else -> clock.trim() to null
     }
 
-    /** 일정 줄 왼쪽의 시작 시각. "9:00AM" → "9:00 AM" */
+    /** 일정 줄 왼쪽의 시작 시각. "9:00AM" → "오전 9:00"(11-18 표기 통일, 예전에는 "9:00 AM") */
     fun rowStartClock(startClock: String): String {
         val (clock, ampm) = splitClock(startClock)
-        return if (ampm == null) clock else "$clock $ampm"
+        return com.swpp.wakeup.domain.model.ClockText.label(clock, ampm) ?: clock
     }
 
     /**

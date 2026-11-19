@@ -478,6 +478,18 @@ fun AddEventScreen(
             onClick = onPickRoute,
             tag = "route_field",
         )
+        // 앱이 자동으로 채운 경로임을 숨기지 않는다(C8). 경로 선택 화면에서 고르면 사라진다.
+        state.routeAutoCaption?.takeIf { state.routeLabel != null }?.let {
+            Text(
+                text = it,
+                color = JitColor.Accent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("route_auto"),
+            )
+        }
         state.fieldErrors[AddField.ROUTE]?.let { EndpointError(it, tag = "route_error") }
 
         // 선택 칸: 제목 → 반복 요일 → 종류

@@ -129,14 +129,14 @@ data class RoutineEditorState(
 ) {
     val includedCount: Int get() = blocks.count { it.checked }
 
-    /** "단순 합 42~68분". 포함된 블록만 더한다 */
+    /** "더하면 42~68분". 포함된 블록만 단순히 더한다(11-17: 내부 용어 "단순 합" 대신 해요체 화면 말) */
     val simpleSumLabel: String?
         get() {
             val included = blocks.filter { it.checked }
             if (included.isEmpty()) return null
             val lo = included.sumOf { it.minMinutes }
             val hi = included.sumOf { it.maxMinutes }
-            return if (lo == hi) "단순 합 ${lo}분" else "단순 합 ${lo}~${hi}분"
+            return if (lo == hi) "더하면 ${lo}분" else "더하면 ${lo}~${hi}분"
         }
 
     val isEventMode: Boolean get() = eventId != null
@@ -173,7 +173,7 @@ data class BlockDraft(
 ) {
     val isNew: Boolean get() = id == null
 
-    val title: String get() = if (isNew) "블록 추가" else "블록 수정"
+    val title: String get() = if (isNew) "항목 추가" else "항목 수정"
 
     /**
      * 저장 가능한지. 화면이 버튼을 잠그는 데 쓴다.

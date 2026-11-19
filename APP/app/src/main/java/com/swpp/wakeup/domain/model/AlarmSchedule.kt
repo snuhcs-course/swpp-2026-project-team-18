@@ -62,6 +62,14 @@ data class AlarmSchedule(
      * 이전 버전이 저장한 JSON 에는 이 키가 없고 Gson 은 null 로 남긴다.
      */
     val firstAlarmAtMillis: Long? = null,
+    /**
+     * 답을 기다리는 "바꿀까요" 제안의 시각과 마감(BE-H3d). 마감까지 답이 없으면 기기가 더 이른 쪽으로 다시 건다
+     * ([com.swpp.wakeup.domain.model.AlarmProposalRule.settledAlarm]). 제안이 없으면 null. 예전 JSON 에는 없다.
+     */
+    val proposedAlarmAtMillis: Long? = null,
+    val proposalAnswerByMillis: Long? = null,
+    /** 제안 이유 문장(서버 `reason_text`). 마감에 바꿨다고 알릴 때 쓴다 */
+    val proposalReason: String? = null,
 ) {
     // Partly AI-generated (Claude)
     /**

@@ -100,6 +100,8 @@ class RouteRefreshWorker(
                 if (SyncDecision.shouldResyncAlarms(true, fromCache = data.fromCache)) {
                     runCatching { AlarmScheduler(applicationContext).sync(data.schedules) }
                         .onFailure { Log.e(TAG, "알람 등록 실패", it) }
+                    // 새 "바꿀까요" 제안이 생겼으면 앱이 꺼져 있을 때 헤드업(BE-H3d)
+                    runCatching { com.swpp.wakeup.alarm.ProposalHeadsUp.notifyNew(applicationContext, data.events) }
                     Log.i(TAG, "경로 갱신 ${refreshed}건, 알람 재등록 완료")
                     Result.success()
                 } else {

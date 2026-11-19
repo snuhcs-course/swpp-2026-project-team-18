@@ -34,6 +34,14 @@ object LocationPermissions {
             Manifest.permission.ACCESS_FINE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
 
+    // Partly AI-generated (Claude)
+    /** 위치 "항상 허용". 앱이 꺼진 뒤 스스로 다시 띄운 추적이 위치를 받으려면 필요하다(11-17) */
+    fun backgroundGranted(context: Context): Boolean =
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+
     /** 대략 위치만 있는 상태. 화면이 "정밀 위치가 필요하다" 고 안내할 때 쓴다. */
     fun coarseOnly(context: Context): Boolean =
         !granted(context) &&

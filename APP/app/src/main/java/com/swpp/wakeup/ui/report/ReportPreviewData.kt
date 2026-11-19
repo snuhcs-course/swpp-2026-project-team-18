@@ -150,10 +150,11 @@ internal object ReportPreviewData {
         ),
         learning = LearningDto(planCount = 7, prepFromRecords = 2, travelFromRecords = 3),
         outcomes = exampleOutcomes,
+        // 서버 템플릿(해요체, PROMPT_VERSION 4)과 같은 모양의 예시 문장
         summary = "이 주 일정 7건 중 도착을 기록한 6번에서 5번 정시 도착해 정시율 83%로 목표 90%에 " +
-            "못 미쳤음. 지각 1번은 이동이 계획보다 오래 걸린 것 때문이었고 화요일에 10분 늦었음. " +
-            "지난주 60%보다 23%p 올랐음. 이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 " +
-            "보거나 몇 분 일찍 나서 볼 것.",
+            "못 미쳤어요. 지각 1번은 이동이 계획보다 오래 걸렸기 때문이었고 화요일에 10분 늦었어요. " +
+            "지난주 60%보다 23%p 올랐어요. 이동이 계획보다 길어지는 날이 있었으니 다른 경로를 골라 " +
+            "보거나 몇 분 일찍 나서 보세요.",
         summarySource = WeeklyReportDto.SOURCE_LLM,
         wake = WeeklyWakeDto(
             alarmsFired = 6, snoozeCount = 3, snoozedAlarms = 2, wakeSecondsMedian = 85.0,
@@ -185,8 +186,8 @@ internal object ReportPreviewData {
                 probability = null,
             )
         },
-        summary = "이 주 일정 3건 모두 도착 기록이 없어 정시 여부를 채점하지 못했음. " +
-            "위치 권한을 켜 두고 알람을 해제한 뒤 이동하면 출발·도착이 자동으로 기록됨.",
+        summary = "이 주 일정 3건 모두 도착 기록이 없어 제때 도착했는지 알 수 없어요. " +
+            "위치 권한을 켜 두고 알람을 해제한 뒤 이동하면 출발·도착이 자동으로 기록돼요.",
         summarySource = WeeklyReportDto.SOURCE_TEMPLATE,
     ).toView(SEOUL)
 

@@ -56,6 +56,18 @@ interface EventsApi {
     @DELETE("api/events/{id}/alarm/time")
     suspend fun clearAlarmTime(@Path("id") id: Long): Response<EventDto>
 
+    // Partly AI-generated (Claude)
+    /**
+     * "바꿀까요" 제안 받아들이기(BE-H3d). 받은 `proposed_alarm_at` 을 보내면 그새 제안이 바뀌었을 때 409
+     * `alarm_proposal_changed`. 마감이 지났으면 409 `alarm_proposal_expired`, 제안이 없으면 409 `no_alarm_proposal`
+     */
+    @POST("api/events/{id}/alarm/proposal/accept")
+    suspend fun acceptAlarmProposal(@Path("id") id: Long, @Body body: AlarmProposalAnswer): Response<EventDto>
+
+    /** "바꿀까요" 제안에 [그대로 두기] */
+    @POST("api/events/{id}/alarm/proposal/reject")
+    suspend fun rejectAlarmProposal(@Path("id") id: Long, @Body body: AlarmProposalAnswer): Response<EventDto>
+
     @POST("api/events")
     suspend fun create(@Body body: EventCreateRequest): Response<EventDto>
 
@@ -679,6 +691,8 @@ data class AlarmPlanDto(
     /** 울릴 시각을 사용자가 확인했는가(BE-H3a). 이번에는 받기만 한다 */
     @SerializedName("alarm_confirmed") val alarmConfirmed: Boolean? = null,
     @SerializedName("alarm_confirmed_at") val alarmConfirmedAt: String? = null,
+    /** 답을 기다리는 "바꿀까요" 제안(BE-H3d). 없거나 구버전 서버면 null */
+    @SerializedName("alarm_proposal") val alarmProposal: AlarmProposalDto? = null,
     /**
      * [onTimeProbability] 가 null 인 **이유**. 화면이 구체적으로 안내해야
      * 사용자가 할 행동이 정해진다. 값마다 사용자가 할 일이 다르다.
@@ -981,6 +995,27 @@ data class PlaceReverseResponse(
     val degraded: Boolean = false,
 )
 
+// Partly AI-generated (Claude)
+/** `GET /api/routes/history` 응답. 앱이 지금 쓰는 필드만 받는다 */
+data class RouteHistoryResponse(val results: List<RouteHistoryItemDto> = emptyList())
+
+data class RouteHistoryItemDto(
+    val destination: RouteHistoryEndpointDto? = null,
+    @SerializedName("route_key") val routeKey: String? = null,
+    @SerializedName("last_trip_at") val lastTripAt: String? = null,
+)
+
+/** `kind` 는 도착지면 `home` · `place` */
+data class RouteHistoryEndpointDto(
+    val kind: String? = null,
+    val name: String? = null,
+    val label: String? = null,
+    val address: String? = null,
+    val lat: Double? = null,
+    val lng: Double? = null,
+    @SerializedName("kakao_place_id") val kakaoPlaceId: String? = null,
+)
+
 data class PlaceSearchItem(
     @SerializedName("kakao_place_id") val kakaoPlaceId: String?,
     val name: String,
@@ -1120,6 +1155,30 @@ data class AlarmTimeRequest(@SerializedName("alarm_at") val alarmAt: String)
 
 /** `POST …/alarm/confirm` 본문. 화면에 보인 울릴 시각. null 이면 지금 울릴 시각을 그대로 확인한다 */
 data class AlarmConfirmRequest(@SerializedName("alarm_at") val alarmAt: String?)
+
+// Partly AI-generated (Claude)
+/** `POST …/alarm/proposal/accept|reject` 본문. 받은 제안 시각을 그대로 보낸다 */
+data class AlarmProposalAnswer(@SerializedName("proposed_alarm_at") val proposedAlarmAt: String?)
+
+/**
+ * "바꿀까요" 제안(서버 계약 `docs/iter4/server-alarm-control.md` 2절). 시각은 모두 오프셋이 붙은 ISO.
+ *
+ * @property kind `recommended_moved`(추천 알람이 5분 넘게 움직임) · `user_low_probability`(직접 정한 시각의 확률이 70% 미만)
+ * @property moveMinutes `proposed − current`(분). 음수 = 앞당기기, 양수 = 늦추기
+ * @property answerBy 답할 마감. 그때까지 답이 없으면 기기가 더 이른 쪽으로 다시 건다(6절)
+ */
+data class AlarmProposalDto(
+    val kind: String? = null,
+    @SerializedName("current_alarm_at") val currentAlarmAt: String? = null,
+    @SerializedName("proposed_alarm_at") val proposedAlarmAt: String? = null,
+    @SerializedName("move_minutes") val moveMinutes: Int? = null,
+    val reason: String? = null,
+    @SerializedName("reason_text") val reasonText: String? = null,
+    @SerializedName("keep_probability") val keepProbability: Int? = null,
+    @SerializedName("change_probability") val changeProbability: Int? = null,
+    @SerializedName("created_at") val createdAt: String? = null,
+    @SerializedName("answer_by") val answerBy: String? = null,
+)
 
 /**
  * 실제로 울릴 시각. 서버가 [AlarmPlanDto.effectiveAlarmAt] 을 주면 그것, 구버전 서버면 [AlarmPlanDto.alarmAt].

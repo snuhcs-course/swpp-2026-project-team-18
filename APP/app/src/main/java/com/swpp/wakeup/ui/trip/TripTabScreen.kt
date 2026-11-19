@@ -55,7 +55,6 @@ import com.swpp.wakeup.ui.common.JitChip
 import com.swpp.wakeup.ui.common.JitDotLabel
 import com.swpp.wakeup.ui.common.LineIcons
 import com.swpp.wakeup.ui.events.SegmentPalette
-import com.swpp.wakeup.ui.home.PendingProbabilityChip
 import com.swpp.wakeup.ui.home.HomeLabels
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.home.riskColor
@@ -101,6 +100,16 @@ fun TripTabScreen(
     modifier: Modifier = Modifier,
     /** 오른쪽 위 ?(도움말, H2-4). null 이면 그리지 않는다 */
     onHelpClick: (() -> Unit)? = null,
+    /** 구간을 못 받아 기기 사본을 보이는 중이면 그 사본을 받은 시각(11-17). null 이면 방금 받은 것 */
+    segmentsSavedAtMillis: Long? = null,
+    /** 구간을 못 받았고 사본도 없다 */
+    segmentsFailed: Boolean = false,
+    /** "가는 길" 의 [다시 시도] */
+    onRetrySegments: () -> Unit = {},
+    /** 알람 전 더 빠른 경로 제안([com.swpp.wakeup.domain.model.FasterRoute.offer]). null 이면 카드가 없다 */
+    fasterRoute: com.swpp.wakeup.domain.model.FasterRouteOffer? = null,
+    fasterRouteBusy: Boolean = false,
+    onSwitchFasterRoute: (com.swpp.wakeup.domain.model.FasterRouteOffer) -> Unit = {},
 ) {
     // 오늘 갈 곳이 없을 때 [내일 가는 길 보기] 를 누르면 그 일정을 펼친다. 일정이 바뀌면 다시 접는다.
     var showLater by rememberSaveable(event?.id) { mutableStateOf(false) }
@@ -140,6 +149,19 @@ fun TripTabScreen(
         when {
             plan != null -> {
                 NextTripCard(event = event, plan = plan, today = today, onClick = { onOpenEvent(event.id) })
+                // 더 빠른 경로가 있으면 가는 길 위에서 바로 바꾼다(11-17 사용자). 지도의 점선 대안과 같은 경로다.
+                fasterRoute?.takeIf { !plan.skipped && it.isOpen(System.currentTimeMillis()) }?.let { offer ->
+                    com.swpp.wakeup.ui.alarm.FasterRouteCard(
+                        offer = offer,
+                        busy = fasterRouteBusy,
+                        onSwitch = { onSwitchFasterRoute(offer) },
+                        tagPrefix = "trip_faster_route",
+                    )
+                }
+                // 구간을 서버에서 못 받았다(대개 오프라인). 사본이면 그 나이를, 없으면 그렇다고 밝힌다(11-17 사용자).
+                if (segmentsSavedAtMillis != null || segmentsFailed) {
+                    SavedRouteNotice(savedAtMillis = segmentsSavedAtMillis, onRetry = onRetrySegments)
+                }
                 RouteCard(
                     plan = plan,
                     segments = segments,
@@ -154,6 +176,38 @@ fun TripTabScreen(
 
             else -> LoadingCard()
         }
+    }
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 홈 오프라인 띠와 같은 모양(Surface2 · 주황 점). "오프라인 · 12분 전 정보" + 이유 한 줄 + [다시 시도].
+ * 실시간 도착(곧 도착 · n분 후)은 사본에 없어 비어 있다는 것도 말한다.
+ */
+@Composable
+private fun SavedRouteNotice(savedAtMillis: Long?, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Hint))
+            .background(JitColor.Surface2)
+            .testTag("trip_route_offline")
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        JitDotLabel(
+            text = TripTabLogic.savedRouteLabel(savedAtMillis, System.currentTimeMillis()),
+            dotColor = JitColor.Amber,
+            textColor = JitColor.TextPrimary,
+            fontSize = 12,
+            dotSize = 6.dp,
+        )
+        Text(
+            text = TripTabLogic.savedRouteBody(savedAtMillis != null),
+            color = JitColor.TextSecondary,
+            fontSize = 11.sp,
+        )
+        JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 3.dp).testTag("trip_route_retry"))
     }
 }
 
@@ -219,7 +273,8 @@ private fun NextTripCard(event: UpcomingEvent, plan: AlarmPlanView, today: Local
                     contentColor = tone,
                     container = tone.copy(alpha = 0.15f),
                 )
-            } ?: PendingProbabilityChip(onClick = null, tag = "trip_probability_pending")
+            }
+            // 확률을 아직 못 내면 칩 자리를 비운다(11-17 사용자)
         }
 
         Row(verticalAlignment = Alignment.Bottom) {
@@ -252,7 +307,7 @@ private fun NextTripCard(event: UpcomingEvent, plan: AlarmPlanView, today: Local
             } else {
                 // 출발 시각을 서버가 주지 않았다. 숫자를 만들지 않고 알람 시각으로 대신한다.
                 Text(
-                    text = "알람 ${event.alarmClock ?: event.alarmAt ?: "—"}",
+                    text = "알람 ${(event.alarmClock ?: event.alarmAt)?.let { com.swpp.wakeup.domain.model.ClockText.label(it, event.alarmMeridiem) ?: it } ?: "—"}",
                     color = JitColor.Accent,
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold,

@@ -5,7 +5,6 @@ import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.AlarmTimeChoice
 import com.swpp.wakeup.domain.model.PlanRow
 import com.swpp.wakeup.domain.model.RiskOptionView
-import com.swpp.wakeup.domain.model.UserAlarmRule
 import com.swpp.wakeup.ui.events.AlarmConfirmText
 import com.swpp.wakeup.ui.events.AlarmConfirmView
 import com.swpp.wakeup.ui.help.OnTimeSheetText
@@ -26,9 +25,6 @@ object AlarmDecisionLogic {
 
         /** 추천이 아닌 칸(여유 있게 · 빠듯하게)을 골랐다(주황) */
         PRESET,
-
-        /** 휠로 직접 정한 시각(회색 — 확률 색과 헷갈리지 않게) */
-        USER,
     }
 
     data class Pill(val text: String, val kind: PillKind)
@@ -40,16 +36,16 @@ object AlarmDecisionLogic {
     )
 
     /**
-     * 알람 줄 옆 알약. 직접 정한 시각이면 "직접 정한 시각", 적용 칸이 추천 칸이면 "추천", 아니면 그 칸 이름.
-     * 추천 칸은 지금 규칙([AlarmTimeChoice.recommendedKey])을 그대로 쓴다(서버 `recommended_key` 는 이번 범위 밖).
+     * 알람 줄 옆 알약. 사용자가 세 칸 중 하나를 골랐으면 그 칸 이름, 아니면(일정 종류 · 프로필 기본값을 그대로
+     * 쓰는 중) "추천". 직접 정한 시각이면 알약을 달지 않는다(null) — 11-18 사용자: "직접 정한 시각" 문구는 필요 없다.
+     * 추천 칸이 무엇인지 앱이 짐작하지 않는다 — 시각 바꾸기 시트의 "추천" 표시는 서버 `recommended_key` 를 쓴다(BE-H3e).
      */
-    fun pill(plan: AlarmPlanView): Pill {
-        if (plan.userAlarm) return Pill(UserAlarmRule.USER_LABEL, PillKind.USER)
+    fun pill(plan: AlarmPlanView): Pill? {
+        if (plan.userAlarm) return null
         val appliedKey = plan.tauUsed?.let { tau -> PRESET_TAUS.entries.firstOrNull { kotlin.math.abs(it.value - tau) < 1e-6 }?.key }
-        // 세 칸에 없는 τ(종류 기본값)이면 사용자가 고른 칸이 없는 것이다 — 그 일정의 추천이다.
-        val recommended = AlarmTimeChoice.recommendedKey(appliedKey, plan.tauSourceLabel)
-        return if (appliedKey == null || appliedKey == recommended) Pill("추천", PillKind.RECOMMENDED)
-        else Pill(AlarmTimeChoice.quickLabel(appliedKey, appliedKey), PillKind.PRESET)
+        val picked = plan.tauSourceLabel == AlarmTimeChoice.MANUAL_TAU_SOURCE
+        return if (picked && appliedKey != null) Pill(AlarmTimeChoice.quickLabel(appliedKey, appliedKey), PillKind.PRESET)
+        else Pill("추천", PillKind.RECOMMENDED)
     }
 
     // ---------------------------------------------------------------- 문구
@@ -157,20 +153,19 @@ object AlarmDecisionLogic {
     /**
      * 알람 카드 안의 작은 상태 한 줄. ④ 에서는 승인 버튼을 두지 않는다(사용자 피드백 11-16 — 화면 아래가 너무 컸다).
      * 승인은 알람 추가 뒤의 알람 확인 시트에서 한다.
-     *
-     * @property confirmed 사용자가 이 시각을 확인했다(서버 `alarm_confirmed`) — 초록 ✓
      */
-    data class AlarmStatus(val text: String, val confirmed: Boolean = false)
+    data class AlarmStatus(val text: String)
 
-    const val CONFIRMED_TEXT = "알람이 맞춰져 있어요"
-
-    /** 계산 전 · 안 가요 · 지난 알람이면 null(그 상태는 다른 카드가 말한다) */
+    /**
+     * 계산 전 · 안 가요 · 지난 알람이면 null(그 상태는 다른 카드가 말한다). 지금은 "알람이 꺼져 있어요" 한 가지다 —
+     * 확인한 알람의 "알람이 맞춰져 있어요" 는 뺐다(11-18 사용자: 필요 없다). "오전 7:31에 알람이 울려요" 는 바로 위
+     * 큰 시각과 같은 말이라 두지 않는다(11-17 사용자).
+     */
     fun alarmStatus(plan: AlarmPlanView, zone: ZoneId = ZoneId.systemDefault()): AlarmStatus? {
         if (!plan.isComputed || plan.skipped || plan.alarmPassed) return null
-        val clock = plan.alarmAtMillis?.let { OnTimeSheetText.clock(it, zone) } ?: return null
+        plan.alarmAtMillis?.let { OnTimeSheetText.clock(it, zone) } ?: return null
         if (!plan.alarmOn) return AlarmStatus("알람이 꺼져 있어요. 홈에서 켤 수 있어요")
-        if (plan.alarmConfirmed == true) return AlarmStatus(CONFIRMED_TEXT, confirmed = true)
-        return AlarmStatus("${clock}에 알람이 울려요")
+        return null
     }
 
     // ---------------------------------------------------------------- 눈금 글자 자리
