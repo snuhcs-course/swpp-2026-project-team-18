@@ -78,7 +78,7 @@ object ApiClient {
             // 재시도는 로깅 뒤에 둔다. 앞에 두면 재시도한 요청이 로그에
             // 한 번만 찍혀 몇 번 시도했는지 알 수 없다.
             .addInterceptor(ColdStartRetryInterceptor())
-            .authenticator(TokenRefreshAuthenticator(tokenStore) { auth })
+            .authenticator(TokenRefreshAuthenticator(tokenStore) { tokenRefreshAuth })
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -135,6 +135,15 @@ object ApiClient {
     val health: HealthApi by lazy { retrofit.create(HealthApi::class.java) }
 
     val auth: AuthApi by lazy { retrofit.create(AuthApi::class.java) }
+
+    // Partly AI-generated (Claude)
+    /** 토큰 갱신 전용. [auth] 로 보내면 동시에 401 을 받은 요청들과 교착한다([forTokenRefresh]) */
+    private val tokenRefreshAuth: AuthApi by lazy {
+        retrofit.newBuilder()
+            .client(client.forTokenRefresh())
+            .build()
+            .create(AuthApi::class.java)
+    }
 
     val support: SupportApi by lazy { retrofit.create(SupportApi::class.java) }
 
