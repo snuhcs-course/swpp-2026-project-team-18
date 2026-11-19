@@ -57,7 +57,7 @@ class BlockDraftTest {
         // 이걸 통과시키면 서버에서 표준편차가 음수가 되어 분포 생성이 터진다.
         // DB 제약도 있지만 여기서 막아야 왕복 없이 알려줄 수 있다.
         val errors = draft(min = "20", max = "10").validate().errors
-        assertEquals("최대가 최소보다 작을 수 없다.", errors["max"])
+        assertEquals("최대가 최소보다 작을 수 없어요.", errors["max"])
     }
 
     @Test
@@ -84,8 +84,6 @@ class ConfidenceViewTest {
     private fun confidence(percent: Int?) = ConfidenceView(
         percent = percent,
         headline = "headline",
-        reason = null,
-        action = null,
     )
 
     @Test
@@ -197,14 +195,14 @@ class RoutineEditorStateTest {
                 block(3, min = 30, max = 40, checked = false),
             ),
         )
-        assertEquals("단순 합 15~25분", state.simpleSumLabel)
+        assertEquals("더하면 15~25분", state.simpleSumLabel)
         assertEquals(2, state.includedCount)
     }
 
     @Test
     fun `범위가 한 점이면 물결표를 쓰지 않는다`() {
         val state = RoutineEditorState(blocks = listOf(block(1, min = 7, max = 7)))
-        assertEquals("단순 합 7분", state.simpleSumLabel)
+        assertEquals("더하면 7분", state.simpleSumLabel)
     }
 
     @Test

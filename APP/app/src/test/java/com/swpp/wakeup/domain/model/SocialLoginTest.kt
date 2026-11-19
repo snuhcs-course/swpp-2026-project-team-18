@@ -39,16 +39,16 @@ class SocialLoginTest {
         val notice = SocialLogin.emailInUseNotice(SocialProvider.KAKAO, listOf("password"))
         assertEquals("이 이메일은 이미 가입돼 있어요", notice.title)
         assertEquals("이메일·비밀번호로 로그인한 뒤 설정 › 로그인 연결에서 카카오를 이어 주세요", notice.body)
-        assertEquals("자동으로 합치지 않음. 원래 로그인 방법: 이메일", notice.footnote)
+        assertEquals("자동으로 합치지 않아요. 원래 로그인 방법: 이메일", notice.footnote)
         assertTrue(notice.amber)
 
         val google = SocialLogin.emailInUseNotice(SocialProvider.GOOGLE, listOf("kakao", "password", "kakao"))
         assertEquals("카카오·이메일로 로그인한 뒤 설정 › 로그인 연결에서 Google을 이어 주세요", google.body)
-        assertEquals("자동으로 합치지 않음. 원래 로그인 방법: 카카오·이메일", google.footnote)
+        assertEquals("자동으로 합치지 않아요. 원래 로그인 방법: 카카오·이메일", google.footnote)
 
         val unknown = SocialLogin.emailInUseNotice(SocialProvider.KAKAO, listOf(" ", ""))
         assertEquals("원래 로그인 방법으로 로그인한 뒤 설정 › 로그인 연결에서 카카오를 이어 주세요", unknown.body)
-        assertEquals("자동으로 합치지 않음", unknown.footnote)
+        assertEquals("자동으로 합치지 않아요", unknown.footnote)
     }
 
     @Test

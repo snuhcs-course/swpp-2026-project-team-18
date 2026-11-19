@@ -1,10 +1,16 @@
 package com.swpp.wakeup.ui.events
 
+import com.swpp.wakeup.ui.common.LineIcons
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.horizontalScroll
+import com.swpp.wakeup.ui.common.JitRetryButton
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -117,117 +123,179 @@ fun RouteChoiceScreen(
         return
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(JitColor.Bg)
-            .verticalScroll(rememberScrollState())
-            .testTag("route_scroll")
-            .padding(
-                start = JitSpace.ScreenHorizontal,
-                end = JitSpace.ScreenHorizontal,
-                top = JitSpace.ScreenTop,
-                bottom = JitSpace.ScreenBottom,
-            ),
-        verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
-    ) {
-        ScreenHeader(title = "경로 선택", onBack = onBack)
+    // Figma 시안(11-18): 머리 · 수단 탭 · 묶음 탭 · 경로 목록(구분선) · 아래 고정 [이 경로로 정하기].
+    val choice = state?.choice
+    Column(modifier = modifier.fillMaxSize().background(JitColor.Bg)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .testTag("route_scroll")
+                .padding(
+                    start = JitSpace.ScreenHorizontal,
+                    end = JitSpace.ScreenHorizontal,
+                    top = JitSpace.ScreenTop,
+                    bottom = 16.dp,
+                ),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            ScreenHeader(title = "경로 선택", onBack = onBack)
 
-        Text(
-            text = "어떻게 갈까?",
-            color = JitColor.TextPrimary,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-        )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "어떻게 갈까요?",
+                    color = JitColor.TextPrimary,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                // 출발지는 일정 추가 화면에서 고른다. 여기서는 무엇 기준인지만 밝힌다.
+                Text(
+                    text = choice?.let { RouteChoiceLogic.header(it.originLabel, it.destination, arriveBy) } ?: "경로를 불러오는 중",
+                    color = JitColor.TextSecondary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.testTag("route_header"),
+                )
+            }
 
-        // 출발지는 일정 추가 화면에서 고른다. 여기서는 무엇 기준인지만 밝힌다.
-        val choice = state?.choice
-        Text(
-            text = choice?.let { "${it.originLabel} → ${it.destination}" } ?: "경로를 불러오는 중",
-            color = JitColor.TextSecondary,
-            fontSize = 13.sp,
-        )
+            when {
+                state == null || state.loading -> LoadingBlock()
 
-        when {
-            state == null || state.loading -> LoadingBlock()
-
-            state.error != null -> ErrorBlock(
-                message = state.error,
-                retryable = state.retryable,
-                onRetry = onRetry,
-                onBack = onBack,
-            )
-
-            choice != null -> {
-
-                // 처음 열 탭: 고른 후보의 수단, 없으면 가장 빠른 후보의 수단.
-                var mode by rememberSaveable(choice.options.map { it.key }) {
-                    mutableStateOf(choice.defaultMode())
-                }
-                ModeTabs(
-                    selected = mode,
-                    counts = RouteMode.entries.associateWith { choice.optionsOf(it).size },
-                    onSelect = { next ->
-                        mode = next
-                        // 탭을 바꾸면 그 탭의 첫 후보(가장 빠른 것)를 고른다. 보이지 않는
-                        // 탭의 후보가 선택된 채로 "이 경로로 계산" 을 누르면 무엇으로
-                        // 계산했는지 화면에서 알 수 없다.
-                        val inTab = choice.optionsOf(next)
-                        if (inTab.none { it.key == choice.selectedKey }) {
-                            inTab.firstOrNull()?.let { onSelect(it.key) }
-                        }
-                    },
+                state.error != null -> ErrorBlock(
+                    message = state.error,
+                    retryable = state.retryable,
+                    onRetry = onRetry,
+                    onBack = onBack,
                 )
 
-                val inTab = choice.optionsOf(mode)
-                emptyTabNotice(choice)?.let {
-                    Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
-                }
-                inTab.forEach { option ->
-                    // 지도는 목록 안에 붙이지 않는다. 세로 스크롤 안의 핀치·드래그가
-                    // 스크롤과 겹친다. 좌표가 있으면 전체 화면 미리보기로 간다(PM 지시
-                    // "눌렀을 때 지도 화면으로"). 경로가 하나뿐인 자동차(B-4 전)·도보·자전거는
-                    // 카드를 누르면, 후보가 여럿인 대중교통은 "지도로 보기" 를 누르면 간다.
-                    val previewable = option.canPreviewMap && loadMap != null
-                    RouteCard(
-                        option = option,
-                        selected = option.key == choice.selectedKey,
-                        onClick = {
-                            if (previewable && option.opensPreviewOnTap) {
-                                onPreview(option.key)
-                            } else {
-                                onSelect(option.key)
+                choice != null -> {
+                    // 처음 열 탭: 고른 후보의 수단, 없으면 가장 빠른 후보의 수단.
+                    var mode by rememberSaveable(choice.options.map { it.key }) {
+                        mutableStateOf(choice.defaultMode())
+                    }
+                    ModeTabs(
+                        selected = mode,
+                        counts = RouteMode.entries.associateWith { choice.optionsOf(it).size },
+                        onSelect = { next ->
+                            mode = next
+                            // 탭을 바꾸면 그 탭의 첫 후보(가장 빠른 것)를 고른다. 보이지 않는
+                            // 탭의 후보가 선택된 채로 정하면 무엇으로 계산했는지 화면에서 알 수 없다.
+                            val inTab = choice.optionsOf(next)
+                            if (inTab.none { it.key == choice.selectedKey }) {
+                                inTab.firstOrNull()?.let { onSelect(it.key) }
                             }
                         },
-                        depart = departAt(arriveBy, option.minutes),
-                        origin = choice.originLabel,
-                        destination = choice.destination,
-                        onPreview = if (previewable) ({ onPreview(option.key) }) else null,
-                        caption = choice.preferredCaption?.takeIf { option.key == choice.preferredKey },
                     )
-                    if (option.key == choice.selectedKey) {
-                        RouteGuide(option.guide)
+
+                    val inMode = choice.optionsOf(mode)
+                    // 대중교통은 묶음 탭(전체 · 버스 · 지하철 · 버스+지하철)으로 한 번 더 나눈다
+                    var group by rememberSaveable(mode, choice.options.map { it.key }) {
+                        mutableStateOf(RouteChoiceLogic.Group.ALL)
                     }
-                    // 구버전 서버처럼 좌표가 없으면 고르기만 된다. 지도가 안 뜨는 이유를 밝힌다.
-                    if (option.key == choice.selectedKey && !option.canPreviewMap) {
-                        Text(
-                            text = "지도 미리보기를 받지 못했음",
-                            color = JitColor.TextSecondary,
-                            fontSize = 10.sp,
+                    if (mode == RouteMode.TRANSIT && inMode.isNotEmpty()) {
+                        GroupTabs(
+                            groups = RouteChoiceLogic.groups(inMode),
+                            selected = group,
+                            onSelect = { g ->
+                                group = g
+                                val shown = RouteChoiceLogic.filter(inMode, g)
+                                if (shown.none { it.key == choice.selectedKey }) {
+                                    shown.firstOrNull()?.let { onSelect(it.key) }
+                                }
+                            },
                         )
                     }
+                    emptyTabNotice(choice)?.let {
+                        Text(text = it, color = JitColor.TextSecondary, fontSize = 12.sp)
+                    }
+
+                    val shown = if (mode == RouteMode.TRANSIT) RouteChoiceLogic.filter(inMode, group) else inMode
+                    Column {
+                        shown.forEachIndexed { index, option ->
+                            if (index > 0) HorizontalDivider(color = JitColor.Track, modifier = Modifier.padding(vertical = 6.dp))
+                            // 지도는 목록 안에 붙이지 않는다(세로 스크롤과 핀치가 겹친다). 좌표가 있으면 전체 화면 미리보기로 간다.
+                            val previewable = option.canPreviewMap && loadMap != null
+                            val selected = option.key == choice.selectedKey
+                            RouteCard(
+                                option = option,
+                                selected = selected,
+                                onClick = {
+                                    if (previewable && option.opensPreviewOnTap) onPreview(option.key) else onSelect(option.key)
+                                },
+                                arriveBy = arriveBy,
+                                destination = choice.destination,
+                                onPreview = if (previewable) ({ onPreview(option.key) }) else null,
+                                caption = choice.preferredCaption?.takeIf { option.key == choice.preferredKey },
+                            )
+                            if (selected) RouteGuide(option.guide)
+                        }
+                    }
                 }
+            }
+        }
 
-                Spacer(Modifier.height(4.dp))
-
+        // 아래 고정. 화면의 꽉 찬 주황 버튼은 이것 하나다.
+        if (choice != null && state.error == null && !state.loading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(JitColor.Bg)
+                    .padding(start = JitSpace.ScreenHorizontal, end = JitSpace.ScreenHorizontal, top = 8.dp, bottom = 16.dp),
+            ) {
                 JitPrimaryButton(
-                    label = "이 경로로 계산",
+                    label = "이 경로로 정하기",
                     modifier = Modifier.testTag("route_confirm"),
                     onClick = onConfirm,
                     enabled = choice.selectedKey != null,
                 )
             }
         }
+    }
+}
+
+// Partly AI-generated (Claude)
+/** 묶음 탭: "전체 3 · 버스 1 · 지하철 1 · 버스+지하철 1". 고른 것만 흰 글씨 + 주황 밑줄. 넘치면 가로로 민다 */
+@Composable
+private fun GroupTabs(
+    groups: List<Pair<RouteChoiceLogic.Group, Int>>,
+    selected: RouteChoiceLogic.Group,
+    onSelect: (RouteChoiceLogic.Group) -> Unit,
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("route_groups"),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            groups.forEach { (g, count) ->
+                val on = g == selected
+                Column(
+                    modifier = Modifier
+                        .width(IntrinsicSize.Max)
+                        .heightIn(min = 40.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(role = Role.Tab, onClick = { onSelect(g) })
+                        .testTag("route_group_${g.name.lowercase()}")
+                        .padding(top = 8.dp, start = 2.dp, end = 2.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = "${g.label} $count",
+                        color = if (on) JitColor.TextPrimary else JitColor.TextSecondary,
+                        fontSize = 14.sp,
+                        fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(2.dp)
+                            .background(if (on) JitColor.Accent else JitColor.Bg)
+                    )
+                }
+            }
+        }
+        HorizontalDivider(color = JitColor.Track)
     }
 }
 
@@ -295,7 +363,13 @@ private fun ModeTabs(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Icon(
-                        imageVector = ModeIcons.of(mode),
+                        // 선 아이콘(LineIcons)으로 통일(11-18 시안)
+                        imageVector = when (mode) {
+                            RouteMode.CAR -> LineIcons.car
+                            RouteMode.TRANSIT -> LineIcons.bus
+                            RouteMode.WALK -> LineIcons.walk
+                            RouteMode.BICYCLE -> LineIcons.bike
+                        },
                         contentDescription = null,
                         tint = tint,
                         modifier = Modifier.size(20.dp),
@@ -333,114 +407,124 @@ private fun emptyTabNotice(choice: RouteChoice): String? {
     if (empty.isEmpty()) return null
     val onlyWalk = choice.options.isNotEmpty() && choice.options.all { it.travelMode == RouteMode.WALK }
     return if (onlyWalk) {
-        "가까운 거리라 도보 경로만 받아왔음"
+        "가까운 거리라 도보 경로만 찾았어요"
     } else {
-        "${empty.joinToString("·") { it.label }} 는 이 구간에 경로가 없음"
+        "${empty.joinToString("·") { it.label }}는 이 구간에 경로가 없어요"
     }
 }
 
 // Partly AI-generated (Claude)
+/**
+ * 경로 한 줄(Figma 시안 11-18). 카드 테두리 없이 목록 사이 구분선으로 나눈다. 고른 줄은 오른쪽 끝 주황 "선택 ✓".
+ *
+ * 위에서부터: 배지(지난번에 고른 길 · 서버 배지) / 큰 소요 시간 + "환승 1회" · "버스" / "오전 8:08 - 8:50 · 1,550원" /
+ * 구간 막대(도보 합계 · 탄 구간 · 대기 합계) + "도보 14분 · 대기 4분은 전체 합계" / 탄 구간 목록 + "○○ 도착".
+ * 자동차 · 도보 · 자전거는 막대와 목록 대신 서버 요약(자전거는 지표 칸).
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun RouteCard(
     option: RouteOption,
     selected: Boolean,
     onClick: () -> Unit,
-    /** 일정 시작에 맞춘 출발 시각(임시 계산). null 이면 시각을 쓰지 않는다 */
-    depart: java.time.LocalDateTime? = null,
-    origin: String = "출발",
-    destination: String = "도착",
+    arriveBy: java.time.LocalDateTime?,
+    destination: String,
     /** 지도 미리보기를 연다. null 이면 좌표가 없어 "지도로 보기" 를 달지 않는다 */
     onPreview: (() -> Unit)? = null,
-    /** 기본으로 고른 이유. "지난번에 고른 경로" (Figma ⑬-b `484:9`). 없으면 그리지 않는다 */
+    /** 기본으로 고른 이유. "지난번에 고른 경로". 없으면 그리지 않는다 */
     caption: String? = null,
 ) {
-    // 카드 전체가 지도로 가는 카드인가(자동차·도보·자전거). 대중교통은 카드가 고르기다.
     val cardOpensMap = onPreview != null && option.opensPreviewOnTap
     Column(
         modifier = Modifier
             .testTag("route_${option.key}")
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Card))
-            .background(JitColor.Surface)
-            .then(
-                // Figma: 고른 카드는 주황 테두리.
-                if (selected) {
-                    Modifier.border(
-                        width = 2.dp,
-                        color = JitColor.Accent,
-                        shape = RoundedCornerShape(JitRadius.Card),
-                    )
-                } else {
-                    Modifier
-                }
-            )
-            .clickable(onClickLabel = if (cardOpensMap) "지도로 보기" else null, onClick = onClick)
-            .padding(13.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp),
+            .clickable(onClickLabel = if (cardOpensMap) "지도로 보기" else "이 경로 고르기", onClick = onClick)
+            .padding(vertical = 10.dp, horizontal = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = option.minutesLabel,
-                color = JitColor.TextPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            // "지하철+도보+버스" 같은 수단 이름은 쓰지 않는다. 탭과 구간 막대가 이미 말한다.
-            // 대신 일정 시작에 맞춘 출발~도착 시각을 총 시간 오른쪽에 쓴다(Figma 13-b).
-            depart?.let {
-                Spacer(Modifier.width(9.dp))
+        // 11-18 사용자: 글씨를 한 단계 줄이고, 배지는 소요 시간 · 설명 오른쪽에 작게, 예전 색(주황 글자)으로.
+        // 한 줄에 다 안 들어가면 다음 줄로 넘긴다(FlowRow) — 자르지 않는다.
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 Text(
-                    text = timeRangeLabel(
-                        it.toLocalTime(),
-                        it.plusMinutes(option.minutes.toLong()).toLocalTime(),
-                    ),
-                    color = if (selected) JitColor.TextPrimary else JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
+                    text = option.minutesLabel,
+                    color = JitColor.TextPrimary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.CenterVertically),
                 )
+                RouteChoiceLogic.subtitle(option)?.let {
+                    Text(
+                        it,
+                        color = JitColor.TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                    )
+                }
+                // "지난번에 고른 경로" — 예전처럼 주황 굵은 글자(배경 없음)
+                caption?.let {
+                    Text(
+                        text = it,
+                        color = JitColor.Accent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterVertically).testTag("route_preferred"),
+                    )
+                }
+                // 서버 배지("최단 시간" 등, 문구 그대로) — 예전 [RouteBadges] 와 같은 주황 글자 · 회색 알약
+                option.badges.forEach { badge ->
+                    Text(
+                        text = badge,
+                        color = JitColor.Accent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .align(Alignment.CenterVertically)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(JitColor.Surface2)
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
             }
-            Spacer(Modifier.weight(1f))
-            // 배지는 최대 3개다("최단 시간", "최소 비용", "최소 환승", "최소 도보" 중). 서버 문구 그대로.
-            RouteBadges(option.badges)
+            if (selected) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 8.dp, top = 4.dp).testTag("route_selected"),
+                ) {
+                    Text("선택", color = JitColor.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(4.dp))
+                    Icon(LineIcons.check, contentDescription = null, tint = JitColor.Accent, modifier = Modifier.size(16.dp))
+                }
+            }
         }
-        caption?.let {
-            Text(
-                text = it,
-                color = JitColor.Accent,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.testTag("route_preferred"),
-            )
+        RouteChoiceLogic.timeLine(option, arriveBy)?.let {
+            Text(it, color = JitColor.TextSecondary, fontSize = 12.sp)
         }
         if (option.travelMode == RouteMode.BICYCLE) {
-            // Figma 13-d: 자전거는 요약 줄 대신 지표 칸(거리·자전거도로). 규칙은 [bicycleMetrics].
             MetricCells(bicycleMetrics(option))
-        } else if (option.detailLine.isNotBlank()) {
-            // 요약 한 줄은 서버 문구 그대로("2호선 → 5513 · 5.1km · 환승 1회 · 1,550원").
-            // 도보는 "1.2km" 처럼 거리만 온다. 계단·경사는 쓰지 않는다(task.md 13-0).
+        } else if (!RouteChoiceLogic.isTransit(option) && option.detailLine.isNotBlank()) {
+            // 자동차 · 도보는 서버 요약 한 줄 그대로("택시 예상액 · 4.3km · 7,600원", "1.2km")
             Text(text = option.detailLine, color = JitColor.TextSecondary, fontSize = 11.sp)
         }
-        // 막대는 대중교통의 구간 막대(노선·버스 색 + 구간별 분)만 그린다. 자동차·도보·
-        // 자전거의 빠르기 막대는 전하는 정보가 없어 뺐다(사용자 결정 10-05).
-        if (option.hasSegmentBar) {
-            TransitSegmentBar(option.segments)
-        }
-        // 상세 목록은 선택한 카드에만 펼친다. 모든 후보에 열면 같은 정류장이
-        // 반복돼 비교가 어려워지고 한 카드가 화면 여러 장을 차지한다.
-        if (selected) {
-            val rows = timelineRows(option.segments, origin, destination, depart)
-            if (rows.isNotEmpty()) {
-                // Figma 13-b: 막대와 정류장 타임라인 사이 구분선.
-                HorizontalDivider(color = JitColor.Track, modifier = Modifier.padding(vertical = 2.dp))
-                RouteTimeline(rows)
+        if (RouteChoiceLogic.isTransit(option)) {
+            val cells = RouteChoiceLogic.barCells(option)
+            if (cells.isNotEmpty()) {
+                SegmentBar(cells)
+                RouteChoiceLogic.totalsNote(option)?.let {
+                    Text(it, color = JitColor.TextSecondary, fontSize = 11.sp)
+                }
             }
+            val steps = RouteChoiceLogic.steps(option)
+            if (steps.isNotEmpty()) StepList(steps, destination)
         }
         onPreview?.let { open ->
-            // 대중교통은 카드가 고르기라서 이 글자가 따로 눌려야 한다. 손가락이 닿을
-            // 크기(48dp)를 준다. 다른 수단은 카드 전체가 같은 일을 하므로 표시만 된다.
             Text(
                 text = "지도로 보기 ›",
                 color = JitColor.Accent,
@@ -450,95 +534,107 @@ private fun RouteCard(
                     .align(Alignment.End)
                     .testTag("route_preview_${option.key}")
                     .then(
-                        if (cardOpensMap) {
-                            Modifier
-                        } else {
-                            Modifier
-                                .minimumInteractiveComponentSize()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable(role = Role.Button, onClick = open)
-                                .padding(horizontal = 4.dp)
-                        }
+                        if (cardOpensMap) Modifier
+                        else Modifier
+                            .minimumInteractiveComponentSize()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(role = Role.Button, onClick = open)
+                            .padding(horizontal = 4.dp)
                     ),
             )
         }
     }
 }
 
-// 구간 막대·노선 칩·지표 칸·배지는 TransitVisuals.kt 의 공용 부품을 쓴다.
-
 // Partly AI-generated (Claude)
 /**
- * 고른 카드의 정류장 타임라인(Figma 13-b, node 232:265).
- *
- * 한 행: [점] 이름 [노선 칩] / 아래 작은 글자("승차"·"환승"·"하차") ··· 오른쪽 시각 / "○○ 도착".
- * 점 색은 그 지점에서 타는 노선색이고, 출발·도착은 회색이다. 노선 번호는 이름 오른쪽 칩으로 둔다.
- *
- * 다음 차량·그다음 차량 "N분 뒤 도착" 은 보여 주지 않는다. 경로를 고르는 단계에서는
- * 필요 없고 화면만 길어진다.
+ * 구간 막대(시안): 칸 폭은 시간 비례(작은 칸은 최소 폭), 칸 안에 수단 아이콘 + "14분". 글자가 안 들어갈 만큼 좁으면
+ * 글자를 빼고 아이콘만, 더 좁으면 색만. 지하철 · 버스 색은 노선색([SegmentPalette]), 도보 · 대기는 회색.
  */
 @Composable
-private fun RouteTimeline(rows: List<TimelineRow>) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+private fun SegmentBar(cells: List<RouteChoiceLogic.BarCell>) {
+    val total = cells.sumOf { it.minutes }.coerceAtLeast(1).toFloat()
+    val weights = labeledWeights(cells.map { RouteSegment(it.kind, it.minutes * 60, "") }, minShare = 0.12f)
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 24.dp).clip(RoundedCornerShape(6.dp)).testTag("route_bar"),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        rows.forEach { TimelineRowView(it) }
+        cells.forEachIndexed { i, cell ->
+            val seg = cell.ride ?: RouteSegment(cell.kind, cell.minutes * 60, "")
+            val fill = when (cell.kind) {
+                RouteSegment.Kind.WALK, RouteSegment.Kind.WAIT -> JitColor.Surface2
+                else -> Color(SegmentPalette.fill(seg))
+            }
+            val on = when (cell.kind) {
+                RouteSegment.Kind.WALK, RouteSegment.Kind.WAIT -> JitColor.TextPrimary
+                else -> Color(SegmentPalette.onFill(seg))
+            }
+            val share = weights.getOrElse(i) { cell.minutes / total }
+            Row(
+                modifier = Modifier.weight(share).heightIn(min = 24.dp).background(fill).padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.Start),
+            ) {
+                val icon = when (cell.kind) {
+                    RouteSegment.Kind.WALK -> LineIcons.walk
+                    RouteSegment.Kind.SUBWAY -> LineIcons.train
+                    RouteSegment.Kind.BUS -> LineIcons.bus
+                    else -> null
+                }
+                if (icon != null && share >= 0.14f) Icon(icon, contentDescription = null, tint = on, modifier = Modifier.size(12.dp))
+                if (share >= 0.10f) {
+                    Text(
+                        text = "${cell.minutes}분",
+                        color = on,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
+            }
+        }
     }
 }
 
 // Partly AI-generated (Claude)
+/** 탄 구간 목록(시안): 둥근 수단 아이콘 + 굵은 노선 이름 / 회색 "지하철 · 7분 탑승", 줄 사이 세로선, 끝은 점 + "○○ 도착" */
 @Composable
-private fun TimelineRowView(row: TimelineRow) {
-    val lineColor = row.line?.let { Color(SegmentPalette.fill(it)) }
-    val dotColor = lineColor ?: JitColor.Track
-    val end = row.kind == TimelineRow.Kind.END
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Spacer(
-            Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(dotColor)
-        )
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = row.name,
-                    color = JitColor.TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    // 이름과 아래 "승차" 사이가 벌어지지 않게 폰트 여백을 걷는다.
-                    style = JitTextStyle.TightCentered,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                // 노선 번호는 이름 오른쪽 칩. 색은 노선색 그대로. 같은 구간을 가는
-                // 대체 버스가 있으면 그 칩도 나란히 붙인다(많으면 "+N").
-                row.line?.let { segment -> TransitLineChips(segment) }
+private fun StepList(steps: List<RouteChoiceLogic.Step>, destination: String) {
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp).testTag("route_steps")) {
+        steps.forEach { step ->
+            val line = Color(SegmentPalette.fill(step.ride))
+            Row(verticalAlignment = Alignment.Top) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(24.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.5.dp, line, RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (step.ride.kind == RouteSegment.Kind.BUS) LineIcons.bus else LineIcons.train,
+                            contentDescription = null,
+                            tint = line,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                    Box(Modifier.width(2.dp).height(10.dp).background(JitColor.Track))
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(step.name, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text(step.sub, color = JitColor.TextSecondary, fontSize = 11.sp)
+                }
             }
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = row.sub,
-                color = JitColor.TextSecondary,
-                fontSize = 10.sp,
-                style = JitTextStyle.TightCentered,
-            )
         }
-        Spacer(Modifier.width(8.dp))
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = row.time?.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")) ?: "",
-                // 시각 아래 "출발 / ○○ 도착" 글자는 뺐다. 마지막 도착 시각만 초록으로 구분한다.
-                color = if (end) JitColor.Green else JitColor.TextPrimary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(JitColor.TextSecondary))
+            }
+            Spacer(Modifier.width(10.dp))
+            Text("$destination 도착", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -556,7 +652,7 @@ private fun LoadingBlock() {
     ) {
         CircularProgressIndicator(color = JitColor.Accent, strokeWidth = 2.dp)
         Text(
-            text = "카카오에서 경로를 받아오는 중",
+            text = "경로를 찾는 중이에요",
             color = JitColor.TextSecondary,
             fontSize = 12.sp,
         )
@@ -592,23 +688,24 @@ private fun ErrorBlock(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "경로를 불러오지 못했음",
+                text = "경로를 불러오지 못했어요",
                 color = JitColor.TextPrimary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
         Text(text = message, color = JitColor.TextSecondary, fontSize = 12.sp)
-        Text(
-            text = if (retryable) "눌러서 다시 시도" else "출발지·도착지 다시 고르기",
-            color = JitColor.Accent,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable(onClick = if (retryable) onRetry else onBack)
-                .padding(vertical = 4.dp),
-        )
+        // 다시 시도할 수 있으면 [다시 시도], 못 하면 같은 회색 버튼에 아이콘 없이 "출발지·도착지 다시 고르기"(HE 2-6)
+        if (retryable) {
+            JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 2.dp).testTag("route_retry"))
+        } else {
+            JitRetryButton(
+                onClick = onBack,
+                label = "출발지·도착지 다시 고르기",
+                icon = null,
+                modifier = Modifier.padding(top = 2.dp).testTag("route_reselect"),
+            )
+        }
     }
 }
 

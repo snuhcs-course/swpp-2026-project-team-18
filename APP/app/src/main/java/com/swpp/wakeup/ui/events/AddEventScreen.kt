@@ -1,23 +1,40 @@
 package com.swpp.wakeup.ui.events
 
+import com.swpp.wakeup.ui.common.JitInlineInput
+import com.swpp.wakeup.ui.common.JitLabeledRow
+import com.swpp.wakeup.ui.common.JitSectionTitle
+import com.swpp.wakeup.ui.common.JitFieldCard
+import com.swpp.wakeup.ui.common.JitPillChip
+import com.swpp.wakeup.domain.model.AlarmTimeChoice
+import com.swpp.wakeup.domain.model.RecentDestinations
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
+import com.swpp.wakeup.ui.common.LineIcons
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.Switch
 import androidx.compose.foundation.verticalScroll
+import com.swpp.wakeup.ui.common.sheetScrollGuard
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
@@ -40,6 +57,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -195,6 +215,17 @@ fun AddEventScreen(
     /** 반복 회차 저장 시트(iter4 A2)에서 고른 범위. 시트는 [HomeViewModel.AddState.scopePrompt] 일 때만 뜬다 */
     onSaveScope: (com.swpp.wakeup.data.repository.EventScope) -> Unit = {},
     onSaveScopeDismiss: () -> Unit = {},
+    /**
+     * 홈 위 바텀시트 안에 그린다(새 일정, H2-8 `545:192`). 머리말에 뒤로 화살표 대신 오른쪽 위 X 를 두고,
+     * 내용만 스크롤하며 [알람 맞추기] 는 시트 아래에 고정한다. 높이는 바깥([modifier])이 정한다.
+     */
+    inSheet: Boolean = false,
+    /** 시트의 X. 기본은 [onBack] */
+    onClose: () -> Unit = onBack,
+    /** 도착지 칩에 넣을 최근 도착지(최신순 2곳, 집 제외). 새 일정에서만 쓴다 */
+    recentDestinations: List<com.swpp.wakeup.data.remote.PlaceSearchItem> = emptyList(),
+    /** 도착지를 집으로 바꾼 직후의 [되돌리기](H2-9) */
+    onUndoDestination: () -> Unit = {},
 ) {
     if (state.scopePrompt) {
         RecurrenceScopeSheet(
@@ -224,234 +255,60 @@ fun AddEventScreen(
         )
     }
     // 일정 수정이면 같은 화면을 수정 모드로 쓴다(Figma ⑫ 변형 `488:9`).
+    // 새 일정은 알람 추가(H2-8 `545:192`): 필수(어디로 · 몇 시까지 · 어떻게) → 선택(제목 · 반복 · 종류).
     val editing = state.isEditing
     // 검색 칸은 "검색" 을 눌렀을 때만 펼친다. 고르면 접는다.
     // 도착지는 아직 아무것도 없으면 처음부터 펼쳐 둔다 — 무엇을 할지 바로 보이게.
-    var originSearching by rememberSaveable { mutableStateOf(false) }
-    var destinationSearching by rememberSaveable { mutableStateOf(state.selectedPlace == null) }
+    // 새 일정의 출발지 변경 시트(H2-8 `658:2177`). "출발지 … · 변경" 칩이 연다.
+    var originSheet by rememberSaveable { mutableStateOf(false) }
     val enabled = !state.submitting
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(JitColor.Bg)
-            .verticalScroll(rememberScrollState())
-            .testTag("add_event_scroll")
-            .padding(
-                start = JitSpace.ScreenHorizontal,
-                end = JitSpace.ScreenHorizontal,
-                top = JitSpace.ScreenTop,
-                bottom = JitSpace.ScreenBottom,
-            ),
-        verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
-    ) {
-        ScreenHeader(title = if (editing) "일정 수정" else "일정 추가", onBack = onBack, enabled = !state.submitting)
+    // 저장을 기다리는 동안은 닫지 않는다. 10초가 넘으면 닫아도 된다(H2-8 `546:766`, 요청은 뷰모델에서 이어진다).
+    val closeLocked = state.submitting && !state.submitSlow
+    // 출발지와 도착지가 같은가(H2-9). 도착지 줄을 노랗게 두르고 저장을 끈다 — 서버의 50m 오류보다 먼저 막는다.
+    val sameEndpoints = SameEndpoints.same(state, homePlace)
+    // 고른 날짜·시각이 이미 지났는가. 화면을 그릴 때의 지금으로 본다(저장할 때 뷰모델이 다시 본다).
+    val pastTime = PastTimeRule.isPast(state)
 
-        if (editing) {
-            // 반복 회차는 저장할 때 범위를 고른다(iter4 A2). 범위 수정을 모르는 서버면 지금처럼 그 회차만
-            // 바뀌고 요일은 고칠 수 없다(event-edit-api.md §5).
-            Text(
-                text = editNoteOf(state),
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
-                modifier = Modifier.testTag("edit_note"),
-            )
-        } else {
-            Text(
-                text = "무슨 일정인가?",
-                color = JitColor.TextPrimary,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "도착 시각에서 거꾸로 계산해 알람을 정함",
-                color = JitColor.TextSecondary,
-                fontSize = 13.sp,
-            )
-        }
+    if (originSheet) {
+        OriginSheet(
+            state = state,
+            homePlace = homePlace,
+            hasHome = hasHome,
+            savedHomes = savedHomes,
+            enabled = enabled,
+            onHome = {
+                onOriginSelect(null)
+                originSheet = false
+            },
+            onSetHome = {
+                originSheet = false
+                onSetHome()
+            },
+            onSavedHome = {
+                onOriginSavedHome(it)
+                originSheet = false
+            },
+            onUseCurrentLocation = {
+                onUseCurrentLocation()
+                originSheet = false
+            },
+            onQueryChange = onOriginQueryChange,
+            onSearch = onOriginSearch,
+            onSelect = { item ->
+                onOriginSelect(item)
+                if (item != null) originSheet = false
+            },
+            onLoadMore = onOriginLoadMore,
+            onSortChange = onOriginSortChange,
+            onOpenMap = onOriginOpenMap,
+            onOpenPlaceUrl = onOpenPlaceUrl,
+            onIncludePrepChange = onIncludePrepChange,
+            onDismiss = { originSheet = false },
+        )
+    }
 
-        // 저장 실패의 줄별 문구(A2)는 그 줄 바로 아래에 붙인다(Figma F-46 `526:9`).
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            JitTextField(
-                label = "일정 제목",
-                inputTag = "event_title",
-                value = state.title,
-                onValueChange = onTitleChange,
-                imeAction = ImeAction.Next,
-                enabled = !state.submitting,
-            )
-            state.fieldErrors[AddField.TITLE]?.let { EndpointError(it, tag = "title_error") }
-        }
-
-        DateRow(state.date, onDateChange, enabled = !state.submitting)
-        // Figma 순서: 날짜 → 반복 → 시작 시각. 수정에서는 반복 회차이고 서버가 "이후 일정 모두" 를 받을 때만
-        // 요일을 고칠 수 있다. 바꾸면 저장 시트에 "이후 일정 모두 저장" 만 남는다(iter4 A2).
-        if (!editing || state.canEditWeekdays) RepeatRow(state.repeatWeekdays, onRepeatDayToggle, enabled)
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            TimeRow(state.hour, state.minute, onTimeChange, enabled = !state.submitting)
-            state.fieldErrors[AddField.TIME]?.let { EndpointError(it, tag = "time_error") }
-        }
-
-        // Figma 13-a 출발·도착 지정: 각 줄 [값] [집] [검색].
-        JitCard(gap = 10.dp) {
-            // 출발지: null 이면 집. 집이 저장돼 있으면 처음부터 집이 선택된 상태다.
-            val originIsHome = state.origin == null && homePlace != null
-            EndpointRow(
-                label = "출발지",
-                tag = "origin",
-                value = when {
-                    state.originLocating -> "현재 위치를 확인하는 중"
-                    state.origin != null -> state.origin.name
-                    homePlace != null -> "집 · ${homePlace.name}"
-                    else -> "출발지를 정해 주세요"
-                },
-                hasValue = state.origin != null || homePlace != null,
-                isHome = originIsHome,
-                homeAvailable = homePlace != null,
-                searching = originSearching,
-                enabled = enabled && !state.originLocating,
-                onHome = {
-                    if (homePlace == null) onSetHome()
-                    else {
-                        onOriginSelect(null)
-                        originSearching = false
-                    }
-                },
-                onSearchToggle = { originSearching = !originSearching },
-            )
-            state.fieldErrors[AddField.ORIGIN]?.let { EndpointError(it, tag = "origin_error") }
-            state.originNotice?.let { NoticeLine(it) }
-            if (originSearching) {
-                // 다른 집(본가·기숙사)은 검색 맨 위에. 고르면 준비 시간을 넣은 채로 둔다.
-                savedHomes.forEach { home ->
-                    Text(
-                        text = "🏠 ${home.line}",
-                        color = JitColor.Accent,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        modifier = Modifier
-                            .testTag("origin_saved_home")
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(JitRadius.Hint))
-                            .background(JitColor.Surface2)
-                            .clickable(enabled = enabled) {
-                                onOriginSavedHome(home)
-                                originSearching = false
-                            }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                    )
-                }
-                // 현재 위치는 버튼을 늘리지 않고 검색 맨 위에 한 줄로 둔다.
-                Text(
-                    text = "📍 현재 위치 사용",
-                    color = JitColor.Accent,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(JitRadius.Hint))
-                        .background(JitColor.Surface2)
-                        .clickable(enabled = enabled) {
-                            onUseCurrentLocation()
-                            originSearching = false
-                        }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                )
-                PlacePicker(
-                    label = "출발지 검색",
-                    state = state.originPlace,
-                    selected = null,
-                    onQueryChange = onOriginQueryChange,
-                    onSearch = onOriginSearch,
-                    onSelect = { item ->
-                        onOriginSelect(item)
-                        originSearching = false
-                    },
-                    enabled = enabled,
-                    onLoadMore = onOriginLoadMore,
-                    onSortChange = onOriginSortChange,
-                    onOpenMap = onOriginOpenMap,
-                    onOpenPlaceUrl = onOpenPlaceUrl,
-                )
-            }
-
-            HorizontalDivider(color = JitColor.Track)
-
-            // 도착지: 집 버튼을 누르면 저장된 집이 들어간다(퇴근·귀가 일정).
-            val destination = state.selectedPlace
-            EndpointRow(
-                label = "도착지",
-                tag = "destination",
-                value = destination?.name ?: "도착지를 검색해 주세요",
-                hasValue = destination != null,
-                isHome = state.destinationIsHome,
-                homeAvailable = homePlace != null,
-                searching = destinationSearching,
-                enabled = enabled,
-                onHome = {
-                    if (homePlace == null) onSetHome()
-                    else {
-                        onDestinationHome()
-                        destinationSearching = false
-                    }
-                },
-                onSearchToggle = { destinationSearching = !destinationSearching },
-            )
-            state.fieldErrors[AddField.DESTINATION]?.let { EndpointError(it, tag = "destination_error") }
-            if (destinationSearching) {
-                PlacePicker(
-                    label = "도착지 검색",
-                    state = state.place,
-                    selected = null,
-                    onQueryChange = onQueryChange,
-                    onSearch = onSearch,
-                    onSelect = { item ->
-                        onPlaceSelect(item)
-                        if (item != null) destinationSearching = false
-                    },
-                    enabled = enabled,
-                    onLoadMore = onLoadMore,
-                    onSortChange = onSortChange,
-                    onOpenMap = onOpenMap,
-                    onOpenPlaceUrl = onOpenPlaceUrl,
-                )
-            }
-        }
-
-        // 집이 아닌 곳에서 자고 바로 나서는 날(친구 집·본가·숙소). 서버 기본 규칙은 출발지를 따로
-        // 고르면 준비 시간을 빼서 알람이 준비 시간만큼 늦게 울린다(include-prep-api.md §5 ①).
-        if (state.origin != null) {
-            IncludePrepRow(
-                checked = state.includePrep,
-                enabled = enabled,
-                onChange = onIncludePrepChange,
-            )
-        }
-
-        // Figma 순서: 출발지 → 도착지 → 경로 → 종류 → "일정 추가"
-        val canPickRoute = state.canPickRoute(hasHome)
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            RouteRow(
-                routeLabel = state.routeLabel,
-                enabled = canPickRoute,
-                ready = state.selectedPlace != null && (state.origin != null || hasHome),
-                onClick = onPickRoute,
-            )
-            state.fieldErrors[AddField.ROUTE]?.let { EndpointError(it, tag = "route_error") }
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            TagDropdown(
-                options = tagOptionsOf(tags),
-                selected = state.tagKey,
-                onChange = onTagChange,
-                onAddTag = onAddTag,
-                onEditTag = onEditTag,
-                enabled = !state.submitting,
-            )
-            state.fieldErrors[AddField.TAG]?.let { EndpointError(it, tag = "tag_error") }
-        }
-
+    // 버튼 묶음. 전체 화면에서는 스크롤 끝에, 시트에서는 아래에 고정한다.
+    val bottomBlock: @Composable () -> Unit = {
         state.error?.let {
             Text(
                 text = it,
@@ -461,22 +318,282 @@ fun AddEventScreen(
             )
         }
 
-        Spacer(Modifier.height(4.dp))
+        state.destinationUndo?.let { undo ->
+            DestinationUndoBar(message = undo.message, enabled = enabled, onUndo = onUndoDestination)
+        }
+
+        val canSubmit = if (editing) state.canSubmitEdit(homePlace) else state.canSubmitAdd(hasHome, homePlace)
+        if (!editing && !canSubmit && !state.submitting) {
+            // 왜 못 누르는지 버튼 바로 위에 한 줄로 말해 준다(H2-8).
+            AddRequiredRule.hint(AddRequiredRule.missing(state, hasHome), sameEndpoints, pastTime)?.let {
+                Text(
+                    text = it,
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().testTag("add_required_hint"),
+                )
+            }
+        }
+        if (!editing && state.submitting) {
+            // 알람 정하는 중(H2-8 `546:766`). 내부 말 대신 지금 하는 일과 기다리는 이유를 말한다.
+            Text(
+                text = addPendingNote(state.submitSlow),
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().testTag("add_pending_note"),
+            )
+        }
 
         JitPrimaryButton(
-            label = if (editing) "수정 저장" else "일정 추가",
+            label = if (editing) "수정 저장" else "알람 맞추기",
             modifier = Modifier.testTag("event_submit"),
             onClick = onSubmit,
-            enabled = state.canSubmit,
+            enabled = canSubmit,
             loading = state.submitting,
+            loadingLabel = if (editing) null else ADD_PENDING_BUTTON,
+        )
+    }
+
+    Column(
+        modifier = if (inSheet) modifier.fillMaxWidth().imePadding()
+        else modifier.fillMaxSize().background(JitColor.Bg),
+    ) {
+    if (inSheet) {
+        Column(Modifier.padding(start = 18.dp, end = 8.dp, top = 2.dp, bottom = 8.dp)) {
+            SheetTitle(
+                title = "알람 추가",
+                subtitle = "* 필수 3가지만 정하면 바로 추가할 수 있어요",
+                closeTag = "add_sheet_close",
+                onClose = onClose,
+                closeEnabled = !closeLocked,
+                subtitleTag = "add_required_note",
+            )
+        }
+    }
+    Column(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+            .then(if (inSheet) Modifier.sheetScrollGuard() else Modifier)
+            .verticalScroll(rememberScrollState())
+            .testTag("add_event_scroll")
+            .padding(
+                start = 18.dp,
+                end = 18.dp,
+                top = if (inSheet) 4.dp else JitSpace.ScreenTop,
+                bottom = if (inSheet) 12.dp else JitSpace.ScreenBottom,
+            ),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        // 알람 추가(Figma `545:279`)와 일정 수정이 같은 구성 · 같은 순서다(사용자 피드백 11-16):
+        // 어디로 가요 → 몇 시까지 도착해요 → 어떻게 가요 → 제목 → 반복 요일 → 종류.
+        if (!inSheet) {
+            ScreenHeader(title = if (editing) "일정 수정" else "알람 추가", onBack = onBack, enabled = !state.submitting)
+        }
+        if (editing) {
+            // 반복 회차는 저장할 때 범위를 고른다(iter4 A2). 범위 수정을 모르는 서버면 그 회차만 바뀌고 요일은 못 고친다.
+            Text(
+                text = editNoteOf(state),
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.testTag("edit_note"),
+            )
+        } else if (!inSheet) {
+            Text(
+                text = "* 필수 3가지만 정하면 바로 추가할 수 있어요",
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.testTag("add_required_note"),
+            )
+        }
+
+        // ① 어디로 가요? + 출발지 알약(누르면 출발지 변경 시트)
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            JitSectionTitle("어디로 가요?", required = !editing, tag = "label_destination", modifier = Modifier.weight(1f))
+            OriginPill(
+                text = when {
+                    state.originLocating -> "현재 위치 확인 중"
+                    state.origin != null -> "출발지 ${state.origin.name} · 변경"
+                    hasHome -> "출발지 집 · 변경"
+                    else -> "출발지 정하기"
+                },
+                accent = state.origin == null && !hasHome,
+                enabled = enabled && !state.originLocating,
+                onClick = { originSheet = true },
+            )
+        }
+        // 출발지 오류 · 안내 · "여기서 자고 출발해요" 는 시트를 닫아도 알약 아래에 남는다.
+        state.fieldErrors[AddField.ORIGIN]?.let { EndpointError(it, tag = "origin_error") }
+        state.originNotice?.let { NoticeLine(it) }
+        if (state.origin != null) {
+            IncludePrepRow(checked = state.includePrep, enabled = enabled, onChange = onIncludePrepChange)
+        }
+        DestinationSection(
+            state = state,
+            recent = recentDestinations,
+            homeAvailable = homePlace != null,
+            sameEndpoints = sameEndpoints,
+            enabled = enabled,
+            onQueryChange = onQueryChange,
+            onSearch = onSearch,
+            onPlaceSelect = onPlaceSelect,
+            onHome = { if (homePlace == null) onSetHome() else onDestinationHome() },
+            onLoadMore = onLoadMore,
+            onSortChange = onSortChange,
+            onOpenMap = onOpenMap,
+            onOpenPlaceUrl = onOpenPlaceUrl,
+        )
+
+        // ② 몇 시까지 도착해요?
+        Spacer(Modifier.height(4.dp))
+        JitSectionTitle("몇 시까지 도착해요?", required = !editing, tag = "label_arrival")
+        ArrivalDateChips(state.date, onDateChange, enabled)
+        ArrivalTimeField(
+            hour = state.hour,
+            minute = state.minute,
+            picked = editing || state.timePicked,
+            enabled = enabled,
+            onChange = onTimeChange,
+        )
+        state.fieldErrors[AddField.TIME]?.let { EndpointError(it, tag = "time_error") }
+        // 이미 지난 시각(11-16). 서버는 한 번짜리 일정을 거절하지 않아 저장 전에 막는다.
+        if (pastTime) {
+            EndpointError(if (editing) PastTimeRule.EDIT_MESSAGE else PastTimeRule.ADD_MESSAGE, tag = "time_past_error")
+        }
+
+        // ③ 어떻게 가요?
+        Spacer(Modifier.height(4.dp))
+        JitSectionTitle("어떻게 가요?", required = !editing, fontSize = 12, tag = "label_route")
+        val routeReady = state.selectedPlace != null && (state.origin != null || hasHome)
+        JitFieldCard(
+            label = state.origin?.name?.let { "${it}에서 출발" } ?: "집에서 출발",
+            value = state.routeLabel
+                ?: "도착지가 바뀌어 경로를 다시 골라야 해요".takeIf { state.destinationUndo?.routeCleared == true }
+                ?: if (routeReady) "이동 경로를 선택해 주세요" else "도착지를 먼저 골라 주세요",
+            valueColor = if (state.routeLabel != null) JitColor.TextPrimary else JitColor.TextSecondary,
+            icon = LineIcons.chevronDown,
+            enabled = state.canPickRoute(hasHome, homePlace),
+            onClick = onPickRoute,
+            tag = "route_field",
+        )
+        // 앱이 자동으로 채운 경로임을 숨기지 않는다(C8). 경로 선택 화면에서 고르면 사라진다.
+        state.routeAutoCaption?.takeIf { state.routeLabel != null }?.let {
+            Text(
+                text = it,
+                color = JitColor.Accent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("route_auto"),
+            )
+        }
+        state.fieldErrors[AddField.ROUTE]?.let { EndpointError(it, tag = "route_error") }
+
+        // 선택 칸: 제목 → 반복 요일 → 종류
+        Spacer(Modifier.height(4.dp))
+        JitLabeledRow("제목") {
+            JitInlineInput(
+                value = state.title,
+                onValueChange = onTitleChange,
+                placeholder = "예: 전공 발표",
+                enabled = enabled,
+                inputTag = "event_title",
+                modifier = Modifier.weight(1f),
+            )
+        }
+        state.fieldErrors[AddField.TITLE]?.let { EndpointError(it, tag = "title_error") }
+        if (!editing) {
+            Text(
+                text = "비우면 장소 이름을 제목으로 써요",
+                color = JitColor.TextSecondary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(start = 72.dp).testTag("title_hint"),
+            )
+        }
+        // 수정에서는 반복 회차이고 서버가 "이후 일정 모두" 를 받을 때만 요일을 고칠 수 있다. 못 고치면 꺼진 채로 보인다.
+        RepeatDaysRow(
+            selected = state.repeatWeekdays,
+            onToggle = onRepeatDayToggle,
+            enabled = enabled && (!editing || state.canEditWeekdays),
+        )
+        JitLabeledRow("종류") {
+            TagDropdown(
+                options = tagOptionsOf(tags),
+                selected = state.tagKey,
+                onChange = onTagChange,
+                onAddTag = onAddTag,
+                onEditTag = onEditTag,
+                enabled = !state.submitting,
+                compact = true,
+            )
+        }
+        state.fieldErrors[AddField.TAG]?.let { EndpointError(it, tag = "tag_error") }
+
+        if (!inSheet) {
+            Spacer(Modifier.height(4.dp))
+            bottomBlock()
+        }
+    }
+    if (inSheet) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) { bottomBlock() }
+    }
+    }
+}
+
+/** 알람 정하는 중 버튼 글자(H2-8 `546:766`) */
+internal const val ADD_PENDING_BUTTON = "알람 시각을 정하고 있어요…"
+
+/** 알람 정하는 중 버튼 위 한 줄. 10초가 넘으면 닫아도 된다고 말한다(H2-8 `546:1942`) */
+internal fun addPendingNote(slow: Boolean): String =
+    if (slow) "조금 더 걸리고 있어요. 닫아도 알람은 정해지는 대로 맞춰 둘게요"
+    else "잠시만 기다려 주세요. 길과 준비 시간을 확인하고 있어요"
+
+// Partly AI-generated (Claude)
+/** 도착 날짜 칩 3개(H2-8): 오늘 · 내일 · 다른 날. "다른 날" 은 달력 팝업을 연다. */
+@Composable
+private fun ArrivalDateChips(date: LocalDate, onChange: (LocalDate) -> Unit, enabled: Boolean) {
+    var picking by remember { mutableStateOf(false) }
+    val today = LocalDate.now()
+    val tomorrow = today.plusDays(1)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        JitPillChip("오늘", selected = date == today, onClick = { onChange(today) }, enabled = enabled, tag = "arrival_date_today")
+        JitPillChip("내일", selected = date == tomorrow, onClick = { onChange(tomorrow) }, enabled = enabled, tag = "arrival_date_tomorrow")
+        JitPillChip(
+            text = otherDateLabel(date, today),
+            selected = date != today && date != tomorrow,
+            onClick = { picking = true },
+            icon = LineIcons.calendar,
+            enabled = enabled,
+            tag = "arrival_date_other",
+        )
+    }
+    if (picking) {
+        JitDatePickerDialog(
+            initial = date,
+            onPick = { picked -> onChange(picked); picking = false },
+            onDismiss = { picking = false },
         )
     }
 }
 
 // Partly AI-generated (Claude)
+/** "다른 날" 칩의 글자. 오늘·내일이면 "다른 날", 아니면 "9월 20일 일" 처럼 고른 날짜 */
+internal fun otherDateLabel(date: LocalDate, today: LocalDate): String =
+    if (date == today || date == today.plusDays(1)) "다른 날"
+    else "${date.format(DateTimeFormatter.ofPattern("M월 d일"))} ${DAY_NAMES[date.dayOfWeek.value - 1]}"
+
+// Partly AI-generated (Claude)
 /** "여기서 자고 출발해요 (준비 시간 포함)" 스위치 한 줄(Figma ⑫ 변형 `488:50`). */
 @Composable
-private fun IncludePrepRow(checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+internal fun IncludePrepRow(checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -495,7 +612,7 @@ private fun IncludePrepRow(checked: Boolean, enabled: Boolean, onChange: (Boolea
                 fontWeight = FontWeight.Medium,
             )
             Text(
-                text = if (checked) "준비 시간을 넣어 알람을 앞당김" else "끄면 이동 시간만 계산함",
+                text = if (checked) "준비 시간을 넣어 알람을 앞당겨요" else "끄면 이동 시간만 계산해요",
                 color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
@@ -562,7 +679,7 @@ fun HomeSetupScreen(
         )
         Text(
             text = if (extra) {
-                if (savedOnServer) "계정에 저장함 · 일정 출발지로 고를 수 있음" else "이 기기에만 저장함 · 일정 출발지로 고를 수 있음"
+                if (savedOnServer) "계정에 저장해요 · 일정 출발지로 고를 수 있어요" else "이 기기에만 저장해요 · 일정 출발지로 고를 수 있어요"
             } else {
                 "출발지 설정"
             },
@@ -686,173 +803,13 @@ internal fun ScreenHeader(
 }
 
 // Partly AI-generated (Claude)
-@Composable
-private fun DateRow(date: LocalDate, onChange: (LocalDate) -> Unit, enabled: Boolean) {
-    var picking by remember { mutableStateOf(false) }
-    val today = LocalDate.now()
-    val label = "${date.format(DateTimeFormatter.ofPattern("M월 d일"))} " +
-        DAY_NAMES[date.dayOfWeek.value - 1]
-    val relative = when (val days = java.time.temporal.ChronoUnit.DAYS.between(today, date)) {
-        0L -> "오늘"
-        1L -> "내일"
-        in Long.MIN_VALUE..-1L -> "${-days}일 전"
-        else -> "${days}일 뒤"
-    }
-
-    JitCard(gap = 9.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("날짜", color = JitColor.TextSecondary, fontSize = 11.sp)
-            Text(
-                "$relative · 눌러서 선택",
-                color = JitColor.Accent,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-        JitPickerValue(display = label, fontSize = 16, enabled = enabled,
-            onClick = { picking = true }, modifier = Modifier.testTag("event_date"),
-            onClickLabel = "날짜 고르기")
-    }
-
-    if (picking) {
-        JitDatePickerDialog(
-            initial = date,
-            onPick = { picked -> onChange(picked); picking = false },
-            onDismiss = { picking = false },
-        )
-    }
-}
-
-// Partly AI-generated (Claude)
-@Composable
-private fun TimeRow(hour: Int, minute: Int, onChange: (Int, Int) -> Unit, enabled: Boolean) {
-    var picking by remember { mutableStateOf(false) }
-
-    JitCard(gap = 9.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("시작 시각", color = JitColor.TextSecondary, fontSize = 11.sp)
-            // 오전/오후는 휠을 열지 않고도 바로 바꿀 수 있게 세그먼트로 둔다.
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(false, true).forEach { pm ->
-                    val on = (hour >= 12) == pm
-                    Text(
-                        text = if (pm) "오후" else "오전",
-                        color = if (on) JitColor.Bg else JitColor.TextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (on) JitColor.Accent else JitColor.Surface2)
-                            .clickable(enabled = enabled && !on) { onChange(withMeridiem(hour, pm), minute) }
-                            .padding(horizontal = 9.dp, vertical = 3.dp),
-                    )
-                }
-            }
-        }
-        // 화면은 12시간제로 보여준다. 오전/오후는 오른쪽 위에 따로 적는다.
-        JitPickerValue(
-            modifier = Modifier.testTag("event_time"),
-            display = "%02d:%02d".format(to12Hour(hour), minute),
-            fontSize = 24,
-            enabled = enabled,
-            onClick = { picking = true },
-            onClickLabel = "시작 시각 고르기",
-        )
-    }
-
-    if (picking) {
-        // 시계 다이얼 대신 휠(iter4 H2-5, Figma `545:670`). 1분 단위, [확인] 만 반영한다.
-        JitTimeWheelSheet(
-            title = "시작 시각",
-            initialHour = hour,
-            initialMinute = minute,
-            minuteStep = 1,
-            onConfirm = { h, m -> onChange(h, m); picking = false },
-            onDismiss = { picking = false },
-        )
-    }
-}
-
-// Partly AI-generated (Claude)
 /** 수정 화면 맨 위 안내. 반복 회차는 저장할 때 범위를 고를 수 있는지에 따라 다르다(iter4 A2) */
 internal fun editNoteOf(state: HomeViewModel.AddState): String = when {
-    !state.recurring -> "바꾼 항목만 저장함. 장소·출발지를 바꾸면 경로를 다시 고름"
+    !state.recurring -> "바꾼 항목만 저장해요. 장소나 출발지를 바꾸면 경로를 다시 골라요"
     state.scopeSupported -> "저장할 때 이 일정만 / 이후 일정 모두 중에 고를 수 있어요. 요일을 바꾸면 이후 일정에 적용돼요"
-    else -> "반복 일정의 이 회차만 바뀜. 요일은 고칠 수 없음"
+    else -> "반복 일정의 이 회차만 바뀌어요. 요일은 고칠 수 없어요"
 }
 
-// Partly AI-generated (Claude)
-/**
- * 반복 카드. Figma "⑫ 반복": 오른쪽 위 선택 요약("월 · 수"), 아래 월~일 칩 7개.
- *
- * @param selected 고른 요일. 0 = 월 … 6 = 일 ([DAY_NAMES] 의 인덱스)
- */
-@Composable
-private fun RepeatRow(selected: Set<Int>, onToggle: (Int) -> Unit, enabled: Boolean) {
-    JitCard(gap = 10.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("반복", color = JitColor.TextSecondary, fontSize = 11.sp)
-            Text(
-                text = repeatSummary(selected),
-                color = JitColor.Accent,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.testTag("repeat_summary"),
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            DAY_NAMES.forEachIndexed { index, name ->
-                val on = index in selected
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(JitRadius.Hint))
-                        .background(if (on) JitColor.Accent else JitColor.Surface2)
-                        .testTag("repeat_day_$index")
-                        .toggleable(
-                            value = on,
-                            enabled = enabled,
-                            role = Role.Checkbox,
-                            onValueChange = { onToggle(index) },
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = name,
-                        color = if (on) JitColor.Bg else JitColor.TextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-        }
-        if (selected.isNotEmpty()) {
-            Text(
-                text = "선택한 날짜부터 매주 반복 / 앞으로 7일치 표시",
-                color = JitColor.TextSecondary,
-                fontSize = 11.sp,
-            )
-        }
-    }
-}
-
-// AI-generated (Claude)
 /** 고른 요일 요약. 월요일부터 순서대로 "월 · 수", 하나도 없으면 "반복 안 함". */
 internal fun repeatSummary(selected: Set<Int>): String =
     if (selected.isEmpty()) "반복 안 함"
@@ -968,6 +925,8 @@ private fun TagDropdown(
     /** 내가 만든 종류 줄의 [편집]. 인자는 종류 key */
     onEditTag: (String) -> Unit,
     enabled: Boolean,
+    /** 시트의 "종류" 줄에 들어가는 작은 버튼 모양(제목 · 안내 줄 없이) */
+    compact: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(false) }
     // 서버 목록을 아직 못 받았으면 고른 key 의 이름을 모른다. 따로 표시한다.
@@ -976,22 +935,23 @@ private fun TagDropdown(
         ?: if (selected == null) TagOption(null, "선택 안 함", "프로필 기본")
         else TagOption(selected, "불러오는 중", "")
 
-    JitCard(gap = 9.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("종류", color = JitColor.TextSecondary, fontSize = 11.sp)
-            Text(
-                text = "시험·발표는 τ 를 높게",
-                color = JitColor.TextSecondary,
-                fontSize = 10.sp,
-            )
-        }
-
-        Box(modifier = Modifier.fillMaxWidth()) {
-            Row(
+    val body: @Composable () -> Unit = {
+        Box(modifier = if (compact) Modifier else Modifier.fillMaxWidth()) {
+            // 알람 추가 · 수정 시트(Figma `545:279`): 높이 36 · 모서리 12 · 아래 꺾쇠 16 + 13sp 굵게
+            if (compact) Row(
+                modifier = Modifier
+                    .heightIn(min = 36.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(JitColor.Surface2)
+                    .clickable(enabled = enabled, role = Role.Button) { expanded = true }
+                    .testTag("tag_picker")
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(LineIcons.chevronDown, contentDescription = null, tint = JitColor.TextPrimary, modifier = Modifier.size(16.dp))
+                Text(current.label, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            } else Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(JitRadius.Hint))
@@ -1093,156 +1053,23 @@ private fun TagDropdown(
             }
         }
     }
-}
-
-// Partly AI-generated (Claude)
-/**
- * 경로 선택 행.
- *
- * **선택 사항이다.** 고르지 않으면 서버가 도보·대중교통 중 빠른 쪽을 쓴다
- * (`clients.best_route`). 필수로 만들면 일정 하나 넣을 때마다 화면을 한 번 더
- * 지나야 하고, 경로가 뻔한 짧은 거리에서도 그렇다.
- */
-@Composable
-private fun RouteRow(
-    routeLabel: String?,
-    enabled: Boolean,
-    /** 출발지와 도착지가 둘 다 정해졌는지 */
-    ready: Boolean,
-    onClick: () -> Unit,
-) {
-    val hint = when {
-        !ready -> "출발지·도착지를 먼저 고름"
-        routeLabel != null -> "선택함"
-        else -> "선택 안 함 · 최단 경로 사용"
-    }
-
-    JitCard(gap = 9.dp) {
+    if (compact) body() else JitCard(gap = 9.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("경로", color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text("종류", color = JitColor.TextSecondary, fontSize = 11.sp)
             Text(
-                text = hint,
-                color = if (routeLabel != null) JitColor.Green else JitColor.TextSecondary,
+                text = "시험·발표는 τ 를 높게",
+                color = JitColor.TextSecondary,
                 fontSize = 10.sp,
             )
         }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(JitRadius.Hint))
-                .background(JitColor.Surface2)
-                .clickable(enabled = enabled, onClick = onClick)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = routeLabel ?: "경로 고르기 ›",
-                color = when {
-                    !enabled -> JitColor.Track
-                    routeLabel != null -> JitColor.TextPrimary
-                    else -> JitColor.Accent
-                },
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            if (routeLabel != null) {
-                Spacer(Modifier.weight(1f))
-                Text(
-                    text = "변경 ›",
-                    color = if (enabled) JitColor.TextSecondary else JitColor.Track,
-                    fontSize = 12.sp,
-                )
-            }
-        }
+        body()
     }
 }
 
-// AI-generated (Claude)
-/**
- * 출발지·도착지 한 줄. Figma 13-a: `[값] [집] [검색]`.
- *
- * 집 버튼은 값이 집이면 주황(활성), 아니면 회색이다. 집이 저장되지 않았으면
- * 흐리게 그리고, 누르면 ⑭ 집 주소로 보낸다([onHome] 이 처리).
- */
-@Composable
-private fun EndpointRow(
-    label: String,
-    tag: String,
-    value: String,
-    hasValue: Boolean,
-    isHome: Boolean,
-    homeAvailable: Boolean,
-    searching: Boolean,
-    enabled: Boolean,
-    onHome: () -> Unit,
-    onSearchToggle: () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label, color = JitColor.TextSecondary, fontSize = 11.sp)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = value,
-                color = if (hasValue) JitColor.TextPrimary else JitColor.TextSecondary,
-                fontSize = 14.sp,
-                fontWeight = if (hasValue) FontWeight.Bold else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(8.dp))
-            EndpointButton(
-                text = "집",
-                active = isHome,
-                dimmed = !homeAvailable,
-                enabled = enabled,
-                onClick = onHome,
-                modifier = Modifier.testTag("${tag}_home"),
-            )
-            Spacer(Modifier.width(6.dp))
-            EndpointButton(
-                text = if (searching) "닫기" else "검색",
-                active = searching,
-                dimmed = false,
-                enabled = enabled,
-                onClick = onSearchToggle,
-                modifier = Modifier.testTag("${tag}_search"),
-            )
-        }
-    }
-}
-
-// Partly AI-generated (Claude)
-@Composable
-private fun EndpointButton(
-    text: String,
-    active: Boolean,
-    dimmed: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Text(
-        text = text,
-        color = when {
-            active -> JitColor.Bg
-            dimmed -> JitColor.Track
-            else -> JitColor.TextPrimary
-        },
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold,
-        modifier = modifier
-            .clip(RoundedCornerShape(JitRadius.Hint))
-            .background(if (active) JitColor.Accent else JitColor.Surface2)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-    )
-}
-
-// AI-generated (Claude)
 /**
  * 각 줄(제목·시각·출발지·도착지·경로·종류) 바로 아래의 서버 오류. 예: "출발지와 도착지는 50m 이상 떨어져
  * 있어야 한다." 규칙은 서버가 소유하므로 문구를 그대로 쓴다.
@@ -1271,4 +1098,225 @@ private fun NoticeLine(text: String) {
         bold = false,
         dotSize = 6.dp,
     )
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 도착지를 집으로 바꾼 직후 6초 동안 버튼 위에 뜨는 줄(H2-9). 스낵바 모양이지만 시트 안에 그린다 —
+ * 바텀시트는 따로 창이라 화면의 스낵바가 시트 뒤에 가려진다.
+ */
+@Composable
+private fun DestinationUndoBar(message: String, enabled: Boolean, onUndo: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(JitRadius.Card))
+            .background(JitColor.Surface2)
+            .testTag("destination_undo")
+            .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(message, color = JitColor.TextPrimary, fontSize = 12.sp, modifier = Modifier.weight(1f))
+        Text(
+            text = "되돌리기",
+            color = JitColor.Accent,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(JitRadius.Hint))
+                .clickable(enabled = enabled, role = Role.Button, onClick = onUndo)
+                .testTag("destination_undo_action")
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        )
+    }
+}
+
+// Partly AI-generated (Claude)
+/** 출발지 알약(Figma: 높이 24 · Surface2 · 집 아이콘 14 + 12sp). 누르는 영역은 48dp */
+@Composable
+private fun OriginPill(text: String, accent: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(percent = 50))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .testTag("origin_chip"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier = Modifier
+                .heightIn(min = 24.dp)
+                .clip(RoundedCornerShape(percent = 50))
+                .background(JitColor.Surface2)
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val color = if (accent) JitColor.Accent else JitColor.TextPrimary
+            Icon(LineIcons.house, contentDescription = null, tint = color, modifier = Modifier.size(14.dp))
+            Text(
+                text = text,
+                color = color,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 180.dp),
+            )
+        }
+    }
+}
+
+// Partly AI-generated (Claude)
+/**
+ * 도착지: 검색칸(Figma: 높이 44 · 돋보기) + 아래 칩 줄(최근 도착지 · 고른 곳 · 집). 고른 도착지는 칩이 주황으로 채워진다.
+ * 출발지와 같은 곳이면 검색칸에 노란 테두리와 이유 한 줄(H2-9).
+ */
+@Composable
+private fun DestinationSection(
+    state: HomeViewModel.AddState,
+    recent: List<com.swpp.wakeup.data.remote.PlaceSearchItem>,
+    homeAvailable: Boolean,
+    sameEndpoints: Boolean,
+    enabled: Boolean,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
+    onPlaceSelect: (com.swpp.wakeup.data.remote.PlaceSearchItem?) -> Unit,
+    onHome: () -> Unit,
+    onLoadMore: () -> Unit,
+    onSortChange: (String) -> Unit,
+    onOpenMap: () -> Unit,
+    onOpenPlaceUrl: (String) -> Unit,
+) {
+    PlacePicker(
+        label = "도착할 장소 이름이나 주소",
+        state = state.place,
+        selected = state.selectedPlace,
+        onQueryChange = onQueryChange,
+        onSearch = onSearch,
+        onSelect = onPlaceSelect,
+        enabled = enabled,
+        onLoadMore = onLoadMore,
+        onSortChange = onSortChange,
+        onOpenMap = onOpenMap,
+        onOpenPlaceUrl = onOpenPlaceUrl,
+        compact = true,
+        borderColor = if (sameEndpoints) JitColor.Amber else null,
+        modifier = if (sameEndpoints) Modifier.testTag("destination_same_border") else Modifier,
+    )
+    val selected = state.selectedPlace
+    // 검색으로 고른 곳이 최근 도착지에 없으면 맨 앞 칩으로 보인다 — 무엇이 골라졌는지 칩 줄에서 보이게.
+    val extra = selected?.takeIf { !state.destinationIsHome && recent.none { r -> RecentDestinations.samePlace(r, it) } }
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("destination_chips"),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        extra?.let {
+            JitPillChip(it.name, selected = true, onClick = {}, icon = LineIcons.mapPin, enabled = enabled, tag = "destination_chip_selected")
+        }
+        recent.forEachIndexed { index, place ->
+            val on = !state.destinationIsHome && selected != null && RecentDestinations.samePlace(selected, place)
+            JitPillChip(
+                text = place.name,
+                selected = on,
+                onClick = { onPlaceSelect(place) },
+                icon = LineIcons.mapPin,
+                enabled = enabled,
+                tag = "destination_chip_$index",
+            )
+        }
+        JitPillChip(
+            text = "집",
+            selected = state.destinationIsHome,
+            onClick = onHome,
+            icon = LineIcons.house,
+            enabled = enabled,
+            tag = "destination_chip_home",
+        )
+    }
+    if (!homeAvailable && recent.isEmpty() && selected == null) {
+        Text("장소를 검색해 골라 주세요", color = JitColor.TextSecondary, fontSize = 11.sp)
+    }
+    if (sameEndpoints) {
+        Row(
+            modifier = Modifier.fillMaxWidth().testTag("destination_same_warning"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(LineIcons.alert, contentDescription = null, tint = JitColor.Amber, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(SameEndpoints.WARNING, color = JitColor.Amber, fontSize = 11.sp)
+        }
+    }
+    state.fieldErrors[AddField.DESTINATION]?.let { EndpointError(it, tag = "destination_error") }
+}
+
+// Partly AI-generated (Claude)
+/** "도착할 시각" 필드 카드 + 휠 시트(H2-5). 고르기 전에는 "시각을 골라 주세요" */
+@Composable
+private fun ArrivalTimeField(hour: Int, minute: Int, picked: Boolean, enabled: Boolean, onChange: (Int, Int) -> Unit) {
+    var picking by remember { mutableStateOf(false) }
+    JitFieldCard(
+        label = "도착할 시각",
+        value = if (picked) AlarmTimeChoice.clockLabel(hour * 60 + minute) else "시각을 골라 주세요",
+        valueColor = if (picked) JitColor.TextPrimary else JitColor.TextSecondary,
+        icon = LineIcons.clock,
+        enabled = enabled,
+        onClick = { picking = true },
+        tag = "event_time",
+    )
+    if (picking) {
+        JitTimeWheelSheet(
+            title = "도착할 시각",
+            initialHour = hour,
+            initialMinute = minute,
+            minuteStep = 1,
+            onConfirm = { h, m -> onChange(h, m); picking = false },
+            onDismiss = { picking = false },
+        )
+    }
+}
+
+// Partly AI-generated (Claude)
+/** 반복 요일 줄: 라벨 + 월~일 둥근 칩 7개(높이 32, 13sp). 고른 요일이 있으면 아래에 요약 한 줄 */
+@Composable
+private fun RepeatDaysRow(selected: Set<Int>, onToggle: (Int) -> Unit, enabled: Boolean) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        JitLabeledRow("반복 요일") {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                DAY_NAMES.forEachIndexed { index, name ->
+                    val on = index in selected
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 32.dp)
+                            .clip(RoundedCornerShape(percent = 50))
+                            .background(if (on) JitColor.Accent else JitColor.Surface2)
+                            .testTag("repeat_day_$index")
+                            .toggleable(value = on, enabled = enabled, role = Role.Checkbox, onValueChange = { onToggle(index) }),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = name,
+                            color = when {
+                                on -> JitColor.Bg
+                                enabled -> JitColor.TextPrimary
+                                else -> JitColor.Track
+                            },
+                            fontSize = 13.sp,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+        if (selected.isNotEmpty()) {
+            Text(
+                text = repeatSummary(selected),
+                color = JitColor.Accent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 72.dp).testTag("repeat_summary"),
+            )
+        }
+    }
 }

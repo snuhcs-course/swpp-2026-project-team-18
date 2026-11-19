@@ -24,6 +24,8 @@ internal fun RiskOptionsDto.toView(zone: ZoneId): RiskOptionsView {
     return RiskOptionsView(
         options = mapped,
         selectedKey = selectedKey?.takeIf { key -> mapped.any { it.key == key } },
+        // 서버가 정한 추천 칸. 세 칸에 없거나 구버전 서버(필드 없음)면 null — 추천 표시를 하지 않는다
+        recommendedKey = recommendedKey?.takeIf { key -> mapped.any { it.key == key } },
         autoAdjusted = autoAdjusted,
         autoReason = autoReason,
         unavailableReason = unavailableReason,

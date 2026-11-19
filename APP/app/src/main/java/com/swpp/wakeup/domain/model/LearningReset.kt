@@ -1,6 +1,8 @@
 // Partly AI-generated (Claude)
 package com.swpp.wakeup.domain.model
 
+import java.time.OffsetDateTime
+
 /**
  * 내 정보 › 계정 › "기록 초기화"(iter4, 백엔드 요청 BE-RESET, 계약 `docs/iter4/learning-reset-api.md`).
  *
@@ -24,9 +26,12 @@ object LearningReset {
     const val CANCEL = "취소"
 
     const val DONE = "기록을 모두 지웠어요. 알람은 처음 기준으로 다시 맞춰요"
-    const val UNSUPPORTED = "아직 서버에서 지원하지 않아요. 기록은 그대로예요"
+
+    /** 응답의 `skipped_plans` 가 0 보다 클 때 [DONE] 뒤에 붙인다(서버 계약 7절 4) */
+    const val SKIPPED_NOTE = "곧 울릴 알람과 이미 시작한 일정은 그대로예요"
+    const val UNSUPPORTED = "아직 지원하지 않는 기능이에요. 기록은 그대로예요"
     const val FAILED = "기록을 지우지 못했어요. 잠시 후 다시 시도해 주세요"
-    const val OFFLINE = "서버에 연결되지 않아 기록을 지우지 못했어요"
+    const val OFFLINE = "인터넷에 연결되지 않아 기록을 지우지 못했어요"
     const val SESSION = "로그인이 끝나 기록을 지우지 못했어요. 다시 로그인해 주세요"
 
     enum class Outcome { DONE, UNSUPPORTED, SESSION, FAILED, OFFLINE }
@@ -41,6 +46,22 @@ object LearningReset {
         404, 405, 501 -> Outcome.UNSUPPORTED
         401 -> Outcome.SESSION
         else -> Outcome.FAILED
+    }
+
+    // Partly AI-generated (Claude)
+    /** 다 지웠을 때의 안내. 다시 맞추지 못한 일정이 있으면([skippedPlans] > 0) 한 줄을 덧붙인다 */
+    fun doneMessage(skippedPlans: Int?): String =
+        if ((skippedPlans ?: 0) > 0) "$DONE. $SKIPPED_NOTE" else DONE
+
+    // Partly AI-generated (Claude)
+    /**
+     * 기기 대기열의 기록이 초기화 시각([resetAt])보다 **이른가**(서버 계약 4절 · 7절 2). 같은 시각은 남긴다(서버도 받는다).
+     * 어느 쪽이든 읽을 수 없으면 false — 지우지 않고 남겨 두면 서버가 마지막으로 거른다.
+     */
+    fun isBeforeReset(recordedAt: String?, resetAt: String?): Boolean {
+        val reset = resetAt?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() } ?: return false
+        val at = recordedAt?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() } ?: return false
+        return at.isBefore(reset)
     }
 
     fun message(outcome: Outcome): String = when (outcome) {

@@ -1,5 +1,7 @@
 package com.swpp.wakeup
 
+import com.swpp.wakeup.data.remote.ServerWarmup
+import com.swpp.wakeup.domain.model.UserAlarmRule
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
@@ -75,7 +77,7 @@ import com.swpp.wakeup.domain.model.TripEta
 import com.swpp.wakeup.domain.model.TripStage
 import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
 import com.swpp.wakeup.ui.alarm.arrivalClockLabel
-import com.swpp.wakeup.ui.alarm.freshnessLabel
+import com.swpp.wakeup.ui.alarm.liveNote
 import com.swpp.wakeup.ui.calendar.CalendarHelpActions
 import com.swpp.wakeup.ui.calendar.CalendarImportScreen
 import com.swpp.wakeup.ui.calendar.CalendarLinkScreen
@@ -83,6 +85,8 @@ import com.swpp.wakeup.ui.common.durationLabel
 import com.swpp.wakeup.ui.alarm.AlarmTimeSheet
 import com.swpp.wakeup.ui.auth.LoginActivity
 import com.swpp.wakeup.ui.events.AddEventScreen
+import com.swpp.wakeup.ui.events.AddEventSheet
+import com.swpp.wakeup.ui.events.AlarmConfirmSheet
 import com.swpp.wakeup.ui.events.AddResumeDialog
 import com.swpp.wakeup.ui.events.HomeSetupScreen
 import com.swpp.wakeup.ui.events.PrepOnboardingScreen
@@ -276,6 +280,9 @@ private fun MainHost(
     val plan by viewModel.plan.collectAsStateWithLifecycle()
     val alarmTimeSheet by viewModel.alarmTimeSheet.collectAsStateWithLifecycle()
     val routeMap by viewModel.routeMap.collectAsStateWithLifecycle()
+    // 홈 진행 중 카드의 단계(11-17)
+    val trackingSnapshot by com.swpp.wakeup.sensing.TripLiveState.snapshot.collectAsStateWithLifecycle()
+    val proposalBusyId by viewModel.proposalBusyId.collectAsStateWithLifecycle()
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
     val tripArrivals by viewModel.tripArrivals.collectAsStateWithLifecycle()
@@ -285,6 +292,9 @@ private fun MainHost(
     val preDepartureState by viewModel.preDeparture.collectAsStateWithLifecycle()
     val addState by viewModel.add.collectAsStateWithLifecycle()
     val addResumePrompt by viewModel.addResumePrompt.collectAsStateWithLifecycle()
+    val addSheetOpen by viewModel.addSheetOpen.collectAsStateWithLifecycle()
+    val alarmConfirm by viewModel.alarmConfirm.collectAsStateWithLifecycle()
+    val confirmBusyId by viewModel.confirmBusyId.collectAsStateWithLifecycle()
     val passwordChange by viewModel.passwordChange.collectAsStateWithLifecycle()
     val emailVerify by viewModel.emailVerify.collectAsStateWithLifecycle()
     val eventTags by viewModel.eventTags.collectAsStateWithLifecycle()
@@ -414,15 +424,18 @@ private fun MainHost(
     LaunchedEffect(addState.done) {
         if (addState.done) {
             // 수정이면 알람 결정 화면으로 돌아간다(같은 goBack). 안내 문구만 다르다.
-            val message = addState.doneMessage ?: "일정을 추가했습니다"
+            val message = addState.doneMessage ?: "일정을 추가했어요"
             // 알람을 계산하지 못한 채 저장했으면 결정 화면의 "다시 계산" 으로 잇는다(A6).
             val recomputeId = addState.routeFailedEventId
-            viewModel.goBack()
+            // 수정(전체 화면)만 화면을 뺀다. 새 일정은 시트라 resetAdd 가 시트를 닫는다.
+            if (addState.isEditing) viewModel.goBack()
             viewModel.resetAdd()
             // resetAdd 가 done 을 false 로 돌려 이 효과를 취소하므로, 스낵바는 화면 범위(scope)에서 띄운다.
             // Partly AI-generated (Claude)
             scope.launch {
-                if (recomputeId != null) {
+                if (recomputeId == null && viewModel.alarmConfirm.value != null) {
+                    // 알람 확인 시트(H2-8 `547:2095`)가 같은 말을 더 자세히 한다. 스낵바를 겹치지 않는다.
+                } else if (recomputeId != null) {
                     val result = snackbarHostState.showSnackbar(
                         message = message,
                         actionLabel = "다시 계산",
@@ -472,11 +485,14 @@ private fun MainHost(
             },
             options = alarmTimeSheet.options,
             onConfirm = { viewModel.saveAlarmTimeOption(sheetEventId, it) },
+            // 직접 정한 시각(BE-H3b). 서버 버전은 홈을 받을 때 이미 확인했다(ServerWarmup).
+            customSupported = UserAlarmRule.supported(ServerWarmup.serverVersion),
+            onConfirmCustom = { viewModel.saveAlarmTimeCustom(sheetEventId, it) },
+            userAlarm = sheetPlan?.userAlarm == true,
+            onRevert = { viewModel.revertAlarmTime(sheetEventId) },
             onDismiss = viewModel::dismissAlarmTimeSheet,
-            recommendedKey = AlarmTimeChoice.recommendedKey(
-                alarmTimeSheet.options?.selectedKey,
-                sheetPlan?.tauSourceLabel,
-            ),
+            // 서버가 정한 추천 칸(BE-H3e). 없으면 "추천" 을 붙이지 않는다
+            recommendedKey = alarmTimeSheet.options?.recommendedKey,
             goalTau = sheetPlan?.tauUsed,
             initialMinutesOfDay = sheetPlan?.let { p ->
                 p.alarmAt?.let { AlarmTimeChoice.minutesOfDay(it, p.meridiem) }
@@ -506,7 +522,7 @@ private fun MainHost(
             val extra = homeSetupState.target == HomeViewModel.HomeTarget.EXTRA
             viewModel.goBack()
             viewModel.resetHomeSetup()
-            if (saved) snackbarHostState.showSnackbar(if (extra) "다른 집을 저장했습니다" else "집 주소를 저장했습니다")
+            if (saved) snackbarHostState.showSnackbar(if (extra) "다른 집을 저장했어요" else "집 주소를 저장했어요")
         }
     }
     LaunchedEffect(prepOnboardingState.done) {
@@ -518,7 +534,7 @@ private fun MainHost(
             viewModel.resetPrepOnboarding()
             if (saved != null) {
                 // "1시간 5분" 처럼 화면 · 휠과 같은 표기. "분"·"간" 모두 받침이 있어 "으로" 고정.
-                snackbarHostState.showSnackbar("평소 준비 시간을 ${durationLabel(saved)}으로 저장했습니다")
+                snackbarHostState.showSnackbar("평소 준비 시간을 ${durationLabel(saved)}으로 저장했어요")
             }
         }
     }
@@ -527,7 +543,7 @@ private fun MainHost(
             val label = importState.resultLabel
             viewModel.goBack()
             viewModel.resetCalendarImport()
-            snackbarHostState.showSnackbar(label ?: "캘린더에서 가져왔습니다")
+            snackbarHostState.showSnackbar(label ?: "캘린더에서 가져왔어요")
         }
     }
     // Partly AI-generated (Claude) — ⑱ 캘린더 연동. 건너뛰었으면 저장한 것이 없으므로 말하지 않는다.
@@ -536,7 +552,7 @@ private fun MainHost(
             val saved = calendarOnboardingState.savedCount
             viewModel.goBack()
             viewModel.resetCalendarOnboarding()
-            if (saved != null) snackbarHostState.showSnackbar("캘린더 ${saved}개를 연동했습니다")
+            if (saved != null) snackbarHostState.showSnackbar("캘린더 ${saved}개를 연동했어요")
         }
     }
     // 기기 설정에서 캘린더 권한을 켜고 돌아왔을 수 있다. 바뀐 경우에만 다시 읽는다.
@@ -557,13 +573,20 @@ private fun MainHost(
     LaunchedEffect(state.notice) {
         val notice = state.notice ?: return@LaunchedEffect
         val undoId = notice.undoSkipEventId
+        val undoRoute = notice.undoRoute
+        val undoAlarm = notice.undoAlarm
+        val canUndo = undoId != null || undoRoute != null || undoAlarm != null
         val result = snackbarHostState.showSnackbar(
             message = notice.message,
-            actionLabel = undoId?.let { "되돌리기" },
-            duration = if (undoId != null) SnackbarDuration.Long else SnackbarDuration.Short,
+            actionLabel = if (canUndo) "되돌리기" else null,
+            duration = if (canUndo) SnackbarDuration.Long else SnackbarDuration.Short,
         )
-        if (result == SnackbarResult.ActionPerformed && undoId != null) {
-            viewModel.setSkipped(undoId, false)
+        if (result == SnackbarResult.ActionPerformed) {
+            if (undoId != null) viewModel.setSkipped(undoId, false)
+            // 더 빠른 경로로 바꾼 것을 되돌린다(11-16)
+            if (undoRoute != null) viewModel.undoRouteSwitch(undoRoute)
+            // 알람 시각을 바꾸기 전으로(C1-9)
+            if (undoAlarm != null) viewModel.undoAlarmChange(undoAlarm)
         }
         viewModel.consumeNotice(notice)
     }
@@ -659,6 +682,70 @@ private fun MainHost(
     // 코치마크가 떠 있으면 뒤로 가기는 코치마크만 닫는다(아래 화면의 뒤로 가기보다 나중에 등록해 먼저 받는다).
     BackHandler(enabled = coachmarkShown) { viewModel.dismissCoachmark() }
 
+    // Partly AI-generated (Claude)
+    // ⑫ 일정 화면. 수정은 전체 화면(AppRoute.EditEvent), 새 일정은 홈 위 바텀시트(H2-8 `545:192`)로 같은 화면을 쓴다.
+    val addEventContent: @Composable (Modifier, Boolean) -> Unit = { modifier, inSheet ->
+        AddEventScreen(
+            state = addState,
+            hasHome = state.hasHome,
+            homePlace = state.homePlace,
+            tags = eventTags,
+            onTitleChange = viewModel::onAddTitleChange,
+            onDateChange = viewModel::onAddDateChange,
+            onTimeChange = viewModel::onAddTimeChange,
+            onRepeatDayToggle = viewModel::onAddRepeatDayToggle,
+            onTagChange = viewModel::onAddTagChange,
+            onQueryChange = viewModel::onAddQueryChange,
+            onSearch = viewModel::searchPlaces,
+            onPlaceSelect = viewModel::onAddPlaceSelected,
+            onDestinationHome = viewModel::onAddDestinationHome,
+            onLoadMore = viewModel::loadMoreAddPlaces,
+            onSortChange = viewModel::onAddSortChange,
+            onOpenMap = {
+                viewModel.openMapPick(HomeViewModel.MapTarget.DESTINATION)
+            },
+            onOpenPlaceUrl = openPlaceUrl,
+            onOriginQueryChange = viewModel::onAddOriginQueryChange,
+            onOriginSearch = viewModel::searchAddOriginPlaces,
+            onOriginSelect = viewModel::onAddOriginSelected,
+            onOriginLoadMore = viewModel::loadMoreAddOriginPlaces,
+            onOriginSortChange = viewModel::onAddOriginSortChange,
+            onOriginOpenMap = {
+                viewModel.openMapPick(HomeViewModel.MapTarget.ORIGIN)
+            },
+            onUseCurrentLocation = viewModel::useCurrentLocationForAddOrigin,
+            onSetHome = {
+                viewModel.resetHomeSetup()
+                viewModel.openHomeSetup()
+            },
+            onPickRoute = viewModel::openRouteChoice,
+            onSubmit = viewModel::submitAdd,
+            onBack = viewModel::goBack,
+            inSheet = inSheet,
+            onClose = viewModel::dismissAddSheet,
+            recentDestinations = state.recentDestinations,
+            onUndoDestination = viewModel::undoDestinationChange,
+            modifier = modifier,
+            onIncludePrepChange = viewModel::onAddIncludePrepChange,
+            savedHomes = state.savedHomes,
+            onOriginSavedHome = viewModel::onAddOriginSavedHome,
+            tagAdd = tagAdd,
+            onAddTag = viewModel::openTagAdd,
+            onTagAddLabelChange = viewModel::onTagAddLabelChange,
+            onTagAddSubmit = viewModel::submitTagAdd,
+            onTagAddDismiss = viewModel::dismissTagAdd,
+            tagEdit = tagEdit,
+            onEditTag = viewModel::openTagEdit,
+            onTagEditLabelChange = viewModel::onTagEditLabelChange,
+            onTagRename = viewModel::submitTagRename,
+            onTagAskDelete = viewModel::askTagDelete,
+            onTagDelete = viewModel::confirmTagDelete,
+            onTagEditDismiss = viewModel::dismissTagEdit,
+            onSaveScope = viewModel::chooseSaveScope,
+            onSaveScopeDismiss = viewModel::dismissSaveScope,
+        )
+    }
+
     // 홈 · 탭 바가 코치마크에 자리를 알리고, 코치마크는 Scaffold 위(탭 바 위)에 겹친다. 두 감싸개 안의 Scaffold 는
     // 들여쓰기를 바꾸지 않았다(바뀐 줄을 줄이려고).
     CompositionLocalProvider(LocalCoachmarkTargets provides coachTargets) {
@@ -719,6 +806,15 @@ private fun MainHost(
                     onSwitchRoute = { event ->
                         event.fasterRoute?.let { viewModel.applyFasterRoute(event.id, it.routeKey, it.alarmAtMillis) }
                     },
+                    trackingEventId = trackingEventId,
+                    trackingInTransit = trackingSnapshot?.let {
+                        it.eventId == trackingEventId && it.phase != com.swpp.wakeup.sensing.TripGeofence.Phase.BEFORE_DEPARTURE
+                    } == true,
+                    onRestartTracking = viewModel::restartOngoingTracking,
+                    onAnswerProposal = { event, accept ->
+                        event.proposal?.let { viewModel.answerProposal(event.id, it, accept) }
+                    },
+                    proposalBusyId = proposalBusyId,
                 )
 
                 is AppRoute.AlarmDecision -> {
@@ -733,7 +829,11 @@ private fun MainHost(
                     }
                     val progress = plan
                         ?.takeIf { it.hasRoutePath }
-                        ?.let { p -> live?.let { RouteProgress.of(p.routePath, it.point) } }
+                        ?.let { p ->
+                            // 앞뒤 도보 구간까지 붙여 잰다(11-18: 마지막 도보 중 "경로 이탈" 오판)
+                            val home = state.homePlace?.let { h -> com.swpp.wakeup.sensing.GeoPoint(h.lat, h.lng) }
+                            live?.let { RouteProgress.ofJourney(p.routePath, p.originPoint ?: home, p.destinationPoint, it.point) }
+                        }
                     val arrival = tripArrivals[route.eventId]
                     val stage = plan?.let { viewModel.stageOf(it, arrival, nowMillis) }
                         ?: TripStage.BEFORE_ALARM
@@ -832,6 +932,10 @@ private fun MainHost(
                         ?.let { checkpointRows(it, plan?.eventPlace.orEmpty().substringBefore(" · "), departedAt) }
                     AlarmDecisionScreen(
                         plan = plan,
+                        onAnswerProposal = { accept ->
+                            plan?.proposal?.let { viewModel.answerProposal(route.eventId, it, accept) }
+                        },
+                        proposalBusy = proposalBusyId == route.eventId,
                         onBack = viewModel::goBack,
                         onChangeRisk = { viewModel.openAlarmTimeSheet(route.eventId) },
                         onEditBlocks = { viewModel.openEventBlocks(route.eventId) },
@@ -845,6 +949,10 @@ private fun MainHost(
                         // 오른쪽 위 i · 확률 줄 → "정시 도착 확률이 뭐예요?" 시트, 확률이 없거나 다른 i → 도움말(H2-4)
                         onHelp = { viewModel.openHelp(it) },
                         onRecompute = { viewModel.recomputePlan(route.eventId) },
+                        // 되돌리기(BE-H3b). 서버가 0.21.0 미만이면 두지 않는다. 확인(승인)은 알람 확인 시트에서만 한다
+                        serverSupportsConfirm = UserAlarmRule.supported(ServerWarmup.serverVersion),
+                        confirmBusy = confirmBusyId == route.eventId,
+                        onRevertAlarm = { viewModel.revertAlarmFromPlan(route.eventId) },
                         recomputeBusy = state.recomputeBusyId == route.eventId,
                         modifier = Modifier.padding(innerPadding),
                         nickname = state.nickname,
@@ -853,7 +961,8 @@ private fun MainHost(
                         progress = progress,
                         outlook = outlook,
                         arrivalClock = outlook?.let { arrivalClockLabel(it.predictedMillis) },
-                        freshness = live?.let { freshnessLabel(it.atMillis) },
+                        // 이 이동에서 받은 마지막 위치 기준(11-18). 새 위치가 없다고 "아직 못 받음" 으로 말하지 않는다.
+                        freshness = liveNote(tripOfEvent?.atMillis, usable = live != null, nowMillis = nowMillis),
                         routeMap = routeMap?.takeIf { it.eventId == route.eventId },
                         onRouteMapViewport = viewModel::loadRouteMapImage,
                         onRouteMapFit = viewModel::fitRouteMap,
@@ -881,71 +990,18 @@ private fun MainHost(
                                 altRouteKey = p.altRouteKey,
                                 altLabel = p.altRouteLabel,
                                 altFasterMinutes = p.altFasterMinutes,
+                                currentTravelMinutes = p.travelMinutes,
                             )
                         },
                         fasterRouteBusy = state.switchRouteBusyId == route.eventId,
                         onSwitchFasterRoute = {
-                            viewModel.applyFasterRoute(route.eventId, it.routeKey, it.alarmAtMillis)
+                            viewModel.applyFasterRoute(route.eventId, it.routeKey, it.alarmAtMillis, previousRouteKey = plan?.routeKey)
                         },
                     )
                 }
 
-                // 일정 수정은 ⑫ 를 수정 모드로 다시 쓴다(addState.editingEventId).
-                AppRoute.AddEvent, is AppRoute.EditEvent -> AddEventScreen(
-                    state = addState,
-                    hasHome = state.hasHome,
-                    homePlace = state.homePlace,
-                    tags = eventTags,
-                    onTitleChange = viewModel::onAddTitleChange,
-                    onDateChange = viewModel::onAddDateChange,
-                    onTimeChange = viewModel::onAddTimeChange,
-                    onRepeatDayToggle = viewModel::onAddRepeatDayToggle,
-                    onTagChange = viewModel::onAddTagChange,
-                    onQueryChange = viewModel::onAddQueryChange,
-                    onSearch = viewModel::searchPlaces,
-                    onPlaceSelect = viewModel::onAddPlaceSelected,
-                    onDestinationHome = viewModel::onAddDestinationHome,
-                    onLoadMore = viewModel::loadMoreAddPlaces,
-                    onSortChange = viewModel::onAddSortChange,
-                    onOpenMap = {
-                        viewModel.openMapPick(HomeViewModel.MapTarget.DESTINATION)
-                    },
-                    onOpenPlaceUrl = openPlaceUrl,
-                    onOriginQueryChange = viewModel::onAddOriginQueryChange,
-                    onOriginSearch = viewModel::searchAddOriginPlaces,
-                    onOriginSelect = viewModel::onAddOriginSelected,
-                    onOriginLoadMore = viewModel::loadMoreAddOriginPlaces,
-                    onOriginSortChange = viewModel::onAddOriginSortChange,
-                    onOriginOpenMap = {
-                        viewModel.openMapPick(HomeViewModel.MapTarget.ORIGIN)
-                    },
-                    onUseCurrentLocation = viewModel::useCurrentLocationForAddOrigin,
-                    onSetHome = {
-                        viewModel.resetHomeSetup()
-                        viewModel.openHomeSetup()
-                    },
-                    onPickRoute = viewModel::openRouteChoice,
-                    onSubmit = viewModel::submitAdd,
-                    onBack = viewModel::goBack,
-                    modifier = Modifier.padding(innerPadding),
-                    onIncludePrepChange = viewModel::onAddIncludePrepChange,
-                    savedHomes = state.savedHomes,
-                    onOriginSavedHome = viewModel::onAddOriginSavedHome,
-                    tagAdd = tagAdd,
-                    onAddTag = viewModel::openTagAdd,
-                    onTagAddLabelChange = viewModel::onTagAddLabelChange,
-                    onTagAddSubmit = viewModel::submitTagAdd,
-                    onTagAddDismiss = viewModel::dismissTagAdd,
-                    tagEdit = tagEdit,
-                    onEditTag = viewModel::openTagEdit,
-                    onTagEditLabelChange = viewModel::onTagEditLabelChange,
-                    onTagRename = viewModel::submitTagRename,
-                    onTagAskDelete = viewModel::askTagDelete,
-                    onTagDelete = viewModel::confirmTagDelete,
-                    onTagEditDismiss = viewModel::dismissTagEdit,
-                    onSaveScope = viewModel::chooseSaveScope,
-                    onSaveScopeDismiss = viewModel::dismissSaveScope,
-                )
+                // 일정 수정은 ⑫ 를 수정 모드로 다시 쓴다(addState.editingEventId). 새 일정은 아래 바텀시트다.
+                is AppRoute.EditEvent -> addEventContent(Modifier.padding(innerPadding), false)
 
                 AppRoute.RouteChoice -> RouteChoiceScreen(
                     state = routeState,
@@ -1038,7 +1094,10 @@ private fun MainHost(
                 AppRoute.Trip -> {
                     val tripEvent = remember(state.sections) { TripTabLogic.pick(state.sections) }
                     // 홈 목록이 바뀌어 알람·시작 시각이 달라지면 계획을 다시 받는다.
-                    val tripVersion = tripEvent?.let { (it.alarmAtEpochSecond ?: 0L) * 31 + it.startAtEpochSecond }
+                    // 경로만 바꿔도 다시 받는다(11-17) — "장소 · 경로" 줄이 바뀐다.
+                    val tripVersion = tripEvent?.let {
+                        ((it.alarmAtEpochSecond ?: 0L) * 31 + it.startAtEpochSecond) * 31 + it.placeAndRoute.hashCode()
+                    }
                     LaunchedEffect(tripEvent?.id, tripVersion) {
                         viewModel.loadTripPlan(tripEvent?.id, tripVersion)
                     }
@@ -1051,6 +1110,34 @@ private fun MainHost(
                         segments = checkpointState
                             ?.takeIf { it.eventId == tripEvent?.id && it.routeKey == tripPlan?.routeKey }
                             ?.segments,
+                        // 못 받아 기기 사본을 보이면 그 나이(11-17). [다시 시도] 는 구간만 다시 받는다.
+                        segmentsSavedAtMillis = checkpointState
+                            ?.takeIf { it.eventId == tripEvent?.id && it.routeKey == tripPlan?.routeKey }
+                            ?.savedAtMillis,
+                        segmentsFailed = checkpointState
+                            ?.takeIf { it.eventId == tripEvent?.id && it.routeKey == tripPlan?.routeKey }
+                            ?.failed == true,
+                        onRetrySegments = viewModel::retryCheckpoints,
+                        fasterRoute = tripPlan?.let { p ->
+                            FasterRoute.offer(
+                                isComputed = p.isComputed,
+                                skipped = p.skipped,
+                                alarmOn = p.alarmOn,
+                                alarmAtMillis = p.alarmAtMillis,
+                                nowMillis = System.currentTimeMillis(),
+                                routeKey = p.routeKey,
+                                altRouteKey = p.altRouteKey,
+                                altLabel = p.altRouteLabel,
+                                altFasterMinutes = p.altFasterMinutes,
+                                currentTravelMinutes = p.travelMinutes,
+                            )
+                        },
+                        fasterRouteBusy = state.switchRouteBusyId == tripEvent?.id,
+                        onSwitchFasterRoute = { offer ->
+                            tripEvent?.let { e ->
+                                viewModel.applyFasterRoute(e.id, offer.routeKey, offer.alarmAtMillis, previousRouteKey = tripPlan?.routeKey)
+                            }
+                        },
                         inTransit = tripPlan?.let { viewModel.stageOf(it) } == TripStage.IN_TRANSIT,
                         onOpenEvent = viewModel::openAlarmDecision,
                         // ⑬-b 경로 바꾸기 화면이 일정에 붙기 전에는 일정 수정(⑫)의 경로 칸에서 바꾼다.
@@ -1243,6 +1330,37 @@ private fun MainHost(
         }
     }
 
+    // Partly AI-generated (Claude)
+    // 알람 추가 바텀시트(H2-8 `545:192`). 탭 첫 화면이 보일 때만 그린다 — 경로 고르기 · 지도 · 집 주소로 가면
+    // 잠시 내려가고, 돌아오면 같은 값으로 다시 뜬다(값은 뷰모델에 있다).
+    // 알람 확인 시트(H2-8 `547:2095`). 알람 추가 시트가 닫히면서 이 시트로 바뀐다.
+    alarmConfirm?.let { confirm ->
+        AlarmConfirmSheet(
+            view = confirm,
+            onChangeTime = {
+                viewModel.dismissAlarmConfirm()
+                viewModel.openAlarmTimeSheet(confirm.eventId)
+            },
+            onDetails = {
+                viewModel.dismissAlarmConfirm()
+                viewModel.openAlarmDecision(confirm.eventId)
+            },
+            onConfirm = { viewModel.dismissAlarmConfirm(confirmed = true) },
+            onDismiss = { viewModel.dismissAlarmConfirm() },
+            // 시트를 닫고 바꾼다 — 알람이 다시 계산되므로 시트의 시각은 더 이상 맞지 않는다. 결과는 스낵바로.
+            onSwitchRoute = { offer ->
+                viewModel.dismissAlarmConfirm()
+                viewModel.applyFasterRoute(confirm.eventId, offer.routeKey, offer.alarmAtMillis, previousRouteKey = confirm.routeKey)
+            },
+        )
+    }
+    if (addSheetOpen && !nav.canGoBack && !addState.isEditing) {
+        AddEventSheet(
+            locked = addState.submitting && !addState.submitSlow,
+            onDismiss = viewModel::dismissAddSheet,
+        ) { addEventContent(it, true) }
+    }
+
     // 탭 바까지 덮어야 하므로 Scaffold 위에 그린다.
     AnimatedVisibility(
         visible = coachmarkShown && homeCoachmarkPending && onHomeRoot,
@@ -1307,6 +1425,7 @@ private fun RoutineHost(
         onSaveEventBlocks = viewModel::saveEventBlocks,
         onDismissMessages = viewModel::clearRoutineMessages,
         modifier = modifier,
+        onOpenRoutine = viewModel::openRoutineEditorFromEvent,
     )
 }
 

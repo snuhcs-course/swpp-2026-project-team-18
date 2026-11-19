@@ -85,7 +85,7 @@ fun CalendarLinkScreen(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "고른 캘린더의 일정을 가져올 수 있음",
+            text = "고른 캘린더의 일정을 가져올 수 있어요",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )
@@ -107,9 +107,9 @@ fun CalendarLinkScreen(
                     control = CalendarRowControl.CHECK,
                 )
                 Text(
-                    text = "읽기만 함. 캘린더를 고치지 않음.\n" +
-                        "켠 캘린더의 일정은 ‘캘린더에서 가져오기’에 나옴.\n" +
-                        "고른 일정만 서버로 보냄",
+                    text = "읽기만 해요. 캘린더를 고치지 않아요.\n" +
+                        "켠 캘린더의 일정은 ‘캘린더에서 가져오기’에 나와요.\n" +
+                        "고른 일정만 가져와요",
                     color = JitColor.TextSecondary,
                     fontSize = 11.sp,
                 )

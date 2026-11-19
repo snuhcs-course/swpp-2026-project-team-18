@@ -1,14 +1,17 @@
 package com.swpp.wakeup.alarm
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.swpp.wakeup.R
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ArrivalVerdict
@@ -39,6 +42,11 @@ object AlarmNotifications {
      * IMPORTANCE_HIGH 다. 추적 채널(LOW)에 두면 상태바에만 숨어 바꿀 때를 놓친다.
      */
     const val CHANNEL_REROUTE = "jit.reroute"
+
+    /** "알람을 바꿀까요?" 제안 · 마감에 바꿨다는 알림(BE-H3d). 헤드업 */
+    const val CHANNEL_PROPOSAL = "jit.proposal"
+    private const val NOTIFICATION_PROPOSAL_BASE = 5_000
+    private const val REQUEST_PROPOSAL_OPEN = 3_005
 
     /** 알람 알림 id. 한 번에 하나만 울리므로 고정값을 쓴다. */
     const val NOTIFICATION_ALARM = 1001
@@ -73,7 +81,7 @@ object AlarmNotifications {
                 "알람",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "계산된 기상 시각에 울린다"
+                description = "계산된 기상 시각에 울려요"
                 // 전체화면 인텐트가 막힌 기기에서는 이 채널 소리가 유일한
                 // 알림 수단이다. 그래서 채널에도 알람 소리를 건다.
                 // 화면이 뜨면 AlarmRinger 가 이어받아 계속 울린다.
@@ -97,7 +105,7 @@ object AlarmNotifications {
                 "이동 추적",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "출발·도착을 판별하는 동안 표시된다"
+                description = "출발·도착을 확인하는 동안 보여요"
                 setShowBadge(false)
             }
         )
@@ -108,7 +116,7 @@ object AlarmNotifications {
                 "도착 결과",
                 NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
-                description = "목적지에 닿았을 때 약속 시각과 비교해 알려 준다"
+                description = "도착했을 때 약속 시각과 비교해 알려 드려요"
                 // 소리는 내지 않는다. 도착 시점은 대개 강의실 앞이고, 거기서
                 // 울리면 사용자가 채널을 끈다 — 그러면 결과를 영영 못 본다.
                 // 진동만으로도 상단에 뜨는 것은 보장된다.
@@ -124,13 +132,60 @@ object AlarmNotifications {
                 "경로 바꾸기 제안",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "이동 중 지금 경로로 늦을 때 더 일찍 닿는 경로를 알려 준다"
+                description = "이동 중 지금 경로로 늦을 것 같으면 더 일찍 닿는 경로를 알려 드려요"
                 // 소리 없이 진동과 헤드업만. 이동 중 큰 소리는 방해가 된다.
                 setSound(null, null)
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 250, 150, 250)
             }
         )
+
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_PROPOSAL,
+                "알람 바꾸기 제안",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "길이나 준비 시간이 바뀌어 알람을 옮기는 게 좋을 때 알려 드려요"
+                setSound(null, null)
+                enableVibration(true)
+            }
+        )
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * "알람을 바꿀까요?" 헤드업 · 마감에 기기가 바꿨다는 알림(BE-H3d). 누르면 그 일정의 ④ 로 간다 — 거기서 답한다.
+     * 일정마다 한 장(같은 id 로 덮는다).
+     */
+    fun postProposal(context: Context, eventId: Long, title: String, text: String) {
+        ensureChannels(context)
+        val open = PendingIntent.getActivity(
+            context,
+            REQUEST_PROPOSAL_OPEN + eventId.toInt(),
+            com.swpp.wakeup.MainActivity.eventIntent(context, eventId),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_PROPOSAL)
+            .setSmallIcon(R.drawable.ic_notification_alarm)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        // 권한 확인을 여기에 펼쳐 쓴다(AlarmReceiver 와 같은 이유 — lint MissingPermission 이 도우미 함수를 넘어 보지 못한다).
+        val canPost = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.POST_NOTIFICATIONS,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!canPost) return
+        runCatching {
+            androidx.core.app.NotificationManagerCompat.from(context)
+                .notify(NOTIFICATION_PROPOSAL_BASE + eventId.toInt(), notification)
+        }
     }
 
     // Partly AI-generated (Claude)
@@ -188,7 +243,7 @@ object AlarmNotifications {
 
         return NotificationCompat.Builder(context, CHANNEL_ALARM)
             .setSmallIcon(R.drawable.ic_notification_alarm)
-            .setContentTitle("${schedule.alarmLabel} ${schedule.meridiem} · 지금 일어날 시각")
+            .setContentTitle("${com.swpp.wakeup.domain.model.ClockText.label(schedule.alarmLabel, schedule.meridiem) ?: schedule.alarmLabel} · 지금 일어날 시각")
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setPriority(NotificationCompat.PRIORITY_MAX)

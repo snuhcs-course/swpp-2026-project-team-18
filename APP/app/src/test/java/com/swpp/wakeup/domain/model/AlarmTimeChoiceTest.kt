@@ -110,20 +110,13 @@ class AlarmTimeChoiceTest {
         assertNull(AlarmTimeChoice.estimate(empty, 80))
     }
 
+    // Partly AI-generated (Claude)
     @Test
-    fun `추천 칸은 지금 적용 중인 칸이다`() {
-        assertEquals(
-            RiskOptionView.KEY_SAFE,
-            AlarmTimeChoice.recommendedKey(RiskOptionView.KEY_SAFE, "수업 일정 기본값"),
-        )
-    }
-
-    @Test
-    fun `직접 고른 값이면 종류 기본값을 알 수 없어 보통에 붙인다`() {
-        assertEquals(
-            RiskOptionView.KEY_NORMAL,
-            AlarmTimeChoice.recommendedKey(RiskOptionView.KEY_SAFE, AlarmTimeChoice.MANUAL_TAU_SOURCE),
-        )
-        assertEquals(RiskOptionView.KEY_NORMAL, AlarmTimeChoice.recommendedKey(null, null))
+    fun `세 칸이나 지금 알람이 5분 단위가 아니면 1분 휠로 연다`() {
+        assertEquals(5, AlarmTimeChoice.wheelStep(listOf(7 * 60 + 20, 7 * 60 + 40, 8 * 60 + 5, null)))
+        // 서버 칸이 7:43 이면 5분 휠은 7:40 으로 보이고 다른 시각을 저장할 수 있다
+        assertEquals(1, AlarmTimeChoice.wheelStep(listOf(7 * 60 + 43, 7 * 60 + 50)))
+        assertEquals(1, AlarmTimeChoice.wheelStep(listOf(7 * 60 + 20, 7 * 60 + 41)))
+        assertEquals(5, AlarmTimeChoice.wheelStep(emptyList()))
     }
 }

@@ -72,6 +72,7 @@ class TripTrackingService : Service() {
     private lateinit var queue: TripObservationQueue
     private lateinit var liveRouteStore: LiveRouteStore
     private lateinit var progressStore: TripProgressStore
+    private lateinit var activeTripStore: com.swpp.wakeup.data.local.ActiveTripStore
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
     private val repository by lazy { EventRepository() }
 
@@ -166,6 +167,7 @@ class TripTrackingService : Service() {
         queue = TripObservationQueue(this)
         liveRouteStore = LiveRouteStore(this)
         progressStore = TripProgressStore(this)
+        activeTripStore = com.swpp.wakeup.data.local.ActiveTripStore(this)
         AlarmNotifications.ensureChannels(this)
     }
 
@@ -220,7 +222,8 @@ class TripTrackingService : Service() {
             return START_NOT_STICKY
         }
 
-        val redelivered = flags and START_FLAG_REDELIVERY != 0
+        // 앱을 다시 열어 끊긴 추적을 잇는 것(ACTION_RESUME)도 시스템 재전달과 같이 다룬다 — 이동 단계와 도착을 이어 간다.
+        val redelivered = flags and START_FLAG_REDELIVERY != 0 || intent?.action == ACTION_RESUME
 
         // 정상 ACTION_START 는 새 추적 세션의 경계다. 같은 event id가 다음 날
         // 다시 쓰이더라도 어제 좌표의 경로를 잠깐 보여 주지 않는다. 반대로
@@ -250,6 +253,10 @@ class TripTrackingService : Service() {
         ridingUntilMillis = null
 
         schedule = parsed
+        // 강제 종료로 끊기면 앱을 다시 열 때 이것으로 잇는다(11-17). 정상 종료는 onDestroy 가 지운다.
+        activeTripStore.save(parsed)
+        // 이 프로세스가 죽어도 앱을 열지 않고 다시 살린다 — 10분마다 점검(11-17).
+        TripWatchdog.schedule(this, parsed.trackingDeadlineMillis)
         // 화면이 "이 일정을 추적 중인가" 를 안다. 아침 기록 화면의 안내 문구와
         // "안 감" 표시 때 추적을 멈출지가 이 값으로 정해진다.
         TripLiveState.beginTracking(parsed.eventId)
@@ -265,7 +272,17 @@ class TripTrackingService : Service() {
         }
 
         // startForeground 는 즉시 불러야 한다. 늦으면 시스템이 죽인다.
-        promoteToForeground(initialNotificationText(parsed))
+        //
+        // 백그라운드에서 다시 뜬 경우(시스템 재전달 · 점검 알람 · 재부팅)는 위치 권한이 "앱 사용 중에만" 이면 시스템이
+        // location 포그라운드 서비스를 거절한다(SecurityException, 11-17 에뮬레이터 실험에서 앱이 죽었다). 죽지 않고 조용히
+        // 멈춘다 — 이어 갈 사본([activeTripStore])은 남겨 두어 앱을 여는 순간 잇는다.
+        if (!promoteToForegroundOrFalse(initialNotificationText(parsed))) {
+            Log.w(TAG, "백그라운드에서 위치 추적을 시작할 수 없다(위치 '항상 허용' 아님). 앱을 열면 잇는다: 일정 ${parsed.eventId}")
+            schedule = null
+            geofence = null
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         val remaining = parsed.trackingDeadlineMillis - System.currentTimeMillis()
         if (remaining <= 0) {
@@ -343,7 +360,7 @@ class TripTrackingService : Service() {
         if (!recorded) return
         manualArrivedAtMillis = now
         scope.launch { queue.flush() }
-        updateNotification(TITLE_ARRIVED, "${current.eventLine} · 도착을 기록했다")
+        updateNotification(TITLE_ARRIVED, "${current.eventLine} · 도착을 기록했어요")
         handler.postDelayed(manualGraceRunnable, MANUAL_GRACE_MILLIS)
     }
 
@@ -565,6 +582,9 @@ class TripTrackingService : Service() {
         // 이동이 끝났다(도착·마감·중지·로그아웃). 이 인스턴스가 추적하던 것만 지운다 — 추적 없이
         // 알림 버튼으로 잠깐 뜬 인스턴스가 다시 전달될 추적의 사본을 지우면 안 된다.
         if (schedule != null) progressStore.clear()
+        schedule?.eventId?.let(activeTripStore::clear)
+        // 정상으로 끝났다. 점검도 멈춘다. (추적 없이 알림 버튼으로 잠깐 뜬 인스턴스는 건드리지 않는다)
+        if (schedule != null) TripWatchdog.cancel(this)
         liveRouteGate.reset()
         TripLiveState.clearTracking()
         Log.i(TAG, "추적 종료 (대기 관측 ${pending}건)")
@@ -724,7 +744,7 @@ class TripTrackingService : Service() {
             TripGeofence.isUsable(fix) -> armBlindTimer()
         }
 
-        // 수동으로 도착을 기록했으면 알림은 "도착 기록함" 에 둔다. GPS 도착만 더 기다린다.
+        // 수동으로 도착을 기록했으면 알림은 "도착을 기록했어요" 에 둔다. GPS 도착만 더 기다린다.
         if (manualArrivedAtMillis != null) return
         refreshProgressNotification(current, fence, fix.atMillis)
     }
@@ -777,7 +797,7 @@ class TripTrackingService : Service() {
 
             if (route == null) {
                 val reason = (result as? EventRepository.Result.Failure)?.message
-                    ?: "사용 가능한 경로가 없음"
+                    ?: "쓸 수 있는 경로가 없어요"
                 Log.w(TAG, "현재 위치 경로 갱신 실패: $reason")
                 // 직전 성공 경로는 유지한다. 잠깐의 지하 구간 때문에 지도를
                 // 출발지 경로로 되돌리는 것보다, 다음 1분 재시도까지 마지막으로
@@ -880,6 +900,19 @@ class TripTrackingService : Service() {
 
     // --- 알림 -------------------------------------------------------------
 
+    /** [promoteToForeground] 를 시도한다. 시스템이 거절하면(권한 · 백그라운드 시작 제한) false */
+    private fun promoteToForegroundOrFalse(text: String): Boolean = try {
+        promoteToForeground(text)
+        true
+    } catch (e: SecurityException) {
+        Log.w(TAG, "포그라운드 승격 거절", e)
+        false
+    } catch (e: IllegalStateException) {
+        // ForegroundServiceStartNotAllowedException(Android 12+)은 IllegalStateException 이다
+        Log.w(TAG, "포그라운드 승격 거절", e)
+        false
+    }
+
     private fun promoteToForeground(text: String) {
         ServiceCompat.startForeground(
             this,
@@ -977,7 +1010,7 @@ class TripTrackingService : Service() {
                     }
                 }
 
-                else -> append("도착을 기록했다")
+                else -> append("도착을 기록했어요")
             }
         }
         updateNotification(phase?.label ?: TITLE_TRACKING, text, phase)
@@ -1051,10 +1084,10 @@ class TripTrackingService : Service() {
         append(
             when {
                 current.canDetectDeparture && current.canDetectArrival ->
-                    "집을 나서는 시각과 도착 시각을 기록함"
+                    "집을 나서는 시각과 도착 시각을 기록해요"
 
-                current.canDetectArrival -> "도착 시각을 기록함"
-                else -> "집을 나서는 시각을 기록함"
+                current.canDetectArrival -> "도착 시각을 기록해요"
+                else -> "집을 나서는 시각을 기록해요"
             }
         )
     }
@@ -1087,7 +1120,7 @@ class TripTrackingService : Service() {
         private const val TITLE_TRACKING = "이동 기록 중"
 
         /** 수동 도착 뒤의 알림 제목 */
-        private const val TITLE_ARRIVED = "도착 기록함"
+        private const val TITLE_ARRIVED = "도착을 기록했어요"
 
         /** 수동 도착 뒤 GPS 도착을 더 기다리는 시간 */
         private const val MANUAL_GRACE_MILLIS = 3 * 60_000L
@@ -1111,6 +1144,9 @@ class TripTrackingService : Service() {
         }
 
         const val ACTION_START = "com.swpp.wakeup.action.TRIP_START"
+
+        /** 강제 종료 등으로 끊긴 추적을 앱을 다시 열 때 잇는다([resume]) */
+        const val ACTION_RESUME = "com.swpp.wakeup.action.TRIP_RESUME"
         const val ACTION_STOP = "com.swpp.wakeup.action.TRIP_STOP"
         private const val EXTRA_SCHEDULE = "schedule"
 
@@ -1134,6 +1170,19 @@ class TripTrackingService : Service() {
             }
             val intent = Intent(context, TripTrackingService::class.java)
                 .setAction(ACTION_START)
+                .putExtra(EXTRA_SCHEDULE, Gson().toJson(schedule))
+            context.startForegroundService(intent)
+        }
+
+        // Partly AI-generated (Claude)
+        /**
+         * 끊긴 추적을 잇는다(11-17). 앱이 화면에 있을 때만 부른다 — 위치 권한이 "앱 사용 중에만" 이어도
+         * 포그라운드에서 시작한 서비스는 위치를 받는다. 집을 나선 뒤였으면 그 단계부터 이어 간다.
+         */
+        fun resume(context: Context, schedule: AlarmSchedule) {
+            if (!schedule.canTrack) return
+            val intent = Intent(context, TripTrackingService::class.java)
+                .setAction(ACTION_RESUME)
                 .putExtra(EXTRA_SCHEDULE, Gson().toJson(schedule))
             context.startForegroundService(intent)
         }

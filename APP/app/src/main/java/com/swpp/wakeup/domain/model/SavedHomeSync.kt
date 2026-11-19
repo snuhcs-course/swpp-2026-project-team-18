@@ -76,4 +76,4 @@ fun skippedOverLimit(dto: SavedPlacesListDto): Int = dto.skipped.orEmpty().count
 fun savedHomesFirstUploadRunning(syncJobActive: Boolean, synced: Boolean): Boolean = syncJobActive && !synced
 
 /** 처음 올리는 중에 집을 더하거나 지우거나 기본으로 바꾸려 할 때의 안내 */
-const val SAVED_HOMES_UPLOADING_NOTICE = "저장한 집을 서버에 올리는 중이에요. 잠시 뒤 다시 해 주세요"
+const val SAVED_HOMES_UPLOADING_NOTICE = "저장한 집을 계정에 올리는 중이에요. 잠시 뒤 다시 해 주세요"

@@ -71,7 +71,7 @@ object SocialLogin {
         return SocialNotice(
             title = "이 이메일은 이미 가입돼 있어요",
             body = "$via 로그인한 뒤 설정 › 로그인 연결에서 ${provider.asObject} 이어 주세요",
-            footnote = if (methods.isEmpty()) "자동으로 합치지 않음" else "자동으로 합치지 않음. 원래 로그인 방법: $how",
+            footnote = if (methods.isEmpty()) "자동으로 합치지 않아요" else "자동으로 합치지 않아요. 원래 로그인 방법: $how",
             amber = true,
         )
     }

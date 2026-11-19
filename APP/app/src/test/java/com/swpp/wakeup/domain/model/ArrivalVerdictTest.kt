@@ -36,7 +36,7 @@ class ArrivalVerdictTest {
 
         assertEquals(5, v.marginMinutes)
         assertEquals(ArrivalVerdict.Status.EARLY, v.status)
-        assertEquals("5분 일찍 도착했습니다", v.headline)
+        assertEquals("5분 일찍 도착했어요", v.headline)
     }
 
     @Test
@@ -45,7 +45,7 @@ class ArrivalVerdictTest {
 
         assertEquals(-12, v.marginMinutes)
         assertEquals(ArrivalVerdict.Status.LATE, v.status)
-        assertEquals("12분 늦게 도착했습니다", v.headline)
+        assertEquals("12분 늦게 도착했어요", v.headline)
     }
 
     @Test
@@ -54,14 +54,14 @@ class ArrivalVerdictTest {
 
         assertEquals(0, v.marginMinutes)
         assertEquals(ArrivalVerdict.Status.ON_TIME, v.status)
-        assertEquals("정시에 도착했습니다", v.headline)
+        assertEquals("정시에 도착했어요", v.headline)
     }
 
     @Test
     fun `0분 일찍이라는 말을 만들지 않는다`() {
-        // 반올림해서 0이 되는 구간. "0분 일찍 도착했습니다" 는 말이 안 된다.
+        // 반올림해서 0이 되는 구간. "0분 일찍 도착했어요" 는 말이 안 된다.
         listOf(arriveAt(9, 29, 40), arriveAt(9, 30, 20)).forEach { v ->
-            assertEquals("정시에 도착했습니다", v.headline)
+            assertEquals("정시에 도착했어요", v.headline)
             assertEquals(ArrivalVerdict.Status.ON_TIME, v.status)
         }
     }
@@ -69,25 +69,25 @@ class ArrivalVerdictTest {
     @Test
     fun `한 시간을 넘으면 시간과 분으로 읽는다`() {
         // 95분 일찍을 "95분" 으로 쓰면 한 번 더 계산해야 읽힌다.
-        assertEquals("1시간 35분 일찍 도착했습니다", arriveAt(7, 55).headline)
-        assertEquals("1시간 일찍 도착했습니다", arriveAt(8, 30).headline)
-        assertEquals("2시간 일찍 도착했습니다", arriveAt(7, 30).headline)
+        assertEquals("1시간 35분 일찍 도착했어요", arriveAt(7, 55).headline)
+        assertEquals("1시간 일찍 도착했어요", arriveAt(8, 30).headline)
+        assertEquals("2시간 일찍 도착했어요", arriveAt(7, 30).headline)
     }
 
     @Test
     fun `59분은 그대로 분이다`() {
-        assertEquals("59분 일찍 도착했습니다", arriveAt(8, 31).headline)
+        assertEquals("59분 일찍 도착했어요", arriveAt(8, 31).headline)
     }
 
     @Test
     fun `근거 줄에 실제 도착과 약속 시각이 함께 있다`() {
         // 제목만 있으면 사용자가 판정을 검산할 수 없다. 앱이 엉뚱한 시각을
         // 잡았을 때 이 줄에서 드러나야 한다.
-        assertEquals("9:25 도착 · 약속 9:30", arriveAt(9, 25).detail(seoul))
+        assertEquals("오전 9:25 도착 · 약속 오전 9:30", arriveAt(9, 25).detail(seoul))
     }
 
     @Test
-    fun `근거 줄은 24시간제로 적는다`() {
+    fun `근거 줄은 오전 오후 12시간제로 적는다`() {
         val afternoon = ArrivalVerdict(
             arrivedAtMillis = ZonedDateTime
                 .of(2026, 9, 23, 14, 5, 0, 0, seoul).toInstant().toEpochMilli(),
@@ -96,8 +96,8 @@ class ArrivalVerdictTest {
         )
 
         // 오전·오후를 붙이지 않으므로 14:05 가 2:05 로 보이면 안 된다.
-        assertEquals("14:05 도착 · 약속 14:00", afternoon.detail(seoul))
-        assertEquals("5분 늦게 도착했습니다", afternoon.headline)
+        assertEquals("오후 2:05 도착 · 약속 오후 2:00", afternoon.detail(seoul))
+        assertEquals("5분 늦게 도착했어요", afternoon.headline)
     }
 
     @Test
@@ -108,7 +108,7 @@ class ArrivalVerdictTest {
         val v = arriveAt(9, 25)
 
         assertEquals(ArrivalVerdict.Status.EARLY, v.status)
-        assertEquals("5분 일찍 도착했습니다", v.headline)
+        assertEquals("5분 일찍 도착했어요", v.headline)
     }
 
     @Test
@@ -122,15 +122,15 @@ class ArrivalVerdictTest {
         )
 
         assertEquals(20, midnight.marginMinutes)
-        assertEquals("20분 일찍 도착했습니다", midnight.headline)
-        assertEquals("23:50 도착 · 약속 0:10", midnight.detail(seoul))
+        assertEquals("20분 일찍 도착했어요", midnight.headline)
+        assertEquals("오후 11:50 도착 · 약속 오전 12:10", midnight.detail(seoul))
     }
 
     @Test
     fun `추적 마감 한 시간까지의 지각을 표현할 수 있다`() {
         // trackingDeadlineMillis 가 일정 시작 + 1시간이라 실제로 나올 수 있는
         // 가장 늦은 판정이 이 근처다.
-        assertEquals("58분 늦게 도착했습니다", arriveAt(10, 28).headline)
+        assertEquals("58분 늦게 도착했어요", arriveAt(10, 28).headline)
     }
 
     @Test

@@ -23,7 +23,8 @@ import java.io.IOException
  * - [Failure]: [network] 는 통신 자체의 실패, [status]·[code] 는 서버 응답에서 온 것.
  */
 sealed interface SavedPlacesResult {
-    data class Ok(val homes: List<SavedHome>, val skippedOverLimit: Int = 0) : SavedPlacesResult
+    /** @param renamed `bulk` 가 겹쳐서 번호를 붙여 저장한 새 이름들(BE-H9). 없으면 비어 있다 */
+    data class Ok(val homes: List<SavedHome>, val skippedOverLimit: Int = 0, val renamed: List<String> = emptyList()) : SavedPlacesResult
     data object Unsupported : SavedPlacesResult
     data class Failure(
         val message: String,
@@ -54,7 +55,11 @@ class SavedPlacesRepository(private val api: SavedPlacesApi = ApiClient.savedPla
         val response = api.bulk(SavedPlacesBulkRequest(bulkItemsOf(homes)))
         val dto = response.body()?.takeIf { response.isSuccessful }
             ?: return@guard unsupportedOrFailure(response)
-        SavedPlacesResult.Ok(dto.toSavedHomes(), skippedOverLimit(dto))
+        SavedPlacesResult.Ok(
+            dto.toSavedHomes(),
+            skippedOverLimit(dto),
+            renamed = dto.renamed.orEmpty().mapNotNull { it.label?.trim()?.takeIf(String::isNotEmpty) },
+        )
     }
 
     /** 집을 하나 더한다. 201 과 200(같은 자리라 이름만 바뀜) 모두 성공이다 */
@@ -112,9 +117,9 @@ class SavedPlacesRepository(private val api: SavedPlacesApi = ApiClient.savedPla
     }
 
     private fun fallbackMessage(status: Int): String = when {
-        status == 401 -> "다시 로그인해야 합니다"
+        status == 401 -> "다시 로그인해 주세요"
         status == 429 -> "요청이 너무 잦아요. 잠시 뒤 다시 시도해 주세요"
-        status >= 500 -> "서버에 문제가 생겼어요"
+        status >= 500 -> "잠시 문제가 생겼어요"
         else -> MESSAGE_UNKNOWN
     }
 
@@ -122,9 +127,11 @@ class SavedPlacesRepository(private val api: SavedPlacesApi = ApiClient.savedPla
         const val CODE_NOT_FOUND = "not_found"
         const val CODE_SAME_AS_DEFAULT = "same_as_default"
         const val CODE_LIMIT = "saved_place_limit"
-        const val MESSAGE_NETWORK = "서버에 연결하지 못했어요"
+        /** 다른 저장한 집과 같은 이름이거나 "집"(BE-H9). 이름 칸 아래에 보인다 */
+        const val CODE_LABEL_DUPLICATE = "saved_place_label_duplicate"
+        const val MESSAGE_NETWORK = "연결하지 못했어요. 인터넷 연결을 확인해 주세요"
         private const val MESSAGE_UNKNOWN = "알 수 없는 오류가 났어요"
-        private const val MESSAGE_BAD_ROW = "서버 응답을 읽지 못했어요"
+        private const val MESSAGE_BAD_ROW = "응답을 읽지 못했어요"
         private const val TAG = "SavedPlacesRepository"
     }
 }
@@ -137,7 +144,9 @@ class SavedPlacesRepository(private val api: SavedPlacesApi = ApiClient.savedPla
 internal fun savedPlaceAddMessage(failure: SavedPlacesResult.Failure): String = when {
     failure.code == SavedPlacesRepository.CODE_SAME_AS_DEFAULT -> "기본 집과 같은 곳이에요(50m 안). 다른 곳을 골라 주세요"
     failure.code == SavedPlacesRepository.CODE_LIMIT -> "다른 집은 5곳까지 저장할 수 있어요"
-    failure.network -> "서버에 연결하지 못해 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요"
-    failure.status == 400 -> failure.fields["lat"] ?: failure.fields["lng"] ?: failure.message
+    failure.network -> "연결하지 못해 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요"
+    // 이름 문제는 서버 `details.label[0]` 그대로(BE-H9): "같은 이름의 집이 이미 있어요…" · "'집'은 기본 집 이름이라…" · "이름을 입력해 주세요."
+    failure.code == SavedPlacesRepository.CODE_LABEL_DUPLICATE -> failure.fields["label"] ?: failure.message
+    failure.status == 400 -> failure.fields["label"] ?: failure.fields["lat"] ?: failure.fields["lng"] ?: failure.message
     else -> failure.message
 }

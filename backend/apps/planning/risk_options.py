@@ -69,10 +69,17 @@ def build_risk_options(event) -> dict:
         calculation = estimators.compute_alarm_math(
             prep, travel, buffer.minutes, option_tau,
         )
+        probability = calculation.on_time_probability
+        if probability is None:
+            # Partly AI-generated (Claude) — 준비·이동 중 한쪽만 변동성을 알면 계획 확률은 비지만,
+            # 아래 `distribution` 은 보낸다. 앱은 그 분포로 휠 시각의 확률을 읽으므로(AlarmTimeChoice.
+            # estimate) 세 칸만 비면 "빠르게 고르기에 확률이 안 뜬다" 가 된다. 같은 분포에서 그 칸의
+            # 시각에 일어날 때의 확률(버퍼 포함 시간 안에 마칠 확률)을 낸다.
+            probability = max(0, min(100, int(round(total.cdf(calculation.total_minutes) * 100))))
         result["options"].append({
             "key": key, "label": label, "tau": option_tau,
             "alarm_at": (event.start_at - timedelta(minutes=calculation.total_minutes)).isoformat(),
-            "probability": calculation.on_time_probability,
+            "probability": probability,
         })
 
     # CDF mass is a modeled proportion, not a count of observed trips. Include

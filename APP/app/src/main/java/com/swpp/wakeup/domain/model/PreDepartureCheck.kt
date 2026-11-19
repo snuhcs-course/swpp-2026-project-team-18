@@ -57,7 +57,7 @@ object PreDepartureCheck {
         val late = route.lateMinutes?.takeIf { it > 0 } ?: return null
         return RerouteBanner(
             headline = headline(late),
-            body = "더 일찍 닿는 경로가 없음",
+            body = "더 일찍 닿는 경로가 없어요",
             routeKey = null,
         )
     }

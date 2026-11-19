@@ -64,7 +64,7 @@ internal fun TagAddDialog(
                 onImeAction = onSubmit,
             )
             Text(
-                text = "20자까지 · 이 계정의 다른 기기에서도 보임 · τ 는 프로필 기본을 씀",
+                text = "20자까지 · 이 계정의 다른 기기에서도 보여요 · τ 는 프로필 기본을 써요",
                 color = JitColor.TextSecondary,
                 fontSize = 11.sp,
             )

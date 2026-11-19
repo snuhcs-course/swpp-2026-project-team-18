@@ -168,6 +168,9 @@ internal fun readDevicePermissions(context: Context): MeTabLogic.Permissions = M
     fullScreen = context.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() ?: true,
     preciseLocation = LocationPermissions.granted(context),
     coarseOnly = LocationPermissions.coarseOnly(context),
+    backgroundLocation = LocationPermissions.backgroundGranted(context),
+    batteryUnrestricted = context.getSystemService(android.os.PowerManager::class.java)
+        ?.isIgnoringBatteryOptimizations(context.packageName) ?: true,
 )
 
 /** [kind] 를 켜는 기기 설정 화면을 연다. 그 화면이 없는 기기면 앱 정보 화면을 연다 */
@@ -178,6 +181,10 @@ internal fun openPermissionSettings(context: Context, kind: MeTabLogic.Permissio
             .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         MeTabLogic.PermissionKind.FULL_SCREEN -> Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, packageUri)
         MeTabLogic.PermissionKind.LOCATION -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
+        // "항상 허용" 은 앱 안 대화상자로 줄 수 없다(Android 11+). 앱 정보 › 권한 › 위치에서 고른다.
+        MeTabLogic.PermissionKind.BACKGROUND_LOCATION -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
+        // 이 앱만 묻는 시스템 대화상자. 알람 앱은 이 요청이 허용된다.
+        MeTabLogic.PermissionKind.BATTERY -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, packageUri)
     }
     val opened = runCatching { context.startActivity(intent) }.isSuccess
     if (!opened) {

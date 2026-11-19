@@ -1,5 +1,19 @@
 package com.swpp.wakeup.ui.alarm
 
+import com.swpp.wakeup.domain.model.ProbabilityRule
+import com.swpp.wakeup.ui.common.PlacedLabels
+import com.swpp.wakeup.ui.events.AlarmConfirmView
+import com.swpp.wakeup.ui.events.AlarmConfirmText
+import com.swpp.wakeup.ui.common.LineIcons
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +35,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -140,6 +155,9 @@ fun AlarmDecisionScreen(
     fasterRouteBusy: Boolean = false,
     /** [이 경로로 바꾸기] (알람 전) */
     onSwitchFasterRoute: (FasterRouteOffer) -> Unit = {},
+    /** "바꿀까요" 제안에 답하기(BE-H3d). true = 받아들이기 */
+    onAnswerProposal: (Boolean) -> Unit = {},
+    proposalBusy: Boolean = false,
     /**
      * 반복 일정 삭제 범위(iter4 A2, [com.swpp.wakeup.data.repository.RecurrenceScope.deleteChoices]). 비어 있으면
      * 묻지 않고 [onDelete] 를 부른다(반복이 아니거나 서버가 범위 삭제를 모름).
@@ -152,6 +170,14 @@ fun AlarmDecisionScreen(
      * 있으면 "정시 도착 확률이 뭐예요?" 시트를, 없으면 도움말의 그 질문을 연다. "계산 방법" 의 i 는 알람 시각 질문이다
      */
     onHelp: ((HelpTopic) -> Unit)? = null,
+    /** 서버가 직접 정한 시각을 받는가(0.21.0 이상). 아니면 [추천 시각으로 되돌리기] 를 두지 않는다 */
+    serverSupportsConfirm: Boolean = false,
+    /** 되돌리기를 보내는 중 */
+    confirmBusy: Boolean = false,
+    /** 직접 정한 시각일 때 [추천 시각으로 되돌리기](BE-H3b) */
+    onRevertAlarm: () -> Unit = {},
+    /** 남은 시간을 셀 지금 시각. 테스트가 고정한다 */
+    nowMillis: Long = System.currentTimeMillis(),
 ) {
     var askDeleteScope by rememberSaveable { mutableStateOf(false) }
     // Partly AI-generated (Claude) — i 시트(Figma `548:1798`)
@@ -191,25 +217,35 @@ fun AlarmDecisionScreen(
             onDismiss = { askDeleteScope = false },
         )
     }
+    // 위는 스크롤, 아래(타일 넷 · 확인)는 화면 바닥에 붙는다(Figma `545:920`).
+    Column(modifier = modifier.fillMaxSize().background(JitColor.Bg)) {
     Column(
-        modifier = modifier
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
             .testTag("plan_scroll")
-            .fillMaxSize()
-            .background(JitColor.Bg)
             .verticalScroll(rememberScrollState())
             .padding(
-                start = JitSpace.ScreenHorizontal,
-                end = JitSpace.ScreenHorizontal,
+                start = SIDE,
+                end = SIDE,
                 top = JitSpace.ScreenTop,
                 bottom = JitSpace.ScreenBottom,
             ),
-        verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         ScreenHeader(
-            title = "알람 결정",
+            title = "알람",
             onBack = onBack,
             action = openProbability?.let { open ->
-                { InfoButton(contentDescription = "정시 도착 확률이 뭐예요?", tag = "plan_info", onClick = open) }
+                {
+                    InfoButton(
+                        contentDescription = "정시 도착 확률이 뭐예요?",
+                        tag = "plan_info",
+                        onClick = open,
+                        size = 36,
+                        iconSize = 18,
+                    )
+                }
             },
         )
 
@@ -218,70 +254,44 @@ fun AlarmDecisionScreen(
             return@Column
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(plan.whenLabel, color = JitColor.TextSecondary, fontSize = 15.sp)
-            Text(plan.dateLabel, color = JitColor.TextSecondary, fontSize = 15.sp)
-        }
-
-        // 일정 요약
-        JitCard(padding = 14.dp, gap = 9.dp) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // "첫 일정" 은 서버가 그날 가장 이른 켜진 알람이라고 판정한 일정에만
-                // 붙인다. 판정이 없으면 일반 일정으로 표시한다.
-                val first = plan.isFirstAlarm == true
-                JitDotLabel(
-                    text = if (first) "첫 일정" else "일정",
-                    dotColor = if (first) JitColor.Accent else JitColor.TextSecondary,
-                    textColor = JitColor.TextSecondary,
-                    fontSize = 11,
-                    bold = false,
-                    dotSize = 6.dp,
-                )
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    plan.sensitivityTag?.let { JitChip(it, JitColor.Accent) }
-                    // 판정은 서버가 한다(B-4). 앱에서 τ 기준으로 따로 정하지 않는다.
-                    if (plan.latenessSensitive) JitChip("지각 민감도 높음", JitColor.Red)
-                }
-            }
-            Text(
-                text = plan.eventTitle,
-                color = JitColor.TextPrimary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(text = plan.eventPlace, color = JitColor.TextSecondary, fontSize = 11.sp)
-        }
+        EventCard(plan)
 
         if (plan.skipped) SkippedCard(onUnskip = onUnskip, enabled = !skipBusy)
 
         if (plan.isComputed) {
             // 안 간 일정의 알람은 울리지 않는다. 근거는 남기되 흐리게 둔다(Figma ④ 변형).
-            if (plan.skipped) {
-                Box(Modifier.alpha(SKIPPED_ALPHA)) { RecommendedAlarmCard(plan, openProbability) }
-            } else {
-                RecommendedAlarmCard(plan, openProbability)
+            Box(if (plan.skipped) Modifier.alpha(SKIPPED_ALPHA) else Modifier) {
+                AlarmCard(
+                    plan = plan,
+                    nowMillis = nowMillis,
+                    onChangeTime = if (plan.skipped) null else onChangeRisk,
+                    onProbabilityClick = openProbability,
+                    canRevert = serverSupportsConfirm && !confirmBusy,
+                    onRevert = onRevertAlarm,
+                )
+            }
+            // 답을 기다리는 "바꿀까요" 제안(BE-H3d). 알람 카드 바로 아래 — 바뀔 시각과 같이 읽힌다.
+            plan.proposal?.takeIf { !plan.skipped }?.let { proposal ->
+                ProposalCard(
+                    proposal = proposal,
+                    busy = proposalBusy,
+                    onAccept = { onAnswerProposal(true) },
+                    onKeep = { onAnswerProposal(false) },
+                    tag = "plan_proposal",
+                )
             }
             // 알람이 울리기 전에만 나온다(Figma ④ 변형 `512:30`). 그 뒤에는 일정에 저장한 경로를 바꾸지 않는다.
             fasterRoute?.takeIf { !plan.skipped && it.isOpen(System.currentTimeMillis()) }?.let {
                 FasterRouteCard(offer = it, busy = fasterRouteBusy, onSwitch = { onSwitchFasterRoute(it) })
             }
-            BreakdownCard(plan, onInfo = onHelp?.let { help -> { help(HelpTopic.ALARM_TIME) } })
+            WhyCard(plan, onInfo = onHelp?.let { help -> { help(HelpTopic.ALARM_TIME) } })
 
             // 계산 근거 바로 아래에 "지금 어디쯤" 을 둔다. 같은 여정을 계획과
             // 실제 두 면에서 보여 주는 것이고, 순서가 바뀌면 진행률이 어느
             // 계획에 대한 것인지 연결이 끊긴다. 안 간 일정에는 이동이 없다.
             if (!plan.skipped) {
-                TripProgressCard(
+                // 알람 전에는 진행할 것이 없다 — Figma `545:920` 처럼 근거 카드 아래를 비운다. 알람이 울린 뒤(준비 · 이동 · 도착)에만.
+                if (stage != TripStage.BEFORE_ALARM) TripProgressCard(
                     nickname = nickname,
                     initials = initials,
                     stage = stage,
@@ -324,86 +334,64 @@ fun AlarmDecisionScreen(
             NotComputedCard(plan, onRecompute, recomputeBusy)
         }
 
+        // 아이콘 타일 넷은 스크롤 내용의 맨 끝에 둔다 — 끝까지 내렸을 때 보인다(사용자 피드백 11-16,
+        // 화면 바닥에 늘 붙어 있으면 너무 크다). 내용이 짧으면 카드 아래에 그대로 이어진다.
         Spacer(Modifier.height(4.dp))
-
-        // 준비 시간을 바꾸는 입구. 확률이 없는 이유가 대개 "블록에 범위가 없다"
-        // 라서, 그 안내 바로 아래에 행동할 자리를 둔다.
-        BlocksEntryCard(plan, onEditBlocks)
-
-        if (plan.isComputed) {
-            // 알람은 이미 자동으로 등록돼 있고 켬/끔은 홈의 스위치가 맡는다.
-            // 이 버튼은 근거를 확인하고 닫는 용도라 "확인" 으로 쓴다.
-            JitPrimaryButton(label = "확인", onClick = onBack)
-            // 안 간 일정은 알람이 울리지 않으므로 알람을 바꾸는 두 입구를 숨긴다.
-            if (!plan.skipped) Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                // 계산된 계획의 "다시 계산" 은 없앴다. 서버가 블록 정의·밤 학습 뒤 알아서 다시 계산하고,
-                // 임박한 일정은 경로 갱신 워커가 15분마다 새로 받는다(todo §2 ③). 계산하지 못한
-                // (route_failed) 계획에만 NotComputedCard 가 "다시 계산" 을 둔다(A6).
-                Text(
-                    text = "지각 위험 바꾸기",
-                    color = JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .testTag("risk_entry")
-                        .clickable(onClick = onChangeRisk)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
-        ) {
-            // 도착한 일정은 간 것이다. 표시를 내놓지 않는다. 표시한 일정은 위 카드가 되돌린다.
-            if (!plan.skipped && stage != TripStage.ARRIVED) {
-                Text(
-                    text = "안 감으로 표시",
-                    color = JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .testTag("event_skip")
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(enabled = !skipBusy, onClick = onSkip)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                )
-            }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // 알람을 정한 뒤에도 제목·시각·장소·출발지·경로·종류를 고친다(Figma ④ `489:9`).
-            onEdit?.let { edit ->
-                Text(
-                    text = "일정 수정",
-                    color = JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .testTag("event_edit")
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = edit)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+            ActionTile(
+                icon = LineIcons.pencil,
+                label = "일정 수정",
+                tag = "event_edit",
+                enabled = onEdit != null,
+                onClick = { onEdit?.invoke() },
+                modifier = Modifier.weight(1f),
+            )
+            // 이 아침에 할 준비 항목 고르기(예전 "이 아침 할 일 고르기" 카드)
+            ActionTile(
+                icon = LineIcons.sliders,
+                label = "준비 항목",
+                tag = "plan_blocks",
+                onClick = onEditBlocks,
+                modifier = Modifier.weight(1f),
+            )
+            // 도착한 일정은 간 것이다. 표시한 일정은 같은 타일이 되돌린다.
+            if (plan.skipped) {
+                ActionTile(
+                    icon = LineIcons.calendarX,
+                    label = "다시 가요",
+                    tag = "event_unskip_tile",
+                    enabled = !skipBusy,
+                    onClick = onUnskip,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                ActionTile(
+                    icon = LineIcons.calendarX,
+                    label = "안 가요",
+                    tag = "event_skip",
+                    enabled = !skipBusy && stage != TripStage.ARRIVED,
+                    onClick = onSkip,
+                    modifier = Modifier.weight(1f),
                 )
             }
-            Text(
-                text = "일정 삭제",
-                color = JitColor.Red,
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .testTag("event_delete")
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable {
-                        // 반복 회차면 "이 일정만 / 이후 일정 모두" 를 먼저 묻는다(iter4 A2).
-                        if (deleteScopes.isNotEmpty()) askDeleteScope = true else onDelete()
-                    }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ActionTile(
+                icon = LineIcons.trash,
+                label = "일정 삭제",
+                tag = "event_delete",
+                tint = JitColor.Red,
+                // 반복 회차면 "이 일정만 / 이후 일정 모두" 를 먼저 묻는다(iter4 A2).
+                onClick = { if (deleteScopes.isNotEmpty()) askDeleteScope = true else onDelete() },
+                modifier = Modifier.weight(1f),
             )
         }
     }
+
+    }
 }
+
+/** 화면 좌우 여백(Figma `545:920` 18dp) */
+private val SIDE = 18.dp
 
 // Partly AI-generated (Claude)
 /** "안 감" 으로 표시한 일정 안내와 되돌리기(Figma ④ 변형 `463:17`). */
@@ -411,13 +399,13 @@ fun AlarmDecisionScreen(
 private fun SkippedCard(onUnskip: () -> Unit, enabled: Boolean) {
     JitCard(padding = 14.dp, gap = 6.dp) {
         JitDotLabel(
-            text = "안 감으로 표시한 일정",
+            text = "안 가요로 표시한 일정",
             dotColor = JitColor.TextSecondary,
             fontSize = 12,
             dotSize = 6.dp,
         )
         Text(
-            text = "알람이 울리지 않고 리포트·학습에서 빠짐",
+            text = "알람이 울리지 않고 리포트·학습에서 빠져요",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
@@ -438,106 +426,6 @@ private fun SkippedCard(onUnskip: () -> Unit, enabled: Boolean) {
 /** 안 간 일정의 "적용 알람" 흐리기 */
 private const val SKIPPED_ALPHA = 0.45f
 
-@Composable
-private fun RecommendedAlarmCard(plan: AlarmPlanView, onProbabilityClick: (() -> Unit)? = null) {
-    JitCard(padding = 18.dp, gap = 8.dp) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // "추천" 이 아니라 "적용" 이다. 이 화면에 온 시점에서 이 시각이
-            // 이미 이 일정의 알람이고, 추천이라고 적으면 아직 고를 것이 남은
-            // 것처럼 읽힌다.
-            Text("적용 알람", color = JitColor.TextSecondary, fontSize = 11.sp)
-            plan.remaining?.let {
-                Text(it, color = JitColor.TextSecondary, fontSize = 11.sp)
-            }
-        }
-
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = plan.alarmAt ?: "—",
-                color = JitColor.TextPrimary,
-                fontSize = 52.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = plan.meridiem,
-                color = JitColor.TextSecondary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-        }
-
-        // 이 카드는 알람 시각과 정시 확률만 둔다(todo §2 "적용 알람 정보 줄이기", Figma ④ `1:18`).
-        // 경로 기준·계산 시각·경로 대체 경고는 "계산 방법" 으로 옮겼다. 도착 예정은 그 카드의
-        // 합계 줄에 이미 있다.
-        ProbabilityRow(plan, onProbabilityClick)
-    }
-}
-
-/**
- * 확률 한 줄.
- *
- * null 이면 왜 없는지까지 적는다. 사용자가 "고장인가?" 하고 의심하지 않게
- * 하려는 것이고, 무엇이 있어야 값이 생기는지 알려 준다. 숫자는 만들지 않는다.
- */
-@Composable
-private fun ProbabilityRow(plan: AlarmPlanView, onClick: (() -> Unit)? = null) {
-    val confidence = plan.confidence
-    // 누르면 "정시 도착 확률이 뭐예요?"(iter4 H2-4). 확률이 없으면 도움말의 그 질문
-    val tapModifier = if (onClick != null) {
-        Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .testTag("plan_probability")
-    } else Modifier
-
-    if (confidence.isUnavailable) {
-        Column(modifier = tapModifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            JitDotLabel(
-                text = confidence.headline,
-                dotColor = JitColor.TextSecondary,
-                textColor = JitColor.TextSecondary,
-                fontSize = 13,
-                dotSize = 8.dp,
-            )
-            confidence.reason?.let {
-                Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
-            }
-            // 할 수 있는 일이 있으면 강조색으로 적는다. "기다려라" 만 있으면
-            // 사용자는 기능이 고장났다고 읽는다.
-            confidence.action?.let {
-                Text(text = "→ $it", color = JitColor.Accent, fontSize = 10.sp)
-            }
-        }
-        return
-    }
-
-    // 목표치(τ)를 넘겼는지로 색을 정한다. 90% 고정으로 비교하면 τ=0.99 를
-    // 고른 사용자에게 95% 를 초록으로 보여주게 된다 — 목표 미달인데 안심시킨다.
-    val color = planProbabilityColor(plan)
-    Column(modifier = tapModifier, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        JitDotLabel(
-            text = confidence.headline,
-            dotColor = color,
-            textColor = color,
-            fontSize = 14,
-            dotSize = 8.dp,
-        )
-        if (!confidence.meets(plan.tauUsed)) {
-            Text(
-                text = "목표치보다 낮음. 지각 위험을 낮추면 알람이 앞당겨짐",
-                color = JitColor.TextSecondary,
-                fontSize = 10.sp,
-            )
-        }
-    }
-}
-
 /** 확률 색. 앱 공통 규칙([ProbabilityRule])을 그대로 쓴다. 줄과 i 시트가 같은 색을 쓴다 */
 private fun planProbabilityColor(plan: AlarmPlanView): Color =
     probabilityColor(plan.confidence.percent, plan.tauUsed)
@@ -554,17 +442,235 @@ private fun onTimeSpecOf(plan: AlarmPlanView): OnTimeSheetSpec? {
 }
 
 private fun koreanMeridiem(ampm: String): String? = when (ampm) {
-    "AM" -> "오전"
-    "PM" -> "오후"
-    else -> null
+    else -> com.swpp.wakeup.domain.model.ClockText.meridiemOf(ampm)
 }
 
-/** Figma "이렇게 계산했음" — 값마다 출처를 붙인다. [onInfo] 는 제목 옆 i(도움말 › 알람 시각) */
+// Partly AI-generated (Claude)
+/** Figma `545:920` 카드 바탕: Surface · 모서리 16 */
+private fun Modifier.planCard(): Modifier = this
+    .fillMaxWidth()
+    .clip(RoundedCornerShape(JitRadius.Card))
+    .background(JitColor.Surface)
+
+/** 둥근 알약 하나. [color] 글자 · 같은 색 [alpha] 바탕 */
 @Composable
-private fun BreakdownCard(plan: AlarmPlanView, onInfo: (() -> Unit)? = null) {
-    JitCard(padding = 14.dp, gap = 9.dp) {
+private fun Pill(text: String, color: Color, tag: String, alpha: Float = 0.18f, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        color = color,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        modifier = modifier
+            .clip(RoundedCornerShape(percent = 50))
+            .background(color.copy(alpha = alpha))
+            .testTag(tag)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+}
+
+// Partly AI-generated (Claude)
+/** 일정 카드: "오늘 오전 9:00" · 종류 태그 / 제목 / 장소 · 수단 · 이동 분 */
+@Composable
+private fun EventCard(plan: AlarmPlanView) {
+    Column(
+        modifier = Modifier.planCard().padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = AlarmDecisionLogic.whenLine(plan.startAtMillis) ?: plan.whenLabel,
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            // 종류 태그. 서버가 지각 민감도 높음으로 판정한 종류는 빨강, 그 밖은 주황(지금 규칙 그대로)
+            val tagText = plan.sensitivityTag ?: if (plan.latenessSensitive) "늦으면 안 되는 일정" else null
+            tagText?.let {
+                Pill(it, if (plan.latenessSensitive) JitColor.Red else JitColor.Accent, tag = "plan_tag")
+            }
+        }
+        Text(
+            text = plan.title.ifBlank { plan.eventTitle },
+            color = JitColor.TextPrimary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("계산 방법", color = JitColor.TextSecondary, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            Icon(LineIcons.mapPin, contentDescription = null, tint = JitColor.TextSecondary, modifier = Modifier.size(12.dp))
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = AlarmDecisionLogic.placeLine(plan.placeName, plan.travelMode, plan.travelMinutes),
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+// Partly AI-generated (Claude)
+/** 알람 카드(주황 1dp 테두리): 라벨 · 알약 · 확률 / 오전 7:40 · [시각 바꾸기] / 남은 시간 */
+@Composable
+private fun AlarmCard(
+    plan: AlarmPlanView,
+    nowMillis: Long,
+    onChangeTime: (() -> Unit)?,
+    onProbabilityClick: (() -> Unit)?,
+    canRevert: Boolean,
+    onRevert: () -> Unit,
+) {
+    val shape = RoundedCornerShape(JitRadius.Card)
+    Column(
+        modifier = Modifier
+            .planCard()
+            .border(1.dp, JitColor.Accent, shape)
+            .testTag("plan_alarm_card")
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("알람", color = JitColor.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(6.dp))
+            AlarmDecisionLogic.pill(plan)?.let { pill ->
+                Pill(text = pill.text, color = JitColor.Accent, tag = "plan_pill")
+            }
+            Spacer(Modifier.weight(1f))
+            plan.confidence.percent?.let { percent ->
+                val color = planProbabilityColor(plan)
+                Pill(
+                    text = "정시 도착 확률 ${ProbabilityRule.displayLabel(percent)}",
+                    color = color,
+                    tag = "plan_probability",
+                    alpha = 0.15f,
+                    modifier = if (onProbabilityClick != null) {
+                        Modifier.clip(RoundedCornerShape(percent = 50)).clickable(onClick = onProbabilityClick)
+                    } else Modifier,
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 58.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.Bottom) {
+                koreanMeridiem(plan.meridiem)?.let {
+                    Text(
+                        text = it,
+                        color = JitColor.Accent,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.alignByBaseline(),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    text = plan.alarmAt ?: "—",
+                    color = JitColor.Accent,
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    modifier = Modifier.alignByBaseline().testTag("plan_alarm_time"),
+                )
+            }
+            onChangeTime?.let { ChangeTimeButton(it) }
+        }
+
+        AlarmDecisionLogic.remainingLine(plan.alarmAtMillis, plan.startAtMillis, nowMillis)?.let {
+            Text(it, color = JitColor.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        }
+        // 작은 상태 한 줄("알람이 꺼져 있어요"). 승인 버튼은 이 화면에 두지 않는다(사용자 피드백 11-16).
+        AlarmDecisionLogic.alarmStatus(plan)?.let { status ->
+            Text(
+                text = status.text,
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+                modifier = Modifier.testTag("plan_alarm_status"),
+            )
+        }
+        // 확률이 없으면 알약 대신 이유 한 줄(숫자를 지어내지 않는다)
+        // 확률을 아직 못 낼 때의 이유 · 할 일 문구는 보이지 않는다(11-17 사용자: 빼 달라고 함). 알약도 없다 —
+        // 숫자를 지어내지 않는다.
+
+        // 직접 정한 시각: 추천과의 차이 + [추천 시각으로 되돌리기](주황 글자, 꽉 찬 버튼 아님)
+        if (plan.userAlarm) {
+            AlarmDecisionLogic.userGapLine(plan.alarmAtMillis, plan.recommendedAlarmAtMillis)?.let {
+                Text(it, color = JitColor.TextSecondary, fontSize = 12.sp, modifier = Modifier.testTag("plan_user_gap"))
+            }
+            if (canRevert) {
+                Text(
+                    text = "추천 시각으로 되돌리기",
+                    color = JitColor.Accent,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(role = Role.Button, onClick = onRevert)
+                        .testTag("plan_revert_alarm")
+                        .padding(vertical = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+/** 회색 [시각 바꾸기]: Surface2 · 높이 36 · 연필 16dp. 누르는 영역은 48dp 이상 */
+@Composable
+private fun ChangeTimeButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(role = Role.Button, onClickLabel = "알람 시각 바꾸기", onClick = onClick)
+            .testTag("risk_entry"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier = Modifier
+                .heightIn(min = 36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(JitColor.Surface2)
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(LineIcons.pencil, contentDescription = null, tint = JitColor.TextPrimary, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("시각 바꾸기", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** 막대 · 점 색. ④ 의 예전 막대 · 알람 확인 시트와 같다(준비 주황 · 이동 파랑 · 여유 회색) */
+private fun segmentColor(kind: AlarmConfirmView.Kind): Color = when (kind) {
+    AlarmConfirmView.Kind.PREP -> JitColor.Accent
+    AlarmConfirmView.Kind.TRAVEL -> JitColor.Blue
+    AlarmConfirmView.Kind.BUFFER -> JitColor.Track
+}
+
+// Partly AI-generated (Claude)
+/**
+ * "왜 오전 7:40인가요?" — 분 비례 막대 · 기상 · 출발 · 도착 · 시작 눈금 · 설명 세 줄.
+ * 예전 "계산 방법" 카드의 τ · 카카오 · "12분 전 계산" 같은 내부 말은 뺐다. 고른 경로가 사라져 다른 경로로
+ * 계산했다는 경고처럼 사용자가 알아야 하는 것은 남긴다.
+ */
+@Composable
+private fun WhyCard(plan: AlarmPlanView, onInfo: (() -> Unit)?) {
+    val timeline = AlarmDecisionLogic.timeline(plan)
+    Column(
+        modifier = Modifier.planCard().testTag("plan_why").padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = AlarmDecisionLogic.whyTitle(plan.alarmAtMillis),
+                color = JitColor.TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
             onInfo?.let {
                 InfoButton(
                     contentDescription = "알람 시각은 어떻게 정해지나요?",
@@ -575,284 +681,132 @@ private fun BreakdownCard(plan: AlarmPlanView, onInfo: (() -> Unit)? = null) {
                 )
             }
         }
-        // 어느 경로를 기준으로 계산했는지. 알람 시각만 보면 "왜 이 시각인가" 의
-        // 절반(이동 시간)이 어디서 왔는지 알 수 없다. 문장은 앱이 경로 key 로 만든다([RouteBasis]).
-        plan.routeBasis?.let {
-            Text(
-                text = it,
-                color = JitColor.TextPrimary,
-                fontSize = 11.sp,
-                modifier = Modifier.testTag("plan_route_basis"),
-            )
+
+        val fractions = AlarmConfirmText.fractions(timeline.segments)
+        if (fractions.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .testTag("plan_bar"),
+            ) {
+                timeline.segments.forEachIndexed { i, seg ->
+                    Box(Modifier.weight(fractions[i]).fillMaxHeight().background(segmentColor(seg.kind)))
+                }
+            }
         }
+        TickRow(timeline.points)
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            timeline.segments.forEach { seg ->
+                val note = when (seg.kind) {
+                    AlarmConfirmView.Kind.PREP -> AlarmDecisionLogic.PREP_NOTE
+                    AlarmConfirmView.Kind.TRAVEL -> AlarmDecisionLogic.travelNote(plan.travelMode)
+                    AlarmConfirmView.Kind.BUFFER -> AlarmDecisionLogic.bufferNote(plan.bufferSource)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(segmentColor(seg.kind)))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = seg.label,
+                        color = JitColor.TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        // 최소 폭만 둔다 — 큰 글자에서 "준비 3 / 분" 처럼 꺾이지 않게(11-16 fontScale 1.5 캡처)
+                        modifier = Modifier.widthIn(min = 64.dp).padding(end = 8.dp),
+                    )
+                    Text(note, color = JitColor.TextSecondary, fontSize = 12.sp)
+                }
+            }
+        }
+
         // 고른 경로가 사라져 다른 경로로 계산했다. **조용히 넘기면 안 된다.** 사용자는 자기가
         // 고른 노선대로 계산된 알람이라고 믿고 그 노선을 타러 간다(`route_choice_honored=false`).
         if (plan.routeFellBack) {
             JitDotLabel(
-                text = "고른 경로가 없어져 다른 경로로 계산함. 경로를 다시 고르는 것이 정확함",
+                text = "고른 경로가 없어져 다른 경로로 계산했어요. 경로를 다시 고르면 더 정확해요",
                 dotColor = JitColor.Amber,
                 textColor = JitColor.Amber,
-                fontSize = 10,
+                fontSize = 11,
                 bold = false,
                 dotSize = 6.dp,
             )
         }
-
-        // 항목별로 막대를 따로 그리면 길이가 **각자의 최대값 기준**이라 셋을
-        // 서로 비교할 수 없다. 하나의 바를 비율대로 쪼개면 "이동이 준비의 1.5배"
-        // 가 눈으로 읽히고, 바 전체가 합계라는 것도 같은 그림에서 드러난다.
-        BreakdownBar(plan.breakdown)
-
-        plan.breakdown.forEach { row ->
-            BreakdownRow(row)
-            // 블록 내역을 준비 시간 **바로 아래**에 들여 쓴다. 별도 카드로
-            // 빼면 어느 줄을 쪼갠 것인지 연결이 끊긴다.
-            if (row.kind == PlanRow.Kind.PREP && plan.prepBlocks.isNotEmpty()) {
-                PrepBlockList(plan.prepBlocks)
-            }
-        }
-
-        HorizontalDivider(color = JitColor.Track)
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = plan.totalMinutes?.let { "합계 ${it}분" } ?: "합계 —",
-                color = JitColor.TextPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            plan.arrivalLine?.let {
-                Text(it, color = JitColor.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        plan.tauUsed?.let {
-            // 출처는 서버 effective_tau 순서(직접 고른 값 → 일정 종류 → 기본값)를 따른다.
-            // 종류가 없는 일정에 "일정 종류에서 결정됨" 이라고 쓰면 틀린다.
-            Text(
-                text = listOfNotNull("적용 τ ${"%.2f".format(it)}", plan.tauSourceLabel)
-                    .joinToString(" · "),
-                color = JitColor.TextSecondary,
-                fontSize = 10.sp,
-            )
-        }
-        // 이 시각을 **언제** 계산했는지. 백그라운드가 임박한 일정의 경로를
-        // 15분마다 다시 조회하므로 알람 시각과 이동 시간이 조용히 바뀐다.
-        // 표시하지 않으면 사용자는 화면의 숫자가 방금 받은 것인지 어제 계산한
-        // 것인지 모르고, 배차가 바뀌었는데도 낡은 값을 믿고 움직인다.
-        computedAgoLabel(plan.computedAtMillis)?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
-        }
     }
 }
 
 /**
- * 블록 편집 입구.
- *
- * 블록이 없을 때와 있을 때의 문구가 다르다. 없으면 **준비 시간이 왜 그 값인지
- * 설명할 수 없다는 것**을 말해야 하고, 있으면 "이 아침만 조정" 이라는
- * 것을 밝혀야 한다 — 기본 설정을 바꾸는 것으로 오해하면 다른 날짜까지 바뀐
- * 줄 알게 된다.
+ * 눈금 줄: 시각(위) · 이름(아래). 기상은 왼쪽 끝, 시작은 오른쪽 끝, 출발 · 도착은 경계에 오른쪽 정렬.
+ * 글자 폭을 실제로 재서 겹치면 밀고, 한 줄에 안 들어가면 두 줄로 엇갈린다([PlacedLabels]). 높이는 고정하지 않는다.
  */
 @Composable
-private fun BlocksEntryCard(plan: AlarmPlanView, onClick: () -> Unit) {
-    val empty = plan.prepBlocks.isEmpty()
+private fun TickRow(points: List<AlarmConfirmView.Point>) {
+    if (points.isEmpty()) return
+    val stops = points.map { it.at }
+    PlacedLabels(
+        count = points.size,
+        anchors = { widths, w -> AlarmDecisionLogic.decisionAnchors(stops, widths, w) },
+        modifier = Modifier.fillMaxWidth().testTag("plan_ticks"),
+    ) { i ->
+        val p = points[i]
+        Column(horizontalAlignment = if (i == 0) Alignment.Start else Alignment.End) {
+            Text(p.clock, color = JitColor.TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(p.name, color = JitColor.TextSecondary, fontSize = 10.sp, maxLines = 1)
+        }
+    }
+}
 
-    JitCard(
-        modifier = Modifier.clickable(onClick = onClick),
-        padding = 14.dp,
-        gap = 6.dp,
-        accented = empty && plan.confidence.isUnavailable,
+/** 타일 하나: Surface2 · 모서리 14 · 아이콘 18dp + 11sp(누르는 영역 48dp 이상) */
+@Composable
+private fun ActionTile(
+    icon: ImageVector,
+    label: String,
+    tag: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tint: Color = JitColor.TextPrimary,
+) {
+    val color = if (enabled) tint else JitColor.Track
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(JitColor.Surface2)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .testTag(tag)
+            .heightIn(min = 48.dp)
+            .padding(vertical = 9.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterVertically),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            JitDotLabel(
-                text = if (empty) "아침 루틴을 등록하면 근거가 생김" else "이 아침 할 일 고르기",
-                dotColor = if (empty) JitColor.Amber else JitColor.Accent,
-                fontSize = 13,
-                dotSize = 7.dp,
-            )
-            Text("›", color = JitColor.TextSecondary, fontSize = 18.sp)
-        }
-        Text(
-            text = if (empty) {
-                // 준비 범위만으로는 확률이 나오지 않는다(이동 변동 폭도 필요). 약속하지 않는다.
-                "준비 시간이 한 덩어리라 왜 그 값인지 설명할 수 없음. 항목으로 쪼개고 " +
-                    "최소~최대 범위를 주면 준비 시간 변동이 계산에 반영됨"
-            } else {
-                "체크를 바꾸면 이 일정의 알람만 다시 계산됨. 기본값은 그대로 남음"
-            },
-            color = JitColor.TextSecondary,
-            fontSize = 10.sp,
-        )
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
+        Text(label, color = color, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 
-/**
- * 준비 블록 내역.
- *
- * 왼쪽 세로선으로 "위 줄을 쪼갠 것" 임을 표시한다. 각 줄에 신고 범위와 관측
- * 수를 적어 학습이 일어나고 있는지 사용자가 직접 확인할 수 있게 한다.
- *
- * 합계를 여기서 다시 더하지 않는다. 병렬 블록은 합이 아니라 max 로 들어가므로
- * 화면이 더하면 위 줄의 값과 어긋난다.
- */
-@Composable
-private fun PrepBlockList(blocks: List<PrepBlockLine>) {
-    Row(modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 2.dp)) {
-        Box(
-            Modifier
-                .width(2.dp)
-                .height((blocks.size * 34).dp)
-                .clip(RoundedCornerShape(1.dp))
-                .background(JitColor.Track)
-        )
-        Spacer(Modifier.width(10.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            blocks.forEach { block ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier
-                                    .size(5.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (block.learned) JitColor.Green
-                                        else JitColor.TextSecondary
-                                    )
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                text = block.name,
-                                color = JitColor.TextPrimary,
-                                fontSize = 11.sp,
-                            )
-                            if (block.parallelizable) {
-                                Spacer(Modifier.width(5.dp))
-                                JitChip("병렬", JitColor.Blue, fontSize = 8)
-                            }
-                        }
-                        Text(
-                            text = block.detail,
-                            color = JitColor.TextSecondary,
-                            fontSize = 9.sp,
-                        )
-                    }
-                    Text(
-                        text = block.minutesLabel,
-                        color = if (block.learned) JitColor.Green else JitColor.TextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** 계산 항목의 색. 바 조각과 범례 점이 **같은 색**이어야 서로 이어진다. */
-private fun planRowColor(kind: PlanRow.Kind) = when (kind) {
-    PlanRow.Kind.PREP -> JitColor.Accent
-    PlanRow.Kind.TRAVEL -> JitColor.Blue
-    PlanRow.Kind.BUFFER -> JitColor.Track
-}
-
-/**
- * 합계를 항목 비율대로 쪼갠 가로 바 하나.
- *
- * 분 수에 비례해 `weight` 를 준다. 0분 항목은 넣지 않는다 — 폭 0 인 조각은
- * 보이지 않으면서 모서리 자르기만 어긋나게 만든다.
- */
-@Composable
-private fun BreakdownBar(rows: List<PlanRow>) {
-    val shown = rows.filter { it.minutes > 0 }
-    if (shown.isEmpty()) return
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(10.dp)
-            .clip(RoundedCornerShape(5.dp)),
-    ) {
-        shown.forEach { row ->
-            Box(
-                Modifier
-                    .weight(row.minutes.toFloat())
-                    .fillMaxHeight()
-                    .background(planRowColor(row.kind))
-            )
-        }
-    }
-}
-
-/**
- * 항목 한 줄. 색 점으로 위 바의 어느 조각인지 잇는다.
- *
- * 예전에는 줄마다 막대를 따로 그렸다. 길이가 **그 화면의 최대값 기준**이라
- * 항목 간 비교가 되지 않았고, 합계가 어디에도 그림으로 나타나지 않았다.
- */
-@Composable
-private fun BreakdownRow(row: PlanRow) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .background(planRowColor(row.kind))
-                )
-                Spacer(Modifier.width(9.dp))
-                Text(row.label, color = JitColor.TextPrimary, fontSize = 12.sp)
-            }
-            Text(
-                text = "${row.minutes}분",
-                color = JitColor.TextPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-        row.note?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 10.sp)
-        }
-    }
-}
 
 /** 알람을 계산할 수 없는 경우. 이유를 그대로 보여준다. */
 @Composable
 private fun NotComputedCard(plan: AlarmPlanView, onRecompute: (() -> Unit)?, recomputeBusy: Boolean) {
     val (dot, body) = when (plan.status) {
         "no_home" -> JitColor.Amber to
-            "이동 시간을 구하려면 출발지가 필요함. 홈 화면 안내에서 집 위치를 설정하면 바로 계산됨"
+            "이동 시간을 구하려면 출발지가 필요해요. 홈 화면 안내에서 집 위치를 정하면 바로 계산해요"
 
         "no_place" -> JitColor.Amber to
-            "일정에 장소가 없어서 이동 시간을 구할 수 없음. 장소를 넣으면 계산됨"
+            "일정에 장소가 없어 이동 시간을 구할 수 없어요. 장소를 넣으면 계산해요"
 
         "route_failed" -> JitColor.Red to
-            "경로 조회가 실패했음. 출발지와 목적지 주변에 정류장이 없거나 일시적 오류일 수 있음"
+            "경로를 찾지 못했어요. 출발지나 도착지 근처에 정류장이 없거나 잠깐 생긴 오류일 수 있어요"
 
-        else -> JitColor.TextSecondary to "알람이 아직 계산되지 않았음"
+        else -> JitColor.TextSecondary to "알람을 아직 계산하지 못했어요"
     }
 
     JitCard(padding = 14.dp, gap = 8.dp) {
         JitDotLabel(
-            text = plan.statusLabel ?: "알람 미계산",
+            text = plan.statusLabel ?: "알람을 아직 계산하지 못했어요",
             dotColor = dot,
             fontSize = 13,
             dotSize = 8.dp,
@@ -871,7 +825,7 @@ private fun NotComputedCard(plan: AlarmPlanView, onRecompute: (() -> Unit)?, rec
                     .clickable(enabled = !recomputeBusy, onClick = onRecompute)
                     .padding(vertical = 8.dp),
             )
-            Text(text = "카카오 경로를 한 번 다시 조회함", color = JitColor.TextSecondary, fontSize = 10.sp)
+            Text(text = "경로를 한 번 더 찾아봐요", color = JitColor.TextSecondary, fontSize = 10.sp)
         }
     }
 }
@@ -909,9 +863,7 @@ private fun AlarmDecisionPreview() {
                 tauUsed = 0.90,
                 confidence = ConfidenceView(
                     percent = null,
-                    headline = "정시 도착 확률 · 아직 계산할 수 없음",
-                    reason = "이동 시간은 경로 조회값 하나뿐임",
-                    action = "이동 기록이 쌓이면 변동성이 생김",
+                    headline = "정시 도착 확률 · 아직 계산할 수 없어요",
                 ),
                 tauSourceLabel = "수업 일정 기본값",
                 breakdown = listOf(

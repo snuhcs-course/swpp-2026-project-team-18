@@ -315,6 +315,15 @@ open class FakeEventsApi : EventsApi {
     ): Response<RouteCandidateResponse> = unexpected("routeCandidates")
 
     override suspend fun riskOptions(id: Long): Response<RiskOptionsDto> = unexpected("riskOptions")
+    override suspend fun setAlarmTime(id: Long, body: com.swpp.wakeup.data.remote.AlarmTimeRequest): Response<EventDto> =
+        unexpected("setAlarmTime")
+    override suspend fun clearAlarmTime(id: Long): Response<EventDto> = unexpected("clearAlarmTime")
+    override suspend fun confirmAlarm(id: Long, body: com.swpp.wakeup.data.remote.AlarmConfirmRequest): Response<EventDto> =
+        unexpected("confirmAlarm")
+    override suspend fun acceptAlarmProposal(id: Long, body: com.swpp.wakeup.data.remote.AlarmProposalAnswer): Response<EventDto> =
+        unexpected("acceptAlarmProposal")
+    override suspend fun rejectAlarmProposal(id: Long, body: com.swpp.wakeup.data.remote.AlarmProposalAnswer): Response<EventDto> =
+        unexpected("rejectAlarmProposal")
 
     override suspend fun liveRoute(body: LiveRouteRequest): Response<LiveRouteResponse> =
         unexpected("liveRoute")

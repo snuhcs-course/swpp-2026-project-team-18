@@ -1,5 +1,7 @@
 package com.swpp.wakeup.ui.home
 
+import com.swpp.wakeup.data.remote.ringAt
+import com.swpp.wakeup.domain.model.UserAlarmRule
 import android.app.Application
 import android.os.SystemClock
 import android.util.Log
@@ -113,6 +115,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -225,6 +228,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         /** 아래 목록 값은 지금 시각으로 다시 그린 것이다([HomeList]) */
         val sections: List<EventSection> = emptyList(),
         val nextAlarm: UpcomingEvent? = null,
+        /** 울렸고 아직 끝나지 않은 아침([com.swpp.wakeup.domain.model.TripResume]). 있으면 홈 맨 위 큰 카드다 */
+        val ongoing: UpcomingEvent? = null,
+        /** [ongoing] 의 기기 계획(출발 · 도착 예정 시각). 모르면 null */
+        val ongoingSchedule: com.swpp.wakeup.domain.model.AlarmSchedule? = null,
         val totalCount: Int = 0,
         /** 목록을 그린 날. 머리글의 "오늘 n개" 와 "오늘" 묶음이 같은 날을 본다 */
         val today: LocalDate = LocalDate.now(),
@@ -275,6 +282,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * 좌표라서 그 자리에 넣을 값이 없다.
          */
         val homePlace: PlaceSearchItem? = null,
+        /** 알람 추가의 최근 도착지 칩(최신순 2곳, 집 제외, H2-8 `545:192`) */
+        val recentDestinations: List<PlaceSearchItem> = emptyList(),
         val unplannedCount: Int = 0,
 
         /**
@@ -325,7 +334,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      *
      * @property undoSkipEventId 있으면 "되돌리기" 를 단다. 누르면 그 일정의 "안 감" 표시를 되돌린다
      */
-    data class HomeNotice(val id: Long, val message: String, val undoSkipEventId: Long? = null)
+    data class HomeNotice(
+        val id: Long,
+        val message: String,
+        val undoSkipEventId: Long? = null,
+        /** 있으면 "되돌리기" 가 바꾸기 전 경로로 되돌린다([undoRouteSwitch]) */
+        val undoRoute: com.swpp.wakeup.domain.model.RouteSwitchUndo? = null,
+        /** 있으면 "되돌리기" 가 바꾸기 전 알람 시각으로 되돌린다([undoAlarmChange], C1-9) */
+        val undoAlarm: AlarmUndo? = null,
+    )
+
+    /** 알람 시각을 바꾸기 전으로 되돌릴 값. [atMillis] 로 `PUT …/alarm/time` 을 보낸다 */
+    data class AlarmUndo(val eventId: Long, val atMillis: Long)
 
     // Partly AI-generated (Claude)
     /** 이동 중 경로를 바꾼 일정과 시각(벽시계 ms) */
@@ -349,14 +369,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val canTrack: Boolean,
     ) {
         /** "8:25 AM" */
-        val alarmLine: String get() = "${schedule.alarmLabel} ${schedule.meridiem}"
+        val alarmLine: String get() = com.swpp.wakeup.domain.model.ClockText.label(schedule.alarmLabel, schedule.meridiem) ?: schedule.alarmLabel
 
         /** 계획된 출발 시각 "9:25". 계산 못 했으면 null */
         val departLabel: String?
             get() = schedule.departByMillis?.let {
-                java.time.Instant.ofEpochMilli(it)
-                    .atZone(ZoneId.systemDefault())
-                    .format(DateTimeFormatter.ofPattern("H:mm"))
+                com.swpp.wakeup.domain.model.ClockText.label(it)
             }
     }
 
@@ -601,6 +619,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * 현재 위치 기준 최단선은 보조선이 아니라 [path] 자체를 교체한다.
          */
         val altPath: List<GeoPoint> = emptyList(),
+        /** 출발지 → 경로선 시작 도보 점선(11-17). 없으면 빈 목록 */
+        val walkHead: List<GeoPoint> = emptyList(),
+        /** 경로선 끝 → 도착지 도보 점선 */
+        val walkTail: List<GeoPoint> = emptyList(),
         /**
          * "9호선 → 2호선 · 4분 빠름" 또는 "여기서부터 9호선 · 3분 빠름".
          * 대안이 없으면 null.
@@ -890,6 +912,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 homeLabel = data.homeLabel,
                 onboardingPrepMin = data.onboardingPrepMin,
                 homePlace = data.toHomePlace(),
+                recentDestinations = com.swpp.wakeup.domain.model.RecentDestinations.choose(
+                    historyDestinations,
+                    com.swpp.wakeup.domain.model.RecentDestinations.pick(data.destinations, data.toHomePlace()),
+                ),
                 offline = data.fromCache,
                 offlineAgeLabel = data.ageLabel,
             )
@@ -920,6 +946,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 sections = view.sections,
                 nextAlarm = view.nextAlarm,
+                ongoing = view.ongoing,
+                ongoingSchedule = view.ongoing?.let { o -> data.schedules.firstOrNull { s -> s.eventId == o.id } },
                 totalCount = view.totalCount,
                 unplannedCount = view.unplannedCount,
                 today = view.today,
@@ -996,6 +1024,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onForeground() {
         foreground = true
+        com.swpp.wakeup.alarm.ProposalHeadsUp.appVisible = true
+        resumeTrackingIfCut()
         reloadMorning()
         renderHome()
         val state = _state.value
@@ -1008,9 +1038,44 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (shouldRefresh) refresh(silent = true)
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 강제 종료 등으로 끊긴 추적을 잇는다(11-17 "죽과이": 추적 중 강제 종료 → 다시 열어도 출발을 기록하지 못했다).
+     * 앱이 화면에 올라올 때만 부른다 — 위치 권한이 "앱 사용 중에만" 이어도 이때 시작한 추적은 위치를 받는다.
+     */
+    private fun resumeTrackingIfCut() {
+        // 점검 알람 · 재부팅과 같은 판단을 쓴다(중복 실행 없음). 화면에 있을 때라 "앱 사용 중에만" 위치로도 받는다.
+        com.swpp.wakeup.sensing.TripWatchdog.resumeIfCut(getApplication(), "앱 열기", foreground = true)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 홈 진행 중 카드의 [기록 다시 시작]. 이 일정의 계획으로 추적을 다시 띄운다. 끊긴 사본이 있으면 그 단계부터 잇는다.
+     */
+    fun restartOngoingTracking() {
+        val app = getApplication<Application>()
+        val state = _state.value
+        val ongoing = state.ongoing ?: return
+        if (!LocationPermissions.granted(app)) {
+            notify("위치 권한이 없어 이동을 기록할 수 없어요. 설정에서 위치를 허용해 주세요")
+            return
+        }
+        val active = runCatching { com.swpp.wakeup.data.local.ActiveTripStore(app).current() }.getOrNull()
+        val schedule = active?.takeIf { it.eventId == ongoing.id } ?: state.ongoingSchedule
+        if (schedule == null || !schedule.canTrack) {
+            notify("이 일정은 출발 · 도착을 기록할 위치 정보가 없어요")
+            return
+        }
+        runCatching {
+            if (active?.eventId == ongoing.id) TripTrackingService.resume(app, schedule) else TripTrackingService.start(app, schedule)
+        }.onSuccess { notify("이동 기록을 다시 시작했어요") }
+            .onFailure { Log.w(TAG, "추적을 다시 시작하지 못했다", it) }
+    }
+
     /** 화면이 뒤로 갔다. 경계 타이머를 멈춘다. */
     fun onBackground() {
         foreground = false
+        com.swpp.wakeup.alarm.ProposalHeadsUp.appVisible = false
         boundaryJob?.cancel()
         boundaryJob = null
     }
@@ -1062,10 +1127,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     TripLiveState.recordReroute(eventId, routeKey)
                     runCatching { TripTrackingService.refreshLiveRoute(app, eventId) }
                         .onFailure { Log.w(TAG, "경로 바꾼 뒤 추적 갱신 요청 실패", it) }
-                    notify("경로를 바꿨습니다. 곧 바꾼 경로로 다시 그립니다")
+                    notify("경로를 바꿨어요. 곧 바꾼 경로로 다시 그려요")
                 }
 
-                is EventRepository.Result.Failure -> notify("경로를 바꾸지 못했습니다. ${result.message}")
+                is EventRepository.Result.Failure -> notify("경로를 바꾸지 못했어요. ${result.message}")
             }
             _state.update { it.copy(rerouteUpdatingId = null) }
         }
@@ -1077,7 +1142,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 다시 맞춘다. **알람이 이미 울렸으면 바꾸지 않는다** — 울린 시점의 계획이 학습 기준이라서다.
      * 화면을 그린 뒤에 알람이 울렸을 수 있으므로 누른 시점에 한 번 더 확인한다.
      */
-    fun applyFasterRoute(eventId: Long, routeKey: String, alarmAtMillis: Long?) {
+    fun applyFasterRoute(
+        eventId: Long,
+        routeKey: String,
+        alarmAtMillis: Long?,
+        /** 바꾸기 전 경로 key. 있으면 스낵바에 [되돌리기] 를 단다 */
+        previousRouteKey: String? = null,
+        /** [되돌리기] 로 부른 것 — 문구가 "되돌렸어요" 이고 다시 되돌리기를 달지 않는다 */
+        undo: Boolean = false,
+    ) {
         if (_state.value.switchRouteBusyId != null) return
         if (alarmAtMillis == null || System.currentTimeMillis() >= alarmAtMillis) {
             notify("알람이 이미 울려서 경로를 바꾸지 않았어요")
@@ -1092,12 +1165,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         ++planLoadGeneration // 먼저 보낸 상세 요청이 늦게 와서 덮지 않게 한다
                         _plan.value = result.data
                     }
+                    onRouteChanged(eventId, result.data)
+                    val newAlarm = result.data.alarmAtMillis
+                    val undoRoute = previousRouteKey?.takeIf { !undo && it.isNotBlank() && it != routeKey }
+                        ?.let { com.swpp.wakeup.domain.model.RouteSwitchUndo(eventId, it, newAlarm) }
                     val homeGen = ++homeLoadGeneration
                     when (val home = repository.loadHome()) {
                         is EventRepository.Result.Success ->
                             if (!home.data.fromCache) {
                                 applyHome(home.data, homeGen) // 목록과 기기 알람을 함께 갱신한다
-                                notify("경로를 바꾸고 알람을 다시 맞췄어요")
+                                // 알람 시각이 바뀌었으면 그 시각을 말한다(11-16)
+                                notify(
+                                    com.swpp.wakeup.domain.model.FasterRoute.switchedMessage(alarmAtMillis, newAlarm, undo),
+                                    undoRoute = undoRoute,
+                                )
                             } else {
                                 notify("경로는 바꿨지만 알람 목록을 갱신하지 못했어요")
                             }
@@ -1110,6 +1191,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(switchRouteBusyId = null) }
         }
     }
+    // Partly AI-generated (Claude)
+    /** 경로 바꾸기 스낵바의 [되돌리기]. 바꾸기 전 경로로 다시 바꾼다(같은 "알람 전에만" 규칙) */
+    fun undoRouteSwitch(undo: com.swpp.wakeup.domain.model.RouteSwitchUndo) =
+        applyFasterRoute(undo.eventId, undo.routeKey, undo.alarmAtMillis, undo = true)
+
     /** 홈 행·알람 결정 화면·스낵바 "되돌리기" */
     fun setSkipped(eventId: Long, skipped: Boolean) = runSkip(eventId, skipped) {}
 
@@ -1139,8 +1225,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             if (saved is EventRepository.Result.Failure) {
                 _state.update { it.copy(skipUpdatingId = null) }
                 notify(
-                    if (skipped) "안 감으로 표시하지 못했습니다. ${saved.message}"
-                    else "되돌리지 못했습니다. ${saved.message}"
+                    if (skipped) "안 가요로 표시하지 못했어요. ${saved.message}"
+                    else "되돌리지 못했어요. ${saved.message}"
                 )
                 return@launch
             }
@@ -1175,7 +1261,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 is EventRepository.Result.Success -> if (!home.data.fromCache) {
                     applyHome(home.data, gen)
                     notify(
-                        if (skipped) "안 감으로 표시했습니다" else "안 감 표시를 되돌렸습니다",
+                        if (skipped) "안 가요로 표시했어요" else "안 가요 표시를 되돌렸어요",
                         undoSkipEventId = eventId.takeIf { skipped },
                     )
                 } else {
@@ -1198,8 +1284,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private fun onSkipSavedOffline(app: Application, eventId: Long, skipped: Boolean) {
         JitWork.requestPlanSync(app)
         notify(
-            if (skipped) "표시는 저장했지만 알람 목록을 갱신하지 못했습니다. 연결되면 자동으로 맞춥니다"
-            else "되돌렸지만 알람 목록을 갱신하지 못했습니다. 연결되면 자동으로 맞춥니다",
+            if (skipped) "표시는 저장했지만 알람 목록을 새로 받지 못했어요. 연결되면 자동으로 맞춰요"
+            else "되돌렸지만 알람 목록을 새로 받지 못했어요. 연결되면 자동으로 맞춰요",
             undoSkipEventId = eventId.takeIf { skipped },
         )
     }
@@ -1219,8 +1305,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     // Partly AI-generated (Claude)
     /** 한 번 띄울 안내를 건다. 화면이 띄운 뒤 [consumeNotice] 로 지운다. */
-    private fun notify(message: String, undoSkipEventId: Long? = null) {
-        val notice = HomeNotice(++noticeCounter, message, undoSkipEventId)
+    private fun notify(
+        message: String,
+        undoSkipEventId: Long? = null,
+        undoRoute: com.swpp.wakeup.domain.model.RouteSwitchUndo? = null,
+        undoAlarm: AlarmUndo? = null,
+    ) {
+        val notice = HomeNotice(++noticeCounter, message, undoSkipEventId, undoRoute, undoAlarm)
         _state.update { it.copy(notice = notice) }
     }
 
@@ -1262,7 +1353,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _state.update {
             it.copy(
                 registeredAlarms = registered.size,
-                nextRegisteredLabel = registered.firstOrNull()?.alarmLabel,
+                nextRegisteredLabel = registered.firstOrNull()?.let { com.swpp.wakeup.domain.model.ClockText.label(it.alarmLabel, it.meridiem) ?: it.alarmLabel },
                 pendingObservations = pendingObservationCount(),
             )
         }
@@ -1299,6 +1390,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         AddDraftHolder.clear()
         pendingAddDraft = null
         _add.value = AddState()
+        _addSheet.value = false
+        _alarmConfirm.value = null
         _addResumePrompt.value = false
         // 종류 목록은 계정마다 다르다. 다음 계정에 이 계정의 종류가 잠깐이라도 보이지 않게 비운다.
         _eventTags.value = emptyList()
@@ -1348,9 +1441,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     logout()
                     onLoggedOut()
                 }
-                code == 404 -> notify("아직 서버에서 지원하지 않아요. 이 기기만 로그아웃할 수 있어요")
-                code != null -> notify("모든 기기를 로그아웃하지 못했습니다. 잠시 후 다시 시도해 주세요")
-                else -> notify("서버에 연결되지 않아 다른 기기를 로그아웃하지 못했습니다")
+                code == 404 -> notify("아직 지원하지 않는 기능이에요. 이 기기만 로그아웃할 수 있어요")
+                code != null -> notify("모든 기기를 로그아웃하지 못했어요. 잠시 뒤 다시 시도해 주세요")
+                else -> notify("인터넷에 연결되지 않아 다른 기기를 로그아웃하지 못했어요")
             }
         }
     }
@@ -1377,9 +1470,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val response = runCatching { withContext(Dispatchers.IO) { ApiClient.auth.resetLearning() } }
             val outcome = LearningReset.outcome(response.getOrNull()?.code())
-            Log.i(TAG, "기록 초기화: $outcome, 지운 건수 ${response.getOrNull()?.body()?.deleted}")
+            val body = response.getOrNull()?.body()
+            Log.i(TAG, "기록 초기화: $outcome, 지운 건수 ${body?.deleted}, 그대로 둔 계획 ${body?.skippedPlans}")
+            // 기기 대기열에서 초기화 전 기록을 지운다(C4, 서버 계약 7절 2). 실패해도 서버가 거르므로 안내는 그대로다.
+            val resetAt = body?.resetAt
+            if (outcome == LearningReset.Outcome.DONE && resetAt != null) {
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        val app = getApplication<Application>()
+                        val trips = TripObservationQueue(app).dropBefore(resetAt)
+                        val alarms = AlarmLogQueue(app).dropBefore(resetAt)
+                        val blocks = blockQueue.dropBefore(resetAt)
+                        Log.i(TAG, "초기화 전 대기 기록 삭제: 이동 $trips · 알람 $alarms · 블록 ${blocks}건")
+                    }
+                }.onFailure { Log.w(TAG, "초기화 전 대기 기록을 지우지 못했다. 서버가 거른다", it) }
+            }
             _state.update { it.copy(learningResetBusy = false, learningResetPrompt = false) }
-            notify(LearningReset.message(outcome))
+            notify(
+                if (outcome == LearningReset.Outcome.DONE) LearningReset.doneMessage(body?.skippedPlans)
+                else LearningReset.message(outcome)
+            )
             if (outcome == LearningReset.Outcome.DONE) refresh(silent = true)
         }
     }
@@ -1506,7 +1616,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = authRepository.requestEmailVerify()) {
                 is AuthRepository.EmailVerifyResult.Sent -> _emailVerify.update {
-                    it.copy(sending = false, code = "", info = "코드를 다시 보냈음 · 이전 코드는 쓸 수 없음")
+                    it.copy(sending = false, code = "", info = "코드를 다시 보냈어요. 이전 코드는 쓸 수 없어요")
                 }
                 is AuthRepository.EmailVerifyResult.AlreadyVerified,
                 is AuthRepository.EmailVerifyResult.Verified -> finishEmailVerify("이미 인증된 이메일이에요", null)
@@ -1584,7 +1694,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             SocialSignIn.Outcome.Cancelled -> _state.update { it.copy(socialLinkBusy = null) }
             SocialSignIn.Outcome.NotConfigured -> {
                 _state.update { it.copy(socialLinkBusy = null) }
-                notify("지금은 ${provider.label} 연결을 쓸 수 없습니다")
+                notify("지금은 ${provider.label} 연결을 쓸 수 없어요")
             }
             is SocialSignIn.Outcome.Failed -> {
                 _state.update { it.copy(socialLinkBusy = null) }
@@ -1594,7 +1704,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 applyLinkResult(
                     provider,
                     authRepository.linkSocial(provider, outcome.idToken),
-                    done = "${provider.asObject} 연결했습니다. 이제 ${provider.label}로도 로그인할 수 있습니다",
+                    done = "${provider.asObject} 연결했어요. 이제 ${provider.label}로도 로그인할 수 있어요",
                 )
             }
         }
@@ -1605,7 +1715,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.socialLinkBusy != null) return
         _state.update { it.copy(socialLinkBusy = provider) }
         viewModelScope.launch {
-            applyLinkResult(provider, authRepository.unlinkSocial(provider), done = "${provider.label} 연결을 끊었습니다")
+            applyLinkResult(provider, authRepository.unlinkSocial(provider), done = "${provider.label} 연결을 끊었어요")
         }
     }
 
@@ -1723,6 +1833,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val routeKey: String,
         val segments: RouteSegments? = null,
         val loading: Boolean = true,
+        /** 서버에서 못 받아 기기 사본을 보이는 중이면 그 사본을 받은 시각(11-17). 새로 받았으면 null */
+        val savedAtMillis: Long? = null,
+        /** 못 받았고 사본도 없다. [다시 시도] 를 보인다 */
+        val failed: Boolean = false,
     )
     private val _checkpoints = MutableStateFlow<CheckpointState?>(null)
     val checkpoints: StateFlow<CheckpointState?> = _checkpoints.asStateFlow()
@@ -1731,25 +1845,47 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 같은 일정·경로를 이미 받았거나 받는 중이면 아무것도 하지 않는다. 실패해도 이 프로세스에서는
      * 다시 부르지 않는다(카카오 호출 한도). 대중교통이 아닌 경로에는 정류장이 없어 부르지 않는다.
      */
-    fun loadCheckpointsIfNeeded(eventId: Long, routeKey: String?) {
+    fun loadCheckpointsIfNeeded(eventId: Long, routeKey: String?, force: Boolean = false) {
         if (routeKey == null || !CheckpointBasis.hasStops(routeKey)) return
         val current = _checkpoints.value
-        if (current != null && current.eventId == eventId && current.routeKey == routeKey) return
-        _checkpoints.value = CheckpointState(eventId, routeKey)
+        if (!force && current != null && current.eventId == eventId && current.routeKey == routeKey) return
+        if (force && current?.loading == true && current.eventId == eventId && current.routeKey == routeKey) return
+        val store = com.swpp.wakeup.data.local.RouteSegmentsStore(getApplication())
+        // 받는 동안에도 사본이 있으면 먼저 보인다(오프라인이면 그대로 남는다).
+        val saved = runCatching { store.get(eventId, routeKey) }.getOrNull()
+        _checkpoints.value = CheckpointState(
+            eventId = eventId,
+            routeKey = routeKey,
+            segments = current?.takeIf { it.eventId == eventId && it.routeKey == routeKey }?.segments ?: saved?.segments,
+            savedAtMillis = saved?.savedAtMillis,
+        )
         checkpointJob?.cancel()
         checkpointJob = viewModelScope.launch {
-            val segments = when (val result = repository.baseRouteSegments(eventId, routeKey)) {
-                is EventRepository.Result.Success -> result.data
-                is EventRepository.Result.Failure -> null
-            }
+            val result = repository.baseRouteSegments(eventId, routeKey)
             _checkpoints.update {
-                if (it?.eventId == eventId && it.routeKey == routeKey) {
-                    it.copy(segments = segments, loading = false)
-                } else {
-                    it
+                if (it?.eventId != eventId || it.routeKey != routeKey) return@update it
+                when (result) {
+                    is EventRepository.Result.Success -> {
+                        // 새로 받았다. 다음 오프라인을 위해 남긴다(실시간 도착은 빼고).
+                        result.data?.let { s -> runCatching { store.save(eventId, routeKey, s) } }
+                        it.copy(segments = result.data, loading = false, savedAtMillis = null, failed = false)
+                    }
+                    // 못 받았다(대개 오프라인). 사본이 있으면 그 나이와 함께 보인다(11-17 사용자).
+                    is EventRepository.Result.Failure -> it.copy(
+                        segments = saved?.segments ?: it.segments,
+                        loading = false,
+                        savedAtMillis = saved?.savedAtMillis,
+                        failed = saved == null,
+                    )
                 }
             }
         }
+    }
+
+    /** 이동 탭 "가는 길" 의 [다시 시도] */
+    fun retryCheckpoints() {
+        val current = _checkpoints.value ?: return
+        loadCheckpointsIfNeeded(current.eventId, current.routeKey, force = true)
     }
     // Partly AI-generated (Claude)
     /**
@@ -1765,6 +1901,34 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val loading: Boolean = false,
         val failed: Boolean = false,
     )
+    // Partly AI-generated (Claude)
+    /**
+     * 일정의 경로가 바뀌었다(일정 수정 저장 · [이 경로로 바꾸기] · 되돌리기). 화면마다 따로 들고 있던 값을 새 계획으로 맞춘다
+     * (11-17 사용자: 경로를 바꿨는데 이동 탭과 알람 상세에 예전 경로가 남았다).
+     *
+     * - 이동 탭: 같은 일정이면 새 계획으로 바꾼다. 받은 계획이 없으면 다시 받는다
+     * - 가는 길 구간: 옛 경로 것을 버린다(경로 key 가 같아도 출발지가 바뀌었을 수 있다). 기기 사본도 지운다
+     * - ④ 지도: 이 일정을 보고 있으면 새 계획으로 다시 그린다
+     */
+    private fun onRouteChanged(eventId: Long, plan: AlarmPlanView?) {
+        val trip = _tripTab.value
+        if (trip.eventId == eventId) {
+            if (plan != null) {
+                _tripTab.value = trip.copy(plan = plan, loading = false, failed = false)
+            } else {
+                loadTripPlan(eventId, trip.version, force = true)
+            }
+        }
+        if (_checkpoints.value?.eventId == eventId) {
+            checkpointJob?.cancel()
+            _checkpoints.value = null
+        }
+        runCatching { com.swpp.wakeup.data.local.RouteSegmentsStore(getApplication()).remove(eventId) }
+        if (plan != null && _routeMap.value?.eventId == eventId) {
+            initRouteMap(plan = plan, preservedLive = null)
+        }
+    }
+
     private val _tripTab = MutableStateFlow(TripTabState())
     val tripTab: StateFlow<TripTabState> = _tripTab.asStateFlow()
     private var tripTabJob: Job? = null
@@ -1849,10 +2013,57 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val state = _alarmTimeSheet.value
         if (state.eventId != eventId || state.loading || state.saving) return
         val selected = state.options?.option(key) ?: return
+        val label = AlarmTimeChoice.minutesOfDay(selected.alarmAt, selected.meridiem)
+            ?.let { AlarmTimeChoice.clockLabel(it) }
+        saveAlarmTime(eventId, label?.let { "$it 알람으로 바꿨어요" } ?: "알람 시각을 바꿨어요") {
+            repository.saveRiskOption(eventId, selected.tau)
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 휠로 고른 시각을 그대로 알람으로(BE-H3b, `PUT …/alarm/time`). 서버가 0.21.0 미만이면 부르지 않는다 —
+     * 시트가 이유 한 줄을 보이고 버튼을 끈다([UserAlarmRule.Save.Locked]).
+     */
+    fun saveAlarmTimeCustom(eventId: Long, minutesOfDay: Int) {
+        val state = _alarmTimeSheet.value
+        if (state.eventId != eventId || state.saving) return
+        if (!UserAlarmRule.supported(ServerWarmup.serverVersion)) return
+        val startMillis = state.plan?.takeIf { it.eventId == eventId }?.startAtMillis ?: return
+        val start = java.time.Instant.ofEpochMilli(startMillis).atZone(ZoneId.systemDefault())
+        // 시트가 버튼을 끄지만 한 번 더 막는다. 그대로 보내면 하루 전 같은 시각으로 맞춰진다([UserAlarmRule.alarmDateTime]).
+        if (UserAlarmRule.isAfterStart(minutesOfDay, start.hour * 60 + start.minute)) {
+            notify(UserAlarmRule.AFTER_START_NOTE)
+            return
+        }
+        val at = UserAlarmRule.alarmDateTime(minutesOfDay, start)
+        val label = AlarmTimeChoice.clockLabel(minutesOfDay)
+        // 바꾸기 전 울릴 시각으로 [되돌리기](C1-9)
+        val before = state.plan?.takeIf { it.eventId == eventId }?.alarmAtMillis
+        saveAlarmTime(eventId, "$label 알람으로 바꿨어요", undo = before?.let { AlarmUndo(eventId, it) }) {
+            repository.setUserAlarm(eventId, UserAlarmRule.wire(at))
+        }
+    }
+
+    /** [추천 시각으로 되돌리기](BE-H3b, `DELETE …/alarm/time`) */
+    fun revertAlarmTime(eventId: Long) {
+        val state = _alarmTimeSheet.value
+        if (state.eventId != eventId || state.saving) return
+        if (!UserAlarmRule.supported(ServerWarmup.serverVersion)) return
+        saveAlarmTime(eventId, "추천 시각으로 되돌렸어요") { repository.clearUserAlarm(eventId) }
+    }
+
+    /** 세 길(칸 · 직접 · 되돌리기)이 같이 쓰는 저장 뒤 처리: ④ 계획 · 홈 · 기기 알람을 함께 다시 맞춘다 */
+    private fun saveAlarmTime(
+        eventId: Long,
+        doneMessage: String,
+        undo: AlarmUndo? = null,
+        save: suspend () -> EventRepository.Result<AlarmPlanView>,
+    ) {
         val generation = riskGeneration
         _alarmTimeSheet.update { it.copy(saving = true, error = null) }
         viewModelScope.launch {
-            val error = when (val saved = repository.saveRiskOption(eventId, selected.tau)) {
+            val error = when (val saved = save()) {
                 is EventRepository.Result.Failure -> saved.message
                 is EventRepository.Result.Success -> {
                     if (_nav.value.current == AppRoute.AlarmDecision(eventId)) {
@@ -1865,23 +2076,99 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             if (!home.data.fromCache) {
                                 applyHome(home.data, homeGen) // Refresh home and device alarms together.
                                 null
-                            } else "선택은 저장됐지만 알람 목록을 갱신하지 못했습니다. 다시 계속하기를 눌러 주세요."
+                            } else "선택은 저장했지만 알람 목록을 새로 받지 못했어요. 다시 계속하기를 눌러 주세요."
                         }
                         is EventRepository.Result.Failure ->
-                            "선택은 저장됐지만 알람 목록을 갱신하지 못했습니다. ${home.message}"
+                            "선택은 저장했지만 알람 목록을 새로 받지 못했어요. ${home.message}"
                     }
                 }
             }
             if (generation != riskGeneration || _alarmTimeSheet.value.eventId != eventId) return@launch
             if (error == null) {
                 _alarmTimeSheet.value = AlarmTimeSheetState()
-                val label = AlarmTimeChoice.minutesOfDay(selected.alarmAt, selected.meridiem)
-                    ?.let { AlarmTimeChoice.clockLabel(it) }
-                notify(label?.let { "$it 알람으로 바꿨어요" } ?: "알람 시각을 바꿨어요")
+                notify(doneMessage, undoAlarm = undo)
             } else {
                 _alarmTimeSheet.update { it.copy(saving = false, error = error) }
             }
         }
+    }
+
+    // Partly AI-generated (Claude)
+    /** 답하는 중인 "바꿀까요" 제안의 일정. 두 번 누르지 않게 버튼을 끈다 */
+    private val _proposalBusyId = MutableStateFlow<Long?>(null)
+    val proposalBusyId: StateFlow<Long?> = _proposalBusyId.asStateFlow()
+
+    // Partly AI-generated (Claude)
+    /**
+     * "바꿀까요" 제안에 답한다(BE-H3d). 받아들이면 스낵바에 [되돌리기](바꾸기 전 시각, C1-9). 그새 제안이 바뀌었거나
+     * 마감이 지났으면(409) 일정을 다시 받아 지금 상태를 보인다.
+     */
+    fun answerProposal(eventId: Long, proposal: com.swpp.wakeup.domain.model.AlarmProposal, accept: Boolean) {
+        if (_proposalBusyId.value != null) return
+        _proposalBusyId.value = eventId
+        viewModelScope.launch {
+            when (val result = repository.answerAlarmProposal(eventId, accept, proposal.proposedAt)) {
+                is EventRepository.Result.Success -> {
+                    if (_nav.value.current == AppRoute.AlarmDecision(eventId)) {
+                        ++planLoadGeneration
+                        _plan.value = result.data
+                    }
+                    refresh(silent = true) // 홈 · 기기 알람(제안 마감 작업 포함)을 다시 맞춘다
+                    if (accept) {
+                        val clock = result.data.alarmAtMillis?.let(::clockOf) ?: "새 시각"
+                        notify(
+                            "알람을 $clock${com.swpp.wakeup.domain.model.RerouteAlert.roParticle(clock)} 바꿨어요",
+                            undoAlarm = AlarmUndo(eventId, proposal.currentAtMillis),
+                        )
+                    } else {
+                        notify("지금 알람 시각 그대로 둘게요")
+                    }
+                }
+
+                is EventRepository.Result.Failure -> {
+                    val stale = result.errorCode in setOf("no_alarm_proposal", "alarm_proposal_changed", "alarm_proposal_expired")
+                    if (stale) {
+                        if (_nav.value.current == AppRoute.AlarmDecision(eventId)) loadPlan(eventId)
+                        refresh(silent = true)
+                    }
+                    notify(
+                        when (result.errorCode) {
+                            "alarm_proposal_expired" -> "답할 시간이 지나 알람을 이미 정했어요. 바뀐 시각을 확인해 주세요"
+                            "alarm_proposal_changed" -> "그새 제안이 바뀌었어요. 다시 확인해 주세요"
+                            "no_alarm_proposal" -> "이미 답한 제안이에요"
+                            else -> "답하지 못했어요. ${result.message}"
+                        },
+                    )
+                }
+            }
+            _proposalBusyId.value = null
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    /** 스낵바 [되돌리기]: 바꾸기 전 시각으로 `PUT …/alarm/time`(C1-9). 직접 정한 시각이 된다 */
+    fun undoAlarmChange(undo: AlarmUndo) {
+        if (!UserAlarmRule.supported(ServerWarmup.serverVersion)) return
+        viewModelScope.launch {
+            val at = java.time.Instant.ofEpochMilli(undo.atMillis).atZone(ZoneId.systemDefault())
+            when (val result = repository.setUserAlarm(undo.eventId, UserAlarmRule.wire(at))) {
+                is EventRepository.Result.Success -> {
+                    if (_nav.value.current == AppRoute.AlarmDecision(undo.eventId)) {
+                        ++planLoadGeneration
+                        _plan.value = result.data
+                    }
+                    refresh(silent = true)
+                    notify("알람을 ${clockOf(undo.atMillis)}${com.swpp.wakeup.domain.model.RerouteAlert.roParticle(clockOf(undo.atMillis))} 되돌렸어요")
+                }
+
+                is EventRepository.Result.Failure -> notify("되돌리지 못했어요. ${result.message}")
+            }
+        }
+    }
+
+    private fun clockOf(millis: Long): String {
+        val t = java.time.Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
+        return AlarmTimeChoice.clockLabel(t.hour * 60 + t.minute)
     }
 
     // Partly AI-generated (Claude)
@@ -1891,7 +2178,125 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 온다. 실기기에서 "GS25" 를 검색했더니 전북 익산·남양주가 상위에 왔다.
         primeCurrentLocation()
         loadEventTags()
-        _nav.update { it.copy(stack = it.stack + AppRoute.AddEvent, forward = true) }
+        loadRecentFromHistory()
+        // 새 일정은 화면을 쌓지 않고 지금 탭 첫 화면 위의 바텀시트로 연다(H2-8 `545:192`).
+        _addSheet.value = true
+    }
+
+    // Partly AI-generated (Claude)
+    /** 다녀온 경로 기록의 도착지. null 이면 아직 못 받았거나 서버에 API 가 없다(배포 전 404) */
+    private var historyDestinations: List<PlaceSearchItem>? = null
+
+    /**
+     * "최근 설정한 위치" 칩을 다녀온 경로 기록(`sort=recent`)의 도착지로 채운다(C8). 시트는 기다리지 않는다 —
+     * 404 · 오류 · 기록 없음이면 지금처럼 홈 일정 목록에서 뽑은 칩 그대로다.
+     */
+    private fun loadRecentFromHistory() {
+        viewModelScope.launch {
+            val response = runCatching { withContext(Dispatchers.IO) { ApiClient.routeHistory.recent() } }
+                .getOrNull()
+            val picked = com.swpp.wakeup.domain.model.RecentDestinations.fromHistoryResponse(
+                response?.code(), response?.body(), _state.value.homePlace,
+            )
+            if (picked == null) {
+                Log.i(TAG, "경로 기록을 받지 못해 칩은 홈 목록 그대로(${response?.code()})")
+                return@launch
+            }
+            historyDestinations = picked
+            if (picked.isNotEmpty()) _state.update { it.copy(recentDestinations = picked) }
+        }
+    }
+
+    // Partly AI-generated (Claude)
+    private val _alarmConfirm = MutableStateFlow<com.swpp.wakeup.ui.events.AlarmConfirmView?>(null)
+
+    /** 방금 만든 일정의 알람 확인 시트(H2-8 `547:2095`). null 이면 띄우지 않는다 */
+    val alarmConfirm: StateFlow<com.swpp.wakeup.ui.events.AlarmConfirmView?> = _alarmConfirm.asStateFlow()
+
+    /**
+     * 알람 확인 시트를 닫는다([이 시각으로 알람 맞추기] · 아래로 밀기 · 뒤로 · 바깥). 알람은 이미 그 시각으로
+     * 맞춰져 있다. TODO(BE-H3a): 승인 필드가 생기면 [confirmed] 일 때 "확인함" 을 저장한다.
+     */
+    fun dismissAlarmConfirm(confirmed: Boolean = false) {
+        val view = _alarmConfirm.value
+        _alarmConfirm.value = null
+        // [이 시각으로 알람 맞추기] 만 확인한다(BE-H3a). 그냥 닫으면 "확인 전" 으로 남고 알람은 그대로 울린다.
+        if (confirmed && view != null) confirmAlarm(view.eventId, view.ringAt, quiet = true)
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * "이 시각으로 알람 맞추기"(BE-H3a, `POST …/alarm/confirm`). 서버가 0.21.0 미만이면 부르지 않는다 —
+     * 화면도 그때는 버튼을 두지 않는다([com.swpp.wakeup.ui.alarm.AlarmDecisionLogic.confirmArea]).
+     *
+     * 409 `alarm_changed` 면 그새 알람이 다시 계산된 것이다. 일정을 다시 받아 새 시각을 보이고 한 줄로 알린다.
+     * [quiet] 이면(알람 확인 시트) 성공해도 말하지 않는다 — 시트를 닫는 것이 곧 답이다.
+     */
+    fun confirmAlarm(eventId: Long, ringAt: String?, quiet: Boolean = false) {
+        if (!UserAlarmRule.supported(ServerWarmup.serverVersion)) return
+        if (_confirmBusyId.value == eventId) return
+        _confirmBusyId.value = eventId
+        viewModelScope.launch {
+            when (val result = repository.confirmAlarm(eventId, ringAt)) {
+                is EventRepository.Result.Success -> {
+                    if (_nav.value.current == AppRoute.AlarmDecision(eventId)) {
+                        ++planLoadGeneration
+                        _plan.value = result.data
+                    }
+                    if (!quiet) notify("알람을 맞췄어요")
+                }
+                is EventRepository.Result.Failure -> {
+                    if (result.errorCode == "alarm_changed") {
+                        notify("그새 알람 시각이 다시 계산됐어요. 새 시각을 확인해 주세요")
+                        if (_nav.value.current == AppRoute.AlarmDecision(eventId)) loadPlan(eventId)
+                        refresh()
+                    } else {
+                        notify(result.message)
+                    }
+                }
+            }
+            _confirmBusyId.value = null
+        }
+    }
+
+    private val _confirmBusyId = MutableStateFlow<Long?>(null)
+
+    /** 확인을 보내는 중인 일정. ④ 의 버튼을 막는다 */
+    val confirmBusyId: StateFlow<Long?> = _confirmBusyId.asStateFlow()
+
+    /** ④ 의 [추천 시각으로 되돌리기](BE-H3b, `DELETE …/alarm/time`). 시트를 열지 않고 바로 되돌린다 */
+    fun revertAlarmFromPlan(eventId: Long) {
+        if (!UserAlarmRule.supported(ServerWarmup.serverVersion)) return
+        if (_confirmBusyId.value == eventId) return
+        _confirmBusyId.value = eventId
+        viewModelScope.launch {
+            when (val result = repository.clearUserAlarm(eventId)) {
+                is EventRepository.Result.Success -> {
+                    if (_nav.value.current == AppRoute.AlarmDecision(eventId)) {
+                        ++planLoadGeneration
+                        _plan.value = result.data
+                    }
+                    notify("추천 시각으로 되돌렸어요")
+                    refresh() // 기기 알람을 새 시각으로 다시 건다
+                }
+                is EventRepository.Result.Failure -> notify(result.message)
+            }
+            _confirmBusyId.value = null
+        }
+    }
+
+    private val _addSheet = MutableStateFlow(false)
+
+    /** 알람 추가 바텀시트가 열려 있는가. 탭 첫 화면이 보일 때만 그린다(경로 고르기 등에서 돌아오면 다시 보인다) */
+    val addSheetOpen: StateFlow<Boolean> = _addSheet.asStateFlow()
+
+    /**
+     * 시트를 닫는다(X · 바깥 누르기 · 아래로 밀기 · 뒤로). 입력은 지우지 않는다 — 다음 "일정 추가" 에서
+     * 쓰다 만 일정 규칙(A4)대로 이어 쓸지 묻는다. 저장 중이면 10초가 지나기 전에는 닫지 않는다.
+     */
+    fun dismissAddSheet() {
+        if (!AddSheetRule.canDismiss(_add.value)) return
+        _addSheet.value = false
     }
 
     // AI-generated (Claude)
@@ -2325,8 +2730,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (wasOnMorning && _morning.value == null) {
             notify(
                 when (closed.reason) {
-                    MorningClose.Reason.DEPARTED -> "출발이 확인돼 아침 기록을 끝냈습니다"
-                    MorningClose.Reason.ARRIVED -> "도착이 확인돼 아침 기록을 끝냈습니다"
+                    MorningClose.Reason.DEPARTED -> "출발이 확인돼 아침 기록을 끝냈어요"
+                    MorningClose.Reason.ARRIVED -> "도착이 확인돼 아침 기록을 끝냈어요"
                 }
             )
         }
@@ -2842,6 +3247,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         loadBlocks(eventId = null)
     }
 
+    // Partly AI-generated (Claude)
+    /**
+     * "이 아침 할 일" 에 항목이 하나도 없을 때의 [아침 루틴 만들러 가기](11-17 사용자). 같은 화면 상태를 쓰므로
+     * 지금 화면을 아침 루틴으로 **바꿔 끼운다** — 뒤로 가면 ④ 로 돌아간다.
+     */
+    fun openRoutineEditorFromEvent() {
+        _nav.update { nav ->
+            val base = if (nav.stack.lastOrNull() is AppRoute.EventBlocks) nav.stack.dropLast(1) else nav.stack
+            nav.copy(stack = base + AppRoute.RoutineEditor, forward = true)
+        }
+        _routine.value = RoutineEditorState(loading = true)
+        loadBlocks(eventId = null)
+    }
+
     /**
      * 일정 하나의 블록 체크 화면을 연다.
      *
@@ -2967,7 +3386,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val state = _routine.value
         val eventId = state.eventId ?: return
         if (!state.dirty) {
-            _routine.update { it.copy(notice = "바뀐 항목이 없다.") }
+            _routine.update { it.copy(notice = "바뀐 항목이 없어요.") }
             return
         }
 
@@ -2983,8 +3402,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             saving = false,
                             // 저장된 상태가 새 기준선이다.
                             original = it.blocks.associate { b -> b.id to b.checked },
-                            notice = plan?.alarmAt?.let { at -> "저장함 · 알람 $at" }
-                                ?: "저장함 · 알람을 계산할 수 없다",
+                            notice = plan?.alarmAt?.let { at -> "저장했어요 · 알람 $at" }
+                                ?: "저장했어요 · 알람은 아직 계산하지 못했어요",
                         )
                     }
                     refresh()
@@ -3159,7 +3578,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun openRouteChoice() {
         val add = _add.value
-        if (!add.canPickRoute(_state.value.hasHome)) return
+        if (!add.canPickRoute(_state.value.hasHome, _state.value.homePlace)) return
         val place = add.selectedPlace ?: return
         _nav.update { it.copy(stack = it.stack + AppRoute.RouteChoice, forward = true) }
 
@@ -3408,8 +3827,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     moved = if (recenter && fix != null) true else current.moved,
                     pendingShift = if (recenter && fix != null) Offset.Zero else current.pendingShift,
                     error = if (recenter && measured == null) {
-                        if (fix == null) "정확한 현재 위치를 확인할 수 없음"
-                        else "새 위치를 못 받아 마지막 위치를 표시함"
+                        if (fix == null) "정확한 현재 위치를 확인할 수 없어요"
+                        else "새 위치를 못 받아 마지막 위치를 보여 드려요"
                     } else current.error,
                 )
             }
@@ -3724,10 +4143,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             it.copy(
                 routeKey = option?.key,
                 routeLabel = option?.let { o -> "${o.minutesLabel} · ${o.mode}" },
+                routeMinutes = option?.minutes,
+                // 사용자가 직접 골랐다. 자동 표시는 뗀다(C8)
+                routeAutoCaption = null,
                 // 집 외의 출발지는 경로 선택 때의 좌표를 그대로 보존한다.
                 origin = eventOrigin,
                 originLabel = current.origin?.name ?: choice.originLabel,
                 error = null,
+                destinationUndo = null,
                 fieldErrors = it.fieldErrors - AddField.ROUTE - AddField.ORIGIN,
             )
         }
@@ -3841,7 +4264,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         val currentLocation = tracked?.toUsableMapLocation()
             ?: rememberedLocation(MAP_LOCATION_MAX_AGE_MS)
-        val fitPath = (displayPath + altPath).ifEmpty {
+        // 계획 경로선 앞뒤의 도보 구간(11-17). 이동 중 현재 위치부터 받은 선에는 붙이지 않는다.
+        val walk = if (moving) {
+            com.swpp.wakeup.domain.model.WalkLegs.Legs(null, null)
+        } else {
+            val home = _state.value.homePlace?.let { GeoPoint(it.lat, it.lng) }
+            com.swpp.wakeup.domain.model.WalkLegs.of(displayPath, plan.originPoint ?: home, plan.destinationPoint)
+        }
+        val fitPath = (displayPath + altPath + walk.all).ifEmpty {
             listOfNotNull(
                 currentLocation?.point ?: cachedSnapshot?.origin?.takeIf { cachedRoute != null },
                 plan.routePath.lastOrNull(),
@@ -3866,6 +4296,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             altPath = altPath,
             altSummary = altSummary,
             currentLocation = currentLocation,
+            walkHead = walk.head.orEmpty(),
+            walkTail = walk.tail.orEmpty(),
         )
 
         // 서비스가 이미 백그라운드에서 받은 경로가 있으면 이 호출이 즉시
@@ -3944,8 +4376,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     currentLocation = fix,
                     locating = false,
                     locationError = if (measured == null) {
-                        if (fix == null) "정확한 현재 위치를 확인할 수 없음"
-                        else "새 위치를 못 받아 마지막 위치를 표시함"
+                        if (fix == null) "정확한 현재 위치를 확인할 수 없어요"
+                        else "새 위치를 못 받아 마지막 위치를 보여 드려요"
                     } else null,
                     cameraMode = if (fix != null) RouteCameraMode.FREE else current.cameraMode,
                     pendingShift = if (fix != null) Offset.Zero else current.pendingShift,
@@ -4225,9 +4657,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val date: LocalDate = LocalDate.now().plusDays(1),
         val hour: Int = 9,
         val minute: Int = 0,
+        /**
+         * 도착 시각을 한 번이라도 골랐는가(H2-8). 미리 채워 두면 9:00 그대로 저장하는 사고가 난다.
+         * 고르기 전에는 "시각을 골라 주세요" 로 보이고 [알람 맞추기] 가 꺼져 있다.
+         */
+        val timePicked: Boolean = false,
         val repeatWeekdays: Set<Int> = emptySet(),
-        /** null 이면 "기타" — 서버에서 태그를 비우고 프로필 기본 τ 를 쓴다 */
-        val tagKey: String? = "class",
+        /**
+         * null 이면 "선택 안 함" — 서버에서 태그를 비우고 프로필 기본 τ 를 쓴다.
+         * 새 일정의 기본값이다(H2-8: 종류는 선택 칸).
+         */
+        val tagKey: String? = null,
         /** 목적지 검색. 집 주소·출발지와 같은 상태를 쓴다 */
         val place: PlaceSearch = PlaceSearch(),
         val selectedPlace: PlaceSearchItem? = null,
@@ -4238,6 +4678,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val routeKey: String? = null,
         /** 고른 경로 요약. "23분 · 지하철+도보+버스" */
         val routeLabel: String? = null,
+        /** 고른 경로의 이동 시간(분). 저장 전에 "지금 출발해도 늦는가" 를 본다([PastTimeRule.travelTooLate]) */
+        val routeMinutes: Int? = null,
+        /**
+         * 경로를 앱이 자동으로 채웠을 때 경로 칸에 다는 말("지난번에 고른 경로", C8). 사용자가 경로 선택 화면에서
+         * 고르면 null 이 된다.
+         */
+        val routeAutoCaption: String? = null,
 
         /**
          * 출발지. **null 이면 집**이다 — 서버가 `origin_*` 이 비어 있으면 프로필 집을 쓴다.
@@ -4265,6 +4712,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val fieldErrors: Map<AddField, String> = emptyMap(),
 
         val submitting: Boolean = false,
+        /**
+         * 저장이 10초를 넘겼다(H2-8 `546:766`). 안내 줄이 "조금 더 걸리고 있어요…" 로 바뀌고 시트를 닫을 수 있다.
+         * 저장이 끝나면(성공·실패) false 로 돌아간다.
+         */
+        val submitSlow: Boolean = false,
         /** 버튼 위의 빨간 줄. 줄에 붙지 않은 오류와 통신·서버 오류 */
         val error: String? = null,
         val done: Boolean = false,
@@ -4301,10 +4753,27 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val scopeSupported: Boolean = false,
         /** 저장을 눌러 "이 일정만 / 이후 일정 모두" 시트를 띄운 상태 */
         val scopePrompt: Boolean = false,
-        /** 저장 뒤 화면이 띄울 한 줄. null 이면 "일정을 추가했습니다" */
+        /** 도착지를 집으로 바꾼 직후의 되돌리기(H2-9). 6초가 지나거나 다른 값을 고르면 지운다 */
+        val destinationUndo: DestinationUndo? = null,
+        /** 저장 뒤 화면이 띄울 한 줄. null 이면 "일정을 추가했어요" */
         val doneMessage: String? = null,
     ) {
-        val canSubmit: Boolean get() = !submitting && title.isNotBlank()
+        val canSubmit: Boolean get() = !submitting && (isEditing && title.isNotBlank() || !isEditing)
+
+        /**
+         * 새 일정의 [알람 맞추기]. 필수 칸이 다 차고 줄 오류가 없고, 출발지와 도착지가 달라야 켜진다(H2-8 · H2-9)
+         */
+        fun canSubmitAdd(hasHome: Boolean, home: PlaceSearchItem? = null): Boolean =
+            !submitting && fieldErrors.isEmpty() &&
+                com.swpp.wakeup.ui.events.AddRequiredRule.missing(this, hasHome).isEmpty() &&
+                !com.swpp.wakeup.ui.events.SameEndpoints.same(this, home) &&
+                !com.swpp.wakeup.ui.events.PastTimeRule.isPast(this)
+
+        /** 일정 수정의 [수정 저장]. 출발지와 도착지가 같으면 끈다(H2-9) */
+        fun canSubmitEdit(home: PlaceSearchItem?): Boolean =
+            canSubmit && !com.swpp.wakeup.ui.events.SameEndpoints.same(this, home) &&
+                !com.swpp.wakeup.ui.events.PastTimeRule.isPast(this)
+
         val isEditing: Boolean get() = editingEventId != null
 
         /** 반복 회차를 고치면서 요일을 바꿨는가. 바꿨으면 "이후 일정 모두" 로만 저장한다 */
@@ -4321,8 +4790,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * 경로를 고를 수 있는 조건. 출발지와 도착지가 **둘 다** 있어야 한다.
          * 출발지는 고른 곳이 있거나([origin]), 비어 있으면 저장된 집이다.
          */
-        fun canPickRoute(hasHome: Boolean): Boolean =
-            !submitting && selectedPlace != null && (origin != null || hasHome)
+        fun canPickRoute(hasHome: Boolean, home: PlaceSearchItem? = null): Boolean =
+            !submitting && selectedPlace != null && (origin != null || hasHome) &&
+                !com.swpp.wakeup.ui.events.SameEndpoints.same(this, home)
 
     }
 
@@ -4337,6 +4807,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resetAdd() {
+        _addSheet.value = false
         _add.value = AddState()
         _routeChoice.value = null
     }
@@ -4356,11 +4827,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 입력은 저장에 성공하거나 사용자가 버릴 때만 지운다.
      */
     fun onAddEventClick() {
-        if (addDraftCandidate() == null) {
-            resetAdd()
-            openAddEvent()
-        } else {
-            _addResumePrompt.value = true
+        when (AddSheetRule.onAdd(_add.value, pendingAddDraft)) {
+            // 닫아 둔 채 저장 중이면 이어 쓰기를 묻지 않고 그 시트를 다시 보여 준다.
+            AddSheetRule.OnAdd.SHOW_PENDING -> _addSheet.value = true
+            AddSheetRule.OnAdd.ASK_RESUME -> _addResumePrompt.value = true
+            AddSheetRule.OnAdd.OPEN_NEW -> {
+                resetAdd()
+                openAddEvent()
+            }
         }
     }
 
@@ -4369,7 +4843,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             _addResumePrompt.value = false
             return
         }
-        _add.value = draft.copy(submitting = false, failureNotice = null)
+        _add.value = draft.copy(submitting = false, submitSlow = false, failureNotice = null)
         _routeChoice.value = null
         pendingAddDraft = null
         AddDraftHolder.clear()
@@ -4403,7 +4877,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun onAddDateChange(v: LocalDate) =
         _add.update { it.copy(date = v, fieldErrors = it.fieldErrors - AddField.TIME) }
     fun onAddTimeChange(h: Int, m: Int) =
-        _add.update { it.copy(hour = h, minute = m, fieldErrors = it.fieldErrors - AddField.TIME) }
+        _add.update { it.copy(hour = h, minute = m, timePicked = true, fieldErrors = it.fieldErrors - AddField.TIME) }
     fun onAddRepeatDayToggle(day: Int) = _add.update {
         val days = it.repeatWeekdays
         // 반복 회차를 고칠 때는 요일을 모두 끌 수 없다. 반복 끝내기는 삭제의 "이후 일정 모두" 로 한다.
@@ -4432,6 +4906,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun selectAddDestination(item: PlaceSearchItem?, isHome: Boolean) {
+        // 집으로 바꿀 때만 바꾸기 전 값을 한 번 보관한다(H2-9). 잘못 눌러도 [되돌리기] 로 돌아간다.
+        val undo = if (isHome) DestinationUndo.capture(_add.value, ++destinationUndoSeq) else null
         _add.update {
             it.copy(
                 selectedPlace = item,
@@ -4439,9 +4915,31 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 place = it.place.copy(results = emptyList(), query = item?.name ?: ""),
                 routeKey = null,
                 routeLabel = null,
+                routeMinutes = null,
+                routeAutoCaption = null,
                 fieldErrors = it.fieldErrors - AddField.DESTINATION - AddField.ORIGIN - AddField.ROUTE,
+                destinationUndo = undo,
             )
         }
+        _routeChoice.value = null
+        prefillRoute()
+        destinationUndoJob?.cancel()
+        if (undo != null) {
+            destinationUndoJob = viewModelScope.launch {
+                delay(DestinationUndo.SHOW_MS)
+                _add.update { if (it.destinationUndo?.id == undo.id) it.copy(destinationUndo = null) else it }
+            }
+        }
+    }
+
+    private var destinationUndoSeq = 0L
+    private var destinationUndoJob: kotlinx.coroutines.Job? = null
+
+    /** [되돌리기]. 바꾸기 전 도착지 · 경로를 한꺼번에 되살린다(H2-9) */
+    fun undoDestinationChange() {
+        destinationUndoJob?.cancel()
+        routePrefillJob?.cancel()
+        _add.update { DestinationUndo.restore(it).copy(routeAutoCaption = null) }
         _routeChoice.value = null
     }
 
@@ -4489,12 +4987,62 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 originNotice = null,
                 routeKey = null,
                 routeLabel = null,
+                routeMinutes = null,
+                routeAutoCaption = null,
                 fieldErrors = it.fieldErrors - AddField.DESTINATION - AddField.ORIGIN - AddField.ROUTE,
                 // 집으로 되돌리면 스위치가 사라진다. 값도 지운다(include-prep-api.md §5 ①).
                 includePrep = if (item == null) false else it.includePrep,
+                // 다른 값을 골랐다. 되돌리기는 버린다(H2-9)
+                destinationUndo = null,
             )
         }
         _routeChoice.value = null
+        prefillRoute()
+    }
+
+    // --- 경로 칸 자동 채우기 (C8) — Partly AI-generated (Claude) ---------------------------
+
+    private var routePrefillJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 출발지 · 도착지가 정해지면 경로 후보를 뒤에서 받아, 서버가 "같은 도착지에 간 지난 선택" 으로 준 경로가
+     * 있으면 경로 칸을 채운다([RoutePrefill]). 화면을 막지 않는다 — 기다리는 동안 다른 칸을 쓸 수 있고, 실패 ·
+     * 느림([RoutePrefill.TIMEOUT_MS]) · 근거 없음이면 지금처럼 빈 칸이다. 받은 후보는 경로 선택 화면이 다시 부르지
+     * 않게 남겨 둔다(같은 출발지 · 도착지일 때만).
+     */
+    private fun prefillRoute() {
+        routePrefillJob?.cancel()
+        val add = _add.value
+        if (add.routeKey != null) return
+        if (!add.canPickRoute(_state.value.hasHome, _state.value.homePlace)) return
+        val place = add.selectedPlace ?: return
+        val origin = add.origin
+        routePrefillJob = viewModelScope.launch {
+            val result = withTimeoutOrNull(com.swpp.wakeup.ui.events.RoutePrefill.TIMEOUT_MS) {
+                runCatching { repository.routeCandidates(place, origin) }.getOrNull()
+            }
+            val choice = (result as? EventRepository.Result.Success)?.data ?: return@launch
+            val now = _add.value
+            if (now.selectedPlace != place || now.origin != origin) return@launch
+            // 경로 선택 화면이 아직 후보를 부르지 않았으면 이 결과를 쓰게 둔다.
+            if (_routeChoice.value == null) {
+                _routeChoice.value = RouteState(loading = false, choice = choice, origin = origin)
+            }
+            val option = com.swpp.wakeup.ui.events.RoutePrefill.pick(choice) ?: return@launch
+            _add.update { cur ->
+                val ok = com.swpp.wakeup.ui.events.RoutePrefill.stillApplies(
+                    cur.routeKey, cur.submitting, cur.selectedPlace, cur.origin, place, origin,
+                )
+                if (!ok) cur else cur.copy(
+                    routeKey = option.key,
+                    routeLabel = com.swpp.wakeup.ui.events.RoutePrefill.label(option),
+                    routeMinutes = option.minutes,
+                    routeAutoCaption = com.swpp.wakeup.ui.events.RoutePrefill.CAPTION,
+                    fieldErrors = cur.fieldErrors - AddField.ROUTE,
+                )
+            }
+            Log.i(TAG, "경로 칸 자동 채우기: ${option.key} (같은 도착지 지난 선택)")
+        }
     }
 
     /** "여기서 자고 출발해요 (준비 시간 포함)" */
@@ -4538,8 +5086,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     if (!savedHomesStore.replaceSynced(result.homes)) return@launch
                     savedPlacesMode = SavedPlacesMode.SERVER
                     _state.update { it.copy(savedHomes = result.homes, savedHomesOnServer = true) }
+                    // 같은 이름이 있어 서버가 번호를 붙였으면 한 번 알린다(BE-H9, 바뀐 이름은 results 에 이미 있다)
+                    if (upload) com.swpp.wakeup.domain.model.SavedHomeLabel.renamedNotice(result.renamed)?.let { notify(it) }
                     if (upload && result.skippedOverLimit > 0) {
-                        notify("저장한 집이 5곳을 넘어 ${result.skippedOverLimit}곳은 서버에 올리지 못했어요")
+                        notify("저장한 집이 5곳을 넘어 ${result.skippedOverLimit}곳은 계정에 올리지 못했어요")
                     }
                 }
 
@@ -4595,11 +5145,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         val next = SavedHomes.remove(_state.value.savedHomes, id)
         if (!savedHomesStore.replace(next)) {
-            notify("다른 집을 지우지 못했습니다")
+            notify("다른 집을 지우지 못했어요")
             return
         }
         _state.update { it.copy(savedHomes = next) }
-        notify("다른 집을 지웠습니다")
+        notify("다른 집을 지웠어요")
     }
 
     // Partly AI-generated (Claude)
@@ -4613,7 +5163,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     val next = SavedHomes.remove(_state.value.savedHomes, id)
                     savedHomesStore.replaceSynced(next)
                     _state.update { it.copy(savedHomes = next, savedHomeBusyId = null) }
-                    notify("다른 집을 지웠습니다")
+                    notify("다른 집을 지웠어요")
                 }
 
                 is SavedPlacesResult.Failure -> {
@@ -4659,14 +5209,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update { it.copy(savedHomes = next, savedHomeBusyId = null) }
                     notify(
                         "기본 집을 ${home.label}${com.swpp.wakeup.domain.model.RerouteAlert.roParticle(home.label)} " +
-                            "바꿨습니다. 알람을 다시 계산합니다"
+                            "바꿨어요. 알람을 다시 계산해요"
                     )
                     refresh()
                 }
 
                 is EventRepository.Result.Failure -> {
                     _state.update { it.copy(savedHomeBusyId = null) }
-                    notify("기본 집을 바꾸지 못했습니다. ${result.message}")
+                    notify("기본 집을 바꾸지 못했어요. ${result.message}")
                 }
             }
         }
@@ -4682,7 +5232,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     _state.update { it.copy(savedHomes = result.homes, savedHomeBusyId = null) }
                     notify(
                         "기본 집을 ${home.label}${com.swpp.wakeup.domain.model.RerouteAlert.roParticle(home.label)} " +
-                            "바꿨습니다. 알람을 다시 계산합니다"
+                            "바꿨어요. 알람을 다시 계산해요"
                     )
                     refresh()
                 }
@@ -4694,7 +5244,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         syncSavedHomes()
                         notify("이 집을 찾지 못했어요. 목록을 다시 불러왔어요")
                     } else {
-                        notify("기본 집을 바꾸지 못했습니다. ${result.message}")
+                        notify("기본 집을 바꾸지 못했어요. ${result.message}")
                     }
                 }
 
@@ -4747,12 +5297,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
             when (val loaded = repository.loadEvent(eventId)) {
-                is EventRepository.Result.Failure -> notify("일정을 불러오지 못했습니다. ${loaded.message}")
+                is EventRepository.Result.Failure -> notify("일정을 불러오지 못했어요. ${loaded.message}")
                 is EventRepository.Result.Success -> {
                     val dto = loaded.data
                     val base = EventEditValues.from(dto, _state.value.homePlace)
                     if (base == null) {
-                        notify("일정 시각을 읽지 못해 고칠 수 없습니다")
+                        notify("일정 시각을 읽지 못해 고칠 수 없어요")
                         return@launch
                     }
                     val start = base.startAt.atZoneSameInstant(ZoneId.systemDefault())
@@ -4761,6 +5311,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     if (_add.value.isUnsavedDraft) {
                         pendingAddDraft = _add.value.copy(submitting = false, failureNotice = null)
                     }
+                    // 수정은 전체 화면이다. 열어 둔 알람 추가 시트가 탭 첫 화면에서 수정 값으로 뜨지 않게 닫는다.
+                    _addSheet.value = false
                     _add.value = AddState(
                         title = base.title,
                         date = start.toLocalDate(),
@@ -4775,6 +5327,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             listOfNotNull("${minutes}분", plan.travelMode?.takeIf(String::isNotBlank))
                                 .joinToString(" · ")
                         },
+                        routeMinutes = plan?.travelMinutes,
                         origin = base.origin,
                         originLabel = base.origin?.name,
                         includePrep = base.includePrep == true,
@@ -4805,7 +5358,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val eventId = current.editingEventId ?: return
         val patch = editPatchOf(current, startAt) ?: return
         if (patch.size() == 0 && !current.weekdaysChanged) {
-            _add.update { it.copy(done = true, doneMessage = "바뀐 항목이 없음") }
+            _add.update { it.copy(done = true, doneMessage = "바뀐 항목이 없어요") }
             return
         }
         val choices = current.saveScopeChoices
@@ -4817,12 +5370,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val weekdays = current.repeatWeekdays.takeIf { scope == EventScope.FOLLOWING && current.weekdaysChanged }
         _add.update { it.copy(submitting = true, scopePrompt = false, error = null, fieldErrors = emptyMap()) }
         viewModelScope.launch {
-            when (val result = repository.updateEvent(eventId, patch, scope, weekdays)) {
+            val result = repository.updateEvent(eventId, patch, scope, weekdays)
+            if (result is EventRepository.Result.Success &&
+                com.swpp.wakeup.ui.events.PastTimeRule.tooLate(result.data.event.alarmPlan, System.currentTimeMillis())
+            ) {
+                onEditTooLate(current, startAt, eventId, scope, weekdays != null)
+                return@launch
+            }
+            when (result) {
                 is EventRepository.Result.Success -> {
                     if (result.data.plan != null) {
                         ++planLoadGeneration
                         _plan.value = result.data.plan
                     }
+                    // 경로 · 장소 · 출발지를 바꿨을 수 있다. 이동 탭 · ④ 지도 · 가는 길 구간이 옛 경로를 들고 있지 않게 한다(11-17).
+                    onRouteChanged(eventId, result.data.plan)
                     // 계산하지 못한 계획이면 결정 화면(저장 뒤 돌아가는 곳)의 "다시 계산" 으로 이어진다(A6·A7).
                     val failed = result.data.plan?.status == AlarmPlanDto.STATUS_ROUTE_FAILED
                     _add.update {
@@ -4832,7 +5394,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                             doneMessage = when {
                                 failed -> EDIT_ROUTE_FAILED_MESSAGE
                                 scope == EventScope.FOLLOWING -> "이후 반복 일정까지 수정했어요"
-                                else -> "일정을 수정했습니다"
+                                else -> "일정을 수정했어요"
                             },
                         )
                     }
@@ -4844,6 +5406,53 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 is EventRepository.Result.Failure -> onSaveFailed(result, editing = true)
             }
         }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 수정 결과 울릴 시각이 이미 지났다(11-16). 이전 값으로 다시 `PATCH` 해 되돌리고, 화면은 고친 값 그대로 둔 채
+     * 이유를 보인다. "이후 일정 모두" 나 요일을 바꾼 저장은 여러 회차를 되돌려야 해 위험하므로 되돌리지 않고 알린다.
+     */
+    private suspend fun onEditTooLate(
+        current: AddState,
+        startAt: OffsetDateTime,
+        eventId: Long,
+        scope: EventScope?,
+        weekdaysSent: Boolean,
+    ) {
+        val base = current.editBase
+        if (scope == EventScope.FOLLOWING || weekdaysSent || base == null) {
+            _add.update { it.copy(submitting = false, done = true, doneMessage = com.swpp.wakeup.ui.events.PastTimeRule.EDIT_FOLLOWING_PASSED) }
+            refresh()
+            return
+        }
+        val reverse = EventEditPatch.build(editValuesOf(current, startAt), base)
+        when (val undo = repository.updateEvent(eventId, reverse, scope)) {
+            is EventRepository.Result.Success -> {
+                if (undo.data.plan != null) {
+                    ++planLoadGeneration
+                    _plan.value = undo.data.plan
+                }
+                _add.update { it.copy(submitting = false, error = com.swpp.wakeup.ui.events.PastTimeRule.EDIT_TOO_LATE) }
+            }
+
+            is EventRepository.Result.Failure ->
+                _add.update { it.copy(submitting = false, done = true, doneMessage = com.swpp.wakeup.ui.events.PastTimeRule.EDIT_UNDO_FAILED) }
+        }
+        refresh()
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 보내기 전 "이동 시간만으로 늦는가" 를 볼 저장인가. 새 일정은 늘, 수정은 시각 · 도착지 · 경로를 바꿨을 때만 —
+     * 이미 시작한 일정의 제목만 고치는 것까지 막지 않는다.
+     */
+    private fun travelCheckApplies(current: AddState): Boolean {
+        if (!current.isEditing) return true
+        val base = current.editBase ?: return false
+        val picked = java.time.LocalDateTime.of(current.date, java.time.LocalTime.of(current.hour, current.minute))
+        val baseStart = base.startAt.atZoneSameInstant(ZoneId.systemDefault()).toLocalDateTime().withSecond(0).withNano(0)
+        return picked != baseStart || current.routeKey != base.routeKey || current.selectedPlace != base.place
     }
 
     // Partly AI-generated (Claude)
@@ -4864,7 +5473,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 수정 화면 값으로 `PATCH` 본문을 만든다(바뀐 필드만). 수정 중이 아니면 null */
     private fun editPatchOf(current: AddState, startAt: OffsetDateTime): com.google.gson.JsonObject? {
         val base = current.editBase ?: return null
-        val edited = EventEditValues(
+        return EventEditPatch.build(base, editValuesOf(current, startAt))
+    }
+
+    /** 수정 화면 값을 [EventEditValues] 로 */
+    private fun editValuesOf(current: AddState, startAt: OffsetDateTime): EventEditValues {
+        return EventEditValues(
             title = current.title,
             startAt = startAt,
             tagKey = current.tagKey,
@@ -4876,7 +5490,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             includePrep = createIncludePrep(current.includePrep, current.origin != null, current.originPlaceId),
             originPlaceId = current.originPlaceId.takeIf { current.origin != null },
         )
-        return EventEditPatch.build(base, edited)
     }
 
     // Partly AI-generated (Claude)
@@ -4911,7 +5524,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 _add.update {
                     it.copy(
                         originLocating = false,
-                        originNotice = "현재 위치를 확인할 수 없음. 위치 권한과 GPS 를 확인하거나 직접 검색할 것",
+                        originNotice = "현재 위치를 확인할 수 없어요. 위치 권한과 GPS를 확인하거나 직접 검색해 주세요",
                     )
                 }
             } else {
@@ -4945,21 +5558,46 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         ),
     )
 
+    /** 보낼 제목. 비어 있으면 장소 이름을 쓴다(H2-8, 제목은 선택 칸). 서버 한도에 맞춰 120자로 자른다 */
+    internal fun addTitleOf(state: AddState): String {
+        val typed = state.title.trim()
+        if (typed.isNotEmpty()) return typed.take(120)
+        return (state.selectedPlace?.name ?: "").trim().take(120)
+    }
+
     fun submitAdd() {
         val current = _add.value
-        if (!current.canSubmit) return
+        if (current.isEditing) {
+            if (!current.canSubmitEdit(_state.value.homePlace)) return
+        } else if (!current.canSubmitAdd(_state.value.hasHome, _state.value.homePlace)) {
+            return
+        }
 
         val startAt = startAtOf(current)
+
+        // 지금 바로 출발해도 고른 경로만으로 늦으면 보내지 않는다(11-16). 반복 일정은 다음 회차가 남으니 서버 판단에 맡긴다.
+        if (current.repeatWeekdays.isEmpty() && !current.recurring && travelCheckApplies(current) &&
+            com.swpp.wakeup.ui.events.PastTimeRule.travelTooLate(startAt, current.routeMinutes, java.time.Instant.now())
+        ) {
+            _add.update { it.copy(error = if (it.isEditing) com.swpp.wakeup.ui.events.PastTimeRule.EDIT_TOO_LATE else com.swpp.wakeup.ui.events.PastTimeRule.ADD_TOO_LATE) }
+            return
+        }
 
         if (current.isEditing) {
             submitEdit(current, startAt)
             return
         }
 
-        _add.update { it.copy(submitting = true, error = null, fieldErrors = emptyMap()) }
+        _add.update { it.copy(submitting = true, submitSlow = false, error = null, fieldErrors = emptyMap()) }
+        // 10초가 넘으면 "조금 더 걸리고 있어요" 로 바꾸고 시트를 닫을 수 있게 한다(H2-8 `546:766`).
+        // 요청은 이 뷰모델에서 이어지므로 시트를 닫아도 끝까지 간다.
+        val slowJob = viewModelScope.launch {
+            delay(ADD_SLOW_AFTER_MS)
+            _add.update { if (it.submitting && !it.isEditing) it.copy(submitSlow = true) else it }
+        }
         viewModelScope.launch {
             val result = repository.createEvent(
-                title = current.title,
+                title = addTitleOf(current),
                 startAt = startAt,
                 place = current.selectedPlace,
                 tagKey = current.tagKey,
@@ -4972,10 +5610,51 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 // 다시 시도는 같은 값이라 서버가 중복 일정을 만들지 않는다(A5). 200 도 성공이다.
                 clientRequestId = current.clientRequestId,
             )
-            when (result) {
-                is EventRepository.Result.Success -> {
+            val tooLate = result is EventRepository.Result.Success &&
+                com.swpp.wakeup.ui.events.PastTimeRule.tooLate(result.data.alarmPlan, System.currentTimeMillis())
+            when {
+                result is EventRepository.Result.Success && tooLate -> {
+                    // 울릴 시각이 이미 지났다 — 알람을 맞추지 않는다(11-16). 방금 만든 일정을 지워 되돌리고, 시트는
+                    // 열어 둔 채 입력값을 그대로 둔다. 목록은 지운 뒤에만 다시 받아 홈에 잠깐도 보이지 않게 한다.
+                    _alarmConfirm.value = null
+                    when (repository.deleteEvent(result.data.id)) {
+                        is EventRepository.Result.Success -> _add.update {
+                            it.copy(
+                                submitting = false,
+                                error = com.swpp.wakeup.ui.events.PastTimeRule.ADD_TOO_LATE,
+                                // 같은 요청 번호로 다시 보내면 서버가 지운 일정을 돌려줄 수 있어 새 번호를 쓴다(A5).
+                                clientRequestId = java.util.UUID.randomUUID().toString(),
+                            )
+                        }
+
+                        is EventRepository.Result.Failure -> {
+                            // 지우지 못했으면 일정이 남았다는 사실을 숨기지 않는다. 남은 일정이 홈에 보이도록 목록을 받는다.
+                            _add.update {
+                                it.copy(submitting = false, done = true, doneMessage = com.swpp.wakeup.ui.events.PastTimeRule.ADD_UNDO_FAILED)
+                            }
+                            refresh()
+                        }
+                    }
+                    // 기다리다 시트를 닫았으면 다시 연다 — 이유는 시트 안에서 보인다.
+                    if (!_add.value.done) _addSheet.value = true
+                }
+
+                result is EventRepository.Result.Success -> {
                     // 일정은 저장됐지만 알람을 계산하지 못했으면 그렇게 알린다(A6).
                     val failed = result.data.alarmPlan?.status == AlarmPlanDto.STATUS_ROUTE_FAILED
+                    // 알람이 정해졌으면 알람 확인 시트로 한 번 보여 준다(H2-8 `547:2095`). 시각이 없으면 null —
+                    // 지금의 "알람 시각을 정하지 못했어요" 흐름을 그대로 탄다.
+                    _alarmConfirm.value = if (failed) null else com.swpp.wakeup.ui.events.AlarmConfirmText.build(
+                        eventId = result.data.id,
+                        title = result.data.title,
+                        placeName = result.data.place?.name,
+                        startAt = result.data.startAt,
+                        plan = result.data.alarmPlan,
+                        originLabel = current.origin?.name,
+                        routeLabel = current.routeLabel,
+                        tagLabel = current.tagKey?.let { key -> _eventTags.value.firstOrNull { it.key == key }?.label },
+                        routeKey = current.routeKey,
+                    )
                     _add.update {
                         it.copy(
                             submitting = false,
@@ -4988,8 +5667,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 // 줄별 문구·빨간 줄·snackbar. 입력은 그대로 둔다.
-                is EventRepository.Result.Failure -> onSaveFailed(result, editing = false)
+                result is EventRepository.Result.Failure -> {
+                    onSaveFailed(result, editing = false)
+                    // 기다리다 시트를 닫았으면 다시 연다 — 줄별 오류는 시트 안에서만 보인다.
+                    _addSheet.value = true
+                }
             }
+            slowJob.cancel()
+            _add.update { it.copy(submitSlow = false) }
         }
     }
 
@@ -5272,7 +5957,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private fun saveExtraHomeOnDevice(home: SavedHome) {
         val next = SavedHomes.add(_state.value.savedHomes, home)
         if (!savedHomesStore.replace(next)) {
-            _homeSetup.update { it.copy(submitting = false, error = "이 기기에 저장하지 못했습니다. 다시 로그인해 주세요") }
+            _homeSetup.update { it.copy(submitting = false, error = "이 기기에 저장하지 못했어요. 다시 로그인해 주세요") }
             return
         }
         _state.update { it.copy(savedHomes = next) }
@@ -5299,7 +5984,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 is SavedPlacesResult.Ok -> {
                     val next = SavedHomes.merge(_state.value.savedHomes, result.homes.first())
                     if (!savedHomesStore.replaceSynced(next)) {
-                        _homeSetup.update { it.copy(submitting = false, error = "이 기기에 저장하지 못했습니다. 다시 로그인해 주세요") }
+                        _homeSetup.update { it.copy(submitting = false, error = "이 기기에 저장하지 못했어요. 다시 로그인해 주세요") }
                         return@launch
                     }
                     _state.update { it.copy(savedHomes = next) }
@@ -5333,6 +6018,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 lat = place.lat,
                 lng = place.lng,
             )
+            // 서버와 같은 규칙으로 먼저 막는다(BE-H9): 빈 이름 · "집" · 다른 집과 같은 이름. 이름 칸 아래에 보인다
+            com.swpp.wakeup.domain.model.SavedHomeLabel.problem(home.label, _state.value.savedHomes.map { it.label })?.let { p ->
+                _homeSetup.update { it.copy(labelError = p.message, error = null) }
+                return
+            }
             if (useSavedPlacesServer()) {
                 saveExtraHomeOnServer(home)
             } else {
@@ -5366,6 +6056,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val TAG = "HomeViewModel"
 
+        /** 이만큼 기다려도 저장이 안 끝나면 안내를 바꾸고 시트를 닫을 수 있게 한다(H2-8 `546:766`) */
+        const val ADD_SLOW_AFTER_MS = 10_000L
         const val ADD_ROUTE_FAILED_MESSAGE = "일정은 저장했어요. 알람을 계산하지 못해 다시 계산이 필요해요"
         const val EDIT_ROUTE_FAILED_MESSAGE = "일정을 고쳤어요. 알람을 계산하지 못해 다시 계산이 필요해요"
 
@@ -5411,7 +6103,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
          * (todo §1 "다시 계산 버튼 없애도 되게", `planning/refresh.py`). 저장 뒤 홈을 다시
          * 받아 기기 알람도 맞춘다. (Partly AI-generated (Claude))
          */
-        const val DEFINITION_NOTICE = "저장함 · 앞으로의 알람에 반영했음"
+        const val DEFINITION_NOTICE = "저장했어요 · 앞으로의 알람에 반영했어요"
 
         /**
          * 가져오기 화면에서 장소를 찾아 볼 최대 건수.

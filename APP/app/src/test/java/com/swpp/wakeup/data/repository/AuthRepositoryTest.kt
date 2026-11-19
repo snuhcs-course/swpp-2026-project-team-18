@@ -144,10 +144,10 @@ class AuthRepositoryTest {
     @Test
     fun `오류 본문이 없으면 상태 코드로 문구를 고른다`() = runTest {
         val cases = mapOf(
-            400 to "입력값을 확인해야 한다.",
-            401 to "이메일 또는 비밀번호가 올바르지 않다.",
-            409 to "이미 가입된 이메일이다.",
-            503 to "서버에 문제가 생겼다. 잠시 후 다시 시도한다.",
+            400 to "입력한 값을 확인해 주세요.",
+            401 to "이메일 또는 비밀번호가 맞지 않아요.",
+            409 to "이미 가입된 이메일이에요.",
+            503 to "잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요.",
             418 to AuthRepository.MESSAGE_UNKNOWN,
         )
         cases.forEach { (code, expected) ->
@@ -168,7 +168,7 @@ class AuthRepositoryTest {
 
         val result = repository(api).login("a@b.c", "pw")
 
-        assertEquals(AuthResult.Failure("서버에 문제가 생겼다. 잠시 후 다시 시도한다."), result)
+        assertEquals(AuthResult.Failure("잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요."), result)
     }
 
     @Test

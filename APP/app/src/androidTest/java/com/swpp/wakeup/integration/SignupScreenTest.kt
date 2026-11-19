@@ -76,6 +76,7 @@ class SignupScreenTest {
                     password = s.password,
                     passwordConfirm = s.passwordConfirm,
                     passwordsMatch = s.passwordsMatch,
+                    passwordConfirmMismatch = s.passwordConfirmMismatch,
                     termsAgreed = s.termsAgreed,
                     loading = s.loading,
                     error = s.error,
@@ -125,6 +126,7 @@ class SignupScreenTest {
         submit().assertIsNotEnabled()
 
         compose.onNodeWithTag("signup_password_confirm").performTextReplacement("pw12345678")
+        compose.waitForIdle()
 
         compose.onNodeWithText("✓").assertExists()
         submit().assertIsEnabled()
@@ -157,9 +159,9 @@ class SignupScreenTest {
 
     @Test
     fun `가입이 거절되면 서버 문구를 보여주고 다시 누를 수 있다`() {
-        show(almostReady.copy(termsAgreed = true, error = "이미 가입된 이메일이다."))
+        show(almostReady.copy(termsAgreed = true, error = "이미 가입된 이메일이에요."))
 
-        compose.onNodeWithText("이미 가입된 이메일이다.").performScrollTo()
+        compose.onNodeWithText("이미 가입된 이메일이에요.").performScrollTo()
         submit().assertIsEnabled()
     }
 
@@ -179,6 +181,7 @@ class SignupScreenTest {
         submit().assertIsEnabled()
 
         compose.onNodeWithTag("signup_nickname").performTextReplacement("자료구조 듣는 서울대 20학번 김진호입니다")
+        compose.waitForIdle()
 
         compose.onNodeWithTag("signup_nickname_error").assertTextEquals("닉네임은 20자까지 쓸 수 있어요")
         compose.onNodeWithTag("signup_nickname_count").assertTextEquals("23/20")
@@ -197,7 +200,10 @@ class SignupScreenTest {
         compose.onNodeWithTag("signup_nickname_error").assertTextEquals("쓸 수 없는 닉네임이에요")
         compose.onNodeWithTag("signup_error").performScrollTo().assertExists()
 
-        compose.onNodeWithTag("signup_nickname").performTextReplacement("수연")
+        // 처음 값("수연")과 다른 글자여야 한다. 같은 글자로 바꾸면 입력 칸이 onValueChange 를 부르지 않아
+        // 오류가 그대로 남는다(제품 동작이 맞다 — 거절된 닉네임을 그대로 두면 이유도 남아야 한다).
+        compose.onNodeWithTag("signup_nickname").performTextReplacement("수연이")
+        compose.waitForIdle()
 
         compose.onNodeWithTag("signup_nickname_error").assertDoesNotExist()
         compose.onNodeWithTag("signup_nickname_hint").assertExists()

@@ -114,6 +114,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val socialBusy: SocialProvider? = null,
         /** 로그인 화면 오류 자리의 카드(이미 가입한 이메일·쓸 수 없음). Figma ⑦ 변형 `496:9` */
         val socialNotice: SocialNotice? = null,
+        /** 로그인 잠금이 풀리는 시각(BE-A3). 이 계정([lockedEmail])을 입력하고 있을 때만 [로그인] 을 막는다 */
+        val lockedUntilMillis: Long? = null,
+        val lockedEmail: String? = null,
+        /** 잠금 카운트다운을 다시 그리는 시계. 잠긴 동안 1초마다 바뀐다 */
+        val nowMillis: Long = System.currentTimeMillis(),
+        /** 401 남은 횟수 안내 "3번 더 틀리면 15분 동안 잠겨요". 이메일 · 비밀번호를 고치면 지운다 */
+        val attemptsHint: String? = null,
         /** 소셜로 처음 가입하는 중이면 그 내용 */
         val socialTerms: SocialTermsDraft? = null,
 
@@ -130,8 +137,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         /** 무언가 서버를 기다리는 중. 이메일·소셜 버튼을 함께 막는다 */
         val busy: Boolean get() = loading || socialBusy != null
 
+        /** 지금 입력한 계정이 잠겨 있는가 */
+        val locked: Boolean
+            get() = com.swpp.wakeup.domain.model.LoginLock.isLocked(lockedUntilMillis, nowMillis) &&
+                com.swpp.wakeup.domain.model.LoginLock.sameAccount(lockedEmail, email)
+
         val canSubmitLogin: Boolean
-            get() = !busy && email.isNotBlank() && password.isNotBlank()
+            get() = !busy && !locked && email.isNotBlank() && password.isNotBlank()
 
         val canAgreeSocialTerms: Boolean
             get() = !busy && socialTerms?.agreed == true
@@ -142,6 +154,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
          */
         val passwordsMatch: Boolean
             get() = passwordConfirm.isNotEmpty() && password == passwordConfirm
+
+        /**
+         * 확인 칸에 무언가 적혀 있는데 위 비밀번호와 다르다. 다 적기를 기다리지 않고 적는 동안 빨갛게 보여 준다 —
+         * 끝까지 적고 버튼이 꺼진 이유를 찾게 하는 것보다 낫다. 확인 칸이 비어 있으면 아직 오류가 아니다.
+         */
+        val passwordConfirmMismatch: Boolean
+            get() = passwordConfirm.isNotEmpty() && password != passwordConfirm
 
         /** 이메일 형식 · 닉네임 1~20자 · 서버 비밀번호 검사 · 확인 일치 · 약관 동의가 모두 필요하다. */
         val canSubmitSignup: Boolean
@@ -165,10 +184,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     // --- 입력 -------------------------------------------------------------
 
     fun onEmailChange(value: String) =
-        _state.update { it.copy(email = value, error = null, socialNotice = null) }
+        _state.update { it.copy(email = value, error = null, socialNotice = null, attemptsHint = null) }
     fun onPasswordChange(value: String) {
         passwordCheckJob?.cancel()
-        _state.update { it.copy(password = value, error = null, passwordCheck = null, passwordCheckError = null) }
+        _state.update { it.copy(password = value, error = null, passwordCheck = null, passwordCheckError = null, attemptsHint = null) }
         if (!_state.value.screen.checksPassword || value.isEmpty()) return
         passwordCheckJob = viewModelScope.launch {
             val result = repository.checkPassword(value)
@@ -345,7 +364,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         screen = Screen.SOCIAL_TERMS,
                         socialBusy = null,
-                        error = if (termsAgreed) "약관 동의를 확인하지 못했다. 다시 시도한다." else null,
+                        error = if (termsAgreed) "약관 동의를 확인하지 못했어요. 다시 시도해 주세요." else null,
                         socialTerms = it.socialTerms?.takeIf { draft -> draft.idToken == idToken }
                             ?: SocialTermsDraft(
                                 provider = provider,
@@ -387,6 +406,58 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         val current = _state.value
         if (!current.canSubmitLogin) return
         submit { repository.login(current.email, current.password) }
+    }
+
+    // Partly AI-generated (Claude)
+    /**
+     * 로그인 잠금(BE-A3). 풀리는 시각을 기기에 남겨 화면을 나갔다 들어와도 남은 시간이 맞게 하고, 잠긴 동안 1초마다
+     * 시계를 돌려 카운트다운을 그린다. 시각이 지나면 스스로 풀린다.
+     */
+    private var lockTicker: kotlinx.coroutines.Job? = null
+    private val lockPrefs = application.getSharedPreferences("jit_login_lock", android.content.Context.MODE_PRIVATE)
+
+    private fun applyLock(email: String, untilMillis: Long) {
+        lockPrefs.edit().putString("email", email.trim()).putLong("until", untilMillis).apply()
+        _state.update { it.copy(lockedEmail = email.trim(), lockedUntilMillis = untilMillis, nowMillis = System.currentTimeMillis()) }
+        startLockTicker()
+    }
+
+    private fun restoreLock() {
+        val until = lockPrefs.getLong("until", 0L)
+        val email = lockPrefs.getString("email", null)
+        if (email == null || until <= System.currentTimeMillis()) {
+            lockPrefs.edit().clear().apply()
+            return
+        }
+        _state.update { it.copy(lockedEmail = email, lockedUntilMillis = until, nowMillis = System.currentTimeMillis()) }
+        startLockTicker()
+    }
+
+    private fun clearLock() {
+        lockTicker?.cancel()
+        lockPrefs.edit().clear().apply()
+        _state.update { it.copy(lockedEmail = null, lockedUntilMillis = null) }
+    }
+
+    private fun startLockTicker() {
+        lockTicker?.cancel()
+        lockTicker = viewModelScope.launch {
+            while (true) {
+                val now = System.currentTimeMillis()
+                val until = _state.value.lockedUntilMillis ?: break
+                if (now >= until) {
+                    clearLock()
+                    break
+                }
+                _state.update { it.copy(nowMillis = now) }
+                delay(1_000L - now % 1_000L)
+            }
+        }
+    }
+
+    // 화면을 나갔다 들어오거나 앱을 다시 켜도 남은 잠금 시간을 이어서 보인다
+    init {
+        restoreLock()
     }
 
     fun signup() {
@@ -439,6 +510,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 is AuthRepository.AuthResult.Success -> {
                     // 이메일 로그인·가입·재설정 성공만 기억한다(서버가 정리한 주소). 소셜은 submit 을 타지 않는다.
                     lastEmailStore.save(result.user.email)
+                    // 재설정을 마치면 서버 잠금도 풀린다(BE-A3)
+                    clearLock()
                     _state.update {
                         it.copy(
                             loading = false,
@@ -453,13 +526,21 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     // 타임아웃으로 실패했으면 "깨어 있다" 는 기록을 지운다.
                     // 그러지 않으면 다음 시도에서 깨우기를 건너뛴다.
                     ServerWarmup.invalidate()
+                    // 로그인 잠금 · 남은 횟수(BE-A3). 잠겼으면 서버 문구 대신 카운트다운 카드가 보인다.
+                    result.lockedUntilMillis?.let { applyLock(_state.value.email, it) }
+                    val attemptsHint = com.swpp.wakeup.domain.model.LoginLock.attemptsLine(result.remainingAttempts)
                     val nicknameReason = result.fields["nickname"]
                     _state.update {
                         it.copy(
                             loading = false,
                             waking = false,
                             // 닉네임 때문이면 카드에 무엇 때문인지 같이 쓴다(Figma `549:2094`). 이유는 칸 아래에도 붙는다.
-                            error = if (nicknameReason != null) "가입하지 못했어요. $nicknameReason" else result.message,
+                            error = when {
+                                nicknameReason != null -> "가입하지 못했어요. $nicknameReason"
+                                result.lockedUntilMillis != null -> null
+                                else -> result.message
+                            },
+                            attemptsHint = attemptsHint,
                             nicknameError = nicknameReason,
                         )
                     }

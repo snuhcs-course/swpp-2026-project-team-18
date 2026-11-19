@@ -97,6 +97,12 @@ fun LoginScreen(
     socialNotice: SocialNotice? = null,
     /** "비밀번호 찾기" 링크. null 이면 링크를 그리지 않는다 */
     onForgotClick: (() -> Unit)? = null,
+    /** 로그인 잠금이 풀리는 시각(BE-A3). null 이면 잠기지 않았다 */
+    lockedUntilMillis: Long? = null,
+    /** 카운트다운 기준 시각. 잠긴 동안 1초마다 바뀐다 */
+    nowMillis: Long = System.currentTimeMillis(),
+    /** 401 남은 횟수 "3번 더 틀리면 15분 동안 잠겨요" */
+    attemptsHint: String? = null,
 ) {
     val busy = loading || socialBusy != null
     Column(
@@ -179,6 +185,40 @@ fun LoginScreen(
 
         if (error != null) {
             ErrorText(error)
+        }
+        // 남은 횟수(BE-A3). 오류 바로 아래, 다음에 틀리면 어떻게 되는지
+        attemptsHint?.let {
+            Text(
+                text = it,
+                modifier = Modifier.fillMaxWidth().testTag("login_attempts"),
+                color = JitColor.Amber,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
+        // 잠겼으면 남은 시간과 바로 푸는 방법(비밀번호 찾기는 켜 둔다)
+        lockedUntilMillis?.takeIf { com.swpp.wakeup.domain.model.LoginLock.isLocked(it, nowMillis) }?.let { until ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(JitColor.Surface2)
+                    .testTag("login_locked")
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = com.swpp.wakeup.domain.model.LoginLock.lockedLine(until, nowMillis),
+                    color = JitColor.TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = com.swpp.wakeup.domain.model.LoginLock.UNLOCK_HINT,
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
         }
 
         // 잠든 서버를 깨우는 동안. 버튼만 돌고 있으면 앱이 멈춘 줄 안다.

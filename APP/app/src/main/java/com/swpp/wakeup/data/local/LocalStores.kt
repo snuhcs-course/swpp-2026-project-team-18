@@ -88,6 +88,11 @@ object LocalStores {
             .onFailure { Log.w(TAG, "도착 기록 삭제 실패", it) }
         runCatching { TripProgressStore(app).wipe() }
             .onFailure { Log.w(TAG, "이동 단계 사본 삭제 실패", it) }
+        runCatching { com.swpp.wakeup.alarm.ProposalHeadsUp.wipe(app) }
+        runCatching { RouteSegmentsStore(app).wipe() }
+            .onFailure { Log.w(TAG, "가는 길 사본 삭제 실패", it) }
+        runCatching { ActiveTripStore(app).wipe() }
+            .onFailure { Log.w(TAG, "추적 중 일정 사본 삭제 실패", it) }
         // Partly AI-generated (Claude) — 기기에만 둔 다른 집(todo §2 "집 여러 개")
         runCatching { SavedHomesStore(app).wipe() }
             .onFailure { Log.w(TAG, "다른 집 목록 삭제 실패", it) }

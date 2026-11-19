@@ -157,8 +157,8 @@ class ReportMappingTest {
         assertEquals(LocalDate.of(2026, 10, 6), line.date)
         assertEquals("화 10월 6일", line.dateLabel)
         assertEquals("10분 늦음", line.lateLabel)
-        assertEquals("이동이 13분 더 걸렸음", line.causeTitle)
-        assertEquals("화요일 10월 6일, 10분 늦음, 이동이 13분 더 걸렸음", line.description)
+        assertEquals("이동이 13분 더 걸렸어요", line.causeTitle)
+        assertEquals("화요일 10월 6일, 10분 늦음, 이동이 13분 더 걸렸어요", line.description)
         assertFalse(view.hasUnknownCause)
 
         assertEquals(
@@ -170,7 +170,7 @@ class ReportMappingTest {
             view.deviations.map { Triple(it.label, it.valueLabel, it.tone) },
         )
         assertEquals(
-            "이번 주 일정 7건의 계획 중 2건은 내 준비 기록으로, 3건은 이동 기록 보정으로 계산함",
+            "이번 주 일정 7건의 계획 중 2건은 내 준비 기록으로, 3건은 이동 기록 보정으로 계산했어요",
             view.learningLabel,
         )
     }
@@ -184,8 +184,8 @@ class ReportMappingTest {
         assertEquals(OutcomeResult.LATE, morning.result)
         assertEquals("10분 지각", morning.headline)
         assertNull(morning.headlineNote)
-        assertEquals("09:00 자료구조", morning.chipLabel)
-        assertEquals("09:00 자료구조 · 알람 7:40", morning.contextLine)
+        assertEquals("오전 9:00 자료구조", morning.chipLabel)
+        assertEquals("오전 9:00 자료구조 · 알람 오전 7:40", morning.contextLine)
         assertEquals("앱이 본 정시 확률 90%", morning.confidenceLine)
         assertTrue("이 주 지각이 이것 하나뿐이다", morning.isOnlyLateOfWeek)
         assertEquals(0.9, morning.tauBucketLower!!, 1e-9)
@@ -203,8 +203,8 @@ class ReportMappingTest {
 
         assertEquals("출발", depart.label)
         assertEquals(RowKind.TIME, depart.kind)
-        assertEquals("계획 8:08", depart.plannedLabel)
-        assertEquals("실제 8:15", depart.actualLabel)
+        assertEquals("계획 오전 8:08", depart.plannedLabel)
+        assertEquals("실제 오전 8:15", depart.actualLabel)
         assertEquals("+7분", depart.deltaLabel)
 
         assertEquals("이동", travel.label)
@@ -213,15 +213,15 @@ class ReportMappingTest {
         assertEquals(1f, travel.actualFraction!!, 1e-4f)
 
         val arrival = morning.arrival!!
-        assertEquals("계획 8:50", arrival.plannedLabel)
-        assertEquals("실제 9:10", arrival.actualLabel)
+        assertEquals("계획 오전 8:50", arrival.plannedLabel)
+        assertEquals("실제 오전 9:10", arrival.actualLabel)
         assertEquals(Tone.BAD, arrival.actualTone)
         assertEquals("", arrival.deltaLabel)
 
         val cause = morning.cause!!
-        assertEquals("이동이 13분 더 걸렸음", cause.title)
-        assertEquals("준비·출발·이동 중 계획보다 가장 크게 늘어난 단계임", cause.body)
-        assertEquals("다른 경로를 골라 보거나 몇 분 일찍 나서 볼 것", cause.action)
+        assertEquals("이동이 13분 더 걸렸어요", cause.title)
+        assertEquals("준비·출발·이동 중 계획보다 가장 크게 늘어난 단계예요", cause.body)
+        assertEquals("다른 경로를 골라 보거나 몇 분 일찍 나서 보세요", cause.action)
     }
 
     @Test
@@ -230,8 +230,8 @@ class ReportMappingTest {
 
         assertEquals(OutcomeResult.UNOBSERVED, morning.result)
         assertEquals("도착 기록 없음", morning.headline)
-        assertEquals("도착을 기록하지 못해 채점하지 않았음", morning.headlineNote)
-        assertEquals("10:00 실험 · 알람 8:35", morning.contextLine)
+        assertEquals("도착을 기록하지 못해 채점하지 않았어요", morning.headlineNote)
+        assertEquals("오전 10:00 실험 · 알람 오전 8:35", morning.contextLine)
         assertEquals("적용 τ 0.90", morning.confidenceLine)
         assertNull(morning.cause)
         assertFalse(morning.isOnlyLateOfWeek)
@@ -243,10 +243,10 @@ class ReportMappingTest {
         assertEquals(1f, prep.plannedFraction!!, 1e-4f)
         assertEquals("측정 안 됨", prep.deltaLabel)
         assertEquals(Tone.UNKNOWN, prep.deltaTone)
-        assertEquals("계획 9:15", depart.plannedLabel)
+        assertEquals("계획 오전 9:15", depart.plannedLabel)
         assertNull(depart.actualLabel)
         assertEquals("계획 35분", travel.plannedLabel)
-        assertEquals("계획 9:50", morning.arrival!!.plannedLabel)
+        assertEquals("계획 오전 9:50", morning.arrival!!.plannedLabel)
         assertNull(morning.arrival!!.actualLabel)
     }
 
@@ -271,7 +271,7 @@ class ReportMappingTest {
 
         val thursday = days[3].outcomes.single()
         assertEquals("9분 전 도착", thursday.headline)
-        assertEquals("09:00 아주 긴 일정…", thursday.chipLabel)
+        assertEquals("오전 9:00 아주 긴 일정…", thursday.chipLabel)
         val travel = thursday.rows[2]
         assertEquals("${MINUS}1분", travel.deltaLabel)
         assertEquals(Tone.GOOD, travel.deltaTone)
@@ -392,7 +392,7 @@ class ReportMappingTest {
         assertNull(view.onTimeSubLabel)
         assertTrue(view.deviations.isEmpty())
         assertEquals("원인 측정 못 함", view.lateDays.single().causeTitle)
-        assertEquals("원인을 나누지 못했음", view.days[0].outcomes.single().cause?.title)
+        assertEquals("원인을 나누지 못했어요", view.days[0].outcomes.single().cause?.title)
         assertEquals(OutcomeResult.UNOBSERVED, view.days[1].outcomes.single().result)
 
         val ai = map("""{"week_start":"2026-10-05","summary":"요약","summary_source":"template"}""")
@@ -426,8 +426,8 @@ class ReportMappingTest {
             arrived = 1, unobserved = 3,
         )!!
         assertEquals("측정하지 못한 아침 1건", mixed.title)
-        assertEquals("도착을 기록하지 못한 아침은 정시로 세지 않음. 위 비율은 1건만 반영한 값임", mixed.body)
-        assertEquals("알람이 울리지 않은 일정 2건은 출발·도착을 기록하지 않음", mixed.caption)
+        assertEquals("도착을 기록하지 못한 아침은 정시로 세지 않음. 위 비율은 1건만 반영한 값이에요", mixed.body)
+        assertEquals("알람이 울리지 않은 일정 2건은 출발·도착을 기록하지 않았어요", mixed.caption)
 
         val noAlarms = gap(
             """{"event":2,"date":"2026-10-06","result":"unobserved","alarm_on":false},
@@ -453,11 +453,11 @@ class ReportMappingTest {
         ).learningLabel
 
         assertEquals(
-            "이번 주 계획은 준비·이동 기록 없이 입력한 준비 시간과 경로 예상 시간으로 계산됨",
+            "이번 주 계획은 준비·이동 기록 없이 입력한 준비 시간과 경로 예상 시간으로 계산했어요",
             label(3, 0, 0),
         )
-        assertEquals("이번 주 일정 4건의 계획 중 2건은 이동 기록 보정으로 계산함", label(4, 0, 2))
-        assertEquals("이번 주 일정 4건의 계획 중 1건은 내 준비 기록으로 계산함", label(4, 1, 0))
+        assertEquals("이번 주 일정 4건의 계획 중 2건은 이동 기록 보정으로 계산했어요", label(4, 0, 2))
+        assertEquals("이번 주 일정 4건의 계획 중 1건은 내 준비 기록으로 계산했어요", label(4, 1, 0))
         assertNull("계획이 없던 주는 문장을 쓰지 않는다", label(0, 0, 0))
     }
 
@@ -470,23 +470,23 @@ class ReportMappingTest {
         ).days[0].outcomes.single().cause!!
 
         val noPlan = cause(""""unmeasured":["prep_over","travel_over","depart_late"],"planned":{}""")
-        assertEquals("그날은 알람 계획이 없어 계획과 비교하지 못했음", noPlan.body)
-        assertEquals("집 주소와 일정 장소를 정해 두면 계획이 계산됨", noPlan.action)
+        assertEquals("그날은 알람 계획이 없어 계획과 비교하지 못했어요", noPlan.body)
+        assertEquals("집 주소와 일정 장소를 정해 두면 계획을 계산해요", noPlan.action)
 
         val notHome = cause(
             """"prep_applies":false,"unmeasured":["travel_over","depart_late"],
                "planned":{"depart_by":"2026-10-04T23:00:00Z"}"""
         )
-        assertEquals("출발지가 집이 아닌 일정이라 출발 시각을 기록하지 않았음", notHome.body)
+        assertEquals("출발지가 집이 아닌 일정이라 출발 시각을 기록하지 않았어요", notHome.body)
         assertNull(notHome.action)
 
         val noDeparture = cause(
             """"prep_applies":true,"unmeasured":["prep_over","travel_over","depart_late"],
                "planned":{"depart_by":"2026-10-04T23:00:00Z"}"""
         )
-        assertEquals("원인을 나누지 못했음", noDeparture.title)
-        assertEquals("집을 나선 시각이 기록되지 않아 출발·이동을 나눠 보지 못했음", noDeparture.body)
-        assertEquals("집 안에서 알람을 해제하면 나서는 시각까지 기록됨", noDeparture.action)
+        assertEquals("원인을 나누지 못했어요", noDeparture.title)
+        assertEquals("집을 나선 시각이 기록되지 않아 출발·이동을 나눠 보지 못했어요", noDeparture.body)
+        assertEquals("집 안에서 알람을 해제하면 나서는 시각까지 기록돼요", noDeparture.action)
         assertFalse("지각이 기록됐다면 위치 권한은 켜져 있었다", noDeparture.action!!.contains("위치 권한"))
 
         val prepOnly = cause(
@@ -494,7 +494,7 @@ class ReportMappingTest {
                "planned":{"depart_by":"2026-10-04T23:00:00Z"}"""
         )
         assertEquals("측정 안 됨: 준비", prepOnly.body)
-        assertEquals("준비 항목을 기록하면 준비 시간도 나눠 볼 수 있음", prepOnly.action)
+        assertEquals("준비 항목을 기록하면 준비 시간도 나눠 볼 수 있어요", prepOnly.action)
     }
 
     @Test
@@ -507,15 +507,15 @@ class ReportMappingTest {
         ).days[0].outcomes.single().cause!!
 
         val home = cause(true, """["prep_over"]""")
-        assertEquals("집에서 7분 늦게 나섰음", home.title)
+        assertEquals("집에서 7분 늦게 나섰어요", home.title)
         assertEquals(
-            "준비·출발·이동 중 계획보다 가장 크게 늘어난 단계임. " +
-                "준비 항목을 기록하면 준비와 출발 중 어디서 늦었는지 나눠 볼 수 있음",
+            "준비·출발·이동 중 계획보다 가장 크게 늘어난 단계예요. " +
+                "준비 항목을 기록하면 준비와 출발 중 어디서 늦었는지 나눠 볼 수 있어요",
             home.body,
         )
         val away = cause(false, "[]")
-        assertEquals("출발이 7분 늦었음", away.title)
-        assertEquals("출발·이동 중 계획보다 가장 크게 늘어난 단계임", away.body)
+        assertEquals("출발이 7분 늦었어요", away.title)
+        assertEquals("출발·이동 중 계획보다 가장 크게 늘어난 단계예요", away.body)
     }
 
     // Partly AI-generated (Claude)
@@ -536,19 +536,19 @@ class ReportMappingTest {
         val travel = late("travel_over", """{"prep_over":-1.0,"depart_late":0.0,"travel_over":0.3}""")
         val travelMorning = travel.days[0].outcomes.single()
         assertEquals("±0분", travelMorning.rows.single { it.label == "이동" }.deltaLabel)
-        assertEquals("이동이 더 걸렸음", travelMorning.cause!!.title)
-        assertEquals("이동이 더 걸렸음", travel.lateDays.single().causeTitle)
+        assertEquals("이동이 더 걸렸어요", travelMorning.cause!!.title)
+        assertEquals("이동이 더 걸렸어요", travel.lateDays.single().causeTitle)
 
         val depart = late("depart_late", """{"prep_over":-1.0,"depart_late":0.4,"travel_over":-0.2}""")
             .days[0].outcomes.single()
         assertEquals("±0분", depart.rows.single { it.label == "출발" }.deltaLabel)
-        assertEquals("집에서 늦게 나섰음", depart.cause!!.title)
+        assertEquals("집에서 늦게 나섰어요", depart.cause!!.title)
 
         // 반올림해 1분 이상이면 줄과 같은 숫자를 쓴다.
         val prep = late("prep_over", """{"prep_over":0.5,"depart_late":0.0,"travel_over":-0.4}""")
             .days[0].outcomes.single()
         assertEquals("+1분", prep.rows.single { it.label == "준비" }.deltaLabel)
-        assertEquals("준비가 1분 더 걸렸음", prep.cause!!.title)
+        assertEquals("준비가 1분 더 걸렸어요", prep.cause!!.title)
     }
 
     @Test
@@ -559,8 +559,8 @@ class ReportMappingTest {
                  "date":"2026-10-05","result":"unobserved","alarm_on":false,
                  "planned":{"alarm_at":"2026-10-05T04:40:00Z"}}]}"""
         ).days[0].outcomes.single()
-        assertEquals("15:00 동아리 · 알람 꺼짐", morning.contextLine)
-        assertEquals("알람이 울리지 않은 일정이라 출발·도착을 기록하지 않았음", morning.headlineNote)
+        assertEquals("오후 3:00 동아리 · 알람 꺼짐", morning.contextLine)
+        assertEquals("알람이 울리지 않은 일정이라 출발·도착을 기록하지 않았어요", morning.headlineNote)
     }
 
     @Test

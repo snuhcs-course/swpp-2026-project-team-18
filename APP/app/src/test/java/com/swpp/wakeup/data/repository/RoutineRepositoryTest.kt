@@ -28,7 +28,7 @@ import retrofit2.Response
  *
  * ## 이 테스트가 지키는 것
  *
- * - 학습 상태 문구: 실측 평균이 신고 범위를 **벗어나면 그렇다고 말한다.**
+ * - 학습 상태 문구: 실제 평균이 신고 범위를 **벗어나면 그렇다고 말한다.**
  *   조용히 학습만 하면 사용자는 자기 설정이 맞다고 믿은 채 알람이 왜 이른지 모른다.
  * - 부분 수정은 **바꾼 필드만** 보낸다. 전체를 보내면 다른 기기에서 바뀐 값을
  *   덮어쓰고, 일정별 체크는 손대지 않은 블록까지 "직접 바꿈" 으로 굳는다.
@@ -64,7 +64,7 @@ class RoutineRepositoryTest {
         assertEquals("12~18분", view.rangeLabel)
         assertEquals(DropCost.LARGE, view.dropCost)
         assertNull(view.observedMeanLabel)
-        assertEquals("관측 없음 · 신고 범위를 사전값으로 씀", view.learningNote)
+        assertEquals("기록 없음 · 적어 둔 범위로 계산해요", view.learningNote)
         assertFalse(view.rangeMismatch)
     }
 
@@ -77,11 +77,11 @@ class RoutineRepositoryTest {
         val view = RoutineRepository(blocksApi(point)).onlyBlock()
 
         assertEquals("5분", view.rangeLabel)
-        assertEquals("관측 없음 · 범위가 한 점이라 변동 폭이 없음", view.learningNote)
+        assertEquals("기록 없음 · 범위가 한 점이라 달라질 폭이 없어요", view.learningNote)
     }
 
     @Test
-    fun `실측 평균이 신고 최대보다 길면 범위를 늘리라고 권한다`() = runTest {
+    fun `실제 평균이 적어 둔 최대보다 길면 범위를 늘리라고 권한다`() = runTest {
         val slow = block(
             """{"id":1,"name":"샤워","default_min_minutes":12,"default_max_minutes":18,
                 "observation_count":4,"observed_mean_minutes":22.0}"""
@@ -89,13 +89,13 @@ class RoutineRepositoryTest {
 
         val view = RoutineRepository(blocksApi(slow)).onlyBlock()
 
-        assertEquals("실측 평균 22분", view.observedMeanLabel)
-        assertEquals("실측 평균 22분 · 신고 최대보다 4분 길다. 범위를 늘리는 것을 권함", view.learningNote)
+        assertEquals("실제 평균 22분", view.observedMeanLabel)
+        assertEquals("실제 평균 22분 · 적어 둔 최대보다 4분 길어요. 범위를 늘려 보세요", view.learningNote)
         assertTrue(view.rangeMismatch)
     }
 
     @Test
-    fun `실측 평균이 신고 최소보다 짧으면 범위를 줄이라고 권한다`() = runTest {
+    fun `실제 평균이 적어 둔 최소보다 짧으면 범위를 줄이라고 권한다`() = runTest {
         val fast = block(
             """{"id":1,"name":"샤워","default_min_minutes":12,"default_max_minutes":18,
                 "observation_count":3,"observed_mean_minutes":8.4}"""
@@ -103,13 +103,13 @@ class RoutineRepositoryTest {
 
         val view = RoutineRepository(blocksApi(fast)).onlyBlock()
 
-        assertEquals("실측 평균 8.4분", view.observedMeanLabel)
-        assertEquals("실측 평균 8.4분 · 신고 최소보다 4분 짧다. 범위를 줄이면 알람이 늦춰짐", view.learningNote)
+        assertEquals("실제 평균 8.4분", view.observedMeanLabel)
+        assertEquals("실제 평균 8.4분 · 적어 둔 최소보다 4분 짧아요. 범위를 줄이면 알람이 늦춰져요", view.learningNote)
         assertTrue(view.rangeMismatch)
     }
 
     @Test
-    fun `실측 평균이 범위 안이면 관측 횟수와 함께 그렇다고 말한다`() = runTest {
+    fun `실제 평균이 범위 안이면 관측 횟수와 함께 그렇다고 말한다`() = runTest {
         val fine = block(
             """{"id":1,"name":"샤워","default_min_minutes":12,"default_max_minutes":18,
                 "observation_count":5,"observed_mean_minutes":15.0}"""
@@ -117,7 +117,7 @@ class RoutineRepositoryTest {
 
         val view = RoutineRepository(blocksApi(fine)).onlyBlock()
 
-        assertEquals("실측 평균 15분 · 관측 5회, 신고 범위 안에 있음", view.learningNote)
+        assertEquals("실제 평균 15분 · 5번 기록, 적어 둔 범위 안이에요", view.learningNote)
         assertFalse(view.rangeMismatch)
     }
 
@@ -154,7 +154,7 @@ class RoutineRepositoryTest {
         val result = RoutineRepository(api).blocks()
 
         assertTrue(result is RoutineResult.Failure)
-        assertTrue((result as RoutineResult.Failure).message.startsWith("서버에 연결할 수 없다"))
+        assertTrue((result as RoutineResult.Failure).message.startsWith("연결할 수 없어요"))
     }
 
     @Test
@@ -223,7 +223,7 @@ class RoutineRepositoryTest {
 
         invalid.forEach { draft ->
             val result = repository.createBlock(draft)
-            assertEquals("$draft", RoutineResult.Failure("입력값을 확인해야 한다."), result)
+            assertEquals("$draft", RoutineResult.Failure("입력한 값을 확인해 주세요."), result)
         }
     }
 
@@ -232,7 +232,7 @@ class RoutineRepositoryTest {
         val result = RoutineRepository(FakeRoutinesApi())
             .updateBlock(BlockDraft(name = "샤워", minText = "5", maxText = "10"))
 
-        assertEquals(RoutineResult.Failure("수정할 블록이 없다."), result)
+        assertEquals(RoutineResult.Failure("고칠 항목이 없어요."), result)
     }
 
     @Test
@@ -272,7 +272,7 @@ class RoutineRepositoryTest {
             override suspend fun deleteBlock(id: Long) = httpError<Unit>(404)
         }
 
-        assertEquals(RoutineResult.Failure("대상을 찾을 수 없다."), RoutineRepository(api).deleteBlock(9))
+        assertEquals(RoutineResult.Failure("찾을 수 없어요."), RoutineRepository(api).deleteBlock(9))
     }
 
     @Test
@@ -310,7 +310,7 @@ class RoutineRepositoryTest {
     fun `바뀐 것이 없으면 서버를 부르지 않는다`() = runTest {
         val result = RoutineRepository(FakeRoutinesApi()).setEventBlocks(10, emptyMap())
 
-        assertEquals(RoutineResult.Failure("바뀐 항목이 없다."), result)
+        assertEquals(RoutineResult.Failure("바뀐 항목이 없어요."), result)
     }
 
     // --- 필드 오류 매핑 ---------------------------------------------------------

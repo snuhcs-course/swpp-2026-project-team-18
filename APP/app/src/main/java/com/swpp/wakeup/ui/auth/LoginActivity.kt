@@ -219,6 +219,10 @@ private fun AuthHost(
                     socialBusy = state.socialBusy,
                     socialNotice = state.socialNotice,
                     onForgotClick = viewModel::goToResetRequest,
+                    // 로그인 잠금은 지금 입력한 계정이 잠긴 계정일 때만 보인다(BE-A3)
+                    lockedUntilMillis = state.lockedUntilMillis?.takeIf { state.locked },
+                    nowMillis = state.nowMillis,
+                    attemptsHint = state.attemptsHint,
                 )
 
                 AuthViewModel.Screen.RESET_REQUEST -> PasswordResetRequestScreen(
@@ -278,6 +282,7 @@ private fun AuthHost(
                     password = state.password,
                     passwordConfirm = state.passwordConfirm,
                     passwordsMatch = state.passwordsMatch,
+                    passwordConfirmMismatch = state.passwordConfirmMismatch,
                     termsAgreed = state.termsAgreed,
                     passwordCheck = state.passwordCheck,
                     passwordCheckError = state.passwordCheckError,

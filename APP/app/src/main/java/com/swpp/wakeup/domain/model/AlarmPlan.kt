@@ -112,6 +112,21 @@ data class AlarmPlanView(
 
     /** 알람 시각(epoch ms). 계산 못 했으면 null. 알람이 울렸는지 클릭 시점에 다시 확인하는 데 쓴다 */
     val alarmAtMillis: Long? = null,
+    /** 사용자가 직접 정한 시각으로 울린다(서버 `alarm_source == "user"`, BE-H3b). ④ 알약 · 시트 [추천 시각으로 되돌리기] */
+    val userAlarm: Boolean = false,
+    // --- ④ 다시 그림(iter4 H2-3 · H2-6, Figma `545:920`) — Partly AI-generated (Claude)
+    /** 일정 제목만(시각 없이). [eventTitle] 은 "09:00 제목" 이다 */
+    val title: String = "",
+    /** 장소 이름만. 없으면 null */
+    val placeName: String? = null,
+    /** 서버 수단 문자열("지하철+버스" 등) */
+    val travelMode: String? = null,
+    /** 여유 시간의 출처(`fixed` · `learned`) */
+    val bufferSource: String? = null,
+    /** 울릴 시각을 사용자가 확인했는가(BE-H3a). 서버가 이 필드를 모르면 null */
+    val alarmConfirmed: Boolean? = null,
+    /** 추천 시각(직접 정한 시각과의 차이를 말할 때) */
+    val recommendedAlarmAtMillis: Long? = null,
     /** 계획한 출발 시각(`depart_by`, epoch ms). 모르면 null */
     val departByMillis: Long? = null,
     /** 계획한 도착 시각(`arrive_at`, epoch ms). 모르면 null */
@@ -176,6 +191,15 @@ data class AlarmPlanView(
      * API 를 다시 부르지 않으므로 호출량이 늘지 않는다.
      */
     val routePath: List<GeoPoint> = emptyList(),
+    /**
+     * 일정 출발지(고른 출발지). null 이면 집에서 출발한다 — 집 좌표는 화면이 프로필에서 채운다.
+     * 경로선이 정류장에서 시작하면 여기서 정류장까지를 도보 점선으로 잇는다(11-17 사용자).
+     */
+    val originPoint: GeoPoint? = null,
+    /** 답을 기다리는 "바꿀까요" 제안(BE-H3d). ④ 알람 카드 아래에 보인다 */
+    val proposal: AlarmProposal? = null,
+    /** 도착지 좌표. 경로선이 마지막 정류장에서 끝나면 여기까지 도보 점선으로 잇는다 */
+    val destinationPoint: GeoPoint? = null,
     /**
      * 서버가 계산한 경로 길이(m). 표시용이다.
      *
@@ -252,20 +276,15 @@ data class PlanRow(
  * **[percent] 가 null 인 것이 정상 상태다.** 서버는 준비·이동 **양쪽** 모두
  * 변동성을 알 때만 확률을 만든다. 한쪽만 알 때 없는 쪽을 0 분산으로 치면
  * "92% 정시 도착" 이 실제로는 "이동이 예측대로라면 92%" 가 되는데 그 조건이
- * 화면에 없다. 그래서 서버가 비워 두고, 화면은 [reason] 과 [action] 으로
- * 왜 비었는지와 무엇을 하면 채워지는지를 밝힌다.
+ * 화면에 없다. 그래서 서버가 비워 두고, 화면은 확률 자리를 비운다.
  */
 data class ConfidenceView(
     /** 0~100. null 이면 아직 계산할 수 없다 */
     val percent: Int?,
-    /** "정시 도착 확률 92%" / "정시 도착 확률 · 아직 계산할 수 없음" */
+    /** "정시 도착 확률 92%" / "정시 도착 확률 · 아직 계산할 수 없어요" */
     val headline: String,
-    /** [percent] 가 null 일 때 그 이유. 있으면 null */
-    val reason: String?,
-    /** 확률에 필요한 재료를 채우는 일. 없거나 할 일이 없으면 null */
-    val action: String?,
 ) {
-    /** 확률을 아직 계산할 수 없다. 숫자를 만들지 않고 이유만 보여 준다 */
+    /** 확률을 아직 계산할 수 없다. 숫자를 만들지 않고 자리를 비운다(11-17 사용자: 이유 문구를 빼 달라고 함) */
     val isUnavailable: Boolean get() = percent == null
 
     /** 확률이 목표치를 넘겼는지. 초록/노랑 구분에 쓴다 */

@@ -14,6 +14,17 @@ enum class ProbabilityTone { GOOD, WARN, BAD, UNKNOWN }
  * 말하게 된다. 목표를 낮춰 잡았다고 해서 지각 위험이 사라지지는 않는다.
  */
 object ProbabilityRule {
+
+    // Partly AI-generated (Claude)
+    /**
+     * 화면에 보이는 정시 도착 확률 숫자. **서버가 준 값 그대로**다(사용자 결정 11-18: 11-16 에 넣은 90 상한을 풀었다 —
+     * 상한 때문에 99 / 96 / 82 가 90 / 90 / 82 로 보여 세 칸이 같아 보였다). 0 ~ 100 밖의 값만 잘라 낸다.
+     */
+    fun displayPercent(percent: Int): Int = percent.coerceIn(0, 100)
+
+    /** "97%" */
+    fun displayLabel(percent: Int): String = "${displayPercent(percent)}%"
+
     /** 이 아래면 빨강 · "지각할 수 있어요" */
     const val LATE_RISK_PERCENT = 70
     const val LATE_WARNING = "지각할 수 있어요"

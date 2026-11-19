@@ -47,8 +47,10 @@ class HelpFaqTest {
         assertTrue(HelpFaq.item(HelpTopic.CALENDAR).answer.containsAll("2주", "고른 것만", "하루 종일"))
         // AlarmScheduler 7일치 · MissedAlarms 강제 중지 · BootReceiver 재부팅
         assertTrue(HelpFaq.item(HelpTopic.ALARM_DIDNT_RING).answer.containsAll("강제 중지", "7일치", "다시 켜거나"))
-        // 분 단위로 고르는 H2-3 시트는 아직 없다 — 없는 기능을 있다고 쓰지 않는다
-        assertTrue(HelpFaq.item(HelpTopic.CHANGE_ALARM).answer.contains("준비 중"))
+        // 휠로 고른 시각 저장(BE-H3b, 서버 0.21.0) · DELETE …/alarm/time 되돌리기
+        assertTrue(
+            HelpFaq.item(HelpTopic.CHANGE_ALARM).answer.containsAll("직접 정한 시각", "추천 시각으로 되돌리기"),
+        )
     }
 
     @Test
@@ -137,20 +139,23 @@ class HelpFaqTest {
         assertEquals(9, OnTimeSheetText.timesOutOfTen(90))
         assertEquals(8, OnTimeSheetText.timesOutOfTen(89))
         assertEquals(6, OnTimeSheetText.timesOutOfTen(65))
+        // 서버가 100 을 주면 10개(11-18 상한을 풀었다)
         assertEquals(10, OnTimeSheetText.timesOutOfTen(100))
+        assertEquals("100번", OnTimeSheetText.sentence(100, "오전 9:00").emphasis)
         assertEquals(0, OnTimeSheetText.timesOutOfTen(9))
         assertEquals(0, OnTimeSheetText.timesOutOfTen(-3))
     }
 
     @Test
-    fun `문장은 10번 중 n번이고 n번만 강조한다`() {
+    fun `문장은 100번 중 확률 그대로이고 그 숫자만 강조한다`() {
         val s = OnTimeSheetText.sentence(97, "오전 9:00")
-        assertEquals("9번", s.emphasis)
-        assertEquals("같은 아침이 10번 온다면\n9번은 오전 9:00 전에 도착한다는 뜻이에요.", s.text)
+        assertEquals("97번", s.emphasis)
+        assertEquals("같은 아침이 100번 온다면\n97번은 오전 9:00 전에 도착한다는 뜻이에요.", s.text)
         assertEquals("오전 7:40에 일어나면", OnTimeSheetText.head("오전 7:40"))
-        assertEquals("정시 도착 확률 90%", OnTimeSheetText.percentLabel(90))
-        // 0번은 어색하다
-        assertEquals("한 번도", OnTimeSheetText.sentence(5, "오전 9:00").emphasis)
+        assertEquals("정시 도착 확률 97%", OnTimeSheetText.percentLabel(97))
+        // 0번은 어색하다. 5% 는 5번 그대로
+        assertEquals("한 번도", OnTimeSheetText.sentence(0, "오전 9:00").emphasis)
+        assertEquals("5번", OnTimeSheetText.sentence(5, "오전 9:00").emphasis)
     }
 
     @Test

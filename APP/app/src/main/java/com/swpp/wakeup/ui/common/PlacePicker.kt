@@ -82,9 +82,37 @@ fun PlacePicker(
      * 가입할 때 받아 둔 주소가 쓰이지 않는다.
      */
     homePlace: PlaceSearchItem? = null,
+    /**
+     * 알람 추가 시트(Figma `545:279`)의 납작한 검색칸: 높이 44 · 모서리 12 · 돋보기 아이콘 + 자리글([label]).
+     * 고른 장소 줄은 그리지 않는다(시트는 고른 장소를 칩으로 보인다). Partly AI-generated (Claude)
+     */
+    compact: Boolean = false,
+    /** [compact] 검색칸 테두리(같은 출발·도착 경고 등). null 이면 없음 */
+    borderColor: androidx.compose.ui.graphics.Color? = null,
 ) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (compact) {
+            JitInlineInput(
+                value = state.query,
+                onValueChange = onQueryChange,
+                placeholder = label,
+                enabled = enabled && !state.searching,
+                minHeight = 44.dp,
+                leadingIcon = LineIcons.search,
+                imeAction = ImeAction.Search,
+                onImeAction = onSearch,
+                inputTag = "place_query",
+                borderColor = borderColor,
+                modifier = Modifier.fillMaxWidth(),
+                trailing = {
+                    JitSearchAction(
+                        loading = state.searching,
+                        enabled = enabled && state.query.isNotBlank(),
+                        onClick = onSearch,
+                    )
+                },
+            )
+        } else Row(verticalAlignment = Alignment.CenterVertically) {
             JitTextField(
                 label = label,
                 inputTag = "place_query",
@@ -115,7 +143,7 @@ fun PlacePicker(
         val selectedInResults = selected != null && state.results.any { it.isSameSpot(selected) }
 
         // 선택된 장소를 확인할 수 있게 남긴다. 좌표가 알람 계산에 쓰인다.
-        selected?.takeIf { !selectedInResults }?.let { place ->
+        selected?.takeIf { !selectedInResults && !compact }?.let { place ->
             SelectedPlaceRow(
                 place = place,
                 enabled = enabled,
@@ -134,7 +162,7 @@ fun PlacePicker(
             state.searched && state.results.isEmpty() && !state.searching && state.error == null
         ) {
             Text(
-                text = "검색 결과가 없음. 상호나 지번을 넣어 볼 것",
+                text = "검색 결과가 없어요. 상호나 지번을 넣어 보세요",
                 color = JitColor.TextSecondary,
                 fontSize = 12.sp,
             )

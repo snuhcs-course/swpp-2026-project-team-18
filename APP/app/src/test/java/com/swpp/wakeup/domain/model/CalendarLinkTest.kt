@@ -47,7 +47,7 @@ class CalendarLinkStateTest {
 
     @Test
     fun `처음 읽는 중에는 캘린더 없음이 아니다`() {
-        // 목록을 받기 전에 "기기에 캘린더가 없음" 이 번쩍이면 사용자가 계정을 추가하러 간다.
+        // 목록을 받기 전에 "기기에 캘린더가 없어요" 이 번쩍이면 사용자가 계정을 추가하러 간다.
         val loading = CalendarLinkState(permission = CalendarPermission.GRANTED, loading = true)
         assertFalse(loading.noCalendars)
     }

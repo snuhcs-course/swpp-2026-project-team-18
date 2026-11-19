@@ -154,7 +154,7 @@ class RerouteAlertTest {
         assertEquals(
             RerouteBanner(
                 headline = "지금 경로로 가면 6분 늦어요",
-                body = "더 일찍 닿는 경로가 없음",
+                body = "더 일찍 닿는 경로가 없어요",
                 routeKey = null,
             ),
             RerouteAlert.banner(route(late = 6, suggestion = null)),

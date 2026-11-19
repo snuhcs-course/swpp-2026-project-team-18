@@ -193,7 +193,7 @@ class EventRepositoryTest {
 
         val result = EventRepository(listApi(event(1, future(days = 1))), profileDown).loadHome()
 
-        assertEquals(Result.Failure("다시 로그인해야 한다."), result)
+        assertEquals(Result.Failure("다시 로그인해 주세요."), result)
     }
 
     @Test
@@ -205,7 +205,7 @@ class EventRepositoryTest {
 
         val result = EventRepository(listDown, profileApi()).loadHome()
 
-        assertEquals(Result.Failure("대상을 찾을 수 없다."), result)
+        assertEquals(Result.Failure("찾을 수 없어요."), result)
     }
 
     @Test
@@ -216,7 +216,7 @@ class EventRepositoryTest {
 
         val result = EventRepository(listApi(), offline).loadHome()
 
-        assertTrue((result as Result.Failure).message.startsWith("서버에 연결할 수 없다"))
+        assertTrue((result as Result.Failure).message.startsWith("연결할 수 없어요"))
     }
 
     // --- 알람 스위치 ----------------------------------------------------------
@@ -251,7 +251,7 @@ class EventRepositoryTest {
 
         val result = EventRepository(api, FakeProfileApi()).setAlarmEnabled(1, enabled = true)
 
-        assertEquals(Result.Failure("대상을 찾을 수 없다."), result)
+        assertEquals(Result.Failure("찾을 수 없어요."), result)
     }
 
     // --- 일정 생성 ------------------------------------------------------------
@@ -456,11 +456,11 @@ class EventRepositoryTest {
     fun `종류 이름이 틀리면 400 의 label 문구를 살린다`() = runTest {
         val api = object : FakeEventsApi() {
             override suspend fun createTag(body: TagCreateRequest) =
-                httpError<EventTagDto>(400, errorJson("입력이 올바르지 않다.", mapOf("label" to "이름을 입력해야 한다.")))
+                httpError<EventTagDto>(400, errorJson("입력이 올바르지 않다.", mapOf("label" to "이름을 입력해 주세요.")))
         }
         val result = EventRepository(api, FakeProfileApi()).createTag("x") as Result.Failure
         assertEquals(400, result.status)
-        assertEquals("이름을 입력해야 한다.", result.fields["label"])
+        assertEquals("이름을 입력해 주세요.", result.fields["label"])
     }
 
     // Partly AI-generated (Claude)
@@ -593,7 +593,7 @@ class EventRepositoryTest {
 
         assertEquals(Result.Success(Unit), EventRepository(okApi, FakeProfileApi()).deleteEvent(1))
         assertEquals(
-            Result.Failure("대상을 찾을 수 없다."),
+            Result.Failure("찾을 수 없어요."),
             EventRepository(goneApi, FakeProfileApi()).deleteEvent(1),
         )
     }
@@ -696,7 +696,7 @@ class EventRepositoryTest {
 
         val result = EventRepository(api, FakeProfileApi()).searchPlaces("서울대")
 
-        assertEquals(Result.Failure("장소 검색 결과를 불러오지 못했다."), result)
+        assertEquals(Result.Failure("장소 검색 결과를 불러오지 못했어요."), result)
     }
 
     @Test
@@ -730,7 +730,7 @@ class EventRepositoryTest {
         }
 
         assertEquals(
-            Result.Failure("현재 위치의 주소를 불러오지 못했다."),
+            Result.Failure("현재 위치의 주소를 불러오지 못했어요."),
             EventRepository(degraded, FakeProfileApi()).reversePlace(37.0, 127.0),
         )
         assertEquals(Result.Success(snu), EventRepository(found, FakeProfileApi()).reversePlace(37.0, 127.0))
@@ -749,7 +749,7 @@ class EventRepositoryTest {
 
         val result = EventRepository(api, FakeProfileApi()).routeCandidates(snu)
 
-        assertEquals(Result.Failure("경로를 찾지 못했다. 장소를 다시 확인한다."), result)
+        assertEquals(Result.Failure("경로를 찾지 못했어요. 장소를 다시 확인해 주세요."), result)
     }
 
     @Test
@@ -760,7 +760,7 @@ class EventRepositoryTest {
 
         val result = EventRepository(api, FakeProfileApi()).loadPlan(1)
 
-        assertEquals(Result.Failure("알람이 아직 계산되지 않았다."), result)
+        assertEquals(Result.Failure("알람을 아직 계산하지 못했어요."), result)
     }
 
     @Test

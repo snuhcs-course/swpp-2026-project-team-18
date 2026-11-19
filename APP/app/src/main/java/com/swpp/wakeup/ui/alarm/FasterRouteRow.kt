@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Icon
+import com.swpp.wakeup.ui.common.LineIcons
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -79,28 +81,45 @@ fun FasterRouteRow(
 }
 
 // Partly AI-generated (Claude)
-/** 알람 결정 화면(④)의 카드(Figma `512:30`). 알람이 울리기 전에만 부른다. */
+/**
+ * 더 빠른 경로 카드(④ 알람 결정 · 알람 확인 시트). "더 빠른 경로가 있어요" + "9호선 → 2호선 · 35분 (7분 빠름)" +
+ * 회색 채움 [이 경로로 바꾸기](HE 2-6: 가벼운 동작은 꽉 찬 주황을 쓰지 않는다). 알람이 울리기 전에만 부른다.
+ * 지도 카드의 점선 대안 경로와 같은 경로(계획의 `alt_route_*`)를 가리킨다.
+ */
 @Composable
 fun FasterRouteCard(
     offer: FasterRouteOffer,
     busy: Boolean,
     onSwitch: () -> Unit,
     modifier: Modifier = Modifier,
+    tagPrefix: String = "plan_faster_route",
 ) {
-    JitCard(modifier = modifier.testTag("plan_faster_route"), padding = 14.dp, gap = 8.dp) {
-        Text(
-            text = FasterRoute.line(offer),
-            color = JitColor.Accent,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-        )
+    JitCard(modifier = modifier.testTag(tagPrefix), padding = 14.dp, gap = 10.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                modifier = Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(JitColor.Surface2),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(LineIcons.route, contentDescription = null, tint = JitColor.Accent, modifier = Modifier.size(18.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(FasterRoute.TITLE, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = FasterRoute.detail(offer),
+                    color = JitColor.Accent,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.testTag("${tagPrefix}_detail"),
+                )
+            }
+        }
         Box(
             modifier = Modifier
-                .testTag("plan_faster_route_switch")
+                .testTag("${tagPrefix}_switch")
                 .fillMaxWidth()
-                .height(36.dp)
-                .clip(RoundedCornerShape(JitRadius.Button))
-                .background(if (busy) JitColor.Track else JitColor.Accent)
+                .heightIn(min = 40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(JitColor.Surface2)
                 .clickable(enabled = !busy, role = Role.Button, onClick = onSwitch),
             contentAlignment = Alignment.Center,
         ) {
@@ -111,13 +130,13 @@ fun FasterRouteCard(
                     strokeWidth = 2.dp,
                 )
             } else {
-                Text("이 경로로 바꾸기", color = JitColor.Bg, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("이 경로로 바꾸기", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         }
         Text(
-            text = "일정에 저장한 경로가 바뀌고 알람을 다시 계산함",
+            text = "일정에 저장한 경로가 바뀌고 알람을 다시 계산해요",
             color = JitColor.TextSecondary,
-            fontSize = 9.sp,
+            fontSize = 11.sp,
         )
     }
 }
@@ -127,7 +146,7 @@ fun FasterRouteCard(
 private fun FasterRoutePreview() {
     JitTheme {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            val offer = FasterRouteOffer("transit:2호선", "9호선 → 2호선", 6, 0L)
+            val offer = FasterRouteOffer("transit:2호선", "9호선 → 2호선", 7, 0L, travelMinutes = 35)
             FasterRouteRow(offer, busy = false, onSwitch = {})
             FasterRouteCard(offer, busy = false, onSwitch = {})
         }

@@ -78,10 +78,29 @@ class MeTabLogicTest {
     fun `알림 권한 화면 줄`() {
         val off = MeTabLogic.Permissions(notifications = false, fullScreen = true, preciseLocation = false, coarseOnly = true)
         val rows = MeTabLogic.permissionRows(off)
-        assertEquals(listOf("알림", "잠금 화면 알람", "위치"), rows.map { it.label })
-        assertEquals(listOf(false, true, false), rows.map { it.on })
+        // 정밀 위치가 없으면 "앱이 꺼져도 기록" 은 아직 묻지 않는다
+        assertEquals(listOf("알림", "잠금 화면 알람", "위치", "배터리 최적화 제외"), rows.map { it.label })
+        assertEquals(listOf(false, true, false, true), rows.map { it.on })
         assertEquals("대략 위치만 켜짐 · 정밀 위치가 있어야 도착이 기록돼요", rows[2].value)
         assertFalse(rows[0].on)
+    }
+
+    @Test
+    fun `앱이 꺼져도 기록하려면 위치 항상 허용과 배터리 최적화 제외를 안내한다`() {
+        val p = MeTabLogic.Permissions(
+            notifications = true, fullScreen = true, preciseLocation = true,
+            backgroundLocation = false, batteryUnrestricted = false,
+        )
+        val rows = MeTabLogic.permissionRows(p)
+        assertEquals(listOf("알림", "잠금 화면 알람", "위치", "앱이 꺼져도 기록", "배터리 최적화 제외"), rows.map { it.label })
+        assertEquals(listOf(true, true, true, false, false), rows.map { it.on })
+        assertEquals("꺼짐 · 위치를 '항상 허용'으로 바꾸면 아침에 앱이 꺼져도 출발을 기록해요", rows[3].value)
+        assertEquals(
+            MeTabLogic.PermissionKind.BACKGROUND_LOCATION,
+            rows[3].kind,
+        )
+        val on = MeTabLogic.permissionRows(p.copy(backgroundLocation = true, batteryUnrestricted = true))
+        assertEquals(listOf(true, true, true, true, true), on.map { it.on })
     }
 
     @Test

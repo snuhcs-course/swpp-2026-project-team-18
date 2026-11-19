@@ -87,7 +87,7 @@ class RoutineRepository(
 
     suspend fun createBlock(draft: BlockDraft): RoutineResult<RoutineBlockView> = guard {
         val body = draft.toWriteRequest()
-            ?: return@guard RoutineResult.Failure("입력값을 확인해야 한다.")
+            ?: return@guard RoutineResult.Failure("입력한 값을 확인해 주세요.")
         val response = api.createBlock(body)
         unwrap(response)?.let { RoutineResult.Success(it.toView()) } ?: failure(response)
     }
@@ -100,9 +100,9 @@ class RoutineRepository(
      * 수정 횟수만큼 먹는다. 즉시 반영이 필요하면 호출부가 일정 재계산을 부른다.
      */
     suspend fun updateBlock(draft: BlockDraft): RoutineResult<RoutineBlockView> = guard {
-        val id = draft.id ?: return@guard RoutineResult.Failure("수정할 블록이 없다.")
+        val id = draft.id ?: return@guard RoutineResult.Failure("고칠 항목이 없어요.")
         val body = draft.toWriteRequest()
-            ?: return@guard RoutineResult.Failure("입력값을 확인해야 한다.")
+            ?: return@guard RoutineResult.Failure("입력한 값을 확인해 주세요.")
         val response = api.updateBlock(id, body)
         unwrap(response)?.let { RoutineResult.Success(it.toView()) } ?: failure(response)
     }
@@ -143,7 +143,7 @@ class RoutineRepository(
         eventId: Long,
         changes: Map<Long, Boolean>,
     ): RoutineResult<EventDto> = guard {
-        if (changes.isEmpty()) return@guard RoutineResult.Failure("바뀐 항목이 없다.")
+        if (changes.isEmpty()) return@guard RoutineResult.Failure("바뀐 항목이 없어요.")
         val response = api.setEventBlocks(
             eventId,
             BlockSelectionRequest(
@@ -186,11 +186,11 @@ class RoutineRepository(
     private fun failure(response: Response<*>): RoutineResult.Failure {
         val raw = response.errorBody()?.string()
         val message = ApiClient.parseErrorMessage(raw) ?: when (response.code()) {
-            400 -> "입력값을 확인해야 한다."
-            401 -> "다시 로그인해야 한다."
-            404 -> "대상을 찾을 수 없다."
-            429 -> "요청이 너무 잦다. 잠시 후 다시 시도한다."
-            in 500..599 -> "서버에 문제가 생겼다."
+            400 -> "입력한 값을 확인해 주세요."
+            401 -> "다시 로그인해 주세요."
+            404 -> "찾을 수 없어요."
+            429 -> "요청이 너무 잦아요. 잠시 뒤 다시 시도해 주세요."
+            in 500..599 -> "잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요."
             else -> MESSAGE_UNKNOWN
         }
         return RoutineResult.Failure(message, ApiClient.parseErrorFields(raw))
@@ -199,8 +199,8 @@ class RoutineRepository(
     companion object {
         private const val TAG = "RoutineRepository"
         private const val MESSAGE_NETWORK =
-            "서버에 연결할 수 없다. 네트워크와 서버 상태를 확인한다."
-        private const val MESSAGE_UNKNOWN = "알 수 없는 오류가 발생했다."
+            "연결할 수 없어요. 인터넷 연결을 확인해 주세요."
+        private const val MESSAGE_UNKNOWN = "알 수 없는 문제가 생겼어요."
 
         /**
          * 서버 필드 이름을 [BlockDraft.errors] 의 키로 바꾼다.
@@ -251,9 +251,9 @@ private fun learningNote(dto: RoutineBlockDto): String {
     if (count == 0 || mean == null) {
         return if (dto.minMinutes == dto.maxMinutes) {
             // 블록 값은 알람 계산에 쓰인다. 변동 폭이 없을 뿐이다.
-            "관측 없음 · 범위가 한 점이라 변동 폭이 없음"
+            "기록 없음 · 범위가 한 점이라 달라질 폭이 없어요"
         } else {
-            "관측 없음 · 신고 범위를 사전값으로 씀"
+            "기록 없음 · 적어 둔 범위로 계산해요"
         }
     }
 
@@ -263,15 +263,15 @@ private fun learningNote(dto: RoutineBlockDto): String {
     return when {
         mean > dto.maxMinutes -> {
             val over = Math.round(mean - dto.maxMinutes)
-            "실측 평균 $meanText · 신고 최대보다 ${over}분 길다. 범위를 늘리는 것을 권함"
+            "실제 평균 $meanText · 적어 둔 최대보다 ${over}분 길어요. 범위를 늘려 보세요"
         }
 
         mean < dto.minMinutes -> {
             val under = Math.round(dto.minMinutes - mean)
-            "실측 평균 $meanText · 신고 최소보다 ${under}분 짧다. 범위를 줄이면 알람이 늦춰짐"
+            "실제 평균 $meanText · 적어 둔 최소보다 ${under}분 짧아요. 범위를 줄이면 알람이 늦춰져요"
         }
 
-        else -> "실측 평균 $meanText · 관측 ${count}회, 신고 범위 안에 있음"
+        else -> "실제 평균 $meanText · ${count}번 기록, 적어 둔 범위 안이에요"
     }
 }
 
@@ -281,7 +281,7 @@ private fun RoutineBlockDto.toView(): RoutineBlockView {
         val rounded = Math.round(mean * 10) / 10.0
         val text = if (abs(rounded - Math.floor(rounded)) < 1e-9) "${rounded.toInt()}"
         else "$rounded"
-        "실측 평균 ${text}분"
+        "실제 평균 ${text}분"
     } else {
         null
     }

@@ -93,9 +93,9 @@ fun CheckpointCard(rows: List<CheckpointRow>, timed: Boolean, modifier: Modifier
         }
         Text(
             text = if (timed) {
-                "시각은 출발 시각에 카카오 구간 시간을 더한 예상"
+                "시각은 출발 시각에 구간별 예상 시간을 더한 값이에요"
             } else {
-                "출발 시각을 몰라 시각은 생략함"
+                "출발 시각을 몰라 시각은 빼고 보여 드려요"
             },
             color = JitColor.TextSecondary,
             fontSize = 9.sp,

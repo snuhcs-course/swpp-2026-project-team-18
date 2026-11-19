@@ -1,6 +1,7 @@
 // Partly AI-generated (Claude)
 package com.swpp.wakeup.data.repository
 
+import com.swpp.wakeup.domain.model.ProbabilityRule
 import com.swpp.wakeup.data.remote.CalibrationDto
 import com.swpp.wakeup.data.remote.DeviationStatDto
 import com.swpp.wakeup.data.remote.LateCauseDto
@@ -48,8 +49,6 @@ import java.time.temporal.ChronoUnit
  */
 
 private val RANGE_FORMAT = DateTimeFormatter.ofPattern("M월 d일")
-private val START_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
-private val TIME_FORMAT = DateTimeFormatter.ofPattern("H:mm")
 private val WEEKDAY_NAMES = listOf("월", "화", "수", "목", "금", "토", "일")
 
 /** 음수 부호. 하이픈(-)은 숫자 옆에서 짧아 보여 놓치기 쉽다. */
@@ -88,7 +87,7 @@ private fun parseInstant(raw: String?): Instant? =
     raw?.let { runCatching { Instant.parse(it.trim()) }.getOrNull() }
 
 private fun clock(raw: String?, zone: ZoneId): String? =
-    parseInstant(raw)?.atZone(zone)?.format(TIME_FORMAT)
+    parseInstant(raw)?.atZone(zone)?.let { com.swpp.wakeup.domain.model.ClockText.label(it) }
 
 private fun weekdayName(date: LocalDate): String = WEEKDAY_NAMES[date.dayOfWeek.value - 1]
 
@@ -163,7 +162,7 @@ internal fun WeeklyReportDto.toView(zone: ZoneId = ZoneId.systemDefault()): Week
         }.orEmpty(),
         learningLabel = learningLabel(),
         // 안 간 일정은 서버가 이미 칸·지각 줄에서 뺐다. 몇 건 뺐는지만 밝힌다.
-        skippedNote = skippedCount.takeIf { it > 0 }?.let { "안 감으로 표시한 일정 ${it}건은 빼고 계산함" },
+        skippedNote = skippedCount.takeIf { it > 0 }?.let { "안 가요로 표시한 일정 ${it}건은 빼고 계산했어요" },
         bufferNotes = bufferNotes,
         bufferCurrentLabel = bufferCurrentLabel(bufferNotes),
         wake = wake.toWakeView(),
@@ -310,7 +309,7 @@ private fun WeeklyReportDto.bufferCurrentLabel(notes: List<String>): String? {
     if (notes.isEmpty()) return null
     val minutes = buffer?.currentMinutes ?: return null
     val learned = buffer.currentSource == "learned"
-    return "지금 안전 버퍼 ${minutes}분" + if (learned) " · 지각 기록으로 조정됨" else ""
+    return "지금 여유 시간 ${minutes}분" + if (learned) " · 지각 기록으로 조정했어요" else ""
 }
 
 private class Placed(val date: LocalDate, val dto: OutcomeDto, val morning: MorningOutcome)
@@ -347,13 +346,13 @@ private fun WeeklyReportDto.gapNotice(): GapNotice? {
     if (eventCount <= 0 || unobservedCount * 2 < eventCount) return null
     val withoutAlarm = outcomes.orEmpty().count { it.isUnobserved() && it.alarmOn == false }
     val measuredGap = (unobservedCount - withoutAlarm).coerceAtLeast(0)
-    val share = if (arrivedCount > 0) ". 위 비율은 ${arrivedCount}건만 반영한 값임" else ""
+    val share = if (arrivedCount > 0) ". 위 비율은 ${arrivedCount}건만 반영한 값이에요" else ""
     return if (measuredGap > 0) {
         GapNotice(
             title = "측정하지 못한 아침 ${measuredGap}건",
             body = "도착을 기록하지 못한 아침은 정시로 세지 않음$share",
             caption = withoutAlarm.takeIf { it > 0 }
-                ?.let { "알람이 울리지 않은 일정 ${it}건은 출발·도착을 기록하지 않음" },
+                ?.let { "알람이 울리지 않은 일정 ${it}건은 출발·도착을 기록하지 않았어요" },
         )
     } else {
         GapNotice(
@@ -447,7 +446,7 @@ private fun durationAverage(stat: DeviationStatDto?): String {
     return when {
         minutes >= 1 -> "평균 ${minutes}분 더 걸림 · ${stat.count}회"
         minutes <= -1 -> "평균 ${-minutes}분 덜 걸림 · ${stat.count}회"
-        else -> "계획과 비슷함 · ${stat.count}회"
+        else -> "계획과 비슷해요 · ${stat.count}회"
     }
 }
 
@@ -474,9 +473,9 @@ private fun WeeklyReportDto.learningLabel(): String? {
         counts.travelFromRecords.takeIf { it > 0 }?.let { "${it}건은 이동 기록 보정으로" },
     )
     return if (parts.isEmpty()) {
-        "이번 주 계획은 준비·이동 기록 없이 입력한 준비 시간과 경로 예상 시간으로 계산됨"
+        "이번 주 계획은 준비·이동 기록 없이 입력한 준비 시간과 경로 예상 시간으로 계산했어요"
     } else {
-        "이번 주 일정 ${counts.planCount}건의 계획 중 ${parts.joinToString(", ")} 계산함"
+        "이번 주 일정 ${counts.planCount}건의 계획 중 ${parts.joinToString(", ")} 계산했어요"
     }
 }
 
@@ -491,7 +490,7 @@ internal fun OutcomeDto.toMorning(zone: ZoneId, weekLateCount: Int): MorningOutc
         // 모르는 값은 기록 없음으로 본다. 정시로 세면 정시율을 부풀린다.
         else -> OutcomeResult.UNOBSERVED
     }
-    val startLabel = parseInstant(startAt)?.atZone(zone)?.format(START_FORMAT)
+    val startLabel = parseInstant(startAt)?.atZone(zone)?.let { com.swpp.wakeup.domain.model.ClockText.label(it) }
     val name = title?.trim()?.takeIf { it.isNotEmpty() } ?: "일정"
     val shortName = if (name.length > CHIP_TITLE_MAX) {
         name.take(CHIP_TITLE_MAX).trimEnd() + "…"
@@ -529,11 +528,11 @@ internal fun OutcomeDto.toMorning(zone: ZoneId, weekLateCount: Int): MorningOutc
         },
         headlineNote = when {
             outcome != OutcomeResult.UNOBSERVED -> null
-            alarmOn == false -> "알람이 울리지 않은 일정이라 출발·도착을 기록하지 않았음"
-            else -> "도착을 기록하지 못해 채점하지 않았음"
+            alarmOn == false -> "알람이 울리지 않은 일정이라 출발·도착을 기록하지 않았어요"
+            else -> "도착을 기록하지 못해 채점하지 않았어요"
         },
         contextLine = listOfNotNull(heading, alarmPart).joinToString(" · "),
-        confidenceLine = onTimeProbability?.let { "앱이 본 정시 확률 $it%" }
+        confidenceLine = onTimeProbability?.let { "앱이 본 정시 확률 ${ProbabilityRule.displayLabel(it)}" }
             ?: tau?.let { "적용 τ ${tauLabel(it)}" },
         rows = rows,
         arrival = arrivalRow(planned?.arriveAt, actual?.arriveAt, outcome, zone),
@@ -644,37 +643,37 @@ private val STAGE_NAMES = mapOf(
 private fun OutcomeDto.causeExplanation(): CauseExplanation {
     val prepCounts = prepApplies != false
     val stages = if (prepCounts) "준비·출발·이동" else "출발·이동"
-    val biggest = "$stages 중 계획보다 가장 크게 늘어난 단계임"
+    val biggest = "$stages 중 계획보다 가장 크게 늘어난 단계예요"
     val missing = unmeasured.orEmpty()
     return when (cause) {
         LateCauseDto.LABEL_TRAVEL -> CauseExplanation(
-            title = "이동이 ${overrun(deviation?.travelOver)}더 걸렸음",
+            title = "이동이 ${overrun(deviation?.travelOver)}더 걸렸어요",
             body = biggest,
-            action = "다른 경로를 골라 보거나 몇 분 일찍 나서 볼 것",
+            action = "다른 경로를 골라 보거나 몇 분 일찍 나서 보세요",
         )
 
         LateCauseDto.LABEL_DEPART -> CauseExplanation(
-            title = if (prepCounts) "집에서 ${overrun(deviation?.departLate)}늦게 나섰음"
-            else "출발이 ${overrun(deviation?.departLate)}늦었음",
+            title = if (prepCounts) "집에서 ${overrun(deviation?.departLate)}늦게 나섰어요"
+            else "출발이 ${overrun(deviation?.departLate)}늦었어요",
             body = if (LateCauseDto.LABEL_PREP in missing) {
-                "$biggest. 준비 항목을 기록하면 준비와 출발 중 어디서 늦었는지 나눠 볼 수 있음"
+                "$biggest. 준비 항목을 기록하면 준비와 출발 중 어디서 늦었는지 나눠 볼 수 있어요"
             } else {
                 biggest
             },
-            action = "알람이 정한 출발 시각을 지켜 볼 것",
+            action = "알람이 정한 출발 시각을 지켜 보세요",
         )
 
         LateCauseDto.LABEL_PREP -> CauseExplanation(
-            title = "준비가 ${overrun(deviation?.prepOver)}더 걸렸음",
+            title = "준비가 ${overrun(deviation?.prepOver)}더 걸렸어요",
             body = biggest,
-            action = "오래 걸린 준비 항목의 시간 범위를 루틴에서 늘려 두면 알람이 그만큼 앞당겨짐",
+            action = "오래 걸린 준비 항목의 시간 범위를 루틴에서 늘려 두면 알람이 그만큼 앞당겨져요",
         )
 
         LateCauseDto.LABEL_PLAN_TIGHT -> CauseExplanation(
-            title = "계획대로 움직였는데 늦었음",
-            body = "${stages}이 모두 계획 안이었음. 계획의 여유가 부족했음",
-            action = if (prepCounts) "평소 준비 시간을 넉넉히 잡으면 알람이 앞당겨짐"
-            else "몇 분 일찍 나서 볼 것",
+            title = "계획대로 움직였는데 늦었어요",
+            body = "${stages}이 모두 계획 안이었어요. 계획의 여유가 부족했어요",
+            action = if (prepCounts) "평소 준비 시간을 넉넉히 잡으면 알람이 앞당겨져요"
+            else "몇 분 일찍 나서 보세요",
         )
 
         else -> unknownCause(missing)
@@ -682,38 +681,38 @@ private fun OutcomeDto.causeExplanation(): CauseExplanation {
 }
 
 private fun OutcomeDto.unknownCause(missing: List<String>): CauseExplanation {
-    val title = "원인을 나누지 못했음"
+    val title = "원인을 나누지 못했어요"
     val departMissing = LateCauseDto.LABEL_DEPART in missing
     return when {
         planned?.departBy == null -> CauseExplanation(
             title,
-            "그날은 알람 계획이 없어 계획과 비교하지 못했음",
-            "집 주소와 일정 장소를 정해 두면 계획이 계산됨",
+            "그날은 알람 계획이 없어 계획과 비교하지 못했어요",
+            "집 주소와 일정 장소를 정해 두면 계획을 계산해요",
         )
 
         prepApplies == false && departMissing -> CauseExplanation(
             title,
-            "출발지가 집이 아닌 일정이라 출발 시각을 기록하지 않았음",
+            "출발지가 집이 아닌 일정이라 출발 시각을 기록하지 않았어요",
             null,
         )
 
         departMissing -> CauseExplanation(
             title,
-            "집을 나선 시각이 기록되지 않아 출발·이동을 나눠 보지 못했음",
-            "집 안에서 알람을 해제하면 나서는 시각까지 기록됨",
+            "집을 나선 시각이 기록되지 않아 출발·이동을 나눠 보지 못했어요",
+            "집 안에서 알람을 해제하면 나서는 시각까지 기록돼요",
         )
 
         missing == listOf(LateCauseDto.LABEL_PREP) -> CauseExplanation(
             title,
             "측정 안 됨: 준비",
-            "준비 항목을 기록하면 준비 시간도 나눠 볼 수 있음",
+            "준비 항목을 기록하면 준비 시간도 나눠 볼 수 있어요",
         )
 
         else -> CauseExplanation(
             title,
             missing.mapNotNull { STAGE_NAMES[it] }.takeIf { it.isNotEmpty() }
                 ?.joinToString(" · ", prefix = "측정 안 됨: ")
-                ?: "기록이 부족해 단계를 나눠 보지 못했음",
+                ?: "기록이 부족해 단계를 나눠 보지 못했어요",
             null,
         )
     }
@@ -745,26 +744,26 @@ internal fun CalibrationDto.toView(): CalibrationView {
     val (verdictLabel, verdictNote, action) = when (verdict) {
         CalibrationDto.VERDICT_CALIBRATED -> Triple(
             "잘 맞음",
-            "앱이 말한 확률과 실제 정시율이 거의 같음",
+            "앱이 말한 확률과 실제 정시율이 거의 같아요",
             null,
         )
 
         CalibrationDto.VERDICT_OVERCONFIDENT -> Triple(
             "과신 중",
-            "앱이 약속한 것보다 실제 정시율이 낮음. 알람이 늦게 잡히고 있음",
-            "지각 위험을 낮추면 알람이 앞당겨짐",
+            "앱이 약속한 것보다 실제 정시율이 낮아요. 알람이 늦게 잡히고 있어요",
+            "지각 위험을 낮추면 알람이 앞당겨져요",
         )
 
         CalibrationDto.VERDICT_CONSERVATIVE -> Triple(
             "지나치게 이름",
-            "실제로는 거의 늘 정시임. 알람이 필요 이상으로 이름",
-            "지각 위험을 높이면 더 잘 수 있음",
+            "실제로는 거의 늘 정시예요. 알람이 필요 이상으로 일러요",
+            "지각 위험을 높이면 더 잘 수 있어요",
         )
 
         else -> Triple(
             "표본 부족",
-            "판정하려면 같은 구간에서 ${minSamples}번 이상의 결과가 필요함",
-            "아침에 이동 기록이 쌓이면 자동으로 채워짐",
+            "판정하려면 같은 구간에서 ${minSamples}번 이상의 결과가 필요해요",
+            "아침에 이동 기록이 쌓이면 자동으로 채워져요",
         )
     }
 

@@ -32,7 +32,7 @@ object Inquiry {
     const val UNSUPPORTED = "아직 앱에서 문의를 받을 수 없어요. 적은 내용은 그대로 두었어요"
     const val LIMITED = "문의를 너무 자주 보냈어요. 잠시 후 다시 보내 주세요"
     const val FAILED = "문의를 보내지 못했어요. 잠시 후 다시 시도해 주세요"
-    const val OFFLINE = "서버에 연결되지 않아 문의를 보내지 못했어요"
+    const val OFFLINE = "인터넷에 연결되지 않아 문의를 보내지 못했어요"
 
     enum class Outcome { DONE, UNSUPPORTED, LIMITED, FAILED, OFFLINE }
 
@@ -48,16 +48,40 @@ object Inquiry {
         else -> null
     }
 
+    /** 답 받을 이메일 최대 길이(RFC 5321 경로 길이). 서버 계약 `server-inquiry.md` 와 같다 */
+    const val REPLY_EMAIL_MAX = 254
+
+    // Partly AI-generated (Claude)
+    /**
+     * 답 받을 이메일 검사(C5, 서버 계약 `server-inquiry.md` 5절). 로그인 · 가입의 [EmailRule] 위에 더 좁힌다:
+     * - 254자까지(코드 포인트, 서버 `len` 과 같다). [EmailRule] 은 계정 이메일용이라 320자까지 받는다.
+     * - 제어 문자 · 서식 문자(폭 없는 공백 등) · 공백이 하나라도 있으면 거절 — 메일 `Reply-To` 에 그대로 들어간다.
+     * - 로컬 부분이 따옴표(`"..."@`)면 거절 — 서버는 dot-atom 만 받는다.
+     * 앞뒤 공백은 보내기 전에 자르므로([com.swpp.wakeup.ui.help.ContactSheet]) 여기서도 자르고 본다.
+     */
+    fun isReplyEmailValid(raw: String): Boolean {
+        val value = raw.trim()
+        if (value.codePointCount(0, value.length) > REPLY_EMAIL_MAX) return false
+        val hidden = value.codePoints().anyMatch { cp ->
+            val type = Character.getType(cp)
+            type == Character.CONTROL.toInt() || type == Character.FORMAT.toInt() || Character.isWhitespace(cp) ||
+                Character.isSpaceChar(cp)
+        }
+        if (hidden) return false
+        if (value.substringBeforeLast('@', "").startsWith('"')) return false
+        return EmailRule.isValid(value)
+    }
+
     /** 이메일 칸 아래 오류. 비었거나 틀린 것은 한 번 보내려 한 뒤에만 말한다 */
     fun emailError(email: String, tried: Boolean): String? = when {
         !tried -> null
         email.isBlank() -> EMAIL_REQUIRED
-        !EmailRule.isValid(email.trim()) -> EMAIL_INVALID
+        !isReplyEmailValid(email) -> EMAIL_INVALID
         else -> null
     }
 
     fun canSend(message: String, email: String): Boolean =
-        length(message) in MIN..MAX && email.isNotBlank() && EmailRule.isValid(email.trim())
+        length(message) in MIN..MAX && email.isNotBlank() && isReplyEmailValid(email)
 
     /** 응답 코드 → 결과. null 이면 서버에 닿지 못했다. 404 · 405 · 501 은 서버에 아직 API 가 없다 */
     fun outcome(status: Int?): Outcome = when (status) {

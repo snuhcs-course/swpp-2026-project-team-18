@@ -6,7 +6,7 @@ import org.junit.Test
 import java.io.File
 
 /**
- * 선택 카드가 Figma 77:2(13-a)의 주황 테두리·도착정보 우선순위를 따르는지 소스 감사.
+ * 선택 카드가 경로 선택 시안(11-18, 목록형)의 선택 표시·도착정보 우선순위를 따르는지 소스 감사.
  * Compose UI 는 기기 없이 픽셀 테스트하기 어려워 배선만 확인한다. 계산·색 값 자체는
  * 다른 단위 테스트가 본다.
  *
@@ -32,28 +32,24 @@ class RouteChoiceSelectionStyleTest {
 
     // Partly AI-generated (Claude)
     @Test
-    fun `선택 경로는 주황 점 없이 주황 테두리만 쓴다`() {
+    fun `선택 경로는 테두리 대신 오른쪽 위 선택 표시로 알린다`() {
         val card = routeCard()
 
-        assertTrue("주황 테두리를 쓰지 않는다", card.contains("color = JitColor.Accent,"))
-        assertTrue("Figma 의 2dp 테두리와 다르다", card.contains("width = 2.dp"))
+        assertTrue("선택 표시(선택 ✓)가 빠졌다", card.contains("\"선택\"") && card.contains("LineIcons.check"))
+        assertTrue("선택 표시는 고른 카드에만", card.contains("if (selected) {"))
+        assertFalse("목록형 시안(11-18)은 카드 테두리를 쓰지 않는다", card.contains("width = 2.dp"))
         assertFalse(
             "자동차·도보·자전거 빠르기 막대는 뺐다(사용자 결정 10-05)",
             card.contains("JitProgressBar"),
-        )
-        assertFalse(
-            "선택 카드에 주황 점이 다시 생겼다",
-            card.contains("if (selected) {\n                Spacer"),
         )
     }
 
     // Partly AI-generated (Claude)
     @Test
-    fun `상세 체크포인트는 선택한 카드에만 펼친다`() {
+    fun `길 안내 문단은 선택한 카드 아래에만 펼친다`() {
         assertTrue(
-            "모든 카드가 펼쳐지면 경로 비교가 불가능해진다",
-            source.contains("if (selected) {\n            val rows = timelineRows(") ||
-                source.contains("if (selected) {\r\n            val rows = timelineRows("),
+            "모든 카드에 안내 문단이 펼쳐지면 경로 비교가 어려워진다",
+            source.contains("if (selected) RouteGuide("),
         )
     }
 

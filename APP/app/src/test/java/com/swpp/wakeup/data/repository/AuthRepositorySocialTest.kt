@@ -110,7 +110,7 @@ class AuthRepositorySocialTest {
     fun `토큰이 틀렸거나 연결이 끊기면 실패를 말한다`() = runTest {
         val invalid = repository(SocialApi { error(401, "social_token_invalid") })
             .socialLogin(SocialProvider.KAKAO, "t")
-        assertEquals(SocialResult.Failure("카카오 로그인을 확인하지 못했다. 다시 시도한다."), invalid)
+        assertEquals(SocialResult.Failure("카카오 로그인을 확인하지 못했어요. 다시 시도해 주세요."), invalid)
 
         val offline = repository(SocialApi { throw IOException("비행기 모드") })
             .socialLogin(SocialProvider.KAKAO, "t")
@@ -156,11 +156,11 @@ class AuthRepositorySocialTest {
             override suspend fun linkSocial(provider: String, body: SocialLinkRequest) = linkError(code, errorCode)
         }
         assertEquals(
-            AccountResult.Failure("이 카카오 계정은 다른 JustInTime 계정에 연결돼 있음"),
+            AccountResult.Failure("이 카카오 계정은 다른 JustInTime 계정에 연결돼 있어요"),
             repository(api(409, "social_already_linked")).linkSocial(SocialProvider.KAKAO, "t"),
         )
         assertEquals(
-            AccountResult.Failure("이미 다른 Google 계정이 연결돼 있음. 먼저 끊어야 함"),
+            AccountResult.Failure("이미 다른 Google 계정이 연결돼 있어요. 먼저 끊어 주세요"),
             repository(api(409, "social_provider_linked")).linkSocial(SocialProvider.GOOGLE, "t"),
         )
     }
@@ -171,14 +171,14 @@ class AuthRepositorySocialTest {
             override suspend fun unlinkSocial(provider: String) = linkError(code, errorCode)
         }
         assertEquals(
-            AccountResult.Failure("유일한 로그인 방법이라 끊을 수 없음"),
+            AccountResult.Failure("하나뿐인 로그인 방법이라 끊을 수 없어요"),
             repository(api(400, "social_last_login_method")).unlinkSocial(SocialProvider.KAKAO),
         )
         val missing = object : FakeAuthApi() {
             override suspend fun unlinkSocial(provider: String) = httpError<SocialUserResponse>(404)
         }
         assertEquals(
-            AccountResult.Failure("연결된 카카오 계정이 없음"),
+            AccountResult.Failure("연결된 카카오 계정이 없어요"),
             repository(missing).unlinkSocial(SocialProvider.KAKAO),
         )
     }

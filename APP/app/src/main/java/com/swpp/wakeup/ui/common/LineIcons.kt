@@ -109,6 +109,29 @@ object LineIcons {
         )
     }
 
+    /** 자동차(경로 선택 수단 탭) */
+    val car: ImageVector by lazy {
+        icon(
+            "Car",
+            "M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5" +
+                "c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2",
+            "M5 17a2 2 0 1 0 4 0a2 2 0 1 0-4 0",
+            "M9 17h6",
+            "M15 17a2 2 0 1 0 4 0a2 2 0 1 0-4 0",
+        )
+    }
+
+    /** 자전거(경로 선택 수단 탭) */
+    val bike: ImageVector by lazy {
+        icon(
+            "Bike",
+            "M2 17.5a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0",
+            "M15 17.5a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0-7 0",
+            "M14 5a1 1 0 1 0 2 0a1 1 0 1 0-2 0",
+            "M12 17.5V14l-3-3 4-3 2 3h2",
+        )
+    }
+
     /** 걷는 구간 */
     val walk: ImageVector by lazy {
         icon(
@@ -175,6 +198,34 @@ object LineIcons {
             "SlidersHorizontal",
             "M21 4h-7", "M10 4H3", "M21 12h-9", "M8 12H3", "M21 20h-5", "M12 20H3",
             "M14 2v4", "M8 10v4", "M16 18v4",
+        )
+    }
+
+    /** 시트 닫기 X(iter4 H2-8, Partly AI-generated (Claude)) */
+    val close: ImageVector by lazy { icon("X", "M18 6L6 18", "M6 6l12 12") }
+
+    /** ④ 타일 [안 가요] — 달력에 x(iter4 H2-6, Partly AI-generated (Claude)) */
+    val calendarX: ImageVector by lazy {
+        icon(
+            "CalendarX",
+            "M8 2v4",
+            "M16 2v4",
+            "M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
+            "M3 10h18",
+            "M10 14l4 4",
+            "M14 14l-4 4",
+        )
+    }
+
+    /** ④ 타일 [일정 삭제] — 휴지통(iter4 H2-6, Partly AI-generated (Claude)) */
+    val trash: ImageVector by lazy {
+        icon(
+            "Trash2",
+            "M3 6h18",
+            "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6",
+            "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2",
+            "M10 11v6",
+            "M14 11v6",
         )
     }
 

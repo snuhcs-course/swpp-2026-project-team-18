@@ -29,6 +29,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -61,6 +63,8 @@ fun SignupScreen(
     passwordConfirm: String,
     /** 두 비밀번호 칸이 같은지. 확인 칸 오른쪽 ✓ 로만 쓴다. */
     passwordsMatch: Boolean,
+    /** 확인 칸에 적힌 것이 위 비밀번호와 다른지. 적는 동안 테두리·라벨이 빨개지고 칸 아래에 이유가 붙는다 */
+    passwordConfirmMismatch: Boolean = false,
     termsAgreed: Boolean,
     loading: Boolean,
     error: String?,
@@ -162,29 +166,44 @@ fun SignupScreen(
         // 검사 자체가 실패한 경우(네트워크 등)만 알린다.
         passwordCheckError?.let { ErrorText(it) }
 
-        JitTextField(
-            label = stringResource(R.string.auth_password_confirm),
-            inputTag = "signup_password_confirm",
-            value = passwordConfirm,
-            onValueChange = onPasswordConfirmChange,
-            isPassword = true,
-            keyboardType = KeyboardType.Password,
-            imeAction = ImeAction.Done,
-            // 키보드의 완료 키 = 가입 버튼. 버튼이 켜져 있을 때만 제출한다.
-            onImeAction = { if (canSubmit) onSubmitClick() },
-            enabled = !loading,
-            passwordToggle = true,
-            trailing = if (passwordsMatch) {
-                {
-                    Text(
-                        text = "✓",
-                        color = JitColor.Green,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            } else null
-        )
+        // 확인 칸은 적는 동안 바로 알려 준다: 다르면 빨간 테두리 + 이유, 완전히 같아지면 초록 ✓
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            JitTextField(
+                label = stringResource(R.string.auth_password_confirm),
+                inputTag = "signup_password_confirm",
+                value = passwordConfirm,
+                onValueChange = onPasswordConfirmChange,
+                isPassword = true,
+                keyboardType = KeyboardType.Password,
+                imeAction = ImeAction.Done,
+                // 키보드의 완료 키 = 가입 버튼. 버튼이 켜져 있을 때만 제출한다.
+                onImeAction = { if (canSubmit) onSubmitClick() },
+                enabled = !loading,
+                passwordToggle = true,
+                isError = passwordConfirmMismatch,
+                trailing = if (passwordsMatch) {
+                    {
+                        Text(
+                            text = "✓",
+                            color = JitColor.Green,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .testTag("signup_password_confirm_ok")
+                                .semantics { contentDescription = "비밀번호가 일치해요" }
+                        )
+                    }
+                } else null
+            )
+            if (passwordConfirmMismatch) {
+                Text(
+                    text = stringResource(R.string.auth_password_confirm_mismatch),
+                    modifier = Modifier.testTag("signup_password_confirm_error"),
+                    color = JitColor.Red,
+                    fontSize = 12.sp
+                )
+            }
+        }
 
         TermsAgreementRow(
             checked = termsAgreed,
@@ -344,6 +363,7 @@ private fun SignupScreenPreview() {
             password = "swpp2026Alarm",
             passwordConfirm = "swpp2026Alarm",
             passwordsMatch = true,
+            passwordConfirmMismatch = false,
             termsAgreed = true,
             loading = false,
             error = null,

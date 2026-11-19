@@ -35,7 +35,7 @@ import com.swpp.wakeup.ui.theme.JitSpace
 /**
  * 비밀번호 재설정 두 화면(Figma F-38 `506:9`, F-39 `507:9`). 가입한 이메일로 6자리 코드를 받고,
  * 코드와 새 비밀번호를 보내면 로그인까지 된다. 서버 계약은 backend-requests.md R3-9(제안)다.
- * 서버가 아직 없으면 오류 줄에 "아직 서버에서 지원하지 않아요" 가 뜬다.
+ * 서버가 아직 없으면 오류 줄에 "아직 지원하지 않는 기능이에요" 가 뜬다.
  *
  * 상태는 [AuthViewModel] 이 갖는다. 여기는 값과 콜백만 받는다.
  */
@@ -78,7 +78,7 @@ fun PasswordResetRequestScreen(
         )
 
         Text(
-            text = "카카오·Google로만 가입한 계정은 비밀번호가 없음",
+            text = "카카오·Google로만 가입한 계정은 비밀번호가 없어요",
             color = JitColor.TextSecondary,
             fontSize = 10.sp,
         )
@@ -140,7 +140,7 @@ fun PasswordResetConfirmScreen(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "${sentTo}로 보낸 코드를 입력함 · 10분 동안 유효",
+            text = "${sentTo}로 보낸 코드를 입력해 주세요 · 10분 동안 쓸 수 있어요",
             color = JitColor.TextSecondary,
             fontSize = 13.sp,
         )

@@ -31,7 +31,7 @@ class PrepReasonTest {
     fun `집이 아닌 출발지에서 직접 켠 일정은 이유가 앞에 붙고 기존 설명이 뒤따른다`() {
         val origin = """"origin_lat":37.50,"origin_lng":127.03,"origin_label":"친구 집","""
         val note = prepNote(""""include_prep":true,$origin""")
-        assertTrue(note, note.startsWith("준비 시간 포함(직접 켬) · 신고 범위 기반"))
+        assertTrue(note, note.startsWith("준비 시간 포함(직접 켬) · 적어 둔 범위 기준"))
         // 켜지 않았거나, 출발지가 집이거나, 저장한 집이면 이유가 없다.
         assertFalse(prepNote(origin).startsWith("준비 시간 포함"))
         assertFalse(prepNote(""""include_prep":true,""").startsWith("준비 시간 포함"))
