@@ -61,6 +61,8 @@ internal fun ContactSheet(
     onSend: suspend (message: String, email: String) -> Inquiry.Outcome,
     onSent: () -> Unit,
     onDismiss: () -> Unit,
+    /** 어디서 열었나(A-7). 신고면 제목 · 안내 · 글자 수가 바뀌고, 보내는 쪽이 첫 줄에 "[문제 신고]" 를 붙인다 */
+    source: Inquiry.Source = Inquiry.Source.CONTACT,
 ) {
     var message by rememberSaveable { mutableStateOf("") }
     var email by rememberSaveable { mutableStateOf(defaultEmail.orEmpty()) }
@@ -69,7 +71,7 @@ internal fun ContactSheet(
     var failure by rememberSaveable { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    val messageError = Inquiry.messageError(message, tried)
+    val messageError = Inquiry.messageError(message, tried, source)
     val emailError = Inquiry.emailError(email, tried)
 
     ModalBottomSheet(
@@ -98,14 +100,17 @@ internal fun ContactSheet(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(Inquiry.TITLE, color = JitColor.TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text(Inquiry.SUBTITLE, color = JitColor.TextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+                Text(
+                    Inquiry.title(source), color = JitColor.TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.testTag("contact_title"),
+                )
+                Text(Inquiry.subtitle(source), color = JitColor.TextSecondary, fontSize = 12.sp, lineHeight = 18.sp)
             }
 
             Field(
                 label = Inquiry.MESSAGE_LABEL,
-                trailing = Inquiry.counter(message),
-                trailingWarn = Inquiry.length(message) > Inquiry.MAX,
+                trailing = Inquiry.counter(message, source),
+                trailingWarn = Inquiry.length(message) > Inquiry.maxFor(source),
                 error = messageError,
                 errorTag = "contact_message_error",
             ) {
@@ -156,7 +161,7 @@ internal fun ContactSheet(
                 loading = sending,
                 onClick = {
                     tried = true
-                    if (!Inquiry.canSend(message, email)) return@JitPrimaryButton
+                    if (!Inquiry.canSend(message, email, source)) return@JitPrimaryButton
                     sending = true
                     failure = null
                     scope.launch {

@@ -72,6 +72,8 @@ fun AlarmTimeSheet(
     goalTau: Double? = null,
     initialMinutesOfDay: Int? = null,
     startMinutesOfDay: Int? = null,
+    /** 지금 알람([initialMinutesOfDay])에 서버가 준 정시 도착 확률. 홈 카드 · 알람 화면과 같은 값이다 */
+    currentProbability: Int? = null,
     loading: Boolean = false,
     saving: Boolean = false,
     error: String? = null,
@@ -110,13 +112,14 @@ fun AlarmTimeSheet(
         supported = customSupported,
         startMinutes = startMinutesOfDay,
     )
-    val percent = match?.probability
-        ?: startMinutesOfDay?.let {
-            AlarmTimeChoice.estimate(
-                options?.distribution,
-                AlarmTimeChoice.availableMinutes(picked, it),
-            )
-        }
+    // 서버가 준 값만 보인다: 지금 알람이면 그 알람의 확률, 세 칸이면 그 칸의 확률, 그 밖이면 비운다(11-19).
+    val percent = AlarmTimeChoice.shownProbability(
+        picked = picked,
+        current = initialMinutesOfDay,
+        currentProbability = currentProbability,
+        cellProbability = match?.probability,
+        startMinutes = startMinutesOfDay,
+    )
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,

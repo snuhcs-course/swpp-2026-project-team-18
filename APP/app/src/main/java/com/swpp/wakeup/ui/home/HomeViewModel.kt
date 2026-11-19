@@ -48,6 +48,7 @@ import com.swpp.wakeup.data.repository.ReportRepository
 import com.swpp.wakeup.data.repository.RoutineRepository
 import com.swpp.wakeup.data.repository.ServerLogout
 import com.swpp.wakeup.domain.model.AlarmPlanView
+import com.swpp.wakeup.domain.model.takeCodePoints
 import com.swpp.wakeup.domain.model.AlarmTimeChoice
 import com.swpp.wakeup.domain.model.ArrivalLedger
 import com.swpp.wakeup.domain.model.Inquiry
@@ -584,6 +585,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 알람 결정 화면이 보고 있는 계획. */
     private val _plan = MutableStateFlow<AlarmPlanView?>(null)
     val plan: StateFlow<AlarmPlanView?> = _plan.asStateFlow()
+
+    // Partly AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19). 계획을 받지 못하면 결정 화면이 끝없이 돌았다.
+    private val _planError = MutableStateFlow<PlanLoadError?>(null)
+    /** 알람 결정 화면이 계획을 받지 못한 이유. 화면은 스피너 대신 오류 카드 + [다시 시도] 를 보인다 */
+    val planError: StateFlow<PlanLoadError?> = _planError.asStateFlow()
+
+    /** 결정 화면 오류 카드의 [다시 시도] */
+    fun retryPlan(eventId: Long) = loadPlan(eventId)
     /** 빠르게 A→B 화면을 열 때 A의 늦은 응답이 B를 덮지 못하게 한다. */
     private var planLoadGeneration: Long = 0L
 
@@ -798,6 +807,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 진행 중인 서버 버전 확인. 홈을 여러 번 불러와도 `/api/health` 를 겹쳐 부르지 않는다. `init` 보다 앞에 둔다 */
     private var recurrenceScopeJob: Job? = null
 
+    /** 이 기기가 서버의 저장한 집을 바꾼 판. 바꾸기 전에 받기 시작한 목록이 덮지 않게 한다([com.swpp.wakeup.domain.model.savedHomesSyncApplies]). init 이 부르는 syncSavedHomes 가 쓰므로 init 위에 둔다 */
+    private var savedHomesVersion = 0L
+
     init {
         // 화면보다 오래 사는 서비스가 저장한 최신 성공 결과를 먼저 복원한다.
         // 이후 두 Flow 수집기는 Activity가 백그라운드여도 ViewModel이 살아 있는
@@ -875,12 +887,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     // 배포가 뒤처졌다고 확인된 상태면 그 사실을 함께 말한다.
                     // 그러지 않으면 "불러오지 못했습니다" 만 남고, 그 증상은 앱
                     // 버그와 구별되지 않는다. 실제로 팀이 그 방향으로 시간을 썼다.
+                    // 화면에는 사용자 말만 쓴다. 버전 · 배포 이야기는 ServerWarmup 이 로그에 남긴다(H2-1, 11-19).
                     val message = if (ServerWarmup.serverBehind) {
-                        result.message + "\n\n" +
-                            ServerVersion.behindMessage(
-                                BuildConfig.VERSION_NAME,
-                                ServerWarmup.serverVersion,
-                            )
+                        result.message + "\n\n" + ServerVersion.BEHIND_USER_LINE
                     } else {
                         result.message
                     }
@@ -904,6 +913,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         homeData = data
+        val previousHome = _state.value.homePlace
         _state.update {
             it.copy(
                 loading = false,
@@ -920,6 +930,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 offlineAgeLabel = data.ageLabel,
             )
         }
+        // 집이 옮겨졌으면 쓰다 만 일정의 집 끝점도 맞춘다. (Partly AI-generated (Claude), fix/iter4-he-bugs 이식)
+        reconcileDraftsWithHome(previousHome, _state.value.homePlace)
         renderHome()
         maybeAskOnboarding(data)
         syncGuideSeen(data)
@@ -1500,10 +1512,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 도움말 › [문의하기] 의 글을 서버로 보낸다([Inquiry]). 예외를 밖으로 던지지 않고 결과로 돌려준다 — 실패하면
      * 시트가 적은 글을 그대로 둔 채 이유를 보인다. 앱 버전과 기기 종류를 함께 보낸다(개인을 가리키는 값은 없다).
      */
-    suspend fun sendInquiry(message: String, email: String): Inquiry.Outcome {
-        val body = InquiryRequest(
+    suspend fun sendInquiry(
+        message: String,
+        email: String,
+        source: Inquiry.Source = Inquiry.Source.CONTACT,
+    ): Inquiry.Outcome {
+        val body = Inquiry.requestOf(
             message = message,
-            replyEmail = email,
+            email = email,
+            source = source,
             appVersion = BuildConfig.VERSION_NAME,
             device = "${Build.MANUFACTURER} ${Build.MODEL} · Android ${Build.VERSION.RELEASE}",
         )
@@ -1526,7 +1543,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun openChangePassword() {
         passwordChangeCheckJob?.cancel()
         _passwordChange.value = PasswordChangeState()
-        _nav.update { it.copy(stack = it.stack + AppRoute.ChangePassword, forward = true) }
+        _nav.update { it.push(AppRoute.ChangePassword) }
     }
 
     fun onCurrentPasswordChange(value: String) =
@@ -1586,7 +1603,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             when (val result = authRepository.requestEmailVerify()) {
                 is AuthRepository.EmailVerifyResult.Sent -> {
                     _emailVerify.value = EmailVerifyState(sentTo = _state.value.accountEmail)
-                    _nav.update { it.copy(stack = it.stack + AppRoute.VerifyEmail, forward = true) }
+                    _nav.update { it.push(AppRoute.VerifyEmail) }
                 }
                 is AuthRepository.EmailVerifyResult.AlreadyVerified,
                 is AuthRepository.EmailVerifyResult.Verified -> {
@@ -1751,7 +1768,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // --- 화면 이동 --------------------------------------------------------
 
     fun openAlarmDecision(eventId: Long) {
-        _nav.update { it.copy(stack = it.stack + AppRoute.AlarmDecision(eventId), forward = true) }
+        _nav.update { it.push(AppRoute.AlarmDecision(eventId)) }
         loadPlan(eventId)
     }
 
@@ -2494,19 +2511,19 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // Partly AI-generated (Claude)
     /** 내 정보 › 설정. "로그인 연결" 에 쓸 로그인 방법을 열 때마다 새로 받는다(다른 기기에서 바꿨을 수 있다) */
     fun openMeSettings() {
-        _nav.update { it.copy(stack = it.stack + AppRoute.Settings, forward = true) }
+        _nav.update { it.push(AppRoute.Settings) }
         loadLoginMethods()
     }
 
     /** 내 정보 › 집 주소. 다른 집 목록을 서버와 맞춘다 */
     fun openHomes() {
-        _nav.update { it.copy(stack = it.stack + AppRoute.Homes, forward = true) }
+        _nav.update { it.push(AppRoute.Homes) }
         syncSavedHomes()
     }
 
     /** 내 정보 › 알림·권한. 권한은 화면이 기기에서 바로 읽는다 */
     fun openPermissions() {
-        _nav.update { it.copy(stack = it.stack + AppRoute.Permissions, forward = true) }
+        _nav.update { it.push(AppRoute.Permissions) }
     }
 
     // --- 첫 실행 안내 · 홈 코치마크 (iter4 H2-4) ---------------------------
@@ -2516,7 +2533,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun replayIntro() {
         if (_nav.value.current == AppRoute.Intro) return
         showCoachmarkNext()
-        _nav.update { it.copy(stack = it.stack + AppRoute.Intro, forward = true) }
+        _nav.update { it.push(AppRoute.Intro) }
     }
 
     /**
@@ -2636,7 +2653,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openHomeSetup() {
         primeCurrentLocation()
-        _nav.update { it.copy(stack = it.stack + AppRoute.HomeSetup, forward = true) }
+        _nav.update { it.push(AppRoute.HomeSetup) }
     }
 
     // --- 아침 기록 --------------------------------------------------------
@@ -2741,7 +2758,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun openMorning() {
         reloadMorning()
         if (_morning.value == null) return
-        _nav.update { it.copy(stack = it.stack + AppRoute.MorningProgress, forward = true) }
+        _nav.update { it.push(AppRoute.MorningProgress) }
     }
 
     /**
@@ -2872,7 +2889,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** ⑨ 상세 리포트. ⑧ 이 이미 받은 주간 응답을 보므로 새로 부르지 않는다. */
     fun openReportDay(date: LocalDate, eventId: Long?) {
         _nav.update {
-            it.copy(stack = it.stack + AppRoute.ReportDay(date, eventId), forward = true)
+            it.push(AppRoute.ReportDay(date, eventId))
         }
     }
 
@@ -2911,7 +2928,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val calendarImport: StateFlow<CalendarImportState> = _calendarImport.asStateFlow()
 
     fun openCalendarImport() {
-        _nav.update { it.copy(stack = it.stack + AppRoute.CalendarImport, forward = true) }
+        _nav.update { it.push(AppRoute.CalendarImport) }
         _calendarImport.value = CalendarImportState(loading = true)
         loadCalendarCandidates()
     }
@@ -2968,15 +2985,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             if (generation != importLoadGeneration) return@launch
             when (result) {
                 is EventRepository.Result.Success -> {
+                    // 다시 읽어도 사용자가 고른 · 끈 것을 지킨다(fix/iter4-he-bugs 이식)
+                    val kept = com.swpp.wakeup.domain.model.keepSelections(result.data, _calendarImport.value.candidates)
                     _calendarImport.update {
                         it.copy(
                             loading = false,
                             error = null,
-                            candidates = result.data,
+                            candidates = kept,
                             linkedCount = linked.size,
                         )
                     }
-                    resolvePlaces(result.data)
+                    resolvePlaces(kept)
                 }
 
                 is EventRepository.Result.Failure -> _calendarImport.update {
@@ -3181,7 +3200,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (!state.canImport) return
         val selected = state.candidates.filter { it.selected }
 
-        _calendarImport.update { it.copy(importing = true, error = null) }
+        _calendarImport.update { it.copy(importing = true, error = null, importError = null) }
         viewModelScope.launch {
             when (val result = repository.importCalendar(selected)) {
                 is EventRepository.Result.Success -> {
@@ -3202,7 +3221,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 is EventRepository.Result.Failure -> _calendarImport.update {
-                    it.copy(importing = false, error = result.message)
+                    it.copy(importing = false, importError = result.message)
                 }
             }
         }
@@ -3242,7 +3261,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 사실을 안내한다.
      */
     fun openRoutineEditor() {
-        _nav.update { it.copy(stack = it.stack + AppRoute.RoutineEditor, forward = true) }
+        _nav.update { it.push(AppRoute.RoutineEditor) }
         _routine.value = RoutineEditorState(loading = true)
         loadBlocks(eventId = null)
     }
@@ -3274,7 +3293,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 ?.let { "${it.startTime} ${it.title}" }
 
         _nav.update {
-            it.copy(stack = it.stack + AppRoute.EventBlocks(eventId), forward = true)
+            it.push(AppRoute.EventBlocks(eventId))
         }
         _routine.value = RoutineEditorState(
             loading = true,
@@ -3291,6 +3310,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 routines.eventBlocks(eventId)
             }
+            // 받는 동안 다른 블록 화면을 열었으면 버린다(그 화면은 제 목록을 따로 받는다). (Partly AI-generated (Claude))
+            if (!_routine.value.acceptsBlocksFor(eventId)) return@launch
             when (result) {
                 is RoutineRepository.RoutineResult.Success -> _routine.update {
                     it.copy(
@@ -3580,7 +3601,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val add = _add.value
         if (!add.canPickRoute(_state.value.hasHome, _state.value.homePlace)) return
         val place = add.selectedPlace ?: return
-        _nav.update { it.copy(stack = it.stack + AppRoute.RouteChoice, forward = true) }
+        _nav.update { it.push(AppRoute.RouteChoice) }
 
         val cached = _routeChoice.value?.choice
         if (cached != null) {
@@ -3748,7 +3769,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             selected = selected,
             currentLocation = rememberedLocation(MAP_LOCATION_MAX_AGE_MS),
         )
-        _nav.update { it.copy(stack = it.stack + AppRoute.MapPick, forward = true) }
+        _nav.update { it.push(AppRoute.MapPick) }
         // 화면 진입 자체가 GPS 고정밀 측정을 강제하지는 않는다. 값이 없으면
         // 배터리 부담이 작은 선점만 하고, 위치 버튼을 누른 순간 getFresh로
         // 정확한 fix를 받아 같은 탭 안에서 이동한다.
@@ -4041,6 +4062,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         MapTarget.ORIGIN -> _add.update { it.copy(originPlace = next) }
     }
 
+    /** 후보 요청 세대. 비우거나 새로 요청하면 지난 응답은 쓰지 않는다([candidatesApply]) */
+    private var routeChoiceGeneration = 0L
+
     /** 후보 조회 한 곳. 최초 진입·재시도·출발지 변경이 모두 이걸 쓴다. */
     private suspend fun loadCandidates(
         place: PlaceSearchItem,
@@ -4050,7 +4074,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _routeChoice.update {
             (it ?: RouteState()).copy(loading = true, error = null, retryable = true)
         }
-        when (val result = repository.routeCandidates(place, origin)) {
+        // 마지막 요청의 응답만 쓴다(fix/iter4-he-bugs 이식, 11-19). 받는 동안 도착지 · 출발지를 바꾸면 후보를 비우는데,
+        // 늦게 온 응답이 비운 자리를 이전 구간의 후보로 다시 채웠다.
+        val generation = ++routeChoiceGeneration
+        val result = repository.routeCandidates(place, origin)
+        if (!com.swpp.wakeup.ui.home.candidatesApply(_routeChoice.value == null, generation, routeChoiceGeneration)) return
+        when (result) {
             is EventRepository.Result.Success -> _routeChoice.update { current ->
                 val base = current ?: RouteState()
                 val choice = if (keepSelection) {
@@ -4157,6 +4186,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         goBack()
     }
 
+    /** 저장을 마친 [match] 화면만 닫는다([NavState.close]). 그 사이 위에 다른 화면이 열렸으면 그 화면은 그대로다 */
+    fun closeScreen(match: (AppRoute) -> Boolean) {
+        _nav.update { it.close(match) }
+    }
+
     fun goBack() {
         // 스택이 깊으면 하나 빼고, 홈이 아닌 탭의 첫 화면이면 홈 탭으로 간다(iter4 H2-2).
         val before = _nav.value
@@ -4180,6 +4214,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val previousMap = _routeMap.value?.takeIf { it.eventId == eventId }
         val generation = ++planLoadGeneration
         _plan.value = null
+        _planError.value = null
         // 다른 일정의 지도가 남아 있으면 안 된다. 계획을 받기 전에 비운다.
         _routeMap.value = null
         primeCurrentLocation()
@@ -4204,7 +4239,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
                 is EventRepository.Result.Failure -> {
                     if (generation != planLoadGeneration) return@launch
-                    _state.update { it.copy(error = result.message) }
+                    // 예전에는 홈의 오류 줄에만 적어서 결정 화면은 스피너로 남았다
+                    _planError.value = PlanLoadError(eventId, planLoadReasonOf(result))
                 }
             }
         }
@@ -4806,6 +4842,28 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _add.update { if (it.failureNotice?.id == id) it.copy(failureNotice = null) else it }
     }
 
+    // AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+    /**
+     * 계정의 집이 옮겨졌으면([homeMoved]) 쓰다 만 일정을 새 집에 맞춘다([afterHomeMoved]). 설정의 "변경" · "기본으로"
+     * 뒤의 새로고침과 다른 기기에서 바꾼 집을 받은 새로고침이 모두 여기로 온다. 일정 수정 폼은 건드리지 않는다 — 서버의
+     * 지금 값으로 열고 바뀐 필드만 보낸다.
+     *
+     * 받아 둔 경로 후보가 예전 집 기준이면 버리고, 경로 선택 화면이 열려 있으면 닫는다(다시 열면 새 집 기준으로 받는다).
+     *
+     * 처음 받을 때는 예전 집을 몰라 [homeMoved] 가 false 이므로, `init` 의 첫 불러오기에서 아래쪽 프로퍼티를 건드리지 않는다.
+     */
+    private fun reconcileDraftsWithHome(previous: PlaceSearchItem?, next: PlaceSearchItem?) {
+        val home = next?.takeIf { homeMoved(previous, it) } ?: return
+        val before = _add.value
+        _add.update { if (it.isEditing) it else it.afterHomeMoved(home) }
+        if (routeCacheStaleAfterHomeMove(_routeChoice.value, formChanged = _add.value != before)) {
+            routeChoiceGeneration++
+            _routeChoice.value = null
+            _nav.update { it.close { r -> r == AppRoute.RouteChoice } }
+        }
+        pendingAddDraft = pendingAddDraft?.afterHomeMoved(home)
+    }
+
     fun resetAdd() {
         _addSheet.value = false
         _add.value = AddState()
@@ -4906,6 +4964,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun selectAddDestination(item: PlaceSearchItem?, isHome: Boolean) {
+        // 같은 도착지를 다시 골랐으면 아무것도 지우지 않는다(fix/iter4-he-bugs 이식, 11-19). 예전에는 주황인 [집] 을
+        // 다시 눌러도 고른 경로가 지워졌다. 검색 결과 목록만 닫는다.
+        if (_add.value.sameDestination(item, isHome)) {
+            _add.update { it.copy(place = it.place.copy(results = emptyList())) }
+            return
+        }
         // 집으로 바꿀 때만 바꾸기 전 값을 한 번 보관한다(H2-9). 잘못 눌러도 [되돌리기] 로 돌아간다.
         val undo = if (isHome) DestinationUndo.capture(_add.value, ++destinationUndoSeq) else null
         _add.update {
@@ -4977,7 +5041,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 출발지가 달라지면 소요시간과 노선이 전부 달라지므로 고른 경로를 버린다.
      * 남겨 두면 없는 노선 key 를 들고 일정을 만들어 `route_failed` 가 된다.
      */
-    fun onAddOriginSelected(item: PlaceSearchItem?) {
+    fun onAddOriginSelected(item: PlaceSearchItem?, placeId: Long? = null) {
+        // 같은 출발지를 다시 골랐으면 경로를 그대로 둔다(fix/iter4-he-bugs 이식, 11-19). 검색 칸 · 현재 위치 안내만 정리한다.
+        if (_add.value.sameOrigin(item, placeId)) {
+            _add.update { it.copy(originPlace = PlaceSearch(), originNotice = null, originLocating = false) }
+            return
+        }
         _add.update {
             it.copy(
                 origin = item,
@@ -4985,6 +5054,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 originPlaceId = null,
                 originPlace = PlaceSearch(),
                 originNotice = null,
+                // 직접 골랐으면 현재 위치 기다리기도 끝난다. 늦게 온 위치가 고른 출발지를 덮지 않는다(fix/iter4-he-bugs 이식)
+                originLocating = false,
                 routeKey = null,
                 routeLabel = null,
                 routeMinutes = null,
@@ -5054,7 +5125,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 넣은 채로 둔다(`include_prep=true`). 사용자가 끌 수 있다.
      */
     fun onAddOriginSavedHome(home: SavedHome) {
-        onAddOriginSelected(home.toPlace())
+        val same = _add.value.sameOrigin(home.toPlace(), home.serverId)
+        onAddOriginSelected(home.toPlace(), home.serverId)
+        if (same) return
         // 서버에 저장한 집이면 id 를 함께 보낸다. 서버는 저장한 집 출발을 집으로 쳐서 준비 시간을 넣는다.
         _add.update { it.copy(includePrep = true, originPlaceId = home.serverId) }
     }
@@ -5079,9 +5152,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         savedHomesSyncJob = viewModelScope.launch {
             val local = runCatching { savedHomesStore.all() }.getOrDefault(emptyList())
             val upload = local.isNotEmpty() && !savedHomesStore.synced()
+            val startVersion = savedHomesVersion
             val result = if (upload) savedPlaces.bulk(local) else savedPlaces.list()
             when (result) {
                 is SavedPlacesResult.Ok -> {
+                    // 받는 동안 이 기기에서 기본으로 · 삭제 · 추가를 했으면 그 전의 목록이라 버린다(fix/iter4-he-bugs 이식)
+                    if (!com.swpp.wakeup.domain.model.savedHomesSyncApplies(startVersion, savedHomesVersion)) return@launch
                     // 로그아웃 중이라 쓰지 못하면 아무것도 바꾸지 않는다(다음 로그인이 새로 맞춘다).
                     if (!savedHomesStore.replaceSynced(result.homes)) return@launch
                     savedPlacesMode = SavedPlacesMode.SERVER
@@ -5133,7 +5209,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onHomeLabelChange(value: String) =
-        _homeSetup.update { it.copy(label = value.take(SavedHomes.LABEL_MAX), error = null, labelError = null) }
+        _homeSetup.update { it.copy(label = value.takeCodePoints(SavedHomes.LABEL_MAX), error = null, labelError = null) }
 
     fun removeSavedHome(id: String) {
         if (blockedByFirstUpload()) return
@@ -5158,6 +5234,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.savedHomeBusyId != null) return
         _state.update { it.copy(savedHomeBusyId = id) }
         viewModelScope.launch {
+            savedHomesVersion++
             when (val result = savedPlaces.delete(serverId)) {
                 is SavedPlacesResult.Ok -> {
                     val next = SavedHomes.remove(_state.value.savedHomes, id)
@@ -5226,6 +5303,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private fun makeSavedHomeDefaultOnServer(home: SavedHome, serverId: Long) {
         _state.update { it.copy(savedHomeBusyId = home.id) }
         viewModelScope.launch {
+            savedHomesVersion++
             when (val result = savedPlaces.makeDefault(serverId)) {
                 is SavedPlacesResult.Ok -> {
                     savedHomesStore.replaceSynced(result.homes)
@@ -5284,9 +5362,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 일정 수정 화면을 연다(todo §2 "알람 결정 후 수정 UI", event-edit-api.md). ⑫ 를 수정 모드로
      * 다시 쓴다. 서버의 지금 값을 채워 두고 저장할 때 바뀐 필드만 보낸다.
      */
+    // Partly AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19). 서버 값을 받는 동안 [일정 수정] 을 막는다. 표시가
+    // 없으면 다시 누르게 되고, 받을 때마다 수정 화면이 한 번 더 쌓였다.
+    private val _editLoadingId = MutableStateFlow<Long?>(null)
+    val editLoadingId: StateFlow<Long?> = _editLoadingId.asStateFlow()
+
     fun openEditEvent(eventId: Long) {
-        if (_add.value.submitting) return
+        if (_add.value.submitting || _editLoadingId.value != null) return
+        _editLoadingId.value = eventId
         viewModelScope.launch {
+          try {
             // 반복 일정의 범위 수정은 서버 버전을 보고 연다(iter4 A2). 보통 홈을 불러올 때 이미 확인했다.
             // 아직 모르면 일정 불러오기를 기다리게 하지 않고 따로 확인해 나중에 연다(서버가 깨는 데 수십 초).
             // 확인이 화면보다 먼저 끝나면 아래에서 화면을 만들 때 그 값을 읽는다.
@@ -5341,9 +5426,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     _routeChoice.value = null
                     loadEventTags()
-                    _nav.update { it.copy(stack = it.stack + AppRoute.EditEvent(eventId), forward = true) }
+                    _nav.update { it.push(AppRoute.EditEvent(eventId)) }
                 }
             }
+          } finally {
+              _editLoadingId.value = null
+          }
         }
     }
 
@@ -5517,9 +5605,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun useCurrentLocationForAddOrigin() {
         if (_add.value.originLocating) return
+        // 위치를 물어본 폼(fix/iter4-he-bugs 이식, 11-19). 위치는 10초까지 기다리고 주소도 받아야 해서, 그 사이 저장하거나
+        // 다른 일정의 수정 화면을 열 수 있다. 예전에는 결과가 그때 열린 폼에 들어가, 고친 적 없는 일정의 출발지와 경로가
+        // 바뀌었다. 같은 폼이 아직 기다릴 때만 쓴다. 출발지를 직접 고르면 기다리기도 끝난다.
+        val formId = _add.value.clientRequestId
         _add.update { it.copy(originLocating = true, originNotice = null) }
         viewModelScope.launch {
             val here = detectCurrentPlace()
+            val current = _add.value
+            if (current.clientRequestId != formId || !current.originLocating) return@launch
             if (here == null) {
                 _add.update {
                     it.copy(
@@ -5679,16 +5773,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** 일정을 지운다. 반복 일정에서 [EventScope.FOLLOWING] 을 고르면 이 회차부터 반복을 끝낸다(iter4 A2) */
-    fun deleteEvent(id: Long, scope: EventScope? = null) {
-        viewModelScope.launch {
-            when (val result = repository.deleteEvent(id, scope)) {
-                is EventRepository.Result.Success -> {
-                    goHome()
-                    refresh()
-                }
+    // Partly AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19). 지우는 동안 막는다: 막지 않으면 누를 때마다 삭제 요청이
+    // 갔다. 실패는 홈의 오류 줄이 아니라 지금 화면의 스낵바로 알린다(예전에는 결정 화면에서 아무 일도 없어 보였다).
+    private val _deletingEventId = MutableStateFlow<Long?>(null)
+    val deletingEventId: StateFlow<Long?> = _deletingEventId.asStateFlow()
 
-                is EventRepository.Result.Failure ->
-                    _state.update { it.copy(error = result.message) }
+    fun deleteEvent(id: Long, scope: EventScope? = null) {
+        if (_deletingEventId.value != null) return
+        _deletingEventId.value = id
+        viewModelScope.launch {
+            try {
+                when (val result = repository.deleteEvent(id, scope)) {
+                    is EventRepository.Result.Success -> {
+                        goHome()
+                        refresh()
+                    }
+
+                    is EventRepository.Result.Failure -> notify("일정을 삭제하지 못했어요. ${result.message}")
+                }
+            } finally {
+                _deletingEventId.value = null
             }
         }
     }
@@ -5738,7 +5842,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             minutes = _state.value.onboardingPrepMin?.toString().orEmpty(),
             fromSettings = true,
         )
-        _nav.update { it.copy(stack = it.stack + AppRoute.PrepOnboarding, forward = true) }
+        _nav.update { it.push(AppRoute.PrepOnboarding) }
     }
 
     fun resetPrepOnboarding() {
@@ -5980,6 +6084,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 address = home.address,
                 clientUuid = home.id,
             )
+            savedHomesVersion++
             when (val result = savedPlaces.create(input)) {
                 is SavedPlacesResult.Ok -> {
                     val next = SavedHomes.merge(_state.value.savedHomes, result.homes.first())

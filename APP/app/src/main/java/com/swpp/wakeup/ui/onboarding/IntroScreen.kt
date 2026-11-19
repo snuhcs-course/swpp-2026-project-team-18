@@ -491,7 +491,7 @@ private fun LearningIllustration() {
         modifier = Modifier.fillMaxWidth().padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        IllustrationCard(title = "한 주 기록", meta = "정시 4번 · 늦음 1번") {
+        IllustrationCard(title = "한 주 기록", meta = "정시 4번 · 늦은 날 1번") {
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 WEEK.forEach { (day, result) ->
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -502,7 +502,7 @@ private fun LearningIllustration() {
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Legend(DayResult.ON_TIME, "정시")
-                Legend(DayResult.LATE, "늦음")
+                Legend(DayResult.LATE, "늦은 날")
                 Legend(DayResult.NONE, "일정 없음")
             }
         }

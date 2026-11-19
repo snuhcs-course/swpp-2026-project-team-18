@@ -11,19 +11,6 @@ import org.junit.Test
  */
 class LateAlarmProbabilityTest {
 
-    /** 서버 risk-options 와 같은 모양: 0분부터 10칸, 50 ~ 70분에 몰린 분포 */
-    private val dist = DurationDistributionView(
-        bins = listOf(
-            DurationDistributionView.Bin(0, 50, 0.0),
-            DurationDistributionView.Bin(50, 60, 0.5),
-            DurationDistributionView.Bin(60, 70, 0.5),
-        ),
-        p50Minutes = 60,
-        p90Minutes = 68,
-        windowDays = null,
-        source = "model",
-    )
-
     private val nine = 9 * 60
 
     @Test
@@ -44,23 +31,16 @@ class LateAlarmProbabilityTest {
 
     @Test
     fun `남은 시간이 0 이하면 분포와 상관없이 0 퍼센트`() {
-        assertEquals(0, AlarmTimeChoice.estimate(dist, 0))
-        assertEquals(0, AlarmTimeChoice.estimate(dist, -30))
-        assertEquals(0, AlarmTimeChoice.estimate(null, -30))
-        assertEquals(
-            0,
-            AlarmTimeChoice.estimate(dist, AlarmTimeChoice.availableMinutes(9 * 60 + 30, nine)),
-        )
+        assertEquals(0, AlarmTimeChoice.shownProbability(nine, null, null, cellProbability = 90, startMinutes = nine))
+        assertEquals(0, AlarmTimeChoice.shownProbability(nine + 30, nine + 30, 90, cellProbability = 90, startMinutes = nine))
         assertEquals("0%", ProbabilityRule.displayLabel(0))
         assertEquals(ProbabilityRule.LATE_WARNING, ProbabilityRule.warning(0))
     }
 
     @Test
-    fun `분포 최소값보다 적게 남으면 0 - 그 안은 누적값 - 넘치면 100`() {
-        assertEquals(0, AlarmTimeChoice.estimate(dist, 40))
-        assertEquals(25, AlarmTimeChoice.estimate(dist, 55))
-        assertEquals(100, AlarmTimeChoice.estimate(dist, 90))
-        assertNull("분포가 없고 시간이 남으면 모른다", AlarmTimeChoice.estimate(null, 30))
+    fun `시작 전 시각은 서버가 준 값만 보이고 없으면 비운다`() {
+        assertNull(AlarmTimeChoice.shownProbability(nine - 30, null, null, cellProbability = null, startMinutes = nine))
+        assertEquals(82, AlarmTimeChoice.shownProbability(nine - 30, null, null, cellProbability = 82, startMinutes = nine))
     }
 
     @Test

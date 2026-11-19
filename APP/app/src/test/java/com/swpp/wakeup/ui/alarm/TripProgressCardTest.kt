@@ -183,7 +183,7 @@ class TripProgressCardTest {
             assertEquals("도착 예정", trailingLine(stage, null, null))
         }
         assertEquals("알람 꺼짐", statusLine(TripStage.ALARM_OFF, null))
-        assertEquals("출발 확인 안 됨", statusLine(TripStage.DEPARTURE_UNKNOWN, null))
+        assertEquals("출발을 확인하지 못했어요", statusLine(TripStage.DEPARTURE_UNKNOWN, null))
         assertEquals("알람이 꺼진 일정이라 이동을 기록하지 않아요", stageHint(TripStage.ALARM_OFF))
         assertFalse(
             "출발을 확인하지 못했는데 준비 중이라고 말한다",

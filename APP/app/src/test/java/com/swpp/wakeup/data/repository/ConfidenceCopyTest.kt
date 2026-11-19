@@ -3,6 +3,7 @@ package com.swpp.wakeup.data.repository
 
 import com.google.gson.Gson
 import com.swpp.wakeup.data.remote.AlarmPlanDto
+import com.swpp.wakeup.data.remote.ringProbability
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -50,5 +51,18 @@ class ConfidenceCopyTest {
         val view = confidence("observed", "kakao_transit", probability = 92)
         assertEquals(92, view.percent)
         assertEquals("정시 도착 확률 92%", view.headline)
+    }
+
+    // AI-generated (Claude) — 11-19 세 화면 확률 통일
+    @Test
+    fun `시각을 바꾼 알람은 홈 · 알람 화면 · 시트가 같은 서버 확률 하나를 쓴다`() {
+        // 서버가 처음 추천한 알람은 100%, 사용자가 바꾼 9:21 알람은 97%
+        val dto = gson.fromJson(
+            """{"status":"ok","alarm_at":"2026-11-23T08:30:00+09:00","on_time_probability":100,""" +
+                """"effective_alarm_at":"2026-11-23T09:21:00+09:00","effective_on_time_probability":97}""",
+            AlarmPlanDto::class.java,
+        )
+        assertEquals(97, dto.ringProbability) // 홈 카드 · 시트의 지금 알람
+        assertEquals(97, dto.toConfidence().percent) // 알람 화면
     }
 }

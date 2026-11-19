@@ -77,6 +77,11 @@ data class CalendarImportState(
     val permissionDenied: Boolean = false,
     val candidates: List<ImportCandidate> = emptyList(),
     val error: String? = null,
+    /**
+     * 가져오기(보내기)가 실패한 이유. 목록을 읽지 못한 [error] 와 나눈다 — 예전에는 같은 칸이라 목록 위 오류 카드에 떴고,
+     * 그 카드의 [다시 시도] 는 가져오기가 아니라 목록 읽기를 다시 했다. 버튼 위에 한 줄로 둔다(fix/iter4-he-bugs 이식).
+     */
+    val importError: String? = null,
     /** "3건 추가, 1건 갱신" */
     val resultLabel: String? = null,
     /** 가져오기가 끝나 화면을 닫아야 하는 상태 */
@@ -97,9 +102,20 @@ data class CalendarImportState(
 ) {
     val selectedCount: Int get() = candidates.count { it.selected }
 
+    // Partly AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+    /**
+     * 고른 줄 중 장소를 찾는 중인 것이 있는가. 그 사이에 보내면 그 줄은 장소 없이 가서 알람이 잡히지 않았다. 끈 줄은
+     * 보내지 않으므로 기다리지 않는다.
+     */
+    val waitingForPlaces: Boolean get() = candidates.any { it.selected && it.resolving }
+
     val canImport: Boolean
         get() = !importing && !loading && selectedCount > 0 &&
-            selectedCount <= MAX_PER_REQUEST
+            selectedCount <= MAX_PER_REQUEST && !waitingForPlaces
+
+    /** 장소를 기다리느라 버튼이 꺼졌을 때 버튼 위 안내. null 이면 기다릴 것이 없다 */
+    val waitingNote: String?
+        get() = if (waitingForPlaces) "고른 일정의 장소를 찾고 있어요. 다 찾으면 가져올 수 있어요" else null
 
     /** 상한을 넘겼을 때의 안내. null 이면 문제없다 */
     val tooManyNote: String?
@@ -126,5 +142,26 @@ data class CalendarImportState(
          * 때문이다.
          */
         const val MAX_PER_REQUEST = 50
+    }
+}
+
+// Partly AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+/**
+ * 다시 읽은 후보 [fresh] 에 앞 목록 [previous] 의 선택을 옮긴다. 같은 일정은 externalId 로 찾는다.
+ *
+ * 캘린더를 하나 더 켜거나 "다시 시도" 로 목록을 다시 읽으면 후보가 기본 선택으로 새로 만들어져, 사용자가 일부러 끈 일정이
+ * 다시 켜진 채 가져와졌다. 앞 목록에 없던 일정은 기본 선택을 따른다. 끈 것은 늘 옮기고, 켠 것은 이미 가져왔는지가 그대로일
+ * 때만 옮긴다(켜짐은 기본값일 수 있다).
+ */
+fun keepSelections(fresh: List<ImportCandidate>, previous: List<ImportCandidate>): List<ImportCandidate> {
+    if (previous.isEmpty()) return fresh
+    val before = previous.associateBy { it.externalId }
+    return fresh.map { candidate ->
+        val prev = before[candidate.externalId]
+        if (prev != null && (!prev.selected || prev.alreadyImported == candidate.alreadyImported)) {
+            candidate.copy(selected = prev.selected)
+        } else {
+            candidate
+        }
     }
 }

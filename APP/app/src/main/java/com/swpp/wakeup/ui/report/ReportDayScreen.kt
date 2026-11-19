@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -342,7 +343,7 @@ private fun DurationRow(row: PlanActualRow) {
         BarLine(
             fraction = row.actualFraction,
             color = toneColor(row.actualTone),
-            label = row.actualLabel ?: "실제 측정 안 됨",
+            label = row.actualLabel ?: "실제는 재지 못했어요",
             labelColor = if (row.actualLabel == null) JitColor.TextSecondary else JitColor.TextPrimary,
             bold = row.actualLabel != null,
         )
@@ -366,8 +367,10 @@ private fun BarLine(fraction: Float?, color: Color, label: String, labelColor: C
             color = labelColor,
             fontSize = 10.sp,
             fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
-            modifier = Modifier.width(64.dp),
+            // 최소 64dp, 긴 라벨("실제는 재지 못했어요")이면 막대가 줄어든다. 고정 폭은 라벨 끝을 잘랐다(11-19).
+            modifier = Modifier.widthIn(min = 64.dp),
             maxLines = 1,
+            softWrap = false,
         )
     }
 }
@@ -381,7 +384,7 @@ private fun TimeRow(row: PlanActualRow, actualColor: Color, showDelta: Boolean) 
             append(row.plannedLabel)
             val actual = row.actualLabel
             if (actual == null) {
-                append(" · 실제 측정 안 됨")
+                append(" · 실제는 재지 못했어요")
             } else {
                 append(" → ")
                 withStyle(SpanStyle(color = actualColor, fontWeight = FontWeight.Bold)) {

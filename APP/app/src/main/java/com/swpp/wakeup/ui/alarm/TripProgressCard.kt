@@ -85,6 +85,10 @@ fun TripProgressCard(
     freshness: String?,
     /** "도착했어요". null 이면 그리지 않는다. 가는 중일 때만 보인다([TripStage.canMarkArrived]) */
     onArrive: (() -> Unit)? = null,
+    /** 이동을 기록할 수 있는가(정확한 위치 권한). false 면 아래 줄이 추적을 약속하지 않고 이유를 말한다(fix/iter4-he-bugs 이식) */
+    canTrack: Boolean = true,
+    /** [canTrack] 이 false 인 이유가 대략적인 위치만 허용한 것인가 */
+    coarseOnly: Boolean = false,
 ) {
     // 11-17 사용자: 바뀐 UI(④ · 알람 추가 시트)와 맞춘다 — 카드 여백 16, 제목 13sp 굵게, 본문 12sp, 막대는 ④ 와 같은
     // 높이 10 · 둥근 끝, 버튼은 회색 채움, 높이는 최소값만.
@@ -187,7 +191,7 @@ fun TripProgressCard(
                     "진행률을 계산할 수 없어요" to JitColor.Amber
 
             freshness != null -> freshness to JitColor.TextSecondary
-            else -> stageHint(stage) to JitColor.TextSecondary
+            else -> stageHint(stage, canTrack, coarseOnly) to JitColor.TextSecondary
         }
         Text(text = note.first, color = note.second, fontSize = 12.sp)
 
@@ -321,7 +325,26 @@ internal fun trailingLine(
 }
 
 /** 진행률을 못 그리는 이유. 상태마다 다르다. */
-internal fun stageHint(stage: TripStage): String = when (stage) {
+// Partly AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+/**
+ * 진행률을 못 그리는 이유. 이동을 기록할 수 없으면([canTrack] false) 아직 끝나지 않은 단계는 그 이유를 말한다. 예전에는
+ * 위치 권한이 없어도 "알람이 울리면 이동 기록을 시작해요" 라고 약속했다. 도착 · 지난 일정 · 알람 꺼짐은 그대로 둔다.
+ */
+internal fun stageHint(stage: TripStage, canTrack: Boolean = true, coarseOnly: Boolean = false): String = when {
+    !canTrack && stage in TRACKED_STAGES ->
+        if (coarseOnly) "정확한 위치 권한이 없어 이동을 기록하지 않아요" else "위치 권한이 없어 이동을 기록하지 않아요"
+    else -> stageHintTracked(stage)
+}
+
+/** 이동을 기록해야 말할 수 있는 단계 */
+private val TRACKED_STAGES = setOf(
+    TripStage.BEFORE_ALARM,
+    TripStage.PREPARING,
+    TripStage.IN_TRANSIT,
+    TripStage.DEPARTURE_UNKNOWN,
+)
+
+private fun stageHintTracked(stage: TripStage): String = when (stage) {
     TripStage.BEFORE_ALARM -> "알람이 울리면 이동 기록을 시작해요"
     TripStage.PREPARING -> "집을 나서면 이동 거리가 보여요"
     TripStage.IN_TRANSIT -> "위치를 아직 받지 못했어요"

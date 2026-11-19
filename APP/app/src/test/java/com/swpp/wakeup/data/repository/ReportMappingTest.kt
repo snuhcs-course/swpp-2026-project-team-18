@@ -241,7 +241,7 @@ class ReportMappingTest {
         assertNull(prep.actualLabel)
         assertNull("값이 없으면 막대를 그리지 않는다", prep.actualFraction)
         assertEquals(1f, prep.plannedFraction!!, 1e-4f)
-        assertEquals("측정 안 됨", prep.deltaLabel)
+        assertEquals("재지 못했어요", prep.deltaLabel)
         assertEquals(Tone.UNKNOWN, prep.deltaTone)
         assertEquals("계획 오전 9:15", depart.plannedLabel)
         assertNull(depart.actualLabel)
@@ -321,7 +321,7 @@ class ReportMappingTest {
         assertEquals("${MINUS}1", view.days[0].valueLabel)
         assertEquals("1분 지각", view.days[0].outcomes.single().headline)
         assertEquals("가장 늦은 날 1분 늦음", view.slackSubLabel)
-        assertEquals("원인 측정 못 함", view.lateDays.single().causeTitle)
+        assertEquals("원인을 재지 못했어요", view.lateDays.single().causeTitle)
         assertTrue(view.hasUnknownCause)
     }
 
@@ -391,7 +391,7 @@ class ReportMappingTest {
         assertTrue(view.canGoNext)
         assertNull(view.onTimeSubLabel)
         assertTrue(view.deviations.isEmpty())
-        assertEquals("원인 측정 못 함", view.lateDays.single().causeTitle)
+        assertEquals("원인을 재지 못했어요", view.lateDays.single().causeTitle)
         assertEquals("원인을 나누지 못했어요", view.days[0].outcomes.single().cause?.title)
         assertEquals(OutcomeResult.UNOBSERVED, view.days[1].outcomes.single().result)
 
@@ -426,7 +426,7 @@ class ReportMappingTest {
             arrived = 1, unobserved = 3,
         )!!
         assertEquals("측정하지 못한 아침 1건", mixed.title)
-        assertEquals("도착을 기록하지 못한 아침은 정시로 세지 않음. 위 비율은 1건만 반영한 값이에요", mixed.body)
+        assertEquals("도착을 기록하지 못한 아침은 정시로 세지 않아요. 위 비율은 1건만 반영한 값이에요", mixed.body)
         assertEquals("알람이 울리지 않은 일정 2건은 출발·도착을 기록하지 않았어요", mixed.caption)
 
         val noAlarms = gap(
@@ -435,7 +435,7 @@ class ReportMappingTest {
             arrived = 0, unobserved = 2,
         )!!
         assertEquals("알람이 울리지 않은 일정 2건", noAlarms.title)
-        assertEquals("알람이 울리지 않은 일정은 출발·도착을 기록하지 않아 정시로 세지 않음", noAlarms.body)
+        assertEquals("알람이 울리지 않은 일정은 출발·도착을 기록하지 않아 정시로 세지 않아요", noAlarms.body)
         assertNull(noAlarms.caption)
 
         val legacy = map(
@@ -493,7 +493,7 @@ class ReportMappingTest {
             """"prep_applies":true,"unmeasured":["prep_over"],
                "planned":{"depart_by":"2026-10-04T23:00:00Z"}"""
         )
-        assertEquals("측정 안 됨: 준비", prepOnly.body)
+        assertEquals("준비 시간은 재지 못했어요", prepOnly.body)
         assertEquals("준비 항목을 기록하면 준비 시간도 나눠 볼 수 있어요", prepOnly.action)
     }
 
@@ -590,7 +590,7 @@ class ReportMappingTest {
         assertFalse(view.points[1].matches(0.9))
         assertFalse(view.points[0].matches(null))
         assertEquals("채점 29건", view.countsLabel)
-        assertEquals("잘 맞음", view.verdictLabel)
+        assertEquals("잘 맞아요", view.verdictLabel)
     }
 
     // --- 기상 (B4) ---------------------------------------------------------

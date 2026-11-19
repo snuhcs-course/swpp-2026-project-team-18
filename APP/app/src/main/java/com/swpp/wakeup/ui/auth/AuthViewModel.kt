@@ -14,6 +14,7 @@ import com.swpp.wakeup.data.repository.AuthRepository
 import com.swpp.wakeup.domain.model.EmailRule
 import com.swpp.wakeup.domain.model.NicknameRule
 import com.swpp.wakeup.domain.model.SocialLogin
+import com.swpp.wakeup.domain.model.takeCodePoints
 import com.swpp.wakeup.domain.model.SocialNotice
 import com.swpp.wakeup.domain.model.SocialProvider
 import kotlinx.coroutines.delay
@@ -67,6 +68,25 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
      * 처음 가입할 때의 약관 동의(Figma ⑦ 변형 `495:9`)다.
      */
     enum class Screen { LOGIN, SIGNUP, SOCIAL_TERMS, RESET_REQUEST, RESET_CONFIRM }
+
+    // AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+    /**
+     * 시스템 뒤로(제스처·뒤로 버튼)가 할 일. [UiState.systemBack] 이 정하고, `AuthHost` 의 BackHandler(켤지)와
+     * [onSystemBack](어디로 갈지)이 함께 따른다.
+     */
+    enum class SystemBack {
+        /** 앱이 받지 않는다. 로그인 화면이라 시스템 기본 동작이 앱을 닫는다 */
+        SYSTEM,
+
+        /** 서버를 기다리는 중이다. 화면의 ‹ 가 꺼진 것과 같이 움직이지 않는다. 받아서 버리므로 앱도 닫히지 않는다 */
+        STAY,
+
+        /** 로그인 화면으로 돌아간다. 가입 · 처음 가입 · 코드 요청 화면의 ‹ 와 같다 */
+        TO_LOGIN,
+
+        /** 코드 요청 화면으로 한 칸 돌아간다. 코드 확인 화면의 ‹ 와 같다 */
+        TO_RESET_REQUEST,
+    }
 
     // Partly AI-generated (Claude)
     /**
@@ -136,6 +156,29 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
         /** 무언가 서버를 기다리는 중. 이메일·소셜 버튼을 함께 막는다 */
         val busy: Boolean get() = loading || socialBusy != null
+
+        // AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+        /**
+         * 시스템 뒤로가 할 일. 로그인 화면만 받지 않는다 — 거기서 뒤로는 앱을 닫는다.
+         *
+         * 서버를 기다리는 중에도 받되 움직이지 않는다([SystemBack.STAY]). 예전에는 기다리는 동안 BackHandler 를 꺼서
+         * 시스템 기본 동작이 돌아 앱이 닫혔고, 진행 중인 요청의 결과(보낸 재설정 코드 등)도 잃었다. 그 밖에는 화면의 ‹ 와
+         * 같은 곳으로 간다(가입 · 처음 가입 · 코드 요청 → 로그인, 코드 확인 → 코드 요청).
+         */
+        val systemBack: SystemBack
+            get() = when (screen) {
+                Screen.LOGIN -> SystemBack.SYSTEM
+                Screen.SIGNUP, Screen.SOCIAL_TERMS, Screen.RESET_REQUEST ->
+                    if (busy) SystemBack.STAY else SystemBack.TO_LOGIN
+                Screen.RESET_CONFIRM -> if (busy) SystemBack.STAY else SystemBack.TO_RESET_REQUEST
+            }
+
+        /** 시스템 뒤로를 앱이 받는가. `AuthHost` 의 BackHandler 를 켠다 */
+        val handlesSystemBack: Boolean get() = systemBack != SystemBack.SYSTEM
+
+        /** 시스템 뒤로로 한 단계 돌아가는가. 서버를 기다리는 중에는 움직이지 않는다(화면의 ‹ 도 꺼져 있다) */
+        val canGoBack: Boolean
+            get() = systemBack == SystemBack.TO_LOGIN || systemBack == SystemBack.TO_RESET_REQUEST
 
         /** 지금 입력한 계정이 잠겨 있는가 */
         val locked: Boolean
@@ -223,6 +266,22 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     fun goToResetRequest() {
         passwordCheckJob?.cancel()
         _state.update { UiState(screen = Screen.RESET_REQUEST, email = it.email) }
+    }
+
+    // AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+    /**
+     * 시스템 뒤로. 서버를 기다리는 중이면 받기만 하고 움직이지 않는다. 움직일 때는 **그 화면의 ‹ 가 부르는 함수를
+     * 그대로 부른다** — 가입은 [goToLogin], 처음 가입은 [cancelSocialTerms], 재설정 두 화면은 [goBackFromReset].
+     */
+    fun onSystemBack() {
+        val current = _state.value
+        if (!current.canGoBack) return
+        when (current.screen) {
+            Screen.SIGNUP -> goToLogin()
+            Screen.SOCIAL_TERMS -> cancelSocialTerms()
+            Screen.RESET_REQUEST, Screen.RESET_CONFIRM -> goBackFromReset()
+            Screen.LOGIN -> Unit
+        }
     }
 
     /** 뒤로. 코드 확인 → 코드 요청 → 로그인. 서버를 기다리는 중에는 움직이지 않는다 */
@@ -326,7 +385,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSocialNicknameChange(value: String) = _state.update {
-        it.copy(socialTerms = it.socialTerms?.copy(nickname = value.take(SocialLogin.NICKNAME_MAX)), error = null)
+        it.copy(socialTerms = it.socialTerms?.copy(nickname = value.takeCodePoints(SocialLogin.NICKNAME_MAX)), error = null)
     }
 
     fun onSocialTermsAgreedChange(value: Boolean) =

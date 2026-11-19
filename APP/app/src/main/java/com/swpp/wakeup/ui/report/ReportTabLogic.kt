@@ -116,7 +116,7 @@ internal object ReportTabLogic {
             val name = WEEKDAYS[date.dayOfWeek.value - 1]
             val state = when (kind) {
                 DotKind.ON_TIME -> "제시간에 도착"
-                DotKind.LATE -> "늦은 일정 있음"
+                DotKind.LATE -> "늦은 일정이 있어요"
                 DotKind.UNOBSERVED -> "도착 기록 없음"
                 DotKind.TODAY, DotKind.EMPTY -> "기록 없음"
             }

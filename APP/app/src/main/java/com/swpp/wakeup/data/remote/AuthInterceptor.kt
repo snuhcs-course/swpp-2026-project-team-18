@@ -4,7 +4,9 @@ import android.util.Log
 import com.swpp.wakeup.data.local.SessionState
 import com.swpp.wakeup.data.local.TokenStore
 import okhttp3.Authenticator
+import okhttp3.Dispatcher
 import okhttp3.Interceptor
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.Route
@@ -56,6 +58,23 @@ class AuthInterceptor(private val tokenStore: TokenStore) : Interceptor {
     }
 }
 
+// Partly AI-generated (Claude)
+/**
+ * 토큰 갱신만 보내는 클라이언트. 설정은 그대로 두고 **디스패처만 따로 쓴다.**
+ *
+ * OkHttp 는 한 서버로 동시에 5개까지만 실행한다(`Dispatcher.maxRequestsPerHost`). access 가 만료된 채
+ * 요청 5개가 함께 401 을 받으면 하나는 락을 쥐고 갱신 응답을 기다리고 넷은 그 락을 기다린다. 다섯 칸이 모두
+ * 막혀 있어 같은 디스패처에 넣은 갱신 요청은 시작조차 못 하고, 대기열의 요청에는 callTimeout 도 돌지 않는다.
+ * 그 뒤로는 로그인까지 그 프로세스의 모든 요청이 멈춰 화면이 로딩에 굳는다. 앱을 강제 종료해야 풀린다.
+ *
+ * 갱신 요청의 401 은 다시 갱신할 수 없으므로 authenticator 도 뺀다.
+ */
+internal fun OkHttpClient.forTokenRefresh(): OkHttpClient =
+    newBuilder()
+        .dispatcher(Dispatcher())
+        .authenticator(Authenticator.NONE)
+        .build()
+
 /**
  * 401 을 만나면 refresh 로 access 를 갱신하고 **한 번만** 재시도한다.
  *
@@ -75,6 +94,9 @@ class AuthInterceptor(private val tokenStore: TokenStore) : Interceptor {
  * 영영 멈춘다. 그 뒤로 인증이 필요한 모든 요청이 같은 락에 줄을 서고,
  * callTimeout 도 막힌 스레드를 풀지 못해 화면이 로딩 상태로 굳는다.
  * 다른 서버에서 받은 토큰(로컬 → 배포 서버 전환)으로 실제로 재현됐다.
+ *
+ * **[refreshApi] 는 [forTokenRefresh] 클라이언트를 타야 한다.** 같은 클라이언트를 타면 요청 5개가
+ * 동시에 401 을 받는 순간 앱의 네트워크가 영영 멈춘다([forTokenRefresh] 참고).
  */
 class TokenRefreshAuthenticator(
     private val tokenStore: TokenStore,

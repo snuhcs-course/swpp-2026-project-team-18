@@ -76,26 +76,36 @@ internal object TripTabLogic {
     }
 
     // Partly AI-generated (Claude)
-    /** 저장된 가는 길 띠의 머리. "오프라인 · 12분 전 정보" / 사본이 없으면 "오프라인 · 가는 길을 받지 못했어요" */
-    fun savedRouteLabel(savedAtMillis: Long?, nowMillis: Long): String {
-        val at = savedAtMillis ?: return "오프라인 · 가는 길을 받지 못했어요"
-        val minutes = ((nowMillis - at) / 60_000L).coerceAtLeast(0)
-        val age = when {
-            minutes < 1 -> "방금 정보"
-            minutes < 60 -> "${minutes}분 전 정보"
-            minutes < 60 * 24 -> "${minutes / 60}시간 전 정보"
-            else -> "${minutes / (60 * 24)}일 전 정보"
-        }
-        return "오프라인 · $age"
-    }
+    /**
+     * 저장된 가는 길 띠의 머리(PM A-2 ①, todo H2-2 문구). 사본이 있으면 "네트워크가 없어 받아 둔 경로를 보여 줘요",
+     * 없으면 "오프라인 · 가는 길을 받지 못했어요". 사본은 [com.swpp.wakeup.data.local.RouteSegmentsStore] 다.
+     */
+    fun savedRouteLabel(savedAtMillis: Long?): String =
+        if (savedAtMillis != null) SAVED_ROUTE_TITLE else "오프라인 · 가는 길을 받지 못했어요"
 
-    /** 띠의 이유 한 줄 */
-    fun savedRouteBody(hasSaved: Boolean): String =
-        if (hasSaved) {
-            "인터넷에 연결되지 않아 마지막으로 받은 가는 길을 보여 드려요. 실시간 도착 정보는 연결되면 다시 보여요"
-        } else {
-            "인터넷에 연결되지 않아 정류장별 가는 길을 받지 못했어요. 아래는 일정에 저장된 요약이에요"
+    const val SAVED_ROUTE_TITLE = "네트워크가 없어 받아 둔 경로를 보여 줘요"
+
+    /**
+     * 띠의 둘째 줄. 사본이 있으면 **저장한 시각**을 앱 표기(오전 8:13)로 — 오늘이면 시각만, 어제면 "어제", 그 전이면
+     * 날짜를 붙인다(사본은 사흘까지 남는다). 저장된 값만 쓴다.
+     */
+    fun savedRouteBody(
+        savedAtMillis: Long?,
+        nowMillis: Long = System.currentTimeMillis(),
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): String {
+        val at = savedAtMillis
+            ?: return "인터넷에 연결되지 않아 정류장별 가는 길을 받지 못했어요. 아래는 일정에 저장된 요약이에요"
+        val saved = java.time.Instant.ofEpochMilli(at).atZone(zone)
+        val today = java.time.Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
+        val clock = com.swpp.wakeup.domain.model.ClockText.label(saved)
+        val day = when (saved.toLocalDate()) {
+            today -> ""
+            today.minusDays(1) -> "어제 "
+            else -> "${saved.monthValue}월 ${saved.dayOfMonth}일 "
         }
+        return "$day${clock}에 받은 경로예요. 실시간 도착 정보는 연결되면 다시 보여요"
+    }
 
     /** "10:00AM" → "오전 10:00". 붙은 말이 없으면 그대로 */
     fun koreanClock(startClock: String): String {

@@ -350,14 +350,14 @@ private fun WeeklyReportDto.gapNotice(): GapNotice? {
     return if (measuredGap > 0) {
         GapNotice(
             title = "측정하지 못한 아침 ${measuredGap}건",
-            body = "도착을 기록하지 못한 아침은 정시로 세지 않음$share",
+            body = "도착을 기록하지 못한 아침은 정시로 세지 않아요$share",
             caption = withoutAlarm.takeIf { it > 0 }
                 ?.let { "알람이 울리지 않은 일정 ${it}건은 출발·도착을 기록하지 않았어요" },
         )
     } else {
         GapNotice(
             title = "알람이 울리지 않은 일정 ${withoutAlarm}건",
-            body = "알람이 울리지 않은 일정은 출발·도착을 기록하지 않아 정시로 세지 않음$share",
+            body = "알람이 울리지 않은 일정은 출발·도착을 기록하지 않아 정시로 세지 않아요$share",
             caption = null,
         )
     }
@@ -418,7 +418,7 @@ private fun Placed.toLateLine(): LateDayLine? {
 }
 
 /** ⑧ 지각한 날 줄의 "원인을 못 나눔" 표기. 카드 아래 캡션이 이 말을 풀어 쓴다. */
-internal const val CAUSE_UNKNOWN_SHORT = "원인 측정 못 함"
+internal const val CAUSE_UNKNOWN_SHORT = "원인을 재지 못했어요"
 
 private val KNOWN_CAUSES = setOf(
     LateCauseDto.LABEL_PREP,
@@ -441,7 +441,7 @@ private fun averageTone(stat: DeviationStatDto?): Tone {
 
 /** 준비·이동. "평균 4분 더 걸림 · 2회" / "평균 1분 덜 걸림 · 5회" / "계획과 비슷함 · 3회" */
 private fun durationAverage(stat: DeviationStatDto?): String {
-    val mean = stat?.meanMinutes?.takeIf { stat.count > 0 } ?: return "측정 안 됨"
+    val mean = stat?.meanMinutes?.takeIf { stat.count > 0 } ?: return "재지 못했어요"
     val minutes = halfUp(mean)
     return when {
         minutes >= 1 -> "평균 ${minutes}분 더 걸림 · ${stat.count}회"
@@ -452,7 +452,7 @@ private fun durationAverage(stat: DeviationStatDto?): String {
 
 /** 출발. "평균 3분 늦게 나섬 · 5회" / "평균 2분 일찍 나섬 · 4회" / "계획대로 나섬 · 3회" */
 private fun departAverage(stat: DeviationStatDto?): String {
-    val mean = stat?.meanMinutes?.takeIf { stat.count > 0 } ?: return "측정 안 됨"
+    val mean = stat?.meanMinutes?.takeIf { stat.count > 0 } ?: return "재지 못했어요"
     val minutes = halfUp(mean)
     return when {
         minutes >= 1 -> "평균 ${minutes}분 늦게 나섬 · ${stat.count}회"
@@ -568,7 +568,7 @@ private fun durationRow(
         kind = RowKind.DURATION,
         plannedLabel = planned?.let { "계획 ${halfUp(it)}분" } ?: "계획 없음",
         actualLabel = actual?.let { "실제 ${halfUp(it)}분" },
-        deltaLabel = minutes?.let(::signedMinutes) ?: "측정 안 됨",
+        deltaLabel = minutes?.let(::signedMinutes) ?: "재지 못했어요",
         deltaTone = deltaTone(minutes),
         actualTone = if ((delta ?: 0.0) > 0) Tone.BAD else Tone.GOOD,
         plannedFraction = fraction(planned),
@@ -589,7 +589,7 @@ private fun timeRow(
         kind = RowKind.TIME,
         plannedLabel = clock(planned, zone)?.let { "계획 $it" } ?: "계획 없음",
         actualLabel = clock(actual, zone)?.let { "실제 $it" },
-        deltaLabel = minutes?.let(::signedMinutes) ?: "측정 안 됨",
+        deltaLabel = minutes?.let(::signedMinutes) ?: "재지 못했어요",
         deltaTone = deltaTone(minutes),
         actualTone = if ((delta ?: 0.0) > 0) Tone.BAD else Tone.GOOD,
         plannedFraction = null,
@@ -704,14 +704,14 @@ private fun OutcomeDto.unknownCause(missing: List<String>): CauseExplanation {
 
         missing == listOf(LateCauseDto.LABEL_PREP) -> CauseExplanation(
             title,
-            "측정 안 됨: 준비",
+            "준비 시간은 재지 못했어요",
             "준비 항목을 기록하면 준비 시간도 나눠 볼 수 있어요",
         )
 
         else -> CauseExplanation(
             title,
             missing.mapNotNull { STAGE_NAMES[it] }.takeIf { it.isNotEmpty() }
-                ?.joinToString(" · ", prefix = "측정 안 됨: ")
+                ?.joinToString(" · ", prefix = "재지 못한 단계: ")
                 ?: "기록이 부족해 단계를 나눠 보지 못했어요",
             null,
         )
@@ -743,7 +743,7 @@ internal fun CalibrationDto.toView(): CalibrationView {
 
     val (verdictLabel, verdictNote, action) = when (verdict) {
         CalibrationDto.VERDICT_CALIBRATED -> Triple(
-            "잘 맞음",
+            "잘 맞아요",
             "앱이 말한 확률과 실제 정시율이 거의 같아요",
             null,
         )
@@ -755,7 +755,7 @@ internal fun CalibrationDto.toView(): CalibrationView {
         )
 
         CalibrationDto.VERDICT_CONSERVATIVE -> Triple(
-            "지나치게 이름",
+            "너무 일러요",
             "실제로는 거의 늘 정시예요. 알람이 필요 이상으로 일러요",
             "지각 위험을 높이면 더 잘 수 있어요",
         )

@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.CalendarImportState
@@ -156,11 +157,19 @@ fun CalendarImportScreen(
                 state.tooManyNote?.let {
                     Text(text = it, color = JitColor.Red, fontSize = 11.sp)
                 }
+                // 가져오기 실패는 버튼 바로 위에(목록을 읽지 못한 오류와 나눈다, fix/iter4-he-bugs 이식)
+                state.importError?.let {
+                    Text(text = it, color = JitColor.Red, fontSize = 11.sp, modifier = Modifier.testTag("import_error"))
+                }
+                // 장소를 찾는 동안 버튼이 꺼진 이유(fix/iter4-he-bugs 이식)
+                state.waitingNote?.let {
+                    Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp, modifier = Modifier.testTag("import_waiting"))
+                }
                 JitPrimaryButton(
                     label = if (state.selectedCount > 0) {
                         "${state.selectedCount}건 가져오기"
                     } else {
-                        "가져올 일정을 고를 것"
+                        "가져올 일정을 골라 주세요"
                     },
                     onClick = onImport,
                     enabled = state.canImport,
@@ -343,8 +352,13 @@ private fun PermissionCard(onRequest: () -> Unit) {
             dotSize = 8.dp,
         )
         Text(
-            text = "기기 캘린더의 앞으로 2주 일정을 **읽기만** 해요. 캘린더를 고치지 않아요.\n" +
-                "읽은 목록에서 고른 것만 가져와요. 전부 자동으로 올리지 않아요",
+            // Text 는 마크다운을 읽지 않는다. "**" 를 넣으면 별표가 그대로 보였다(PM A-3, 11-19 이식). (Partly AI-generated (Claude))
+            text = androidx.compose.ui.text.buildAnnotatedString {
+                append("기기 캘린더의 앞으로 2주 일정을 ")
+                withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold)) { append("읽기만") }
+                append(" 해요. 캘린더를 고치지 않아요.\n")
+                append("읽은 목록에서 고른 것만 가져와요. 전부 자동으로 올리지 않아요")
+            },
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )

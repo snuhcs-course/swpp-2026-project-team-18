@@ -79,35 +79,19 @@ class AlarmTimeChoiceTest {
         assertEquals(10 * 60, AlarmTimeChoice.availableMinutes(23 * 60, 9 * 60))
     }
 
+    // AI-generated (Claude) — 11-19 세 화면 확률 통일
     @Test
-    fun `분포의 누적값으로 확률을 낸다`() {
-        val distribution = DurationDistributionView(
-            bins = listOf(
-                DurationDistributionView.Bin(60, 70, 0.5),
-                DurationDistributionView.Bin(70, 80, 0.5),
-            ),
-            p50Minutes = 70,
-            p90Minutes = 79,
-            windowDays = null,
-            source = "model",
-        )
-        assertEquals(0, AlarmTimeChoice.estimate(distribution, 60))
-        assertEquals(50, AlarmTimeChoice.estimate(distribution, 70))
-        assertEquals(75, AlarmTimeChoice.estimate(distribution, 75))
-        assertEquals(100, AlarmTimeChoice.estimate(distribution, 90))
-    }
-
-    @Test
-    fun `분포가 없으면 확률을 지어내지 않는다`() {
-        assertNull(AlarmTimeChoice.estimate(null, 80))
-        val empty = DurationDistributionView(
-            bins = emptyList(),
-            p50Minutes = 0,
-            p90Minutes = 0,
-            windowDays = null,
-            source = "model",
-        )
-        assertNull(AlarmTimeChoice.estimate(empty, 80))
+    fun `시트의 확률은 서버 값만 쓴다`() {
+        val start = 11 * 60
+        val current = 9 * 60 + 21
+        // 지금 알람이면 서버가 그 알람에 준 확률(홈 · 알람 화면과 같은 값)
+        assertEquals(97, AlarmTimeChoice.shownProbability(current, current, 97, cellProbability = 90, startMinutes = start))
+        // 세 칸 중 하나와 같은 시각이면 그 칸의 확률
+        assertEquals(99, AlarmTimeChoice.shownProbability(8 * 60 + 50, current, 97, cellProbability = 99, startMinutes = start))
+        // 서버가 확률을 주지 않은 시각은 비운다(앱이 계산하지 않는다)
+        assertNull(AlarmTimeChoice.shownProbability(9 * 60 + 5, current, 97, cellProbability = null, startMinutes = start))
+        // 지금 알람의 확률이 없으면 지어내지 않는다
+        assertNull(AlarmTimeChoice.shownProbability(current, current, null, cellProbability = null, startMinutes = start))
     }
 
     // Partly AI-generated (Claude)
