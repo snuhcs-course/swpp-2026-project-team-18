@@ -99,7 +99,7 @@ android {
         applicationId = "com.swpp.wakeup"
         minSdk = 34
         targetSdk = 37
-        versionCode = 14
+        versionCode = 16
         // 서버 APP_VERSION 과 같은 자리수를 쓴다. 실기기에서 "어느 빌드인가" 를
         // 서버 버전과 나란히 읽을 수 있어야 원인을 좁힐 수 있다.
         //   0.1.0  P1 — 고정 규칙 알람
@@ -122,7 +122,11 @@ android {
         //          소셜 로그인·준비 시간 포함·로그아웃 취소는 서버 쪽, 앱 연동은 할 일)
         //   0.14.0 서버 0.14.0 과 맞춘다. 경로 선택 화면 대중교통 후보 3 → 5개. "안 감" 표시·
         //          블록 기록 거르기는 서버 쪽이고 앱 버튼은 할 일
-        versionName = "0.14.0"
+        //   0.15.0 UAT Cycle 2 빌드(main fffab60, 11-17). HE 반영: 네 탭, "알람 추가" 시트
+        //          필수 3칸, 지난 시각 저장 전 차단, 알람 시각 직접 정하기(서버 0.21.0)
+        //   0.15.1 Iteration 4 마감(11-20). 경로 선택 화면 개편, 이동 추적 수정, 빠른 선택
+        //          정시 확률(서버 risk-options 수정과 함께)
+        versionName = "0.15.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
