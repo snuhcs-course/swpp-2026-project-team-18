@@ -182,9 +182,9 @@ SYSTEM_PROMPT = """너는 알람 앱의 주간 리포트를 쓰는 도우미다.
 3. 숫자는 JSON 에 있는 값만 그대로 쓰고 모두 아라비아 숫자로 쓴다('두 번' 이 아니라 '2번'). '한 번도'·'한번 더'·'한번 ~해 보세요' 처럼 한글 수가 든 관용구도 쓰지 않는다. late 가 0 이면 '지각은 없었어요' 라고 쓴다. 새로 계산하거나 날짜·시각을 만들지 않는다.
 4. *_slack_min 은 일정 시작보다 일찍 도착한 분(음수면 늦은 분), *_mean_min 은 계획보다 더 걸리거나 늦은 분(음수면 덜 걸리거나 일찍)이다. late_max_min 은 가장 많이 늦은 분(양수), on_time_change_pp 는 지난주 대비 정시율 차이(%p), unobserved 는 도착 기록이 없는 일정 수, alarm_events 는 알람이 켜진 일정 수, top_cause 는 가장 많은 지각 원인이고 top_cause_count 는 그 건수, suggestion 은 마지막 문장의 근거다.
 5. null 은 기록이 없다는 뜻이다. 0 으로 읽지 말고 언급하지 않거나 '기록이 없어요' 라고만 쓴다.
-6. 순서: 정시율과 목표 → 지각과 주원인 → 지난주 대비 변화나 계획 대비 차이 중 하나 → 마지막 문장은 suggestion 의 뜻을 바꾸지 않고 다듬은 제안 하나.
+6. thin_data 가 false 면 순서: 정시율과 목표 → 지각과 주원인 → 지난주 대비 변화나 계획 대비 차이 중 하나 → 마지막 문장은 suggestion 의 뜻을 바꾸지 않고 다듬은 제안 하나.
 7. '학습' 이라는 낱말을 쓰지 않는다. 사용자를 탓하지 않는다. 없는 앱 기능을 말하지 않는다.
-8. thin_data 가 true 면 도착 기록이 적은 주다. 정시율·비율·%를 쓰지 않고, 목표를 달성했다거나 못 미쳤다고 쓰지 않는다. 도착을 기록한 횟수와 정시·지각 횟수만 말하고, 기록이 아직 적어 비율로 판단하기 이르다는 것과 suggestion 을 말한다.
+8. thin_data 가 true 면 도착 기록이 적은 주다. 정시율 숫자나 %를 쓰지 않고, 목표를 달성했다거나 못 미쳤다고 쓰지 않는다. 도착을 기록한 횟수와 정시·지각 횟수만 말하고, 기록이 아직 적어 비율로 판단하기 이르다는 것과 suggestion 을 말한다.
 9. week_complete 가 false 면 아직 끝나지 않은 주다. 첫 문장에서 지금까지의 기록이라고 밝힌다."""
 
 # 검사용 패턴.
@@ -274,7 +274,8 @@ def build_facts(report: dict) -> dict:
         "on_time_pct": _pct(report.get("on_time_rate")),
         "target_pct": _pct(report.get("target_rate")),
         "target_met": report.get("target_met"),
-        "thin_data": 0 < arrived < THIN_ARRIVALS,
+        # 기록이 적은 주. 판정과 같은 수(τ 가 있는 도착 기록, `judged_count`)로 센다(BE-LLM1).
+        "thin_data": arrived > 0 and int(report.get("judged_count", arrived) or 0) < THIN_ARRIVALS,
         "median_slack_min": _minutes(report.get("median_slack_minutes")),
         "tightest_slack_min": _slack_minutes(report.get("tightest_slack_minutes")),
         "late_max_min": late_minutes(worst["slack_minutes"]) if worst else None,
@@ -562,7 +563,7 @@ def check_text(text: str, facts: dict) -> str | None:
         return "not_haeyo"
     # Partly AI-generated (Claude) — BE-LLM1. 기록이 적은 주에 목표 · 비율로 판단한 문장은 버린다.
     # 같은 화면의 확률 카드가 "기록이 아직 적어요" 로 보류하는데 요약이 판정하면 어긋난다.
-    if facts.get("thin_data") and ("%" in text or "목표" in text or "정시율" in text):
+    if facts.get("thin_data") and ("%" in text or "목표" in text):
         return "thin_judgement"
     return None
 

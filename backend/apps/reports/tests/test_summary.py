@@ -746,6 +746,26 @@ class TestSummaryFor:
         assert source == summary.SOURCE_TEMPLATE
         assert "%" not in text and "목표" not in text
 
+    def test_thin_week_accepts_saying_it_is_too_early(self, user, fake_llm):
+        """프롬프트 8번이 시키는 말("정시율로 판단하기는 일러요")은 통과한다(리뷰)."""
+        report = make_report([on_time(8.0, 0), late(-4.0, "unknown", 1)])
+        fake_llm.reply = (
+            "이 주 도착을 기록한 2번 중 1번 정시 도착했어요. 기록이 아직 적어 정시율로 판단하기는 "
+            "일러요. 집을 나서기 전에 알람을 해제해 두면 원인을 나눌 수 있어요."
+        )
+        assert summary.summary_for(user, report)[1] == summary.SOURCE_LLM
+
+    def test_thin_counts_arrivals_with_a_plan_like_the_verdict(self):
+        """도착 3건 중 1건이 계획(τ) 없이 "도착했어요" 면 판정은 보류다. 요약도 비율로 말하지 않는다."""
+        report = {
+            **make_report([on_time(8.0, 0), on_time(6.0, 1), late(-4.0, "unknown", 2)]),
+            "judged_count": 2,
+        }
+        facts = summary.build_facts(report)
+        assert facts["thin_data"] is True
+        assert facts["on_time_pct"] is None and facts["target_met"] is None
+        assert "%" not in summary.render_template(facts)
+
     def test_thin_template_passes_its_own_check(self):
         report = make_report([on_time(8.0, 0), late(-4.0, "unknown", 1)])
         facts = summary.build_facts(report)

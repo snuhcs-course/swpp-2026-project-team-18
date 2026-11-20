@@ -678,7 +678,10 @@ def weekly(user, *, anchor: date | None = None) -> dict:
     taus = [o.tau for o in arrived if o.tau is not None]
     target_rate = round(statistics.fmean(taus), 4) if taus else None
     target_met = None
-    if on_time_rate is not None and target_rate is not None and len(arrived) >= THIN_ARRIVALS:
+    # Partly AI-generated (Claude) — BE-LLM1 리뷰. 판정에 쓰는 수는 **τ 가 있는 도착 기록**이다. 확률 카드
+    # 판정(`calibration_from` 의 `scored`)과 같은 수라, 계획 없이 "도착했어요" 를 누른 아침이 섞여도
+    # 요약과 판정이 어긋나지 않는다(`judged_count`).
+    if on_time_rate is not None and target_rate is not None and len(taus) >= THIN_ARRIVALS:
         target_met = half_up(on_time_rate * 100) >= half_up(target_rate * 100)
 
     # 끝난 주인가. 다음 주 월요일 00:00 이 지났는가와 **같은 값**이다 — 화면이
@@ -697,6 +700,8 @@ def weekly(user, *, anchor: date | None = None) -> dict:
         "on_time_count": len(on_time),
         "late_count": len(late),
         "on_time_rate": on_time_rate,
+        # 목표 · 확률 판정에 쓰는 도착 기록 수(τ 가 있는 것). `calibration.scored_count` 와 같다.
+        "judged_count": len(taus),
         "median_slack_minutes": (
             round(statistics.median(slacks), 1) if slacks else None
         ),

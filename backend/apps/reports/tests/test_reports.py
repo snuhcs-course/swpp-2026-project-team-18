@@ -291,6 +291,21 @@ class TestCalibration:
         assert result["mean_gap"] == pytest.approx(0.25 - 0.775)
         assert result["verdict"] == "overconfident"
 
+    def test_weekly_judged_count_matches_the_verdict(self, user, place):
+        """계획(τ) 없는 도착은 목표 판정 · 확률 판정 어디에도 세지 않는다(같은 수, 리뷰)."""
+        start, _ = services.week_bounds(timezone.localdate() - timedelta(days=14))
+        monday_ago = (timezone.localdate() - timezone.localtime(start).date()).days
+        for offset, tau in enumerate((0.90, 0.90, None)):
+            arrive_early(make_past_event(user, place, days_ago=monday_ago - offset, tau=tau))
+
+        report = services.weekly(user, anchor=timezone.localtime(start).date())
+
+        assert report["arrived_count"] == 3
+        assert report["judged_count"] == report["calibration"]["scored_count"] == 2
+        assert report["target_met"] is None
+        assert report["calibration"]["verdict"] == "insufficient"
+        assert report["calibration"]["samples_needed"] == 1
+
     def test_samples_needed_counts_down_to_the_verdict(self, user, place):
         for i in range(2):
             arrive_early(make_past_event(user, place, days_ago=3 + i, tau=0.90))
