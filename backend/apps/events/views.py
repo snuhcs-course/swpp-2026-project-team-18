@@ -1034,6 +1034,10 @@ class RouteHistoryView(APIView):
         return Response({"sort": sort, "days": route_history.HISTORY_DAYS, "results": results})
 
 
+# `routes/candidates` 의 `arrive_by` 로 받는 범위(지금 ± 1년, BE-11).
+ARRIVE_BY_WINDOW = timedelta(days=366)
+
+
 class RouteCandidateView(APIView):
     """GET /api/routes/candidates?dest_lat=&dest_lng=[&dest_label=&origin_lat=&origin_lng=&origin_label=]
 
@@ -1119,14 +1123,25 @@ class RouteCandidateView(APIView):
         raw_arrive_by = request.query_params.get("arrive_by")
         if raw_arrive_by:
             # 쿼리스트링의 "+09:00" 은 인코딩하지 않으면 공백으로 온다. 끝의 시간대 자리만 되돌린다.
-            arrive_by = parse_datetime(re.sub(r" (\d{2}:?\d{2})$", r"+\1", raw_arrive_by.strip()))
-            if arrive_by is None:
+            try:
+                arrive_by = parse_datetime(
+                    re.sub(r" (\d{2}:?\d{2})$", r"+\1", raw_arrive_by.strip())
+                )
+                if arrive_by is not None and timezone.is_naive(arrive_by):
+                    arrive_by = timezone.make_aware(arrive_by)
+            except (ValueError, OverflowError):
+                # 모양은 맞지만 없는 날짜·시각(2월 30일, 25시, +25:00)
+                arrive_by = None
+            # 일정은 1년 안팎이다. 먼 시각은 계산 중 넘침(OverflowError)도 막는다.
+            now = timezone.now()
+            if arrive_by is None or not (
+                now - ARRIVE_BY_WINDOW <= arrive_by <= now + ARRIVE_BY_WINDOW
+            ):
                 return _error(
-                    "invalid_arrive_by", "arrive_by 는 ISO 8601 시각이어야 해요.",
+                    "invalid_arrive_by", "arrive_by 는 1년 안의 ISO 8601 시각이어야 해요.",
                     status.HTTP_400_BAD_REQUEST,
                 )
-            if timezone.is_naive(arrive_by):
-                arrive_by = timezone.make_aware(arrive_by)
+            arrive_by = arrive_by.replace(microsecond=0)
 
         validate_route_distance(origin["lat"], origin["lng"], dest_lat, dest_lng)
         candidates, degraded = clients.route_candidates(

@@ -308,7 +308,7 @@ class TestArriveBy:
         )
 
     def test_times_line_up_to_the_arrival_target(self, user, monkeypatch):
-        res = self.get(user, monkeypatch, arrive_by="2026-11-21T09:00:00+09:00")
+        res = self.get(user, monkeypatch, arrive_by="2026-11-21T09:00:00.123456+09:00")
         assert res.status_code == 200, res.data
         transit, walk = res.data["results"]
         assert transit["arrive_at"] == "2026-11-21T09:00:00+09:00"
@@ -333,7 +333,11 @@ class TestArriveBy:
         assert "depart_at" not in res.data["results"][0]
         assert "start_at" not in res.data["results"][0]["segments"][0]
 
-    def test_bad_arrive_by_is_400(self, user, monkeypatch):
-        res = self.get(user, monkeypatch, arrive_by="내일 아침")
+    @pytest.mark.parametrize("value", [
+        "내일 아침", "2026-02-30T10:00:00", "2026-11-20T25:00:00", "2026-11-20T10:00:00+25:00",
+        "0001-01-01T00:10:00", "9999-12-31T23:59:59-09:00",
+    ])
+    def test_bad_arrive_by_is_400(self, user, monkeypatch, value):
+        res = self.get(user, monkeypatch, arrive_by=value)
         assert res.status_code == 400
         assert res.data["error"]["code"] == "invalid_arrive_by"
