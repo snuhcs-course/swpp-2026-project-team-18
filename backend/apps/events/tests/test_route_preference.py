@@ -1,7 +1,8 @@
 # Partly AI-generated (Claude)
 """경로 선택 화면의 기본 선택(`route_preference`).
 
-같은 목적지의 최근 선택이 먼저고, 없으면 최근 선택 10개에서 가장 많이 고른 수단이다.
+같은 출발지 → 같은 목적지로 90일 안에 다녀온 가장 최근 이동에서 실제로 탄 경로가 먼저고(BE-PREF),
+없으면 최근 선택 10개에서 가장 많이 고른 수단이다.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ HOME = (37.4842, 126.9297)
 CAMPUS = (37.4601, 126.9520)
 CAFE = (37.4850, 126.9310)
 T0 = datetime(2026, 9, 1, 9, 0, tzinfo=KST)
+# 기준 "지금". 아래 일정(T0 + 며칠)은 모두 다녀온 이동이고 90일 안이다.
+NOW = T0 + timedelta(days=30)
 
 CANDIDATES = [
     {"key": "car", "kind": "car", "minutes": 12, "transfers": 0},
@@ -63,14 +66,18 @@ def chose(user, place, key, days, **kw) -> Event:
     return event
 
 
-def prefer(user, dest, candidates=CANDIDATES):
-    return pref.preferred_route(user, dest[0], dest[1], candidates)
+def prefer(user, dest, candidates=CANDIDATES, origin=None, now=NOW):
+    lat, lng = origin if origin is not None else (None, None)
+    return pref.preferred_route(
+        user, dest[0], dest[1], candidates, origin_lat=lat, origin_lng=lng, now=now,
+    )
 
 
 class TestPreferredRoute:
     def test_no_history_gives_no_preference(self, user):
         assert prefer(user, CAMPUS) == {
             "preferred_key": None, "preferred_mode": None, "preferred_basis": None,
+            "preferred_match": None,
         }
 
     def test_same_destination_reuses_the_exact_route(self, user, campus):
@@ -80,6 +87,7 @@ class TestPreferredRoute:
             "preferred_key": "transit:2호선",
             "preferred_mode": "transit",
             "preferred_basis": pref.SAME_DESTINATION,
+            "preferred_match": pref.SAME_ROUTE,
         }
 
     def test_same_destination_latest_choice_wins(self, user, campus):
@@ -98,6 +106,50 @@ class TestPreferredRoute:
         # 22분 둘 중 환승이 적은 쪽(전체 최단과 같은 순위).
         assert result["preferred_key"] == "transit:5513"
         assert result["preferred_basis"] == pref.SAME_DESTINATION
+        assert result["preferred_match"] == pref.SAME_MODE_FALLBACK
+
+    # Partly AI-generated (Claude) — BE-PREF(11-20): 같은 출발지 · 90일 안 · 다녀온 이동 · 실제로 탄 경로.
+    def test_other_origin_does_not_count(self, user, campus):
+        """카페에서 캠퍼스로 간 기록은 집에서 캠퍼스로 가는 기본 선택이 아니다."""
+        chose(user, campus, "walk", 1, origin_lat=CAFE[0], origin_lng=CAFE[1])
+
+        assert prefer(user, CAMPUS)["preferred_basis"] == pref.RECENT_MODE
+        assert prefer(user, CAMPUS, origin=CAFE)["preferred_key"] == "walk"
+        # 출발지를 좌표로 보내도 집 격자와 같으면 집에서 간 기록을 쓴다.
+        chose(user, campus, "transit:2호선", 2)
+        assert prefer(user, CAMPUS, origin=HOME)["preferred_key"] == "transit:2호선"
+
+    def test_saved_origin_is_compared_by_its_coordinates(self, user, campus):
+        from apps.accounts.models import SavedPlace
+
+        saved = SavedPlace.objects.create(user=user, label="본가", lat=37.55, lng=126.99)
+        chose(user, campus, "car", 1, origin_place=saved, origin_lat=37.55, origin_lng=126.99)
+
+        assert prefer(user, CAMPUS, origin=(37.5501, 126.9902))["preferred_key"] == "car"
+
+    def test_only_the_last_90_days(self, user, campus):
+        chose(user, campus, "walk", 1)
+
+        assert prefer(user, CAMPUS, now=T0 + timedelta(days=90))["preferred_key"] == "walk"
+        assert prefer(user, CAMPUS, now=T0 + timedelta(days=92))["preferred_basis"] == pref.RECENT_MODE
+
+    def test_trips_not_taken_yet_or_skipped_do_not_count(self, user, campus):
+        chose(user, campus, "walk", 40)  # NOW 뒤의 일정 — 아직 다녀오지 않았다
+        skipped = chose(user, campus, "car", 2)
+        Event.objects.filter(pk=skipped.pk).update(skipped_at=T0 + timedelta(days=2))
+
+        assert prefer(user, CAMPUS)["preferred_basis"] == pref.RECENT_MODE
+
+    def test_rerouted_trip_uses_the_route_actually_taken(self, user, campus):
+        from apps.observations.models import TripReroute
+
+        event = chose(user, campus, "transit:2호선", 1)
+        TripReroute.objects.create(
+            user=user, event=event, from_route_key="transit:2호선", to_route_key="walk",
+        )
+
+        assert prefer(user, CAMPUS)["preferred_key"] == "walk"
+        assert prefer(user, CAMPUS)["preferred_match"] == pref.SAME_ROUTE
 
     def test_bus_merged_into_another_card_picks_that_card(self, user, campus):
         """버스 번호만 다른 경로는 한 카드로 온다. 전에 고른 5516 이 대표가 아니어도 그 카드다."""
@@ -132,6 +184,7 @@ class TestPreferredRoute:
             "preferred_key": "transit:5513",
             "preferred_mode": "transit",
             "preferred_basis": pref.RECENT_MODE,
+            "preferred_match": None,
         }
 
     def test_tie_goes_to_the_more_recent_mode(self, user, campus, cafe):
@@ -196,7 +249,10 @@ class TestPreferredRoute:
 @pytest.mark.integration
 class TestCandidatesResponse:
     def test_response_carries_the_preference(self, user, campus, monkeypatch):
-        chose(user, campus, "transit:2호선", 1)
+        from django.utils import timezone as dj_tz
+
+        # 실제 "지금" 기준 어제 다녀온 이동.
+        chose(user, campus, "transit:2호선", (dj_tz.now() - T0).days - 1)
         monkeypatch.setattr("apps.routing.realtime.enrich_candidates", lambda items: None)
         monkeypatch.setattr(
             clients, "route_candidates",
@@ -212,3 +268,4 @@ class TestCandidatesResponse:
         assert res.data["preferred_key"] == "transit:2호선"
         assert res.data["preferred_mode"] == "transit"
         assert res.data["preferred_basis"] == "same_destination"
+        assert res.data["preferred_match"] == "same_route"

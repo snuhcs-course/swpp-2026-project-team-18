@@ -1063,9 +1063,11 @@ class RouteCandidateView(APIView):
     소요시간으로 알람을 잡는다**(planning/services.py 3번 주석).
 
     **기본 선택** — `fastest_key` 는 전체 최단이다. `preferred_key`·`preferred_mode`
-    는 사용자가 전에 고른 경로에서 정한 기본 선택이고, 근거는 `preferred_basis`
-    (`same_destination` 같은 목적지 · `recent_mode` 최근에 자주 고른 수단)다. 고른
-    기록이 없거나 그 수단의 후보가 없으면 셋 다 null 이다(`route_preference`).
+    는 사용자의 기록에서 정한 기본 선택이고, 근거는 `preferred_basis`
+    (`same_destination` 같은 출발지 → 같은 목적지로 90일 안에 다녀온 이동에서 실제로 탄 경로 ·
+    `recent_mode` 최근에 자주 고른 수단)다. `preferred_match` 는 같은 목적지일 때 그 경로가
+    후보에 그대로 있었는지(`same_route`) 같은 수단의 가장 빠른 후보로 대신했는지
+    (`same_mode_fallback`)다. 기록이 없거나 그 수단의 후보가 없으면 모두 null 이다(`route_preference`).
     (Partly AI-generated (Claude))
     """
 
@@ -1135,7 +1137,10 @@ class RouteCandidateView(APIView):
                 "degraded": degraded,
                 **groups,
                 "fastest_key": fastest["key"] if fastest else None,
-                **route_preference.preferred_route(request.user, dest_lat, dest_lng, results),
+                **route_preference.preferred_route(
+                    request.user, dest_lat, dest_lng, results,
+                    origin_lat=origin["lat"], origin_lng=origin["lng"],
+                ),
             }
         )
 
