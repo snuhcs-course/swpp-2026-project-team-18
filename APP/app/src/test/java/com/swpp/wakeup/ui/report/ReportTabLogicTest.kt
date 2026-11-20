@@ -123,7 +123,7 @@ class ReportTabLogicTest {
         assertTrue("일정이 있는 날은 ⑨ 로 간다", dots[1].clickable)
         assertEquals("늦은 일정이 그날 대표", 2L, dots[1].eventId)
         assertFalse(dots[3].clickable)
-        assertEquals("화요일, 늦은 일정 있음", dots[1].description)
+        assertEquals("화요일, 늦은 일정이 있어요", dots[1].description)
         assertEquals("오늘 목요일, 기록 없음", dots[3].description)
 
         val unobserved = ReportTabLogic.dots(

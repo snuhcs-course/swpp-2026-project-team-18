@@ -1,6 +1,10 @@
 // Partly AI-generated (Claude)
 package com.swpp.wakeup.ui.me
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -71,7 +75,27 @@ internal fun MeTabScreen(
     onHelp: (() -> Unit)? = null,
     onReplayIntro: (() -> Unit)? = null,
     onResetLearning: (() -> Unit)? = null,
+    /** "문제 신고"(PM A-7). 도움말의 문의 시트를 신고로 연다. null 이면 줄이 없다 */
+    onSendReport: (suspend (message: String, email: String) -> com.swpp.wakeup.domain.model.Inquiry.Outcome)? = null,
+    /** 신고 시트의 "답 받을 이메일" 에 미리 채울 값 */
+    contactEmail: String? = null,
+    /** 신고를 보낸 뒤(스낵바) */
+    onReportSent: () -> Unit = {},
 ) {
+    // Partly AI-generated (Claude) — 도움말의 [문의하기] 와 같은 시트를 신고로 연다(시트는 하나, A-7)
+    var reportOpen by rememberSaveable { mutableStateOf(false) }
+    if (reportOpen && onSendReport != null) {
+        com.swpp.wakeup.ui.help.ContactSheet(
+            defaultEmail = contactEmail,
+            onSend = onSendReport,
+            onSent = {
+                reportOpen = false
+                onReportSent()
+            },
+            onDismiss = { reportOpen = false },
+            source = com.swpp.wakeup.domain.model.Inquiry.Source.PROBLEM_REPORT,
+        )
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -106,7 +130,7 @@ internal fun MeTabScreen(
             MeRow(LineIcons.bell, "알림·권한", MeTabLogic.permissions(permissions), "me_permissions", onPermissions)
         }
 
-        if (onHelp != null || onReplayIntro != null) {
+        if (onHelp != null || onReplayIntro != null || onSendReport != null) {
             Group("도움") {
                 onHelp?.let {
                     MeRow(
@@ -120,6 +144,13 @@ internal fun MeTabScreen(
                         LineIcons.sunrise, "처음 안내 다시 보기",
                         MeTabLogic.Value("처음 켰을 때 본 안내를 다시 봐요"), "me_intro", it,
                     )
+                }
+                if (onSendReport != null) {
+                    if (onHelp != null || onReplayIntro != null) RowDivider()
+                    MeRow(
+                        LineIcons.alert, com.swpp.wakeup.domain.model.Inquiry.REPORT_TITLE,
+                        MeTabLogic.Value(com.swpp.wakeup.domain.model.Inquiry.REPORT_ROW_VALUE), "me_report",
+                    ) { reportOpen = true }
                 }
             }
         }

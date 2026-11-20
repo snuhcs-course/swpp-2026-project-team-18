@@ -96,7 +96,7 @@ object SocialLogin {
             .firstNotNullOfOrNull { key ->
                 claims.get(key)?.takeIf { it.isJsonPrimitive }?.asString?.trim()?.takeIf { it.isNotEmpty() }
             }
-            ?.take(NICKNAME_MAX)
+            ?.takeCodePoints(NICKNAME_MAX) // 이모지를 반으로 자르지 않는다(fix/iter4-he-bugs 이식, 11-19)
     }.getOrNull()
 
     private fun String.padBase64(): String = when (length % 4) {

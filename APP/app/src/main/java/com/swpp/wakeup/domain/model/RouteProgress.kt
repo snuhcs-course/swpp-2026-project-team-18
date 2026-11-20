@@ -282,7 +282,7 @@ enum class TripStage(val label: String) {
      * 말을 하고, "이동 중" 이라고 하면 추적이 멈춘 것을 감춘다. [ordered] 에 넣지
      * 않는다. (Partly AI-generated (Claude))
      */
-    DEPARTURE_UNKNOWN("출발 확인 안 됨");
+    DEPARTURE_UNKNOWN("출발을 확인하지 못했어요");
 
     /**
      * 지각 전망(색·"+5분")을 낼 수 있는 단계인가.

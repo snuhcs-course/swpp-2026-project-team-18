@@ -94,6 +94,17 @@ import com.swpp.wakeup.ui.theme.JitTheme
 @Composable
 fun AlarmDecisionScreen(
     plan: AlarmPlanView?,
+    /** 계획을 받지 못한 이유. 있으면 스피너 대신 오류 카드와 [다시 시도] 를 보인다(fix/iter4-he-bugs 이식) */
+    planError: String? = null,
+    onRetryPlan: () -> Unit = {},
+    /** 수정 화면에 채울 서버 값을 받는 중. [일정 수정] 을 막고 "불러오는 중…" 으로 쓴다(fix/iter4-he-bugs 이식) */
+    editBusy: Boolean = false,
+    /** 일정을 지우는 중. [일정 삭제] 를 막고 "삭제하는 중…" 으로 쓴다(fix/iter4-he-bugs 이식) */
+    deleteBusy: Boolean = false,
+    /** 이동을 기록할 수 있는가(정확한 위치 권한). 진행 카드로 넘긴다 */
+    canTrack: Boolean = true,
+    /** [canTrack] 이 false 인 이유가 대략적인 위치만 허용한 것인가 */
+    coarseOnly: Boolean = false,
     onBack: () -> Unit,
     onChangeRisk: () -> Unit,
     /** 이 아침에 할 블록 고르기. 저장하면 이 일정만 즉시 재계산된다 */
@@ -250,7 +261,7 @@ fun AlarmDecisionScreen(
         )
 
         if (plan == null) {
-            LoadingBlock()
+            if (planError != null) PlanErrorCard(planError, onRetryPlan) else LoadingBlock()
             return@Column
         }
 
@@ -301,6 +312,8 @@ fun AlarmDecisionScreen(
                     arrivalAt = arrivalClock ?: plan.arrivalAt,
                     freshness = freshness,
                     onArrive = onArrive,
+                    canTrack = canTrack,
+                    coarseOnly = coarseOnly,
                 )
                 // 늦는 이유 한 줄(Figma ④-c 변형 `510:25`). 이동 중에만 의미가 있다.
                 if (stage == TripStage.IN_TRANSIT) lateCause?.let {
@@ -341,9 +354,9 @@ fun AlarmDecisionScreen(
             // 알람을 정한 뒤에도 제목·시각·장소·출발지·경로·종류를 고친다(Figma ④ `489:9`).
             ActionTile(
                 icon = LineIcons.pencil,
-                label = "일정 수정",
+                label = if (editBusy) "불러오는 중…" else "일정 수정",
                 tag = "event_edit",
-                enabled = onEdit != null,
+                enabled = onEdit != null && !editBusy,
                 onClick = { onEdit?.invoke() },
                 modifier = Modifier.weight(1f),
             )
@@ -377,9 +390,10 @@ fun AlarmDecisionScreen(
             }
             ActionTile(
                 icon = LineIcons.trash,
-                label = "일정 삭제",
+                label = if (deleteBusy) "삭제하는 중…" else "일정 삭제",
                 tag = "event_delete",
-                tint = JitColor.Red,
+                tint = if (deleteBusy) JitColor.TextSecondary else JitColor.Red,
+                enabled = !deleteBusy,
                 // 반복 회차면 "이 일정만 / 이후 일정 모두" 를 먼저 묻는다(iter4 A2).
                 onClick = { if (deleteScopes.isNotEmpty()) askDeleteScope = true else onDelete() },
                 modifier = Modifier.weight(1f),
@@ -830,6 +844,20 @@ private fun NotComputedCard(plan: AlarmPlanView, onRecompute: (() -> Unit)?, rec
     }
 }
 
+// Partly AI-generated (Claude)
+/** 계획을 받지 못했을 때. 예전에는 실패해도 스피너가 끝없이 돌았다 */
+@Composable
+private fun PlanErrorCard(reason: String, onRetry: () -> Unit) {
+    com.swpp.wakeup.ui.common.JitCard(padding = 16.dp, gap = 8.dp, modifier = Modifier.testTag("plan_load_error")) {
+        Text(
+            com.swpp.wakeup.ui.home.PLAN_LOAD_TITLE,
+            color = JitColor.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+        )
+        Text(reason, color = JitColor.TextSecondary, fontSize = 12.sp)
+        com.swpp.wakeup.ui.common.JitRetryButton(onClick = onRetry, modifier = Modifier.testTag("plan_load_retry"))
+    }
+}
+
 @Composable
 private fun LoadingBlock() {
     Row(
@@ -851,7 +879,7 @@ private fun AlarmDecisionPreview() {
         AlarmDecisionScreen(
             plan = AlarmPlanView(
                 eventId = 1,
-                whenLabel = "내일 아침",
+                whenLabel = "내일",
                 dateLabel = "9월 18일 금",
                 eventTitle = "09:00 자료구조 및 알고리즘",
                 eventPlace = "서울대학교 302동 · 서울 관악구 관악로 1",

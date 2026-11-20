@@ -29,7 +29,7 @@ LAYERS = (
     ("Model - Data", lambda pkg, src: pkg.startswith("data")),
     ("ViewModel", lambda pkg, src: pkg.startswith("ui") and src.endswith("ViewModel.kt")),
     ("View", lambda pkg, src: pkg.startswith("ui")),
-    ("Platform", lambda pkg, src: pkg.split("/")[0] in ("alarm", "sensing", "background", "calendar")),
+    ("Platform", lambda pkg, src: pkg.split("/")[0] in ("alarm", "sensing", "background", "calendar", "reminder")),
 )
 
 

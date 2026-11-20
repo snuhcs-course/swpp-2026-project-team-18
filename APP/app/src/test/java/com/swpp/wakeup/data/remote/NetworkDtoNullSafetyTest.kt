@@ -345,7 +345,7 @@ class NetworkDtoNullSafetyTest {
                 "calibration":{"buckets":null,"verdict":null}}"""
         )
         assertTrue(view.days.isEmpty())
-        assertEquals(listOf("측정 안 됨", "측정 안 됨", "측정 안 됨"), view.deviations.map { it.valueLabel })
+        assertEquals(listOf("재지 못했어요", "재지 못했어요", "재지 못했어요"), view.deviations.map { it.valueLabel })
 
         val calibration = gson.fromJson(
             """{"buckets":null,"verdict":null,"scored_count":null}""",
@@ -378,7 +378,7 @@ class NetworkDtoNullSafetyTest {
         }
         assertTrue("0 이 새어 나왔다: $texts", texts.none { "0%" in it || "0분" in it })
         assertEquals("계획 없음", morning.rows[0].plannedLabel)
-        assertEquals("측정 안 됨", morning.rows[0].deltaLabel)
+        assertEquals("재지 못했어요", morning.rows[0].deltaLabel)
     }
 
     // AI-generated (Claude)

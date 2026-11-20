@@ -165,6 +165,8 @@ fun SignupScreen(
         // 조건 카드의 점 색이 같은 내용을 이미 말한다(사용자 결정 10-06).
         // 검사 자체가 실패한 경우(네트워크 등)만 알린다.
         passwordCheckError?.let { ErrorText(it) }
+        // 두 점이 다 초록인데 남은 이유(흔한 비밀번호)는 점으로 말할 수 없어 서버 문구를 그대로 보인다(fix/iter4-he-bugs 이식)
+        passwordCheck?.extraReason?.let { ErrorText(it, modifier = Modifier.testTag("signup_password_reason")) }
 
         // 확인 칸은 적는 동안 바로 알려 준다: 다르면 빨간 테두리 + 이유, 완전히 같아지면 초록 ✓
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -36,14 +36,53 @@ object Inquiry {
 
     enum class Outcome { DONE, UNSUPPORTED, LIMITED, FAILED, OFFLINE }
 
+    // Partly AI-generated (Claude)
+    /**
+     * 시트를 어디서 열었나(PM A-7). 시트는 하나다 — 도움말 [문의하기] 는 [CONTACT], 내 정보 "문제 신고" 는
+     * [PROBLEM_REPORT]. 신고면 보내는 글 첫 줄 앞에 [REPORT_PREFIX] 를 붙인다(앱 버전 · 기기는 원래 함께 간다).
+     */
+    enum class Source { CONTACT, PROBLEM_REPORT }
+
+    const val REPORT_PREFIX = "[문제 신고]"
+    const val REPORT_TITLE = "문제 신고"
+    const val REPORT_SUBTITLE = "어떤 화면에서 무엇이 잘못됐는지 적어 주세요. 답은 이메일로 보내 드려요."
+    const val REPORT_ROW_VALUE = "앱 버전과 기기 종류가 함께 전달돼요"
+
+    fun title(source: Source): String = if (source == Source.PROBLEM_REPORT) REPORT_TITLE else TITLE
+    fun subtitle(source: Source): String = if (source == Source.PROBLEM_REPORT) REPORT_SUBTITLE else SUBTITLE
+
+    /** 앞에 붙는 "[문제 신고] " 까지 서버 1000자에 들어가야 한다. 신고는 그만큼 덜 쓸 수 있다 */
+    fun maxFor(source: Source): Int =
+        if (source == Source.PROBLEM_REPORT) MAX - length("$REPORT_PREFIX ") - 1 else MAX
+
+    /** 서버로 보낼 글. 신고면 첫 줄 앞에 "[문제 신고] " */
+    fun bodyFor(message: String, source: Source): String {
+        val text = message.trim()
+        return if (source == Source.PROBLEM_REPORT) "$REPORT_PREFIX $text" else text
+    }
+
+    /** 요청 본문. 글은 [bodyFor] 를 거친다 — 신고 표시가 붙는 곳은 여기 한 곳이다 */
+    fun requestOf(
+        message: String,
+        email: String,
+        source: Source,
+        appVersion: String,
+        device: String,
+    ): com.swpp.wakeup.data.remote.InquiryRequest = com.swpp.wakeup.data.remote.InquiryRequest(
+        message = bodyFor(message, source),
+        replyEmail = email.trim(),
+        appVersion = appVersion,
+        device = device,
+    )
+
     /** 앞뒤 공백을 뺀 글자 수(코드 포인트). 서버도 같은 기준으로 센다 */
     fun length(message: String): Int = message.trim().let { it.codePointCount(0, it.length) }
 
-    fun counter(message: String): String = "${length(message)}/$MAX"
+    fun counter(message: String, source: Source = Source.CONTACT): String = "${length(message)}/${maxFor(source)}"
 
     /** 글 칸 아래 오류. 아직 쓰는 중(짧음)은 한 번 보내려 한 뒤([tried])에만 말한다. 넘친 것은 바로 말한다 */
-    fun messageError(message: String, tried: Boolean): String? = when {
-        length(message) > MAX -> TOO_LONG
+    fun messageError(message: String, tried: Boolean, source: Source = Source.CONTACT): String? = when {
+        length(message) > maxFor(source) -> if (source == Source.CONTACT) TOO_LONG else "${maxFor(source)}자까지 쓸 수 있어요"
         tried && length(message) < MIN -> TOO_SHORT
         else -> null
     }
@@ -80,8 +119,8 @@ object Inquiry {
         else -> null
     }
 
-    fun canSend(message: String, email: String): Boolean =
-        length(message) in MIN..MAX && email.isNotBlank() && isReplyEmailValid(email)
+    fun canSend(message: String, email: String, source: Source = Source.CONTACT): Boolean =
+        length(message) in MIN..maxFor(source) && email.isNotBlank() && isReplyEmailValid(email)
 
     /** 응답 코드 → 결과. null 이면 서버에 닿지 못했다. 404 · 405 · 501 은 서버에 아직 API 가 없다 */
     fun outcome(status: Int?): Outcome = when (status) {

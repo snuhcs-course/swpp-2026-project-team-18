@@ -20,6 +20,7 @@ import com.swpp.wakeup.data.remote.SocialLinkRequest
 import com.swpp.wakeup.data.remote.SocialLoginRequest
 import com.swpp.wakeup.data.remote.UserDto
 import com.swpp.wakeup.domain.model.SocialLogin
+import com.swpp.wakeup.domain.model.takeCodePoints
 import com.swpp.wakeup.domain.model.SocialProvider
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -268,7 +269,7 @@ class AuthRepository(
             SocialLoginRequest(
                 idToken = idToken,
                 termsAgreed = true.takeIf { termsAgreed },
-                nickname = nickname?.trim()?.take(SocialLogin.NICKNAME_MAX)?.takeIf { it.isNotEmpty() },
+                nickname = nickname?.trim()?.takeCodePoints(SocialLogin.NICKNAME_MAX)?.takeIf { it.isNotEmpty() },
             ),
         )
         if (response.isSuccessful) {

@@ -132,4 +132,14 @@ class ServerVersionTest {
         assertFalse(ServerVersion.isAtLeast("unknown", "0.21.0"))
         assertFalse(ServerVersion.isAtLeast("0.21.0", "x"))
     }
+
+    // AI-generated (Claude) — H2-1(11-19)
+    @Test
+    fun `화면에 붙이는 말에는 버전 · 배포 이야기가 없고 해요체다`() {
+        val line = ServerVersion.BEHIND_USER_LINE
+        listOf("Render", "대시보드", "404", "구버전", "Deploy", "니다").forEach { word ->
+            org.junit.Assert.assertFalse(word, line.contains(word))
+        }
+        org.junit.Assert.assertTrue(line.endsWith("주세요"))
+    }
 }

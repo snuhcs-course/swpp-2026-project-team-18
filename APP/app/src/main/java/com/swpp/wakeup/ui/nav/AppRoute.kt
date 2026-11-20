@@ -236,6 +236,34 @@ data class NavState(
     val current: AppRoute get() = stack.last()
     val canGoBack: Boolean get() = stack.size > 1
 
+    // AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+    /**
+     * [route] 를 맨 위에 쌓는다. **맨 위가 이미 [route] 면 그대로 둔다.** 화면 전환 동안 나가는 화면도 탭을 받아서, 빠르게
+     * 두 번 누르면 같은 화면이 두 장 쌓였다(뒤로를 한 번 눌러도 바뀌는 것이 없어 보였다).
+     */
+    fun push(route: AppRoute): NavState =
+        if (current == route) this else copy(stack = stack + route, forward = true)
+
+    // AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+    /**
+     * [match] 에 맞는 가장 위 화면 하나를 닫는다. 맨 위면 한 칸 닫기와 같다. 기다린 결과(저장 완료)로 화면을 닫을 때 쓴다 —
+     * 맨 위를 무조건 닫으면, 저장하는 동안 알림 · 알람이 위에 연 엉뚱한 화면이 닫혔다. 그 위에 다른 화면이 쌓였으면 위 화면은
+     * 그대로 두고 스택에서만 뺀다. 맞는 화면이 없으면(이미 닫힘) 그대로다. 맨 아래(탭 첫 화면)는 빼지 않는다.
+     * 뺀 자리 양옆이 같은 화면이면 한 장만 남긴다.
+     */
+    fun close(match: (AppRoute) -> Boolean): NavState {
+        val index = stack.indexOfLast(match)
+        return when {
+            index <= 0 -> this
+            index == stack.lastIndex -> copy(stack = stack.dropLast(1), forward = false)
+            else -> {
+                val rest = stack.filterIndexed { i, _ -> i != index }
+                val twin = rest[index - 1] == rest[index]
+                copy(stack = if (twin) rest.filterIndexed { i, _ -> i != index - 1 } else rest)
+            }
+        }
+    }
+
     /** 하단 탭 바를 그릴지([showsTabBar]) */
     val showsTabBar: Boolean get() = current.showsTabBar
 

@@ -270,7 +270,7 @@ private fun SlackCard(session: MorningSession, nowMillis: Long) {
 
     JitCard(padding = 18.dp, gap = 7.dp, accented = netSlack < 0) {
         Text(
-            text = if (netSlack >= 0) "여유" else "이미 늦음",
+            text = if (netSlack >= 0) "여유" else "이미 늦었어요",
             color = JitColor.TextSecondary,
             fontSize = 11.sp,
         )
@@ -283,7 +283,7 @@ private fun SlackCard(session: MorningSession, nowMillis: Long) {
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = if (netSlack >= 0) "남음" else "초과",
+                text = if (netSlack >= 0) "남았어요" else "넘었어요",
                 color = JitColor.TextSecondary,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,

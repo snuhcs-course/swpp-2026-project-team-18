@@ -53,7 +53,7 @@ fun SavedPlacesListDto.toSavedHomes(): List<SavedHome> = results.orEmpty().mapNo
  */
 fun bulkItemsOf(homes: List<SavedHome>): List<SavedPlaceInput> = homes.take(SAVED_PLACES_BULK_MAX).map {
     SavedPlaceInput(
-        label = it.label.trim().ifEmpty { it.name }.take(SAVED_PLACE_LABEL_MAX),
+        label = it.label.trim().ifEmpty { it.name }.takeCodePoints(SAVED_PLACE_LABEL_MAX),
         lat = it.lat,
         lng = it.lng,
         name = it.name,
@@ -77,3 +77,12 @@ fun savedHomesFirstUploadRunning(syncJobActive: Boolean, synced: Boolean): Boole
 
 /** 처음 올리는 중에 집을 더하거나 지우거나 기본으로 바꾸려 할 때의 안내 */
 const val SAVED_HOMES_UPLOADING_NOTICE = "저장한 집을 계정에 올리는 중이에요. 잠시 뒤 다시 해 주세요"
+
+// AI-generated (Claude) — fix/iter4-he-bugs 이식(11-19)
+/**
+ * 받아 온 목록(`GET /api/saved-places/`)을 기기 목록에 쓸지. 목록을 받기 시작할 때의 판([startVersion])이 지금
+ * 판([currentVersion])과 같을 때만 쓴다. 판은 이 기기가 서버의 저장한 집을 바꿀 때마다(기본으로 · 삭제 · 추가) 올린다.
+ * 받는 동안 "기본으로" 를 누르면 바뀐 목록이 먼저 오고, 바꾸기 전에 만든 목록이 뒤에 와서 덮었다 — 지운 집이
+ * 되살아나고 방금 더한 집이 사라졌다. 그 목록은 버린다. 다른 기기에서 바꾼 것은 다음에 받는다.
+ */
+fun savedHomesSyncApplies(startVersion: Long, currentVersion: Long): Boolean = startVersion == currentVersion
