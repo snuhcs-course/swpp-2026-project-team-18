@@ -274,6 +274,31 @@ class TestCalibration:
         assert result["verdict"] == "conservative"
         assert result["mean_gap"] > 0
 
+    # Partly AI-generated (Claude) — BE-LLM1. 판정은 구간별이 아니라 전체 기록 수(3건)로 한다.
+    def test_verdict_counts_all_records_not_per_bucket(self, user, place):
+        """도착 4건이 두 구간에 2건씩 나뉘어도 판정한다. 요약이 비율로 말하는 기준과 같다."""
+        for i, tau in enumerate((0.90, 0.90, 0.65, 0.65)):
+            event = make_past_event(user, place, days_ago=3 + i, tau=tau)
+            if i == 0:
+                arrive_early(event)
+            else:
+                arrive_late(event)
+
+        result = services.calibration(user)
+        assert [b["total"] for b in result["buckets"]] == [2, 2]
+        assert result["reliable_bucket_count"] == 0  # 점을 진하게 그리는 기준은 그대로 구간별이다
+        assert result["samples_needed"] == 0
+        assert result["mean_gap"] == pytest.approx(0.25 - 0.775)
+        assert result["verdict"] == "overconfident"
+
+    def test_samples_needed_counts_down_to_the_verdict(self, user, place):
+        for i in range(2):
+            arrive_early(make_past_event(user, place, days_ago=3 + i, tau=0.90))
+        result = services.calibration(user)
+        assert result["verdict"] == "insufficient"
+        assert result["samples_needed"] == 1
+        assert result["min_samples_for_reliable"] == 3
+
     def test_plans_without_tau_are_skipped(self, user, place):
         event = make_past_event(user, place, tau=None)
         arrive_early(event)

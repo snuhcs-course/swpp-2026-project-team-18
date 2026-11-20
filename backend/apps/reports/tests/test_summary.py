@@ -19,7 +19,7 @@ import json
 import re
 import statistics
 import urllib.error
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from django.core.cache import cache
@@ -446,7 +446,8 @@ class TestTemplate:
         assert "'~함', '~음', '~임' 으로 끝낸다" not in summary.SYSTEM_PROMPT
         assert "'~습니다'" in summary.SYSTEM_PROMPT
         assert "'한번 ~해 보세요'" in summary.SYSTEM_PROMPT
-        assert summary.PROMPT_VERSION == 4
+        assert summary.PROMPT_VERSION == 5
+        assert "thin_data" in summary.SYSTEM_PROMPT and "week_complete" in summary.SYSTEM_PROMPT
 
     # Partly AI-generated (Claude)
     @pytest.mark.parametrize("name", sorted(TEMPLATE_CASES))
@@ -709,8 +710,6 @@ class TestSummaryFor:
     @pytest.mark.parametrize(
         "change",
         [
-            {"week_complete": False},          # 진행 중인 주
-            {"arrived_count": 2},              # 기록 적음
             {"arrived_count": 0},              # 도착 기록 없음
             {"week_start": monday_iso(13)},    # 12주보다 오래됨
         ],
@@ -719,6 +718,59 @@ class TestSummaryFor:
         report = {**example_report(), **change}
         _, source = summary.summary_for(user, report)
         assert source == summary.SOURCE_TEMPLATE
+        assert fake_llm.calls == 0
+
+    # Partly AI-generated (Claude) — BE-LLM1.
+    def test_thin_week_calls_llm_without_rates(self, user, fake_llm):
+        """도착 1~2건인 주도 AI 요약을 부른다. 비율 · 목표는 보내지 않는다."""
+        report = make_report([on_time(8.0, 0), late(-4.0, "unknown", 1)])
+        fake_llm.reply = (
+            "이 주 도착을 기록한 2번 중 1번 정시 도착했고 지각은 1번이었어요. 기록이 아직 적어 "
+            "비율로 판단하기는 일러요. 집을 나서기 전에 알람을 해제해 두면 원인을 나눌 수 있어요."
+        )
+        text, source = summary.summary_for(user, report)
+        assert source == summary.SOURCE_LLM and fake_llm.calls == 1
+        sent = json.loads(fake_llm.sent()["messages"][1]["content"])
+        assert sent["thin_data"] is True
+        for key in ("on_time_pct", "target_pct", "target_met", "prev_on_time_pct", "on_time_change_pp"):
+            assert sent[key] is None, key
+
+    @pytest.mark.parametrize("reply", [
+        "이 주 도착을 기록한 2번 중 1번 정시 도착해 정시율 50%였어요. 지각은 1번이었어요. 알람을 해제해 두세요.",
+        "이 주 도착을 기록한 2번 중 1번 정시 도착해 목표에 못 미쳤어요. 지각은 1번이었어요. 알람을 해제해 두세요.",
+    ])
+    def test_thin_week_rejects_rate_judgements(self, user, fake_llm, reply):
+        report = make_report([on_time(8.0, 0), late(-4.0, "unknown", 1)])
+        fake_llm.reply = reply
+        text, source = summary.summary_for(user, report)
+        assert source == summary.SOURCE_TEMPLATE
+        assert "%" not in text and "목표" not in text
+
+    def test_thin_template_passes_its_own_check(self):
+        report = make_report([on_time(8.0, 0), late(-4.0, "unknown", 1)])
+        facts = summary.build_facts(report)
+        assert summary.check_text(summary.render_template(facts), facts) is None
+
+    # BE-R2. 진행 중인 주는 그 주 일요일 12:00(서버 시간) 뒤부터 부른다.
+    @pytest.mark.parametrize("day,hour,allowed", [
+        (0, 9, False), (5, 23, False), (6, 11, False), (6, 12, True), (6, 23, True),
+    ])
+    def test_in_progress_week_opens_on_sunday_noon(self, day, hour, allowed):
+        from datetime import datetime as dt
+
+        start = date.fromisoformat(monday_iso(0))
+        now = timezone.make_aware(dt(start.year, start.month, start.day, hour)) + timedelta(days=day)
+        report = {**example_report(weeks_ago=0), "week_complete": False}
+        assert summary.llm_allowed(report, now=now) is allowed
+
+    def test_in_progress_week_before_sunday_stays_on_template(self, user, fake_llm, monkeypatch):
+        from datetime import datetime as dt
+
+        start = date.fromisoformat(monday_iso(0))
+        monday = timezone.make_aware(dt(start.year, start.month, start.day, 9))
+        monkeypatch.setattr(summary.timezone, "now", lambda: monday)
+        report = {**example_report(weeks_ago=0), "week_complete": False}
+        assert summary.summary_for(user, report)[1] == summary.SOURCE_TEMPLATE
         assert fake_llm.calls == 0
 
     def test_stored_text_is_kept_for_older_weeks(self, user, fake_llm):

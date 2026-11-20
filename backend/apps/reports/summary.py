@@ -70,10 +70,20 @@ SOURCE_TEMPLATE = "template"
 # 2: 지각 0 표현("지각은 없었음")과 한글 수 관용구 금지를 더함.
 # 3: 문장 끝을 해요체("~했어요", "~예요")로 바꿈(BE-R1). 템플릿·제안 문장도 함께 바꿨다.
 # 4: '~습니다' 와 '한번 ~해 보세요' 금지를 더함. 검사가 해요체가 아닌 문장을 버린다(BE-R1 리뷰 T-1·T-2).
-PROMPT_VERSION = 4
+# 5: 기록이 적은 주(thin_data)와 진행 중인 주의 규칙을 더함(BE-LLM1, BE-R2).
+PROMPT_VERSION = 5
 
 # LLM 을 부르는 가장 오래된 주. 비용 상한이고, 리포트의 90일 범위와도 맞다.
 LLM_MAX_WEEKS_BACK = 12
+
+# Partly AI-generated (Claude) — BE-LLM1. LLM 을 부르는 최소 도착 기록 수. 기록이 적은 주(1~2건)도
+# AI 요약을 보여 준다. 대신 그 주는 비율로 판단하지 않게 한다(프롬프트 8번, `check_text`, `build_facts`).
+LLM_MIN_ARRIVALS = 1
+
+# BE-R2. 진행 중인 주도 일요일 12:00(서버 시간, `TIME_ZONE`) 뒤에는 LLM 을 부른다. 그 주 일정이
+# 거의 끝났고, 일요일 저녁 리포트 알림을 열었을 때 AI 요약이 보이게 하려는 것이다.
+IN_PROGRESS_LLM_WEEKDAY = 6  # 일요일
+IN_PROGRESS_LLM_HOUR = 12
 
 MIN_CHARS = 40
 MAX_CHARS = 400
@@ -173,7 +183,9 @@ SYSTEM_PROMPT = """너는 알람 앱의 주간 리포트를 쓰는 도우미다.
 4. *_slack_min 은 일정 시작보다 일찍 도착한 분(음수면 늦은 분), *_mean_min 은 계획보다 더 걸리거나 늦은 분(음수면 덜 걸리거나 일찍)이다. late_max_min 은 가장 많이 늦은 분(양수), on_time_change_pp 는 지난주 대비 정시율 차이(%p), unobserved 는 도착 기록이 없는 일정 수, alarm_events 는 알람이 켜진 일정 수, top_cause 는 가장 많은 지각 원인이고 top_cause_count 는 그 건수, suggestion 은 마지막 문장의 근거다.
 5. null 은 기록이 없다는 뜻이다. 0 으로 읽지 말고 언급하지 않거나 '기록이 없어요' 라고만 쓴다.
 6. 순서: 정시율과 목표 → 지각과 주원인 → 지난주 대비 변화나 계획 대비 차이 중 하나 → 마지막 문장은 suggestion 의 뜻을 바꾸지 않고 다듬은 제안 하나.
-7. '학습' 이라는 낱말을 쓰지 않는다. 사용자를 탓하지 않는다. 없는 앱 기능을 말하지 않는다."""
+7. '학습' 이라는 낱말을 쓰지 않는다. 사용자를 탓하지 않는다. 없는 앱 기능을 말하지 않는다.
+8. thin_data 가 true 면 도착 기록이 적은 주다. 정시율·비율·%를 쓰지 않고, 목표를 달성했다거나 못 미쳤다고 쓰지 않는다. 도착을 기록한 횟수와 정시·지각 횟수만 말하고, 기록이 아직 적어 비율로 판단하기 이르다는 것과 suggestion 을 말한다.
+9. week_complete 가 false 면 아직 끝나지 않은 주다. 첫 문장에서 지금까지의 기록이라고 밝힌다."""
 
 # 검사용 패턴.
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
@@ -289,6 +301,12 @@ def build_facts(report: dict) -> dict:
             if o.get("alarm_on") is not False and o.get("result") == RESULT_UNOBSERVED
         ),
     }
+    if facts["thin_data"]:
+        # Partly AI-generated (Claude) — BE-LLM1. 기록이 적은 주는 비율을 보내지 않는다. 보내지 않은 수는
+        # 문장에 쓸 수 없으므로(`check_text` 의 숫자 검사) "정시율 50%" 같은 판단이 나오지 않는다.
+        # 템플릿도 이 주에는 비율을 쓰지 않는다(`_overview`).
+        for key in ("on_time_pct", "target_pct", "target_met", "prev_on_time_pct", "on_time_change_pp"):
+            facts[key] = None
     facts["suggestion"] = _suggestion(facts)
     return facts
 
@@ -542,6 +560,10 @@ def check_text(text: str, facts: dict) -> str | None:
             return f"invented_number:{number}"
     if not all(_HAEYO_END.search(s) for s in _SENTENCE_BREAK.split(text) if s):
         return "not_haeyo"
+    # Partly AI-generated (Claude) — BE-LLM1. 기록이 적은 주에 목표 · 비율로 판단한 문장은 버린다.
+    # 같은 화면의 확률 카드가 "기록이 아직 적어요" 로 보류하는데 요약이 판정하면 어긋난다.
+    if facts.get("thin_data") and ("%" in text or "목표" in text or "정시율" in text):
+        return "thin_judgement"
     return None
 
 
@@ -557,21 +579,25 @@ def _week_start(report: dict) -> date | None:
         return None
 
 
-def llm_allowed(report: dict) -> bool:
+def llm_allowed(report: dict, now=None) -> bool:
     """LLM 을 부를 만한 주인가. 키 여부는 보지 않는다(`llm.configured`).
 
-    진행 중인 주, 도착 기록이 [THIN_ARRIVALS] 건 미만인 주, [LLM_MAX_WEEKS_BACK] 주
-    보다 오래된 주는 템플릿만 쓴다. 기록이 적은 주에 LLM 이 "목표 달성" 을 쓰면
-    판정을 보류한 화면과 문장이 엇갈린다.
+    - 도착 기록이 [LLM_MIN_ARRIVALS] 건 미만(0건)인 주는 템플릿이다(BE-LLM1). 1~2건인 주는 부르되
+      비율로 판단하지 않게 한다(`thin_data`).
+    - 진행 중인 주는 그 주 일요일 12:00(서버 시간) 전까지 템플릿이다(BE-R2).
+    - [LLM_MAX_WEEKS_BACK] 주보다 오래된 주는 템플릿이다.
     """
-    if not report.get("week_complete"):
-        return False
-    if int(report.get("arrived_count") or 0) < THIN_ARRIVALS:
+    if int(report.get("arrived_count") or 0) < LLM_MIN_ARRIVALS:
         return False
     start = _week_start(report)
     if start is None:
         return False
-    return start >= timezone.localdate() - timedelta(weeks=LLM_MAX_WEEKS_BACK)
+    now = timezone.localtime(now or timezone.now())
+    if not report.get("week_complete"):
+        opens = start + timedelta(days=IN_PROGRESS_LLM_WEEKDAY)
+        if (now.date(), now.hour) < (opens, IN_PROGRESS_LLM_HOUR):
+            return False
+    return start >= now.date() - timedelta(weeks=LLM_MAX_WEEKS_BACK)
 
 
 def facts_digest(facts: dict) -> str:

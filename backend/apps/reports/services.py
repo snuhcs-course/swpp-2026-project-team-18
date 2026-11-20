@@ -533,9 +533,14 @@ def calibration_from(outcomes: list[Outcome]) -> dict:
     ordered = [buckets[key] for key in sorted(buckets)]
     reliable = [b for b in ordered if b.reliable]
 
-    # 전체 편차. 표본이 있는 버킷만 쓰고, 신뢰 가능한 버킷이 없으면 None 이다.
-    gaps = [b.gap for b in reliable if b.gap is not None]
-    mean_gap = round(statistics.fmean(gaps), 4) if gaps else None
+    # Partly AI-generated (Claude) — BE-LLM1. 판정은 구간별이 아니라 **전체 기록 수**로 한다. 기록 4건이
+    # 서로 다른 구간에 2건씩 나뉘어도 판정한다. 주간 요약이 비율로 말하는 기준(도착 3건,
+    # `THIN_ARRIVALS`)과 같은 수다. 편차는 실제 정시율 − 약속한 τ 의 평균이다.
+    mean_gap = None
+    if len(scored) >= MIN_BUCKET_SAMPLES:
+        actual = sum(1 for o in scored if o.on_time) / len(scored)
+        promised = statistics.fmean(o.tau for o in scored)
+        mean_gap = round(actual - promised, 4)
 
     return {
         "buckets": [b.as_dict() for b in ordered],
@@ -543,23 +548,26 @@ def calibration_from(outcomes: list[Outcome]) -> dict:
         # 채점할 수 없었던 지난 일정 수. 도착 관측이 없거나 계획이 없던 경우다.
         "unscored_count": len(outcomes) - len(scored),
         "reliable_bucket_count": len(reliable),
+        # 판정에 필요한 기록 수(전체). 구간 점을 진하게 그리는 기준(`reliable`)도 같은 수다.
         "min_samples_for_reliable": MIN_BUCKET_SAMPLES,
+        # 판정까지 남은 기록 수. 판정했으면 0. 앱의 "N번 더 다니면 보여 드릴게요" 의 N 이다.
+        "samples_needed": max(0, MIN_BUCKET_SAMPLES - len(scored)),
         "mean_gap": mean_gap,
         # 전체 정시율. 버킷과 달리 τ 를 가리지 않는다
         "on_time_rate": (
             round(sum(1 for o in scored if o.on_time) / len(scored), 4) if scored else None
         ),
-        "verdict": _verdict(mean_gap, len(reliable)),
+        "verdict": _verdict(mean_gap),
     }
 
 
-def _verdict(mean_gap: float | None, reliable_buckets: int) -> str:
+def _verdict(mean_gap: float | None) -> str:
     """한 줄 판정. 화면이 그대로 쓴다.
 
     표본이 부족하면 **판정하지 않는다.** "잘 맞음" 을 표본 2건으로 말하면
     사용자가 그 말을 믿고 여유를 줄인다.
     """
-    if mean_gap is None or reliable_buckets == 0:
+    if mean_gap is None:
         return "insufficient"
     if mean_gap < -0.10:
         return "overconfident"
