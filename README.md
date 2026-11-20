@@ -143,6 +143,15 @@ the backend are [`docs/iter4/*-api.md`](docs/iter4/); the backend's contracts ar
 Each BE request above went through a review round on 11-15 before it was merged into `back-iter4`
 (the "review fixes" commits for A2, A3, H3, H4, H4b, H9, R1 and RESET).
 
+**Server 0.22.0, on `back-iter4` only.** On 11-20 Park Junha added 14 commits for the app's 11-19
+requests ([`0a66637`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/0a66637)):
+one on-time probability formula that never says 100% (BE-P100, BE-H3c), an AI summary for weeks with
+only 1–2 arrivals (BE-LLM1, BE-R2), a preferred route from the last trip (BE-PREF), a "지하철만 이용"
+(subway only) badge and the fare (BE-BADGE, BE-FARE), the prep minutes of the alarm that will ring
+(BE-H3f) and route times for an arrival target (BE-11). Its 2,372 backend tests and the contract
+suites pass locally. **It is not merged or deployed**: the shared server stays at 0.21.0 until after
+UAT cycle 2 (11-23), and the app 0.16.0 doesn't read the new fields yet.
+
 **Testing** (run locally, see [Verification](#verification))
 
 - Backend tests 1,795 → **2,299** (96.0% line coverage), app JVM tests 950 → **1,425**, device
@@ -391,6 +400,8 @@ Logs contain locations; don't share them.
 ---
 
 ## Known limitations and todos
+
+**Not deployed yet.** Server 0.22.0 is on `back-iter4` only (see [Major progress](#major-progress-in-iteration-4)); it will be merged and deployed after UAT cycle 2.
 
 **Deployed during the UAT week.** `back-iter4` (server 0.21.0) was merged into `main` (`a175b4d`)
 on 11-16 at 15:46 KST, the day of the first UAT session, instead of 11-19 as planned, so cycle 1
