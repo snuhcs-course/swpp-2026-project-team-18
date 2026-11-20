@@ -686,6 +686,16 @@ def present(plan: AlarmPlan, *, now=None) -> dict:
             "answer_by": iso(control.answer_by(recommended, start_at)),
         }
 
+    # Partly AI-generated (Claude) — BE-H3f. 울릴 시각에 일어나면 출발까지 준비할 수 있는 분과 계획한
+    # 준비와의 차이. 출발 시각(`depart_by`)은 울릴 시각과 상관없이 같다 — 이동 · 여유는 일정 시작에서
+    # 거꾸로 정해진다. 8:40 기상 · 8:53 출발 · 계획 준비 28분이면 13분, 차이 −15(15분 모자람)다.
+    effective_prep = None
+    prep_margin = None
+    if effective is not None and plan.depart_by is not None:
+        effective_prep = max(0, _minutes(plan.depart_by - effective))
+        if plan.prep_minutes is not None:
+            prep_margin = effective_prep - plan.prep_minutes
+
     confirmed = control.confirmed(effective)
     return {
         "alarm_source": SOURCE_USER if user else SOURCE_RECOMMENDED,
@@ -702,4 +712,6 @@ def present(plan: AlarmPlan, *, now=None) -> dict:
         "alarm_confirmed": confirmed,
         "alarm_confirmed_at": iso(control.confirmed_at) if confirmed else None,
         "alarm_proposal": proposal,
+        "effective_prep_minutes": effective_prep,
+        "prep_margin_minutes": prep_margin,
     }

@@ -48,6 +48,13 @@ BE-P100 으로 확률은 100 을 내지 않고 소수 한 자리 값(`*_precise`
 | `alarm_confirmed` | bool | 울릴 시각을 사용자가 확인했는가. 새 일정은 `false` |
 | `alarm_confirmed_at` | 시각 \| null | 확인한 순간. 확인 전이면 null |
 | `alarm_proposal` | 객체 \| null | 답을 기다리는 "바꿀까요" 제안. 아래 표 |
+| `effective_prep_minutes` | 정수 \| null | 울릴 시각에 일어나면 출발(`depart_by`)까지 준비할 수 있는 분(0 이상). 추천 시각이면 `prep_minutes` 와 같다 (BE-H3f) |
+| `prep_margin_minutes` | 정수 \| null | `effective_prep_minutes − prep_minutes`. 음수면 그만큼 준비 시간이 모자라고, 양수면 남는다 |
+
+**직접 정한 시각의 "왜 이 시각인가요" 막대(BE-H3f, 11-20):** 출발 시각은 울릴 시각과 상관없이 `depart_by` 그대로다(이동 · 여유는
+일정 시작에서 거꾸로 정해진다). 준비 구간은 `prep_minutes` 대신 `effective_prep_minutes` 로 그리고, `prep_margin_minutes` 가 음수면
+"준비 시간이 N분 모자라요", 양수면 "준비 시간이 N분 남아요" 처럼 보이면 된다. 예: 8:40 기상 · 8:53 출발 · 계획 준비 28분 →
+`effective_prep_minutes` 13, `prep_margin_minutes` −15.
 
 `alarm_proposal`:
 

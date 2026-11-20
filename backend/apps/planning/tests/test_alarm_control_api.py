@@ -509,3 +509,33 @@ def test_risk_option_probability_agrees_with_user_time_probability(ctx):
     plan = plan_of(client.put(url(event, "time"), {"alarm_at": iso(at)}, format="json"))
     assert abs(plan["user_alarm_probability"] - round(below * 100)) <= 5
     assert ac.USER_PROBABILITY_FLOOR == 70
+
+
+# Partly AI-generated (Claude) — BE-H3f.
+def test_prep_values_follow_the_user_time(ctx):
+    client, event, _ = ctx
+    plan = plan_of(client.get(f"/api/events/{event.pk}"))
+    assert plan["effective_prep_minutes"] == plan["prep_minutes"]
+    assert plan["prep_margin_minutes"] == 0
+
+    later = datetime.fromisoformat(plan["alarm_at"]) + timedelta(minutes=15)
+    plan = plan_of(client.put(url(event, "time"), {"alarm_at": iso(later)}, format="json"))
+    depart = datetime.fromisoformat(plan["depart_by"])
+    assert plan["effective_prep_minutes"] == int((depart - later).total_seconds() // 60)
+    assert plan["prep_margin_minutes"] == -15
+    assert datetime.fromisoformat(plan["depart_by"]) == depart  # 출발 시각은 그대로
+
+    earlier = later - timedelta(minutes=25)
+    plan = plan_of(client.put(url(event, "time"), {"alarm_at": iso(earlier)}, format="json"))
+    assert plan["prep_margin_minutes"] == 10
+
+
+def test_prep_values_never_go_negative(ctx):
+    client, event, _ = ctx
+    plan = plan_of(client.get(f"/api/events/{event.pk}"))
+    after_departure = datetime.fromisoformat(plan["depart_by"]) + timedelta(minutes=3)
+    if after_departure > event.start_at - ac.USER_MIN_LEAD:
+        pytest.skip("이 계획은 출발 뒤 · 시작 5분 전 사이에 고를 시각이 없다")
+    plan = plan_of(client.put(url(event, "time"), {"alarm_at": iso(after_departure)}, format="json"))
+    assert plan["effective_prep_minutes"] == 0
+    assert plan["prep_margin_minutes"] == -plan["prep_minutes"]
