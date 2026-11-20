@@ -110,7 +110,7 @@ android {
         applicationId = "com.swpp.wakeup"
         minSdk = 34
         targetSdk = 37
-        versionCode = 16
+        versionCode = 17
         // 서버 APP_VERSION 과 같은 자리수를 쓴다. 실기기에서 "어느 빌드인가" 를
         // 서버 버전과 나란히 읽을 수 있어야 원인을 좁힐 수 있다.
         //   0.1.0  P1 — 고정 규칙 알람
@@ -137,7 +137,9 @@ android {
         //          필수 3칸, 지난 시각 저장 전 차단, 알람 시각 직접 정하기(서버 0.21.0)
         //   0.15.1 Iteration 4 마감(11-20). 경로 선택 화면 개편, 이동 추적 수정, 빠른 선택
         //          정시 확률(서버 risk-options 수정과 함께)
-        versionName = "0.15.1"
+        //   0.16.0 알파 후보 · ONE store 첫 업로드(main 9496202 + 이 줄, 11-20). 팀 릴리스 키로
+        //          서명하는 첫 빌드. 문제 신고, 시스템 뒤로 가기, 토큰 갱신 교착 수정 포함
+        versionName = "0.16.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
