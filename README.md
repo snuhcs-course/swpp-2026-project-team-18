@@ -20,11 +20,11 @@ inquiries.
 | | |
 | --- | --- |
 | Iteration | 4 · 2026-11-07 – 2026-11-20 (Hardening and UAT) |
-| Snapshot | `main` at [`16b232e`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/16b232e) (2026-11-19), the Iteration 4 final code. Only this README differs from `main` |
-| Version | App **0.15.1** (`versionCode` 16) · server **0.21.0** (`APP_VERSION`), deployed on the shared server since 2026-11-16. The UAT cycle-2 APK was 0.15.0 (`fffab60`) |
+| Snapshot | `main` at [`9496202`](https://github.com/snuhcs-course/swpp-2026-project-team-18/commit/9496202) (2026-11-19, 22:00), the Iteration 4 final code. Only this README and `demo-video/` differ from `main` |
+| Version | App **0.15.1** (`versionCode` 16) · server **0.21.0** (`APP_VERSION`), deployed on the shared server since 2026-11-16. The APK made for UAT cycle 2 is 0.15.0 (`fffab60`) |
 | Server | `https://justintime-api.onrender.com` ([`/api/health`](https://justintime-api.onrender.com/api/health)) |
-| Demo video | Recorded on 2026-11-18 on a phone and shown at the TA meeting; see [below](#demo-video) |
-| UAT | Cycle 1 on 11-16 (build 0.14.0), cycle 2 on 11-18 (build 0.15.0). Results in the Wiki's [Testing Documentation, Iteration 4](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter4%E2%80%90testing), section 6 |
+| Demo video | [`demo-video/iteration4_demo.mp4`](demo-video/iteration4_demo.mp4) (1 min 48 s, recorded on a phone on 2026-11-18); see [below](#demo-video) |
+| UAT | Cycle 1 on 11-16 (build 0.14.0); cycle 2 on 11-23, in Iteration 5. Results in the Wiki's [Testing Documentation, Iteration 4](https://github.com/snuhcs-course/swpp-2026-project-team-18/wiki/team18%E2%80%90iter4%E2%80%90testing), section 6 |
 
 Everything needed to run the demo is on this page. The full project README (architecture, API,
 deployment, configuration) is on
@@ -44,9 +44,9 @@ and [`iteration-3-demo`](https://github.com/snuhcs-course/swpp-2026-project-team
 
 ## Demo video
 
-Recorded on 2026-11-18 on a phone (portrait) and shown at the Iteration 4 TA meeting; it is
-submitted with this iteration's deliverables. The scenes follow the order in which the heuristic
-evaluation ranked the problems:
+[`demo-video/iteration4_demo.mp4`](demo-video/iteration4_demo.mp4) — 1 min 48 s, recorded on a
+phone (portrait) on 2026-11-18 and shown at the Iteration 4 TA meeting, on the build of that day.
+The scenes follow the order in which the heuristic evaluation ranked the problems:
 
 | Scene | What it should show | Runs on |
 | --- | --- | --- |
@@ -78,14 +78,15 @@ every tab, a time picker that doesn't fight the user, and a way to change the al
 | 3 | First run | Home address, **prep time on a redesigned screen (−/+ 5 min, quick chips, a wheel; no prefilled value)**, optional calendar link, **then three intro pages and a one-time coachmark on Home**. Whether the guide was seen is **stored on the account** (falls back to the phone on a 0.20.0 server) |
 | 4 | Home | **Redrawn: today's date, one large next-alarm card (alarm time, on-time probability chip when it is known, time to go, place and title), an in-progress card while a trip is being tracked, a "바꿀까요?" (change it?) card when the server proposes a new time, then today and tomorrow in full; each row is start · title · place · alarm time with its switch; a floating [+] (add).** The weekly report, calendar and routine cards moved to the report and me tabs |
 | 5 | Add and edit an event | **[+] opens the "알람 추가" (add alarm) sheet: three required fields — where, arrive by, route — and the title optional; a line over the button names what is still missing ("도착지 · 도착 시각 · 이동 경로를 정해 주세요"), a start time already past is refused before saving, recent destinations are one tap (from the route history), and choosing home can be undone. The route choice ⑬ is redrawn (bus / subway tabs, a bar of the legs with line colors, minutes and fare). A confirmation sheet then shows "내일 오전 ○:○○에 깨워 드릴게요" (I'll wake you at …) and [이 시각으로 알람 맞추기] (set the alarm at this time).** Editing keeps the full screen: **time on a scrolling wheel instead of the clock dial**, event type (**rename and delete your own types**), destination and route ("어디로 가요?", "어떻게 가요?"), weekly repeat. **Recurring events: [저장] asks "이 일정만 / 이후 일정 모두" (this one / this and following) and weekdays can change for "following"** (needs 0.21.0) |
-| 6 | Change the alarm | **A bottom sheet from Home's [시각 바꾸기] and the decision screen: three presets 여유 있게 · 보통 · 빠듯하게 (safe .97 · normal .90 · tight .65) and a wheel that previews the on-time probability from the prep + travel distribution. Any wheel time can be saved as "직접 정한 시각" (a time you set), which recomputes don't move; [추천 시각으로 되돌리기] (back to the recommended time) undoes it. When a recompute would move a confirmed alarm a lot, the server proposes the new time instead: a card on Home and the decision screen and a heads-up notification, and if nobody answers, the phone moves the alarm at the deadline** (needs 0.21.0). The old risk-choice screen ⑤ was removed |
+| 6 | Change the alarm | **A bottom sheet from Home's [시각 바꾸기] and the decision screen: three presets 여유 있게 · 보통 · 빠듯하게 (safe .97 · normal .90 · tight .65) and a wheel; Home, the decision screen and the sheet show the same server probability for the time that will ring. Any wheel time can be saved as "직접 정한 시각" (a time you set), which recomputes don't move; [추천 시각으로 되돌리기] (back to the recommended time) undoes it. When a recompute would move a confirmed alarm a lot, the server proposes the new time instead: a card on Home and the decision screen and a heads-up notification, and if nobody answers, the phone moves the alarm at the deadline** (needs 0.21.0). The old risk-choice screen ⑤ was removed |
 | 7 | See the alarm and why | **"왜 오전 ○:○○인가요?" (why this time?): prep, travel and safety buffer add up to start − alarm, with where the buffer comes from;** the route map and alternatives, **a faster route shown from one minute faster.** **An i button opens "정시 도착 확률이 뭐예요?" (what is the on-time probability) — ten circles, "10번 중 N번" rounded down** |
 | 8 | Trip tab | **Before leaving: the next trip (leave time, time left, arrival) with the on-time chip and a vertical "가는 길" (the way) timeline of the planned legs, kept offline; empty states for no trip today, no events, and no route chosen.** While moving it links to the trip progress card of Iteration 3 (reroute when late, "도착했어요"). **Tracking resumes if the app is killed during a trip** |
-| 9 | Wake up reliably | Full screen over the lock screen, 5-min snooze, re-registered after reboot and app update; only the first alarm of each day on by default |
+| 9 | Wake up reliably | Full screen over the lock screen, 5-min snooze, re-registered after reboot and app update; only the first alarm of each day on by default. **If a second alarm rings while one is on screen, the screen switches to the new one** |
 | 10 | Learn | Nightly training at 23:17 KST: safety buffer, prep from GPS departures, walking speed and time-of-day factors, route correction; the next 7 days recomputed. **"기록 초기화" (reset my records) in me › account clears the learned data and keeps events, homes and routines — needs 0.21.0 (on 0.20.0 the app says the server doesn't support it yet)** |
 | 11 | Report tab | **Opens on this week: "이번 주 N번 중 M번 제시간에 도착했어요" (on time M of N this week) with weekday dots, late days → the day detail ⑨, expected vs actual on-time probability with a verdict, expected vs actual prep time; ‹ › move between weeks.** **A Sunday 12:00 notification "이번 주 리포트가 나왔어요" (this week's report is ready) opens it; switch in me › 알림·권한** |
 | 12 | Me tab | **Profile, then 내 아침 (my morning: homes, prep time, routine) · 일정 (calendar) · 도움 (help) · 계정 (account) rows with their current values; 알림·권한 (notifications and permissions) shows notifications, full-screen alarm and precise location, with what is off in orange and a shortcut to the setting** |
-| 13 | Help | **Help screen with eight questions, search, and [처음 안내 다시 보기] (replay the intro); a ? on Home, trip and report; [문의하기] (contact us) sends a message with a reply email — needs 0.21.0** |
+| 13 | Help | **Help screen with eight questions, search, and [처음 안내 다시 보기] (replay the intro); a ? on Home, trip and report; [문의하기] (contact us) sends a message with a reply email, and me › 도움 › "문제 신고" (report a problem) sends one as a problem report with the app version and device — needs 0.21.0** |
+| 14 | Back | **The system back gesture does what the on-screen ‹ does; on sign-up it returns to login instead of closing the app, and it waits while a request is running** |
 
 The app's text is Korean. Server texts (weekly summary, buffer reasons, plan status, errors) are
 rewritten in the polite 해요체 on 0.21.0; the app shows them as they come.
@@ -95,7 +96,7 @@ rewritten in the polite 해요체 on 0.21.0; the app shows them as they come.
 ## Major progress in Iteration 4
 
 Compared with [`iteration-3-demo`](https://github.com/snuhcs-course/swpp-2026-project-team-18/tree/iteration-3-demo)
-(`5dc51ef`, 2026-11-05): 54 commits without merges up to `16b232e`. Jinho Kim is the PM, Sooyeon Kim did the app
+(`5dc51ef`, 2026-11-05): 57 commits without merges up to `9496202`. Jinho Kim is the PM, Sooyeon Kim did the app
 and Junha Park the server (roles rotate each iteration). The 15 commits of 11-06 – 11-07 are the
 last Iteration 3 app fixes (merged into `main` on 11-07 as `86ba415`). The frontend's requests to
 the backend are [`docs/iter4/*-api.md`](docs/iter4/); the backend's contracts are
@@ -119,6 +120,11 @@ the backend are [`docs/iter4/*-api.md`](docs/iter4/); the backend's contracts ar
   and a deadline alarm, the login-lock countdown, saved-home name checks, recent destinations, the
   route choice ⑬ redrawn, trip tracking that survives the app being killed, and most developer-style
   wording rewritten in 해요체
+- The last fixes (`9496202`, 11-19 evening): no more endless loading when several requests hit an
+  expired session at once (Park Junha, `0a15bc5`); the problem-report row; the system back gesture
+  everywhere; one on-time probability on every screen; the alarm screen handing over to a second
+  alarm; a retry card instead of an endless spinner on the decision screen; calendar import that
+  keeps unchecked events and waits for places; plainer wording (`17816cd`, `0b3d308`)
 
 **Server (`back-iter4`, 0.21.0, merged into `main` and deployed on 11-16)**
 
@@ -137,15 +143,14 @@ the backend are [`docs/iter4/*-api.md`](docs/iter4/); the backend's contracts ar
 Each BE request above went through a review round on 11-15 before it was merged into `back-iter4`
 (the "review fixes" commits for A2, A3, H3, H4, H4b, H9, R1 and RESET).
 
-**Testing** (run locally on this snapshot on 2026-11-19, see [Verification](#verification))
+**Testing** (run locally, see [Verification](#verification))
 
-- Backend tests 1,795 → **2,299** (96.0% line coverage), app JVM tests 950 → **1,364**, device
-  tests 34 → **70** (all pass), contract checks 241 passed · 34 skipped (no Kakao key) · 0 failed
-- CI [run 97](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/runs/44438086703)
-  on `main` `16b232e`: **all four jobs passed** (the device job had failed in runs 94 and 95 on
-  11-16)
+- Backend tests 1,795 → **2,299** (96.0% line coverage), app JVM tests 950 → **1,425**, device
+  tests 34 → **71** (all pass), contract checks 241 passed · 34 skipped (no Kakao key) · 0 failed
+- CI [run 98](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/runs/44529297085) on `main` `9496202`: **all four jobs passed** (the device job had failed in
+  runs 94 and 95 on 11-16; run 97 on `16b232e` was the first green run since)
 - UAT cycle 1 (11-16): 7 of 15 cases accepted, 2 rejected (editing, past start time; both fixed in
-  0.15.0), 6 not tested (moving, harsh conditions). Cycle 2 (11-18) was rewritten as one 21-step
+  0.15.0), 6 not tested (moving, harsh conditions). Cycle 2 (11-23) was rewritten as one 21-step
   flow of about 40 minutes
 
 **PM work**
@@ -154,7 +159,7 @@ Each BE request above went through a review round on 11-15 before it was merged 
   the Figma section "피드백 적용" with one redesigned frame per finding and 13 open decisions
 - The frontend's request list to the backend and the backend's answer (what the app still has to
   connect), the UAT sheet (five stories, submitted 11-13), the Nov 9 meeting log
-- The UAT APKs and the cycle-2 sheet, the TA meeting deck, and the final merge of 11-19 with all
+- The UAT APKs and the cycle-2 sheet, the TA meeting deck, and the merge of 11-19 morning with all
   four suites run before `main` moved (a lint error in new code was caught and fixed there)
 
 ---
@@ -168,12 +173,12 @@ Severity is the highest rating any evaluator gave (0–4).
 | Issue (severity) | Change | Result in this snapshot |
 | --- | --- | --- |
 | Too much on Home, nothing stands out (3) | Four tabs; Home shows one next-alarm card and a plain list | ✅ in the app |
-| Developer wording on screen (3) | Server texts in 해요체 (0.21.0); app texts rewritten (`fffab60`) | 🚧 most lines rewritten; about 8 sentence-like lines, about 70 short status labels ("꺼짐", "켜짐 · …") and the τ symbol in a few places remain |
+| Developer wording on screen (3) | Server texts in 해요체 (0.21.0); app texts rewritten (`fffab60`, `17816cd`) | 🚧 most lines rewritten; about 4 sentence-like lines, about 57 short status labels ("기록 없음", "꺼짐 · …") and the τ symbol in a few places remain |
 | The computed alarm can't be changed or approved (3) | Alarm-time sheet with presets and a wheel; a time of one's own, confirmation and proposals | ✅ in the app; confirming again on the decision screen after a recompute is not possible |
-| No help or tutorial (2) | Intro, coachmark, help, i sheets, contact | ✅ in the app (one help answer still names the old button "지각 위험 바꾸기") |
+| No help or tutorial (2) | Intro, coachmark, help, i sheets, contact, problem report | ✅ in the app (one help answer still names the old button "지각 위험 바꾸기") |
 | The clock dial is hard to use (2) | Time and duration wheels | ✅ |
 | Buttons look like text (2) | Four button levels in Figma | 🚧 partly: a gray secondary button, icon tiles, one filled button on the route choice; no app-wide pass |
-| Back only by the on-screen button (2) | Predictive back; fix the sign-up back gesture | ❌ not in the app yet |
+| Back only by the on-screen button (2) | Predictive back; fix the sign-up back gesture | 🚧 the system back works everywhere, sign-up included; the predictive-back preview is not built |
 | Adding an event in a hurry takes too long (2) | An add sheet with three required fields; the route history API | ✅ the add sheet with recent destinations; most-used routes not used |
 | Choosing "집" by mistake; duplicate home names (1) | Undo after swapping to home; the name rule at the field | ✅ (a saved home can't be renamed) |
 | Route colors unclear (1) | Line names in the bar, a legend and a color sheet | 🚧 the route bar shows mode icons, minutes and line colors; no legend or color sheet |
@@ -398,15 +403,16 @@ may have run against either server version.
   screen draws them), and an on-time probability the app can't compute is left blank without a reason
 - A recomputed alarm can't be confirmed again from ④; confirmation happens on the new-event sheet
 - Most-used routes from the route history are not used; a saved home can't be renamed
-- Heuristic evaluation: predictive back and the sign-up back gesture (H2-7), button levels app-wide
-  (H2-6), a legend for the route bar (H2-10), the remaining 해요체 wording and τ (H2-1), one help
-  answer naming an old button. The map zoom (A4) and the grey travelled path (A5) are also open
+- Heuristic evaluation: button levels app-wide (H2-6), a legend for the route bar (H2-10), the
+  remaining 해요체 wording and τ (H2-1), the predictive-back preview (H2-7), one help answer naming
+  an old button. The map zoom (A4) and the grey travelled path (A5) are also open
+- The app version is still 0.15.1 (16) on `9496202`, the same as on `16b232e`; the next build is
+  0.16.0 (17), signed with the team release key, for ONE store and the alpha
 - The 11-08 bug-fix branch `fix/iter4-he-bugs` is not merged (planned for 11-19 – 11-22)
 
 **Not checked yet** — the newly connected alarm control, login lock and trip resume end to end on
 a physical phone against the shared server, the Sunday notification on a real Sunday,
-`qa/demo/run.py` against the tab layout, and the UAT cycle-2 results (the course sheet has no
-tester results yet).
+`qa/demo/run.py` against the tab layout, and the UAT cycle-2 results (the session is on 11-23).
 
 **Next (Iteration 5)** — the open items above, a release signing key and crash reporting before
 the alpha, splitting `HomeViewModel` (ViewModel coverage 6.9%) with the design-pattern refactoring,
@@ -424,16 +430,16 @@ cd APP     && ./gradlew jacocoDebugAndroidTestReport -Pandroid.testInstrumentati
                                                     # app integration tests on a running emulator
 ```
 
-Run on this snapshot (`16b232e`) on 2026-11-19 (Windows 11, Python 3.12, Android Studio's JBR);
-CI [run 97](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/runs/44438086703) on
-the same commit passed all four jobs:
+Run on this snapshot (`9496202`) on 2026-11-20 for the app, and on `16b232e` on 2026-11-19 for the
+backend and contract suites (the backend did not change in between); Windows 11, Python 3.12,
+Android Studio's JBR. CI [run 98](https://github.com/snuhcs-course/swpp-2026-project-team-18/actions/runs/44529297085) on `9496202` passed all four jobs:
 
 | Suite | Result |
 | --- | --- |
 | Backend pytest | 2,299 passed (unit 1,302 · integration 997) in 97 s; line coverage 96.0% (computation 95.6%, API 96.2%) |
 | Contract suites (8), without a Kakao key | 241 passed · 34 skipped · 0 failed |
-| App JVM tests, lint, debug build | 1,364 passed, 0 failed; line coverage domain 97.4%, data 69.0%, ViewModel 6.9%, platform 12.9% |
-| App device tests (`integration` package, Android 36 emulator) | 70 passed, 0 failed; View line coverage on the device 32.3% |
+| App JVM tests, lint, debug build | 1,425 passed, 0 failed; line coverage domain 97.5%, data 71.3%, ViewModel 7.3%, platform 13.2% |
+| App device tests (`integration` package, Android 36 emulator) | 71 passed, 0 failed; View line coverage on the device 34.3% |
 
 CI runs the same suites on every push to `main` and every pull request. Coverage by layer and the
 device test results are in the Wiki's
