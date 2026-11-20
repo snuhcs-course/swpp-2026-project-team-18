@@ -261,3 +261,14 @@ def test_every_candidate_carries_a_fare_field(upstream):
     items, _ = clients._transit_candidates(*START, *END)
     fares = {item["key"]: item["fare"] for item in items}
     assert fares == {"transit:A": 1550, "transit:B": None}
+
+
+def test_subway_plus_unmapped_vehicle_is_not_subway_only(upstream):
+    """배처럼 구간으로 그리지 않는 탈것이 섞이면 "지하철만" 이 아니다(리뷰)."""
+    ferry = route([("subway", "2호선")], 1200)
+    ferry["steps"].append({"properties": {"type": "FERRY", "time": 300, "vehicles": [{"name": "X선"}]}})
+    upstream[0]["routes"] = [ferry, route([("bus", "B")], 1500)]
+    items, _ = clients._transit_candidates(*START, *END)
+    mixed = next(item for item in items if item["key"].startswith("transit:2호선"))
+    assert mixed["key"] == "transit:2호선>X선"
+    assert clients.SUBWAY_ONLY_BADGE not in mixed["badges"]

@@ -1312,7 +1312,11 @@ def _transit_candidates(
         # Partly AI-generated (Claude) — BE-BADGE. 비교가 아니라 그 경로의 성질이다. 버스를 타지 않고
         # 지하철로만 가면 붙인다(걷는 구간은 상관없다). 상한(3개)에 걸려도 빠지지 않게 비교 배지를
         # 하나 덜 보인다 — 시안이 이 배지를 카드에 늘 보여 준다.
-        if _ride_kinds(item) == SUBWAY_ONLY_KINDS:
+        # 지도에 그리지 않는 탈것(배 등)은 구간에서 빠지고 key 에만 남는다. key 의 노선 수와 탄 구간 수가
+        # 같아야 모든 탈것이 지하철이다(BADGE 리뷰).
+        if _ride_kinds(item) == SUBWAY_ONLY_KINDS and len(_ride_legs(item)) == len(
+            item["key"].removeprefix("transit:").split(">")
+        ):
             badges = [*badges[: TRANSIT_MAX_BADGES - 1], SUBWAY_ONLY_BADGE]
         item["badges"] = badges[:TRANSIT_MAX_BADGES]
         item["reason"] = item["badges"][0] if item["badges"] else ""
