@@ -42,9 +42,15 @@ class TestNumbers:
 
     @pytest.mark.parametrize("precise,whole_value,expected", [
         (97.3, 97, 97.3), (None, 97, 97.0), (None, 100, 99.9), (None, 0, 0.0), (None, None, None),
+        # 0.21.0 서버가 정수만 고쳐 쓴 행: 남은 소수 칸은 믿지 않는다(리뷰).
+        (93.2, 88, 88.0), (93.2, None, None), (99.9, 100, 99.9),
     ])
     def test_stored_falls_back_to_the_old_integer(self, precise, whole_value, expected):
         assert on_time.stored(precise, whole_value) == expected
+
+    @pytest.mark.parametrize("precise,text", [(46.0, "46"), (69.6, "69.6"), (0.1, "0.1")])
+    def test_label(self, precise, text):
+        assert on_time.label(precise) == text
 
     def test_table_starts_at_zero_and_ends_at_the_cap(self):
         table = on_time.table(dist.Normal(30.0, 4.0))
@@ -227,3 +233,25 @@ def test_rows_stored_before_the_decimal_columns(ctx):
     assert plan["on_time_probability"] == 99
     assert plan["on_time_probability_precise"] == 99.9
     assert plan["effective_on_time_probability"] == 99
+
+
+@pytest.mark.parametrize("probability,proposes", [(69.4, True), (69.6, True), (70.0, False)])
+def test_user_floor_uses_the_decimal(probability, proposes):
+    """70% 아래인지는 화면에 보이는 소수 값으로 본다. 69.6 은 정수로 70 이지만 묻는다(리뷰)."""
+    from apps.planning.alarm_control import Control
+
+    start = datetime(2026, 11, 21, 9, tzinfo=KST)
+    recommended = start - timedelta(minutes=60)
+    picked = recommended + timedelta(minutes=20)
+    control = Control()
+    control.set_user(picked, start, 99.0, start - timedelta(days=1))
+    control.after_compute(
+        before_recommended=recommended, recommended=recommended, recommended_probability=97.3,
+        start_at=start, trigger="recompute", now=start - timedelta(days=1),
+        probability_at=lambda _at: probability, reason=lambda: ("model", "x"),
+    )
+    assert control.has_proposal is proposes
+    if proposes:
+        assert control.proposal_reason_text.endswith(f"{on_time.label(probability)}%예요")
+        assert control.proposal_keep_probability_precise == probability
+        assert control.proposal_change_probability_precise == 97.3

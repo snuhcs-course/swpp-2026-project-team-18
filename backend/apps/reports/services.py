@@ -62,6 +62,7 @@ from apps.events.models import Event
 from apps.observations import selection
 from apps.observations.models import AlarmLog, TripObservation
 from apps.planning import buffers, learning_reset
+from apps.planning import on_time as _on_time
 from apps.planning.estimators import PREP_SOURCE_NOT_FROM_HOME
 from apps.planning.models import AlarmPlan, BufferAdjustment
 from apps.routines.models import BlockObservation
@@ -980,7 +981,11 @@ def _outcome_row(
         "weekday": local.weekday(),
         "result": result,
         "slack_minutes": outcome.slack_minutes,
-        "on_time_probability": plan.on_time_probability if plan else None,
+        # 계획 응답과 같은 값(1~99, BE-P100). 0.21.0 이 저장한 100 도 99 다.
+        "on_time_probability": (
+            _on_time.whole(_on_time.stored(plan.on_time_probability_precise, plan.on_time_probability))
+            if plan else None
+        ),
         "tau": outcome.tau,
         "tau_bucket_lower": bucket_for(outcome.tau)[0] if outcome.tau is not None else None,
         "prep_applies": _prep_applies(event),

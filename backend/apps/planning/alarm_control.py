@@ -362,7 +362,7 @@ class Control:
             self._set_user_probability(probability)
             if (
                 probability is not None
-                and on_time.whole(probability) < USER_PROBABILITY_FLOOR
+                and probability < USER_PROBABILITY_FLOOR
                 and self.user_alarm_at - recommended > PROPOSAL_THRESHOLD
                 and not self._suppressed(recommended)
             ):
@@ -374,7 +374,7 @@ class Control:
                     change=recommended_probability,
                     reason=(
                         "user_low_probability",
-                        f"직접 정한 시각에 일어나면 정시 도착 확률이 {on_time.whole(probability)}%예요",
+                        f"직접 정한 시각에 일어나면 정시 도착 확률이 {on_time.label(probability)}%예요",
                     ),
                     now=now,
                 )

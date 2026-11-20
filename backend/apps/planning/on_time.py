@@ -68,14 +68,23 @@ def whole(precise: float | None) -> int | None:
 
 
 def stored(precise: float | None, whole_value: int | None) -> float | None:
-    """저장된 확률의 소수 값. 소수 칸이 생기기 전(0.21.0)의 행이면 정수 값을 쓰되 상한을 지킨다."""
-    if precise is not None:
-        return precise
+    """저장된 확률의 소수 값. 정수 칸이 기준이다.
+
+    소수 칸은 정수 칸과 맞을 때만 믿는다. 0.21.0 서버는 같은 DB 에서 정수 칸만 고쳐 쓰므로(소수 칸을
+    모른다) 소수 칸이 옛 계산의 값으로 남을 수 있다. 맞지 않거나 비었으면 정수 값을 쓰되 상한을 지킨다.
+    """
     if whole_value is None:
         return None
+    if precise is not None and whole(precise) == min(whole_value, WHOLE_MAX):
+        return precise
     if whole_value <= 0:
         return 0.0
     return min(PRECISE_MAX, float(whole_value))
+
+
+def label(precise: float) -> str:
+    """문장에 넣는 퍼센트 숫자. 소수 한 자리이되 .0 은 뗀다(46.0 → "46", 69.6 → "69.6")."""
+    return f"{precise:.1f}".removesuffix(".0")
 
 
 def function(prep, travel, start_at) -> Callable[[object], float | None]:
