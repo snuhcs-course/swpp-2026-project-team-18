@@ -84,7 +84,7 @@ Authorization: Bearer <access>
 
 `GET /api/routes/candidates` 의 `preferred_key` 는 이제 이 문서의 "다녀온 이동 · 탄 경로" 로 정한다.
 
-1. 이번 요청의 출발지(`origin_lat`/`origin_lng`, 없으면 집)와 **같은 출발지**(약 100m 격자, 3절과 같다)에서
+1. 이번 요청의 출발지(`origin_lat`/`origin_lng`, 없으면 집)와 **같은 출발지**(100m 안)에서
    **같은 목적지**(100m 안)로 **지난 90일 안에 다녀온** 가장 최근 이동의 **탄 경로**(이동 중 바꿨으면 바꾼 경로).
    - 그 경로가 이번 후보에 있으면 그 경로: `preferred_basis: same_destination`, `preferred_match: same_route`
    - 없으면 같은 수단의 가장 빠른 후보: `preferred_basis: same_destination`, `preferred_match: same_mode_fallback`
@@ -95,8 +95,10 @@ Authorization: Bearer <access>
   채우기 때문이다(`RoutePrefill.kt`). 요청의 `same_route` / `same_mode_fallback` 구분은 새 필드 `preferred_match` 로 준다.
   앱은 `same_route` 일 때만 "지난번에 고른 길" 이라고 쓰고, `same_mode_fallback` 이면 다른 문구(예: "지난번과 같은 수단")를
   쓰면 된다.
-- 출발지 비교는 좌표 격자다. 요청이 저장한 집 id 를 보내지 않으므로, 저장한 집에서 간 이동은 그 집의 좌표(일정에 복사된
-  `origin_*`)로 비교한다. 격자 경계를 사이에 둔 두 점(수십 m 차이)은 다른 출발지로 볼 수 있다(`routes/history` 와 같은 한계).
+- 출발지 비교는 **100m 거리**다(목적지와 같다). 요청이 저장한 집 id 를 보내지 않으므로, 저장한 집에서 간 이동은 그 집의
+  좌표(일정에 복사된 `origin_*`)로 비교한다. `routes/history` 의 격자는 경계를 사이에 둔 10m 차이도 가르므로 기본 선택에는
+  쓰지 않았다. 집을 옮겼으면 출발지 없이 만든 예전 일정은 새 집에서 간 것으로 본다(`routes/history` 와 같다).
+- 가장 최근 이동의 경로를 알 수 없으면(계산 실패) 그다음 이동의 경로를 쓴다.
 - 아직 시작하지 않은 일정(내일 일정에 고른 경로)은 "다녀온 이동" 이 아니라 1번에 들지 않는다. 2번(수단)에는 든다.
 
 ## 5. 정할 것 (팀)

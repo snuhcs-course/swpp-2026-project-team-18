@@ -14,9 +14,11 @@
    그 경로(`preferred_match: same_route`), 없으면(대중교통 노선 조합이 바뀌었으면) 같은 수단의 가장
    빠른 후보다(`same_mode_fallback`). "다녀온 이동" 과 "실제로 탄 경로" 는 `routes/history` 와 같다
    (`route_history`): 시작 시각이 지났고 "안 감" 이 아닌 일정, 이동 중 바꿨으면 바꾼 경로.
-   출발지는 집 · 저장한 집 · 그 밖의 좌표를 약 100m 격자로 비교한다. 이번 요청은 좌표만 오므로
-   (`origin_lat`/`origin_lng`, 없으면 집) 그 좌표의 격자와 이동의 출발 좌표 격자가 같으면 같은
-   출발지다.
+   출발지는 집 · 저장한 집 · 그 밖의 좌표를 **100m 안**이면 같다고 본다. 이번 요청은 좌표만
+   오므로(`origin_lat`/`origin_lng`, 없으면 집) 이동의 출발 좌표(저장한 집이면 일정에 복사된 좌표,
+   집이면 지금 집 좌표)와 거리로 비교한다. `routes/history` 의 묶음은 약 100m 격자지만, 격자는
+   경계를 사이에 둔 10m 차이도 갈라 놓으므로 여기서는 거리를 쓴다(BE-PREF 리뷰).
+   가장 최근 이동의 경로를 알 수 없으면(계산 실패 등) 그다음 이동을 본다.
 2. 없으면 **최근 선택 10개에서 가장 많이 고른 수단**의 가장 빠른 후보다. 동률이면 더
    최근에 고른 수단이다. 가장 최근 하나만 보면 근처 카페에 한 번 걸어간 것 때문에 먼
    곳도 도보 탭이 열린다.
@@ -132,7 +134,6 @@ def last_trip_route(
         origin_lat, origin_lng = profile.home_lat, profile.home_lng
     if origin_lat is None or origin_lng is None:
         return ""
-    wanted_origin = route_history._grid(origin_lat, origin_lng)
 
     near_destination = Q(
         place__lat__range=(dest_lat - _DEST_BOX_LAT, dest_lat + _DEST_BOX_LAT),
@@ -152,12 +153,16 @@ def last_trip_route(
             skipped_at__isnull=True,
         )
         .select_related("place", "alarm_plan")
+        .only(
+            "id", "start_at", "route_key", "destination_is_home", "origin_lat", "origin_lng",
+            "place__lat", "place__lng", "alarm_plan__route_key",
+        )
         .order_by("-start_at", "-id")[:SCAN_LIMIT]
     )
     trips = [
         e for e in events
         if (e.destination_is_home or _within(e.place.lat, e.place.lng, dest_lat, dest_lng))
-        and _origin_grid(e, profile) == wanted_origin
+        and _same_origin(e, profile, origin_lat, origin_lng)
     ]
     if not trips:
         return ""
@@ -170,13 +175,14 @@ def last_trip_route(
     return ""
 
 
-def _origin_grid(event: Event, profile) -> tuple | None:
-    """이동의 출발 좌표 격자. 저장한 집이면 그 집의 좌표(`origin_*` 에 복사돼 있다), 집이면 지금 집 좌표."""
+def _same_origin(event: Event, profile, origin_lat: float, origin_lng: float) -> bool:
+    """이동의 출발지가 요청의 출발지와 100m 안인가. 저장한 집이면 그 집의 좌표(`origin_*` 에 복사돼
+    있다), 출발지가 없으면 지금 집 좌표다(`Event.resolve_origin`, 집을 옮겼으면 새 집으로 본다)."""
     if event.origin_lat is not None and event.origin_lng is not None:
-        return route_history._grid(event.origin_lat, event.origin_lng)
-    if profile.home_lat is None or profile.home_lng is None:
-        return None
-    return route_history._grid(profile.home_lat, profile.home_lng)
+        lat, lng = event.origin_lat, event.origin_lng
+    else:
+        lat, lng = profile.home_lat, profile.home_lng
+    return _within(lat, lng, origin_lat, origin_lng)
 
 
 def _within(lat, lng, dest_lat, dest_lng) -> bool:

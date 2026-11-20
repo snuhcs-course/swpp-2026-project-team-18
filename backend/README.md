@@ -78,11 +78,13 @@ curl http://127.0.0.1:8000/api/health
 - **알람 켬/끔:** `alarm_enabled`는 null(자동)/true/false, `alarm_on`은 최종 결과, `is_first_alarm`은 그날 켜진 첫 알람이다.
   PATCH는 일정 한 건만 돌려주므로 목록을 다시 조회한다. 직접 일정을 추가하면 같은 날 기존 일정의 `alarm_enabled`가 null로 돌아간다.
 - **장소:** 출발지와 목적지가 50m 미만이면 400이다. 주소 검색은 도로명·지번을 먼저 찾고, 주소 결과의 `kakao_place_id`는 null이다.
-- **경로 후보:** `fastest_key`는 전체 최단, `preferred_key`·`preferred_mode`는 사용자가 전에 고른 경로다
-  (`preferred_basis`: `same_destination` 또는 `recent_mode`, 기록이 없으면 null). 탑승 구간의 `alt_vehicles`는 같은 구간의 다른 노선이다.
+- **경로 후보:** `fastest_key`는 전체 최단, `preferred_key`·`preferred_mode`는 같은 출발지 → 같은 목적지로 90일 안에
+  다녀온 이동에서 실제로 탄 경로(없으면 최근에 자주 고른 수단)다. `preferred_basis`: `same_destination` 또는 `recent_mode`,
+  `preferred_match`: `same_route` 또는 `same_mode_fallback`(같은 목적지일 때만). 기록이 없으면 null. 탑승 구간의 `alt_vehicles`는 같은 구간의 다른 노선이다.
 - **도착:** 목적지 100m 안의 첫 유효 위치에서 도착한다. `detector: "manual"` 관측은 위치가 없거나 오차가 커도 받는다.
 - **지각 민감도:** τ ≥ 0.95는 `high`, ≥ 0.85는 `normal`, 나머지는 `low`다.
-- **도착 확률:** 변동성 근거가 없으면 null이다. 앱은 홈에서 숨기고 알람 근거에 이유를 표시한다.
+- **도착 확률:** 준비·이동 둘 다 변동성 근거가 없으면 null이다. 정수는 1~99, 소수 한 자리는 `*_precise`(0.1~99.9)이고
+  100은 내지 않는다. risk-options 의 `probability_table` 이 휠 시각의 확률이다(`docs/iter4/server-alarm-control.md`).
 
 ## 검증과 학습
 

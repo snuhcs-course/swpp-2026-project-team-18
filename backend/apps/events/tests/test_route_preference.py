@@ -119,6 +119,19 @@ class TestPreferredRoute:
         chose(user, campus, "transit:2호선", 2)
         assert prefer(user, CAMPUS, origin=HOME)["preferred_key"] == "transit:2호선"
 
+    def test_nearby_origins_across_a_grid_edge_still_match(self, user, campus):
+        """격자로 비교하면 11m 차이도 갈린다(37.49949 → 37.499, 37.49959 → 37.5). 거리로 본다(리뷰)."""
+        chose(user, campus, "walk", 1, origin_lat=37.49949, origin_lng=126.9295)
+
+        assert prefer(user, CAMPUS, origin=(37.49959, 126.9295))["preferred_key"] == "walk"
+        assert prefer(user, CAMPUS, origin=(37.5010, 126.9295))["preferred_basis"] == pref.RECENT_MODE
+
+    def test_destination_just_outside_100m_is_not_the_same(self, user):
+        near = Place.objects.create(name="정문 밖", lat=CAMPUS[0] + 0.0011, lng=CAMPUS[1])  # 약 122m
+        chose(user, near, "walk", 1)
+
+        assert prefer(user, CAMPUS)["preferred_basis"] == pref.RECENT_MODE
+
     def test_saved_origin_is_compared_by_its_coordinates(self, user, campus):
         from apps.accounts.models import SavedPlace
 
