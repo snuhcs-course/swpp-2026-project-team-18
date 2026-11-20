@@ -10,8 +10,8 @@
 | BE-H3d | 다시 계산으로 5분 넘게 바뀌면 **"바꿀까요" 제안** · 수락/거절 · 답이 없을 때 규칙 | 묻기 `547:2766` |
 | BE-H3e | risk-options 에 **추천 칸**(`recommended_key`) | 시트 "빠르게 고르기" |
 
-BE-H3c(임의 시각 → 확률 API)는 만들지 않았다. 앱이 risk-options 의 `distribution` 으로 읽는 값과 서버가
-직접 정한 시각에 내는 확률이 **같은 분포·같은 식**이다(5절).
+BE-H3c(임의 시각 → 확률)는 11-20 에 **risk-options 의 1분 단위 표(`probability_table`)** 로 넣었다(3.7절). 같은 날
+BE-P100 으로 확률은 100 을 내지 않고 소수 한 자리 값(`*_precise`)도 준다(5절).
 
 구현: `planning/alarm_control.py`(규칙 전부), `planning/views.py`·`planning/urls.py`(API), `AlarmPlan` 새 필드
 (마이그레이션 `planning 0014_alarm_control`, events 마이그레이션 없음), 재계산 훅 `services._upsert`·`refresh._remix`,
@@ -38,10 +38,13 @@ BE-H3c(임의 시각 → 확률 API)는 만들지 않았다. 앱이 risk-options
 | `alarm_source` | `"recommended"` \| `"user"` | 울릴 시각이 추천인지 직접 정한 것인지. `user` 면 ④ 카드에 "직접 정한 시각" 회색 알약, 홈 줄에 "직접" |
 | `recommended_alarm_at` | 시각 \| null | 추천 시각(`alarm_at` 과 같다). 계산하지 못했으면 null |
 | `effective_alarm_at` | 시각 \| null | 울릴 시각. 계산하지 못했으면(`status` ≠ `ok`) null |
-| `effective_on_time_probability` | 0~100 \| null | 울릴 시각에 일어날 때의 정시 도착 확률. 변동성 근거가 없으면 null(`on_time_probability` 와 같은 조건) |
+| `effective_on_time_probability` | 0~99 \| null | 울릴 시각에 일어날 때의 정시 도착 확률. 준비 · 이동 둘 다 점추정이면 null(`on_time_probability` 와 같은 조건) |
+| `effective_on_time_probability_precise` | 0.0~99.9 \| null | 같은 값의 소수 한 자리(BE-P100). 정수는 이 값을 반올림하되 99 를 넘지 않는다 |
+| `on_time_probability_precise` | 0.0~99.9 \| null | 추천 시각 확률(`on_time_probability`)의 소수 한 자리 |
 | `user_alarm_at` | 시각 \| null | 직접 정한 시각. `alarm_source` 가 `user` 일 때만 |
 | `user_alarm_reason` | `""` \| `"picked"` \| `"kept"` | `picked` 휠로 골랐다, `kept` "그대로 두기"(또는 답이 없어 서버가 지킴)로 원래 시각을 지켰다. 동작은 같다 |
-| `user_alarm_probability` | 0~100 \| null | 직접 정한 시각의 확률. 다시 계산할 때마다 새로 구한다 |
+| `user_alarm_probability` | 0~99 \| null | 직접 정한 시각의 확률. 다시 계산할 때마다 새로 구한다 |
+| `user_alarm_probability_precise` | 0.0~99.9 \| null | 같은 값의 소수 한 자리 |
 | `alarm_confirmed` | bool | 울릴 시각을 사용자가 확인했는가. 새 일정은 `false` |
 | `alarm_confirmed_at` | 시각 \| null | 확인한 순간. 확인 전이면 null |
 | `alarm_proposal` | 객체 \| null | 답을 기다리는 "바꿀까요" 제안. 아래 표 |
@@ -57,6 +60,7 @@ BE-H3c(임의 시각 → 확률 API)는 만들지 않았다. 앱이 risk-options
 | `reason` · `reason_text` | `travel` · `prep` · `buffer` · `model` · `user_low_probability` 와 문장(예: "이동 시간이 12분 늘었어요", "직접 정한 시각에 일어나면 정시 도착 확률이 46%예요") |
 | `keep_probability` | 그대로 둘 때의 확률(새 분포 기준) |
 | `change_probability` | 바꿀 때의 확률(= 새 추천의 `on_time_probability`) |
+| `keep_probability_precise` · `change_probability_precise` | 위 두 값의 소수 한 자리 |
 | `created_at` | 처음 물은 시각. 같은 제안을 다시 내면(15분마다 다시 계산) 그대로다 |
 | `answer_by` | 답할 마감 = `min(current_alarm_at, proposed_alarm_at) − 10분`(6절). 앞당기는 제안이면 제안 시각의 10분 전 |
 
@@ -169,6 +173,26 @@ PATCH 로 고르고 기기 알람을 `alarm_at` 으로 걸며 확인 API 를 부
 `selected_key`(지금 적용 중인 칸)는 그대로다. 사용자가 τ 를 직접 고른 뒤에도 "추천" 을 `recommended_key` 에 붙이면 된다.
 예: τ 0.97 로 바꾼 뒤 `selected_key: "safe"`, `recommended_key: "normal"`, `default_tau: 0.9`.
 
+`options[]` 에는 `probability_precise`(0.1~99.9, 소수 한 자리)가 더해졌다. `probability` 는 1~99 정수다(BE-P100).
+
+### 3.7 `GET /api/events/{id}/risk-options` 의 `probability_table` — 휠 시각의 확률 (BE-H3c)
+
+```json
+"probability_table": {
+  "unit": "minutes_before_start",
+  "precise": [0.0, 0.1, 0.1, …, 87.4, 91.2, …, 99.9],
+  "whole":   [0,   1,   1,   …, 87,   91,   …, 99],
+  "max_minutes": 74
+}
+```
+
+- `precise[i]` · `whole[i]` 는 **일정 시작 i 분 전**에 일어날 때의 확률이다. 앱은 `i = (일정 시작 − 휠 시각)` 을 분으로 세어(초는
+  버림) 그 칸을 읽는다. `i > max_minutes` 면 마지막 칸(상한 99.9 / 99)이다. `i ≤ 0`(일정 시작과 같거나 뒤)이면 0 이다.
+- 세 칸(`options[]`), 계획(`on_time_probability`, `effective_on_time_probability`), 저장한 직접 시각(`user_alarm_probability`)과
+  **같은 식 · 같은 분포**다. 같은 시각이면 같은 숫자가 나온다(테스트 `planning/tests/test_on_time.py`).
+- 확률을 낼 수 없으면(둘 다 점추정, 계획 없음) null 이고 `unavailable_reason` 을 준다.
+- `distribution`(10칸 구간)은 그대로 준다. 휠 확률은 이제 표에서 읽는다.
+
 ## 4. 다시 계산할 때의 규칙
 
 다시 계산은 일정 생성 · 수정 · `POST /recompute`(앱의 경로 갱신 워커 포함) · 캘린더 가져오기 · 프로필/집 변경 · 블록 체크 ·
@@ -202,20 +226,20 @@ PATCH 로 고르고 기기 알람을 `alarm_at` 으로 걸며 확인 API 를 부
 - `reset_alarm_overrides`(직접 추가한 일정과 같은 날의 켬/끔 선택을 자동으로 돌림)는 **켬/끔만** 돌린다. 직접 정한
   시각은 그 일정만의 선택이라 그대로 둔다.
 
-## 5. 확률 계산 (BE-H3c 를 대신하는 근거)
+## 5. 확률 계산 (하나의 식, `planning/on_time.py`)
 
-직접 정한 시각 `T` 의 확률 = `P(준비 + 이동 ≤ 시작 − T)`. 분포는 알람 계산(`compute_alarm_math`)과 risk-options 가 쓰는
-`estimators.total_distribution` 이고, 준비 · 이동 모두 변동성이 있어야 낸다(없으면 null). 버퍼도 쓸 수 있는 시간에 든다.
+시각 `T` 에 일어날 때의 확률 = `P(준비 + 이동 ≤ 시작 − T)`. 분포는 `estimators.total_distribution` 이고 버퍼도 쓸 수 있는
+시간에 든다. 추천 시각이면 `시작 − T` = τ 분위수(분 단위로 반올림) + 버퍼다. 계획 · 세 칸 · 휠 표 · 직접 정한 시각 · 제안의
+두 확률이 모두 이 식이다.
 
-앱의 `AlarmTimeChoice.estimate(distribution, available)` 는 같은 분포를 10칸 구간으로 받아 `available = 시작 − 알람` 까지의
-누적값을 구간 안 균등으로 읽는다. 같은 양이라 휠 미리보기와 저장 뒤 서버 값이 맞는다. 다른 점:
-
-- 구간 보간 때문에 앱 값이 1~5%p 다를 수 있다(테스트: 세 칸 시각에서 ±1%p, 중간 시각에서 ±5%p). 실측 예: 9:00 일정 8:10 → 앱식 46%, 서버 46%.
-- 추천 시각 자체의 확률은 `on_time_probability`(반올림 전 분위수 기준)와 ±1%p 다를 수 있다.
-
-저장 뒤에는 서버 값(`user_alarm_probability`)을 보여 준다.
-
-**risk-options 세 칸의 `probability`** 는 준비 · 이동 중 한쪽만 변동성을 알아도 채운다. 응답의 `distribution` 과 같은 분포에서 그 칸의 시각까지 쓸 수 있는 시간의 누적값이다(휠 값과 맞추려는 것, PM 피드백 iter4). 한쪽 변동성을 모르는 만큼 낙관적인 값이다. 계획의 `on_time_probability` · `effective_on_time_probability` 는 그대로 null 이다. 분포를 낼 수 없으면 지금처럼 `options` 가 비고 `unavailable_reason` 을 준다.
+- **언제 내는가(11-20 결정):** 준비 · 이동 중 **한쪽이라도** 변동성을 알면 낸다. 모르는 쪽은 예상값(카카오 예상 시간, 입력한
+  준비 시간)에 고정되므로 조금 높게 나올 수 있다. 그 사실은 `confidence_basis`(`travel_variance_unknown` ·
+  `prep_variance_unknown`)가 알려 준다. 둘 다 점추정이면 null 이다.
+- **숫자(BE-P100):** 소수 한 자리 `*_precise` 는 0.1~99.9(시간이 남아 있을 때), 시각이 일정 시작과 같거나 뒤면 0.0. 정수는
+  소수를 반올림하되 1~99 다. **100 은 내지 않는다** — 모델은 확실하다고 말할 수 없다. 정수 필드를 소수로 바꾸지 않은 이유는
+  배포된 앱(Gson `Int?`)이 `99.8` 을 받으면 파싱이 깨지기 때문이다.
+- 흔들림이 아주 작고 버퍼가 크면 세 칸이 99.9 / 99.9 / 99.8 처럼 거의 같다. 설명 문장은 주지 않는다(11-20 결정).
+- 0.21.0 이 저장한 행(소수 칸이 빈 행)은 정수 값을 쓰되 100 은 99 · 99.9 로 내보낸다. 다음 재계산에서 소수 칸이 채워진다.
 
 ## 6. 답이 없을 때 (잠정, Figma 캡션의 예시)
 
@@ -301,4 +325,4 @@ PATCH 로 고르고 기기 알람을 `alarm_at` 으로 걸며 확인 API 를 부
 - 이력(`PlanRevision`)과 학습은 추천 시각 기준이다. 직접 정한 시각으로 일어난 아침도 학습은 추천 계획과 비교한다. 필요하면 이력에 울릴 시각을 더한다.
 - 그날 "첫 알람"(`is_first_alarm`) 순서는 울릴 시각으로 정한다(리뷰 H3-5). 일정 목록 응답마다 그 사용자의 계획을 한 번
   읽어 파이썬에서 정렬한다(예전과 같은 쿼리 1번).
-- 관리 화면(`AlarmPlanAdmin`)에는 새 필드를 넣지 않았다.
+- 관리 화면(`AlarmPlanAdmin`)에는 새 필드를 넣지 않았다. 목록의 "정시 확률" 은 소수 한 자리로 보인다(예전엔 퍼센트에 100 을 한 번 더 곱했다).

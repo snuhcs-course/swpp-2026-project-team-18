@@ -215,8 +215,11 @@ def main() -> int:
             f"prep_source={plan.get('prep_source')}",
         )
         check(
-            "확률은 여전히 null (이동 변동성 미지)",
-            plan.get("on_time_probability") is None,
+            # 11-20 결정(BE-H3c): 한쪽 변동성만 알아도 확률을 낸다. 100 은 내지 않는다(BE-P100).
+            "준비 변동성만으로 확률이 나온다 (1~99, 이동 변동성 미지)",
+            isinstance(plan.get("on_time_probability"), int)
+            and 1 <= plan["on_time_probability"] <= 99
+            and plan.get("confidence_basis") == "travel_variance_unknown",
             f"prob={plan.get('on_time_probability')} basis={plan.get('confidence_basis')}",
         )
         check(

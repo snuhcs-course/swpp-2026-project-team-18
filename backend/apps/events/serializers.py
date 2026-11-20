@@ -65,9 +65,10 @@ class EventTagSerializer(serializers.ModelSerializer):
 class AlarmPlanSerializer(serializers.Serializer):
     """일정에 딸린 알람 계획.
 
-    `on_time_probability` 는 **null 일 수 있다.** 준비·이동 **양쪽** 모두
-    변동성이 있을 때만 채운다. 한쪽만 있으면 없는 쪽을 0 분산으로 치게 되어
-    확신도를 과대 보고한다.
+    `on_time_probability` 는 **null 일 수 있다.** 준비·이동 **둘 다** 변동성을 모를 때(점추정)
+    비운다. 한쪽만 알면 채운다(11-20, BE-H3c) — 모르는 쪽을 예상값에 고정하므로 조금 높게 나올
+    수 있고, 그 사실은 `confidence_basis` 가 알려 준다. 정수는 1~99 이고 100 은 내지 않는다.
+    같은 값의 소수 한 자리는 `on_time_probability_precise`(0.1~99.9)다. 식: `planning/on_time.py`.
 
     왜 null 인지는 `confidence_basis` 가 알려준다. 앱은 계산할 수 없다는
     문구와 구체적인 이유를 표시한다 — 사용자가 할 수 있는 행동이 다르다.
@@ -75,9 +76,9 @@ class AlarmPlanSerializer(serializers.Serializer):
     | confidence_basis | 뜻 | 사용자가 할 일 |
     | --- | --- | --- |
     | `observed` | 양쪽 모두 변동성 근거가 있어 확률을 계산함 | — |
-    | `point_estimate` | 둘 다 점추정 | 준비 범위·이동 보정 근거가 필요함 |
-    | `travel_variance_unknown` | 준비만 변동성 있음 | 이동 기록 학습·재계산이 필요함 |
-    | `prep_variance_unknown` | 이동만 변동성 있음 | 루틴 블록에 범위를 넣으면 된다 |
+    | `point_estimate` | 둘 다 점추정. 확률 없음 | 준비 범위·이동 보정 근거가 필요함 |
+    | `travel_variance_unknown` | 준비만 변동성 있음. 확률은 이동을 예상값으로 두고 냄 | 이동 기록 학습·재계산이 필요함 |
+    | `prep_variance_unknown` | 이동만 변동성 있음. 확률은 준비를 예상값으로 두고 냄 | 루틴 블록에 범위를 넣으면 된다 |
     """
 
     status = serializers.CharField()
@@ -92,7 +93,8 @@ class AlarmPlanSerializer(serializers.Serializer):
     buffer_minutes = serializers.IntegerField(allow_null=True)
     total_minutes = serializers.IntegerField(allow_null=True)
     tau_used = serializers.FloatField(allow_null=True)
-    on_time_probability = serializers.IntegerField(allow_null=True)
+    on_time_probability = serializers.SerializerMethodField()
+    on_time_probability_precise = serializers.SerializerMethodField()
     # 확률이 없을 때 그 이유. 위 표 참고.
     confidence_basis = serializers.CharField()
     travel_mode = serializers.CharField()
@@ -136,6 +138,17 @@ class AlarmPlanSerializer(serializers.Serializer):
     prep_source = serializers.SerializerMethodField()
     buffer_source = serializers.SerializerMethodField()
     travel_time_source = serializers.SerializerMethodField()
+
+    # Partly AI-generated (Claude) — BE-P100. 정수는 소수에서 만든다. 0.21.0 에 저장된 100 도 99 다.
+    def get_on_time_probability_precise(self, obj) -> float | None:
+        from apps.planning import on_time
+
+        return on_time.stored(obj.on_time_probability_precise, obj.on_time_probability)
+
+    def get_on_time_probability(self, obj) -> int | None:
+        from apps.planning import on_time
+
+        return on_time.whole(self.get_on_time_probability_precise(obj))
 
     def get_route_path(self, obj) -> list:
         return _as_list(obj.route_path)

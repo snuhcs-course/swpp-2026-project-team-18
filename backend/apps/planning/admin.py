@@ -85,9 +85,13 @@ class AlarmPlanAdmin(admin.ModelAdmin):
 
     @admin.display(description="정시 확률", ordering="on_time_probability")
     def probability(self, obj):
-        if obj.on_time_probability is None:
+        # 값은 이미 퍼센트다(0~100). 소수 칸이 있으면 그 값을 쓴다(BE-P100).
+        from .on_time import stored
+
+        value = stored(getattr(obj, "on_time_probability_precise", None), obj.on_time_probability)
+        if value is None:
             return "—"
-        return f"{obj.on_time_probability * 100:.0f}%"
+        return f"{value:.1f}%"
 
     @admin.display(description="경로")
     def travel_summary(self, obj):

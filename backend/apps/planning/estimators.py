@@ -11,10 +11,11 @@
 
 `sd=0` 이면 τ 를 올려도 값이 변하지 않는다. 그게 정직한 동작이다.
 
-**확률은 두 성분 모두 변동성이 있을 때만 계산한다.** 준비만 변동성이 있는
-상태에서 확률을 내면 이동의 불확실성을 0 으로 치므로 **확신도를 과대
-보고한다.** "92% 정시 도착" 이 실제로는 "이동이 예측대로라면 92%" 인데
-그 조건이 화면에 없다. 그래서 둘 다 갖출 때까지 null 을 유지한다.
+~~확률은 두 성분 모두 변동성이 있을 때만 계산한다.~~ (11-20 바뀜) **한쪽이라도
+변동성을 알면 확률을 낸다.** 준비만 변동성이 있으면 이동의 불확실성을 0 으로
+치므로 확신도를 조금 과대 보고한다. 대신 홈 · 알람 상세 · 시트 · 휠이 모두 같은
+숫자를 보인다(BE-H3c). 과대 보고는 `confidence_basis`(`travel_variance_unknown`
+등)로 남고, 그 차이로 생기는 지각은 버퍼 학습이 본다. 식은 `on_time.py` 에 있다.
 
 ## 블록 범위를 분포로 바꾸는 규칙
 
@@ -543,12 +544,14 @@ class AlarmMath:
     buffer_minutes: int
     total_minutes: int
     tau_used: float
-    # 둘 다 변동성이 있을 때만 채운다. 없으면 None.
+    # 정수 퍼센트(1~99, `on_time.whole`). 한쪽이라도 변동성이 있으면 채운다(`on_time.can_tell`).
     on_time_probability: int | None
     prep_source: str
     travel_source: str
     confidence_basis: str
     prep_breakdown: list[dict]
+    # 소수 한 자리 퍼센트(0.1~99.9, `on_time.precise_of`). `on_time_probability` 와 같은 값이다.
+    on_time_probability_precise: float | None = None
 
 
 def total_distribution(prep: PrepEstimate | None, travel: TravelEstimate) -> dist.Distribution:
@@ -598,17 +601,22 @@ def compute_alarm_math(
     """
     total_dist = total_distribution(prep, travel)
 
+    from . import on_time
+
     q = total_dist.quantile(tau)
-    budget = q + buffer_minutes
 
     # 준비가 없으면 이동 변동성만 본다. 없는 성분의 변동성을 따지지 않는다.
     enough_variance = travel.has_variance and (prep is None or prep.has_variance)
+    # Partly AI-generated (Claude) — BE-P100/H3c. 확률은 실제 알람 시각(분 단위로 반올림한 τ 분위수
+    # + 버퍼) 기준이고, 한쪽 변동성만 알아도 낸다. 휠 표 · 직접 정한 시각과 같은 식이다(`on_time`).
+    if on_time.can_tell(prep, travel):
+        precise = on_time.precise_of(total_dist, int(round(q)) + buffer_minutes)
+    else:
+        precise = None
+    probability = on_time.whole(precise)
     if enough_variance:
-        probability = int(round(total_dist.cdf(budget) * 100))
-        probability = max(0, min(100, probability))
         basis = "observed"
     else:
-        probability = None
         if prep is None:
             basis = BASIS_TRAVEL_ONLY
         elif not prep.has_variance and not travel.has_variance:
@@ -641,6 +649,7 @@ def compute_alarm_math(
         total_minutes=total_min,
         tau_used=tau,
         on_time_probability=probability,
+        on_time_probability_precise=precise,
         prep_source=PREP_SOURCE_NOT_FROM_HOME if prep is None else prep.source,
         travel_source=travel.source,
         confidence_basis=basis,

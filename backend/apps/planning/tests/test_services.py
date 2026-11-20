@@ -134,16 +134,19 @@ class TestWithBlocks:
         p_high = services.compute_and_store(high)
         assert p_high.prep_minutes > p_low.prep_minutes
 
-    def test_still_no_probability_when_travel_variance_is_unknown(
+    def test_probability_when_only_prep_variance_is_known(
         self, user, place, stub_route
     ):
-        """**핵심 규칙.** 준비만 변동성이 있으면 확률을 내지 않는다.
-
-        내면 이동의 불확실성을 0 으로 치므로 확신도를 과대 보고한다.
+        """11-20 결정(BE-H3c): 준비만 변동성이 있어도 확률을 낸다. 이동은 예상값에 고정되고,
+        그 사실은 `confidence_basis` 에 남는다. 소수 값도 함께 저장한다(BE-P100).
         """
         make_block(user, "샤워", 10, 30, order=1)
         plan = services.compute_and_store(make_event(user, place))
-        assert plan.on_time_probability is None
+        assert plan.on_time_probability is not None
+        assert plan.on_time_probability_precise is not None
+        assert plan.on_time_probability == round(plan.on_time_probability_precise) or (
+            plan.on_time_probability == 99
+        )
         assert plan.confidence_basis == "travel_variance_unknown"
 
     def test_breakdown_is_saved(self, user, place, stub_route):

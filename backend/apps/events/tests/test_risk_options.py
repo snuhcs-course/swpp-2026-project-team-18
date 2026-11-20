@@ -179,12 +179,15 @@ def test_partial_variance_still_shows_option_probabilities(context):
     client, event = context
     add_variance(event, travel=False)  # 준비만 흔들린다(이동 기록 없는 새 사용자)
     plan = services.compute_and_store(event)
-    assert plan.on_time_probability is None  # 계획 확률은 그대로 비운다
     data = get_options(client, event)
     options = data["options"]
     assert len(options) == 3
     probs = [o["probability"] for o in options]
-    assert all(isinstance(p, int) and 0 <= p <= 100 for p in probs)
+    assert all(isinstance(p, int) and 0 <= p <= 99 for p in probs)
+    # 11-20 결정: 계획 확률도 같은 식으로 채운다. 지금 고른 칸(보통)과 계획 값이 같다.
+    normal = next(o for o in options if o["key"] == "normal")
+    assert plan.on_time_probability == normal["probability"]
+    assert plan.on_time_probability_precise == normal["probability_precise"]
     assert probs[0] >= probs[1] >= probs[2]
     # 휠로 같은 시각을 고르면 앱이 분포로 읽는 값과 거의 같아야 한다(구간 균등 가정만큼 차이).
     for option in options:

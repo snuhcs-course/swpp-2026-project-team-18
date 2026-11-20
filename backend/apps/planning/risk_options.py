@@ -3,7 +3,7 @@
 from datetime import timedelta
 import math
 
-from . import buffers, estimators, history, services
+from . import buffers, estimators, history, on_time, services
 from .models import AlarmPlan
 
 OPTIONS = (("safe", "안전", .97), ("normal", "보통", .90), ("gamble", "도박", .65))
@@ -36,6 +36,7 @@ def build_risk_options(event) -> dict:
             if auto_adjusted else None
         ),
         "distribution": None,
+        "probability_table": None,
         "unavailable_reason": None,
     }
     # Partly AI-generated (Claude) — BE-R1 T-4. 앱 시트가 그대로 보이는 문장이다. 시트에는 [다시 시도]
@@ -61,7 +62,10 @@ def build_risk_options(event) -> dict:
         "mode": plan.travel_mode,
     }, buffer_minutes=buffer.minutes)
     total = estimators.total_distribution(prep, travel)
-    if total.quantile(.99) <= total.quantile(.5) + 1e-9:
+    # Partly AI-generated (Claude) — BE-P100/H3c. 확률은 계획 · 휠 표 · 직접 정한 시각과 같은 식이다
+    # (`on_time`). 한쪽 변동성만 알아도 낸다. 둘 다 모르면(점추정) 시각을 골라도 확률이 같아 보여
+    # 고를 근거가 없으므로 세 칸을 내지 않는다.
+    if not on_time.can_tell(prep, travel):
         result["unavailable_reason"] = "걸리는 시간이 얼마나 달라지는지 아직 몰라 고를 수 있는 알람 시각을 계산할 수 없어요."
         return result
 
@@ -69,18 +73,16 @@ def build_risk_options(event) -> dict:
         calculation = estimators.compute_alarm_math(
             prep, travel, buffer.minutes, option_tau,
         )
-        probability = calculation.on_time_probability
-        if probability is None:
-            # Partly AI-generated (Claude) — 준비·이동 중 한쪽만 변동성을 알면 계획 확률은 비지만,
-            # 아래 `distribution` 은 보낸다. 앱은 그 분포로 휠 시각의 확률을 읽으므로(AlarmTimeChoice.
-            # estimate) 세 칸만 비면 "빠르게 고르기에 확률이 안 뜬다" 가 된다. 같은 분포에서 그 칸의
-            # 시각에 일어날 때의 확률(버퍼 포함 시간 안에 마칠 확률)을 낸다.
-            probability = max(0, min(100, int(round(total.cdf(calculation.total_minutes) * 100))))
+        precise = on_time.precise_of(total, calculation.total_minutes)
         result["options"].append({
             "key": key, "label": label, "tau": option_tau,
             "alarm_at": (event.start_at - timedelta(minutes=calculation.total_minutes)).isoformat(),
-            "probability": probability,
+            "probability": on_time.whole(precise),
+            "probability_precise": precise,
         })
+
+    # 휠 표(BE-H3c). `precise[i]` 는 일정 시작 i 분 전에 일어날 때의 확률이다.
+    result["probability_table"] = on_time.table(total)
 
     # CDF mass is a modeled proportion, not a count of observed trips. Include
     # clipped lower-tail mass in the first bin and upper-tail mass in the last.

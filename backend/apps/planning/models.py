@@ -93,6 +93,11 @@ class AlarmPlan(models.Model):
         blank=True,
         validators=[MaxValueValidator(100)],
     )
+    # Partly AI-generated (Claude) — BE-P100. 같은 확률의 소수 한 자리 값(0.1~99.9). 위 정수는 이 값을
+    # 반올림하되 99 를 넘지 않는다(`on_time`). 이 칸이 생기기 전의 계획은 비어 있다.
+    on_time_probability_precise = models.FloatField(
+        "정시 도착 확률(%, 소수)", null=True, blank=True
+    )
 
     # 확률을 낼 수 있었는지, 못 냈으면 왜인지. 화면이 "학습 중" 문구를
     # 구체적으로 쓸 수 있게 한다 — "관측이 없다" 와 "이동 변동성만 모른다" 는
@@ -249,6 +254,9 @@ class AlarmPlan(models.Model):
     user_alarm_probability = models.PositiveSmallIntegerField(
         "직접 정한 시각의 확률(%)", null=True, blank=True, validators=[MaxValueValidator(100)]
     )
+    user_alarm_probability_precise = models.FloatField(
+        "직접 정한 시각의 확률(%, 소수)", null=True, blank=True
+    )
 
     # 사용자가 확인한 알람 시각과 그 순간(BE-H3a). 지금 울릴 시각이 이 값과 다르면 "확인 전" 이다.
     confirmed_alarm_at = models.DateTimeField("확인한 알람", null=True, blank=True)
@@ -272,6 +280,12 @@ class AlarmPlan(models.Model):
     )
     proposal_change_probability = models.PositiveSmallIntegerField(
         "바꿀 때 확률(%)", null=True, blank=True, validators=[MaxValueValidator(100)]
+    )
+    proposal_keep_probability_precise = models.FloatField(
+        "그대로 둘 때 확률(%, 소수)", null=True, blank=True
+    )
+    proposal_change_probability_precise = models.FloatField(
+        "바꿀 때 확률(%, 소수)", null=True, blank=True
     )
     proposed_at = models.DateTimeField("제안한 시각", null=True, blank=True)
     # 사용자가(또는 답이 없어 서버가) 거절한 제안 시각. 같은 제안을 15분마다 다시 묻지 않는다.

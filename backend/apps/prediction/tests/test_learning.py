@@ -758,9 +758,9 @@ class TestLearningReachesTheAlarm:
             start_at=datetime(2026, 10, 5, 9, 0, tzinfo=KST),
         )
 
-        # 보정 전: 이동 변동성을 모르므로 확률 없음
+        # 보정 전: 이동 변동성을 모른다. 확률은 이동을 예상값에 두고 낸다(11-20 결정).
         plan = services.compute_and_store(event)
-        assert plan.on_time_probability is None
+        assert plan.on_time_probability is not None
         assert plan.confidence_basis == "travel_variance_unknown"
 
         # 관측을 쌓고 학습

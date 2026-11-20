@@ -40,7 +40,7 @@ from typing import Callable
 from django.db import transaction
 from django.utils import timezone
 
-from . import estimators
+from . import estimators, on_time
 from .models import AlarmPlan, PlanRevision
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,11 @@ SNAPSHOT_FIELDS = (
 )
 
 
+def _precise_or_whole(precise: float | None, whole: int | None) -> float | None:
+    """소수 확률. 소수 칸이 생기기 전(0.21.0)에 저장된 행이면 정수 값(`on_time.stored`)."""
+    return on_time.stored(precise, whole)
+
+
 def _minutes(delta: timedelta) -> int:
     return int(round(delta.total_seconds() / 60))
 
@@ -90,6 +95,7 @@ class Control:
     user_alarm_reason: str = ""
     user_alarm_start_at: datetime | None = None
     user_alarm_probability: int | None = None
+    user_alarm_probability_precise: float | None = None
     confirmed_alarm_at: datetime | None = None
     confirmed_at: datetime | None = None
     held_alarm_at: datetime | None = None
@@ -99,6 +105,8 @@ class Control:
     proposal_reason_text: str = ""
     proposal_keep_probability: int | None = None
     proposal_change_probability: int | None = None
+    proposal_keep_probability_precise: float | None = None
+    proposal_change_probability_precise: float | None = None
     proposed_at: datetime | None = None
     rejected_alarm_at: datetime | None = None
 
@@ -158,15 +166,14 @@ class Control:
         self.proposal_kind = ""
         self.proposal_reason = ""
         self.proposal_reason_text = ""
-        self.proposal_keep_probability = None
-        self.proposal_change_probability = None
+        self._set_proposal_probabilities(None, None)
         self.proposed_at = None
 
     def _clear_user(self) -> None:
         self.user_alarm_at = None
         self.user_alarm_reason = ""
         self.user_alarm_start_at = None
-        self.user_alarm_probability = None
+        self._set_user_probability(None)
 
     def clear_choice(self) -> None:
         """직접 정한 시각 · 기다리는 제안 · 거절 기록을 지운다. 확인 기록은 그대로 둔다.
@@ -177,11 +184,37 @@ class Control:
         self._clear_user()
         self.rejected_alarm_at = None
 
+    # Partly AI-generated (Claude) — BE-P100. 확률은 소수 값(`on_time.precise_of`)으로 받아 정수 칸과
+    # 소수 칸을 함께 쓴다. 정수는 늘 소수 값에서 나온다(`on_time.whole`).
+    def _set_user_probability(self, precise: float | None) -> None:
+        self.user_alarm_probability_precise = precise
+        self.user_alarm_probability = on_time.whole(precise)
+
+    def _set_proposal_probabilities(self, keep: float | None, change: float | None) -> None:
+        self.proposal_keep_probability_precise = keep
+        self.proposal_keep_probability = on_time.whole(keep)
+        self.proposal_change_probability_precise = change
+        self.proposal_change_probability = on_time.whole(change)
+
+    def user_probability_precise(self) -> float | None:
+        """직접 정한 시각의 소수 확률. 소수 칸이 생기기 전에 저장된 행이면 정수 값."""
+        return _precise_or_whole(self.user_alarm_probability_precise, self.user_alarm_probability)
+
+    def keep_probability_precise(self) -> float | None:
+        return _precise_or_whole(
+            self.proposal_keep_probability_precise, self.proposal_keep_probability
+        )
+
+    def change_probability_precise(self) -> float | None:
+        return _precise_or_whole(
+            self.proposal_change_probability_precise, self.proposal_change_probability
+        )
+
     def _pin(self, at, start_at, probability, reason) -> None:
         self.user_alarm_at = at
         self.user_alarm_reason = reason
         self.user_alarm_start_at = start_at
-        self.user_alarm_probability = probability
+        self._set_user_probability(probability)
 
     def confirm(self, effective, now) -> None:
         """그 시각을 확인한 것으로 둔다. 이미 같은 시각을 확인했으면 처음 확인한 순간을 둔다."""
@@ -197,8 +230,7 @@ class Control:
         self.proposed_alarm_at = proposed
         self.proposal_kind = kind
         self.proposal_reason, self.proposal_reason_text = reason
-        self.proposal_keep_probability = keep
-        self.proposal_change_probability = change
+        self._set_proposal_probabilities(keep, change)
 
     def _apply_proposal(self) -> None:
         """제안한 시각으로 바꾼다. 직접 정한 시각에 대한 제안이면 추천 시각으로 돌아간다."""
@@ -215,7 +247,7 @@ class Control:
         뒤에도 15분마다 같은 질문을 받지 않게 하려는 것이다. [추천 시각으로 되돌리기] 로 푼다.
         """
         if self.proposal_kind == KIND_RECOMMENDED and self.held_alarm_at is not None:
-            self._pin(self.held_alarm_at, start_at, self.proposal_keep_probability, REASON_KEPT)
+            self._pin(self.held_alarm_at, start_at, self.keep_probability_precise(), REASON_KEPT)
         self.rejected_alarm_at = self.proposed_alarm_at
         self._clear_proposal()
 
@@ -288,19 +320,19 @@ class Control:
         *,
         before_recommended,
         recommended,
-        recommended_probability: int | None,
+        recommended_probability: float | None,
         start_at,
         trigger: str,
         now,
-        probability_at: Callable[[datetime], int | None],
+        probability_at: Callable[[datetime], float | None],
         reason: Callable[[], tuple[str, str]],
         before_start_at=None,
     ) -> None:
         """재계산 뒤. 직접 정한 시각은 두고 확률만 새로 구한다. 추천이 5분 넘게 움직이면 묻는다.
 
         `before_recommended` 는 재계산 전 추천 시각(계산 불가였으면 None), `recommended` 는 새
-        추천 시각(계산 불가면 None)이다. `probability_at(시각)` 은 새 분포에서 그 시각에 일어날
-        때의 정시 도착 확률, `reason()` 은 제안 이유 (코드, 문장)이다. `before_start_at` 은 재계산
+        추천 시각(계산 불가면 None)이다. `recommended_probability` 와 `probability_at(시각)` 은 새
+        분포에서 그 시각에 일어날 때의 정시 도착 확률(소수, `on_time.precise_of`), `reason()` 은 제안 이유 (코드, 문장)이다. `before_start_at` 은 재계산
         전 계획을 만든 일정 시작이다(모르면 None — `start_at` 과 같다고 본다).
         """
         # 1) 일정 시작이 바뀌면 직접 정한 시각 · 제안 · 거절 기록을 버린다(9:00 일정의 7:50 은
@@ -321,16 +353,16 @@ class Control:
         # 3) 계산 불가. 직접 정한 시각은 남겨 두고(다시 계산되면 그대로 쓴다) 제안만 버린다.
         if recommended is None:
             self._clear_proposal()
-            self.user_alarm_probability = None
+            self._set_user_probability(None)
             return
 
         if self.user_active(start_at):
             # 4) 직접 정한 시각. 시각은 그대로, 확률만. 70% 아래로 떨어지면 추천 시각으로 바꿀지 묻는다.
             probability = probability_at(self.user_alarm_at)
-            self.user_alarm_probability = probability
+            self._set_user_probability(probability)
             if (
                 probability is not None
-                and probability < USER_PROBABILITY_FLOOR
+                and on_time.whole(probability) < USER_PROBABILITY_FLOOR
                 and self.user_alarm_at - recommended > PROPOSAL_THRESHOLD
                 and not self._suppressed(recommended)
             ):
@@ -342,7 +374,7 @@ class Control:
                     change=recommended_probability,
                     reason=(
                         "user_low_probability",
-                        f"직접 정한 시각에 일어나면 정시 도착 확률이 {probability}%예요",
+                        f"직접 정한 시각에 일어나면 정시 도착 확률이 {on_time.whole(probability)}%예요",
                     ),
                     now=now,
                 )
@@ -403,28 +435,14 @@ def effective_alarm_at(plan: AlarmPlan, start_at, now=None):
     return effective_of(Control.of(plan), _recommended(plan), start_at, now)
 
 
-def probability_function(prep, travel, start_at) -> Callable[[datetime], int | None]:
-    """새 분포에서 "그 시각에 일어나면" 정시 도착 확률(%)을 내는 함수.
+def probability_function(prep, travel, start_at) -> Callable[[datetime], float | None]:
+    """새 분포에서 "그 시각에 일어나면" 정시 도착 확률(%, 소수 한 자리)을 내는 함수.
 
-    `compute_alarm_math` 와 같은 분포(`total_distribution`)와 같은 조건(준비·이동 모두 변동성이
-    있어야 함)이다. 확률은 `P(준비 + 이동 <= 시작 − 알람)` — 버퍼도 쓸 수 있는 시간에 든다.
-    risk-options 의 `distribution` 으로 앱이 휠 확률을 읽는 식(`AlarmTimeChoice.estimate`)과
-    같은 양이다. 앱은 10칸 구간 안을 균등으로 보므로 1~2%p 다를 수 있다.
+    계획 확률 · 빠르게 고르기 세 칸 · 휠 표와 같은 식이다(`on_time`). 정수 칸은 `on_time.whole`.
     """
-    if travel is None or not (travel.has_variance and (prep is None or prep.has_variance)):
+    if travel is None:
         return lambda _at: None
-    total = None
-
-    def at(alarm_at) -> int | None:
-        nonlocal total
-        if total is None:
-            total = estimators.total_distribution(prep, travel)
-        available = (start_at - alarm_at).total_seconds() / 60
-        if available <= 0:
-            return 0
-        return max(0, min(100, int(round(total.cdf(available) * 100))))
-
-    return at
+    return on_time.function(prep, travel, start_at)
 
 
 def current_components(event, plan: AlarmPlan):
@@ -451,8 +469,8 @@ def current_components(event, plan: AlarmPlan):
     )
 
 
-def probability_now(event, plan: AlarmPlan, alarm_at) -> int | None:
-    """지금 분포로 그 시각의 확률. 재료가 없으면 None."""
+def probability_now(event, plan: AlarmPlan, alarm_at) -> float | None:
+    """지금 분포로 그 시각의 확률(소수). 재료가 없으면 None."""
     components = current_components(event, plan)
     if components is None:
         return None
@@ -529,7 +547,9 @@ def after_compute(event, plan: AlarmPlan, before: dict | None, *, trigger: str, 
             control.after_compute(
                 before_recommended=before_recommended,
                 recommended=_recommended(plan),
-                recommended_probability=plan.on_time_probability,
+                recommended_probability=_precise_or_whole(
+                    plan.on_time_probability_precise, plan.on_time_probability
+                ),
                 start_at=event.start_at,
                 trigger=trigger or "",
                 now=timezone.now(),
@@ -638,13 +658,15 @@ def present(plan: AlarmPlan, *, now=None) -> dict:
     user = control.user_active(start_at) and recommended is not None
 
     if effective is None:
-        probability = None
+        precise = None
     elif user:
-        probability = control.user_alarm_probability
+        precise = control.user_probability_precise()
     elif control.held_alarm_at is not None:
-        probability = control.proposal_keep_probability
+        precise = control.keep_probability_precise()
     else:
-        probability = plan.on_time_probability
+        precise = _precise_or_whole(plan.on_time_probability_precise, plan.on_time_probability)
+    # 정수는 소수에서 만든다. 0.21.0 에 저장된 100 도 99 로 내보낸다(BE-P100).
+    probability = on_time.whole(precise)
 
     proposal = None
     if control.has_proposal and effective is not None:
@@ -656,8 +678,10 @@ def present(plan: AlarmPlan, *, now=None) -> dict:
             "move_minutes": _minutes(control.proposed_alarm_at - effective),
             "reason": control.proposal_reason,
             "reason_text": control.proposal_reason_text,
-            "keep_probability": control.proposal_keep_probability,
-            "change_probability": control.proposal_change_probability,
+            "keep_probability": on_time.whole(control.keep_probability_precise()),
+            "change_probability": on_time.whole(control.change_probability_precise()),
+            "keep_probability_precise": control.keep_probability_precise(),
+            "change_probability_precise": control.change_probability_precise(),
             "created_at": iso(control.proposed_at),
             "answer_by": iso(control.answer_by(recommended, start_at)),
         }
@@ -668,9 +692,13 @@ def present(plan: AlarmPlan, *, now=None) -> dict:
         "recommended_alarm_at": iso(recommended),
         "effective_alarm_at": iso(effective),
         "effective_on_time_probability": probability,
+        "effective_on_time_probability_precise": precise,
         "user_alarm_at": iso(control.user_alarm_at) if user else None,
         "user_alarm_reason": control.user_alarm_reason if user else "",
-        "user_alarm_probability": control.user_alarm_probability if user else None,
+        "user_alarm_probability": (
+            on_time.whole(control.user_probability_precise()) if user else None
+        ),
+        "user_alarm_probability_precise": control.user_probability_precise() if user else None,
         "alarm_confirmed": confirmed,
         "alarm_confirmed_at": iso(control.confirmed_at) if confirmed else None,
         "alarm_proposal": proposal,

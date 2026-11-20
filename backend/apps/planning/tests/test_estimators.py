@@ -417,26 +417,32 @@ class TestComputeAlarmMath:
         assert math_.confidence_basis == "point_estimate"
         assert math_.total_minutes == 60  # 30 + 20 + 10
 
-    def test_probability_is_none_when_only_prep_varies(self):
-        """**이 테스트가 이 파일의 핵심이다.**
-
-        준비만 변동성이 있는데 확률을 내면 이동의 불확실성을 0 으로 치므로
-        확신도를 과대 보고한다. "92% 정시 도착" 이 실제로는 "이동이 예측대로
-        라면 92%" 인데 그 조건이 화면에 없다.
+    def test_probability_appears_when_only_prep_varies(self):
+        """11-20 결정(BE-H3c): 한쪽만 변동성을 알아도 확률을 낸다. 홈 · 상세 · 시트 · 휠이 같은
+        숫자를 보이게 하려는 것이다. 이동을 예상값에 고정했다는 사실은 근거(basis)에 남는다.
         """
         prep = PrepEstimate(dist.Normal(30.0, 6.0), source="declared_range")
         travel = TravelEstimate(dist.Normal(20.0, 0.0), raw_minutes=20.0)
         math_ = compute_alarm_math(prep, travel, buffer_minutes=10, tau=0.9)
-        assert math_.on_time_probability is None
+        assert math_.on_time_probability is not None
+        assert math_.on_time_probability_precise is not None
         assert math_.confidence_basis == "travel_variance_unknown"
 
-    def test_probability_is_none_when_only_travel_varies(self):
+    def test_probability_appears_when_only_travel_varies(self):
         prep = PrepEstimate(dist.Normal(30.0, 0.0), source="declared_point")
         travel = TravelEstimate(dist.Normal(20.0, 5.0), raw_minutes=20.0,
                                 source="observed_global")
         math_ = compute_alarm_math(prep, travel, buffer_minutes=10, tau=0.9)
-        assert math_.on_time_probability is None
+        assert math_.on_time_probability is not None
         assert math_.confidence_basis == "prep_variance_unknown"
+
+    def test_probability_is_none_for_point_estimates(self):
+        prep = PrepEstimate(dist.Normal(30.0, 0.0), source="declared_point")
+        travel = TravelEstimate(dist.Normal(20.0, 0.0), raw_minutes=20.0)
+        math_ = compute_alarm_math(prep, travel, buffer_minutes=10, tau=0.9)
+        assert math_.on_time_probability is None
+        assert math_.on_time_probability_precise is None
+        assert math_.confidence_basis == "point_estimate"
 
     def test_probability_appears_when_both_vary(self):
         prep = PrepEstimate(dist.Normal(30.0, 6.0), source="observed")
@@ -513,4 +519,6 @@ class TestComputeAlarmMath:
         travel = TravelEstimate(dist.Normal(20.0, 1.0), raw_minutes=20.0,
                                 source="observed_route")
         m = compute_alarm_math(prep, travel, buffer_minutes=120, tau=0.9)
-        assert m.on_time_probability == 100
+        # BE-P100: 100 으로 반올림하지 않는다. 소수는 99.9, 정수는 99 가 상한이다.
+        assert m.on_time_probability == 99
+        assert m.on_time_probability_precise == 99.9
