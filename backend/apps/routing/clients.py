@@ -106,6 +106,9 @@ TRANSIT_SLOW_MAX_EXTRA_SECONDS = 20 * 60
 
 # 대중교통 배지 상한. 경로 카드 한 줄에 들어가야 한다.
 TRANSIT_MAX_BADGES = 3
+# 지하철로만 가는 경로의 배지(BE-BADGE, Figma 경로 선택 시안).
+SUBWAY_ONLY_BADGE = "지하철만 이용"
+SUBWAY_ONLY_KINDS = frozenset({"subway"})
 
 # 버스 번호만 다른 경로를 한 카드로 합칠 때(사용자 요청 10-29), 타는 곳·내리는 곳 이름이
 # 같아도 탑승 시간이 이만큼 넘게 다르면 돌아가는 버스라 따로 둔다. 정류장은 이름이 **완전히
@@ -1306,6 +1309,11 @@ def _transit_candidates(
             badges.append("최소 환승")
         if walks[item["key"]] == least_walk:
             badges.append("최소 도보")
+        # Partly AI-generated (Claude) — BE-BADGE. 비교가 아니라 그 경로의 성질이다. 버스를 타지 않고
+        # 지하철로만 가면 붙인다(걷는 구간은 상관없다). 상한(3개)에 걸려도 빠지지 않게 비교 배지를
+        # 하나 덜 보인다 — 시안이 이 배지를 카드에 늘 보여 준다.
+        if _ride_kinds(item) == SUBWAY_ONLY_KINDS:
+            badges = [*badges[: TRANSIT_MAX_BADGES - 1], SUBWAY_ONLY_BADGE]
         item["badges"] = badges[:TRANSIT_MAX_BADGES]
         item["reason"] = item["badges"][0] if item["badges"] else ""
 

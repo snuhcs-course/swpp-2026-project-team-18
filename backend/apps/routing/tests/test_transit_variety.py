@@ -231,3 +231,33 @@ def test_best_route_still_takes_the_fastest_transit(upstream, monkeypatch):
     item, degraded = clients.best_route(*START, *END)
     assert not degraded
     assert item["key"] == "transit:A"
+
+
+# Partly AI-generated (Claude) — BE-BADGE.
+def test_subway_only_route_gets_its_badge(upstream):
+    upstream[0]["routes"] = [
+        route([("subway", "2호선")], 1200),
+        route([("bus", "5513")], 1300),
+        route([("subway", "2호선"), ("bus", "5511")], 1400, transfers=1),
+    ]
+    items, _ = clients._transit_candidates(*START, *END)
+    badges = {item["key"]: item["badges"] for item in items}
+    assert clients.SUBWAY_ONLY_BADGE in badges["transit:2호선"]
+    assert clients.SUBWAY_ONLY_BADGE not in badges["transit:5513"]
+    assert clients.SUBWAY_ONLY_BADGE not in badges["transit:2호선>5511"]
+
+
+def test_subway_badge_survives_the_cap(upstream):
+    upstream[0]["routes"] = [route([("subway", "2호선")], 1200, 1000, 0), route([("bus", "B")], 1500)]
+    items, _ = clients._transit_candidates(*START, *END)
+    subway = next(item for item in items if item["key"] == "transit:2호선")
+    assert subway["badges"] == ["최단 시간", "최소 비용", clients.SUBWAY_ONLY_BADGE]
+    assert subway["reason"] == "최단 시간"
+
+
+def test_every_candidate_carries_a_fare_field(upstream):
+    """BE-FARE: 요금은 `fare` 로 이미 온다. 모르면 null(0 으로 위조하지 않는다)."""
+    upstream[0]["routes"] = [route([("bus", "A")], 1200, fare=1550), route([("bus", "B")], 1300, fare=None)]
+    items, _ = clients._transit_candidates(*START, *END)
+    fares = {item["key"]: item["fare"] for item in items}
+    assert fares == {"transit:A": 1550, "transit:B": None}
