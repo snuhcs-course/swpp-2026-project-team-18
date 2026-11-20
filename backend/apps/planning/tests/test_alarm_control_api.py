@@ -538,4 +538,17 @@ def test_prep_values_never_go_negative(ctx):
         pytest.skip("이 계획은 출발 뒤 · 시작 5분 전 사이에 고를 시각이 없다")
     plan = plan_of(client.put(url(event, "time"), {"alarm_at": iso(after_departure)}, format="json"))
     assert plan["effective_prep_minutes"] == 0
-    assert plan["prep_margin_minutes"] == -plan["prep_minutes"]
+    # 출발 3분 뒤에 일어나면 계획한 준비보다 3분 더 모자라다(리뷰).
+    assert plan["prep_margin_minutes"] == -plan["prep_minutes"] - 3
+
+
+def test_prep_values_are_null_without_a_prep_step(ctx):
+    """집에서 출발하지 않는 일정은 준비 단계가 없다. 막대에 준비 구간을 그리지 않게 null 이다(리뷰)."""
+    client, event, _ = ctx
+    event.origin_lat, event.origin_lng = 37.47, 126.94
+    event.save()
+    services.compute_and_store(event)
+    assert event.prep_applies is False
+    plan = plan_of(client.get(f"/api/events/{event.pk}"))
+    assert plan["effective_prep_minutes"] is None
+    assert plan["prep_margin_minutes"] is None

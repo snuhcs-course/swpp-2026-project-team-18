@@ -689,12 +689,16 @@ def present(plan: AlarmPlan, *, now=None) -> dict:
     # Partly AI-generated (Claude) — BE-H3f. 울릴 시각에 일어나면 출발까지 준비할 수 있는 분과 계획한
     # 준비와의 차이. 출발 시각(`depart_by`)은 울릴 시각과 상관없이 같다 — 이동 · 여유는 일정 시작에서
     # 거꾸로 정해진다. 8:40 기상 · 8:53 출발 · 계획 준비 28분이면 13분, 차이 −15(15분 모자람)다.
+    # 집에서 출발하지 않는 일정(준비 단계가 없음)은 둘 다 null 이다. 앱도 그 일정의 막대에 준비 구간을
+    # 그리지 않는다(`AlarmDecisionLogic.timeline`). 차이는 자르지 않은 간격으로 센다 — 출발 3분 뒤에
+    # 일어나면 준비 28분 계획은 31분 모자라다. 초는 버린다(일정 시작에 초가 있어도 분 단위로 맞춘다).
     effective_prep = None
     prep_margin = None
-    if effective is not None and plan.depart_by is not None:
-        effective_prep = max(0, _minutes(plan.depart_by - effective))
+    if effective is not None and plan.depart_by is not None and plan.event.prep_applies:
+        gap = int((plan.depart_by - effective).total_seconds() // 60)
+        effective_prep = max(0, gap)
         if plan.prep_minutes is not None:
-            prep_margin = effective_prep - plan.prep_minutes
+            prep_margin = gap - plan.prep_minutes
 
     confirmed = control.confirmed(effective)
     return {
