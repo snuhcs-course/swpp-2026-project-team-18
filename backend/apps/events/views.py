@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import re
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -30,7 +31,7 @@ from apps.observations.models import TripReroute, current_route_key
 from apps.planning import alarm_control, live_switch
 from apps.planning import services as planning_services
 from apps.planning.models import PlanRevision
-from apps.routing import clients
+from apps.routing import clients, timing
 
 from . import edits, recurrence, route_history, route_preference
 from .alarms import reset_alarm_overrides
@@ -1069,6 +1070,10 @@ class RouteCandidateView(APIView):
     후보에 그대로 있었는지(`same_route`) 같은 수단의 가장 빠른 후보로 대신했는지
     (`same_mode_fallback`)다. 기록이 없거나 그 수단의 후보가 없으면 모두 null 이다(`route_preference`).
     (Partly AI-generated (Claude))
+
+    **시각(BE-11)** — `arrive_by`(ISO 8601, 선택)를 주면 후보마다 `depart_at` · `arrive_at`, 구간마다
+    `start_at` · `end_at` 을 붙인다. 그 시각에 다니는 경로만 고르지는 않는다(카카오가 시각을 받지
+    않는다, `routing.timing`).
     """
 
     throttle_classes = [ScopedRateThrottle]
@@ -1108,6 +1113,21 @@ class RouteCandidateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Partly AI-generated (Claude) — BE-11. 도착 목표 시각(선택). 주면 후보마다 출발 · 도착 · 구간
+        # 시각을 붙인다(`routing.timing`). 시간대가 없으면 서버 시간(KST)으로 읽는다.
+        arrive_by = None
+        raw_arrive_by = request.query_params.get("arrive_by")
+        if raw_arrive_by:
+            # 쿼리스트링의 "+09:00" 은 인코딩하지 않으면 공백으로 온다. 끝의 시간대 자리만 되돌린다.
+            arrive_by = parse_datetime(re.sub(r" (\d{2}:?\d{2})$", r"+\1", raw_arrive_by.strip()))
+            if arrive_by is None:
+                return _error(
+                    "invalid_arrive_by", "arrive_by 는 ISO 8601 시각이어야 해요.",
+                    status.HTTP_400_BAD_REQUEST,
+                )
+            if timezone.is_naive(arrive_by):
+                arrive_by = timezone.make_aware(arrive_by)
+
         validate_route_distance(origin["lat"], origin["lng"], dest_lat, dest_lng)
         candidates, degraded = clients.route_candidates(
             start_lat=origin["lat"],
@@ -1126,6 +1146,8 @@ class RouteCandidateView(APIView):
                 **candidate,
                 "guide": clients.candidate_guide(candidate, origin["label"], destination_label),
             }
+            if arrive_by is not None:
+                item = timing.with_times(item, arrive_by)
             groups[mode].append(item)
             results.append(item)
         # 기존 results와 같은 분·환승 순위와 안정적인 동률 순서를 쓴다.

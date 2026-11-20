@@ -282,3 +282,58 @@ class TestCandidatesResponse:
         assert res.data["preferred_mode"] == "transit"
         assert res.data["preferred_basis"] == "same_destination"
         assert res.data["preferred_match"] == "same_route"
+
+
+# Partly AI-generated (Claude) — BE-11. 도착 목표 시각에 맞춘 출발 · 도착 · 구간 시각.
+@pytest.mark.integration
+class TestArriveBy:
+    SEGMENTED = [
+        {"key": "transit:2호선", "kind": "transit", "minutes": 25, "transfers": 0, "fare": 1550,
+         "segments": [
+             {"kind": "walk", "seconds": 300}, {"kind": "wait", "seconds": 120},
+             {"kind": "subway", "seconds": 900, "vehicle": "2호선"}, {"kind": "walk", "seconds": 180},
+         ]},
+        {"key": "walk", "kind": "walk", "minutes": 45, "transfers": 0, "fare": 0},
+    ]
+
+    def get(self, user, monkeypatch, **params):
+        monkeypatch.setattr(
+            clients, "route_candidates",
+            lambda **kw: ([dict(c, mode=c["kind"]) for c in self.SEGMENTED], False),
+        )
+        client = APIClient()
+        client.force_authenticate(user)
+        return client.get(
+            "/api/routes/candidates", {"dest_lat": CAMPUS[0], "dest_lng": CAMPUS[1], **params},
+        )
+
+    def test_times_line_up_to_the_arrival_target(self, user, monkeypatch):
+        res = self.get(user, monkeypatch, arrive_by="2026-11-21T09:00:00+09:00")
+        assert res.status_code == 200, res.data
+        transit, walk = res.data["results"]
+        assert transit["arrive_at"] == "2026-11-21T09:00:00+09:00"
+        assert transit["depart_at"] == "2026-11-21T08:35:00+09:00"  # 구간 합 1500초
+        starts = [s["start_at"] for s in transit["segments"]]
+        ends = [s["end_at"] for s in transit["segments"]]
+        assert starts[0] == transit["depart_at"] and ends[-1] == transit["arrive_at"]
+        assert starts[1:] == ends[:-1]
+        assert transit["segments"][2]["start_at"] == "2026-11-21T08:42:00+09:00"  # 승차
+        # 구간이 없는 후보는 분으로 센다.
+        assert walk["depart_at"] == "2026-11-21T08:15:00+09:00"
+        assert "segments" not in walk or not walk["segments"]
+
+    def test_plus_sign_decoded_as_space_and_naive_times(self, user, monkeypatch):
+        res = self.get(user, monkeypatch, arrive_by="2026-11-21T09:00:00 09:00")
+        assert res.data["results"][0]["arrive_at"] == "2026-11-21T09:00:00+09:00"
+        res = self.get(user, monkeypatch, arrive_by="2026-11-21T09:00:00")
+        assert res.data["results"][0]["arrive_at"] == "2026-11-21T09:00:00+09:00"
+
+    def test_without_arrive_by_nothing_changes(self, user, monkeypatch):
+        res = self.get(user, monkeypatch)
+        assert "depart_at" not in res.data["results"][0]
+        assert "start_at" not in res.data["results"][0]["segments"][0]
+
+    def test_bad_arrive_by_is_400(self, user, monkeypatch):
+        res = self.get(user, monkeypatch, arrive_by="내일 아침")
+        assert res.status_code == 400
+        assert res.data["error"]["code"] == "invalid_arrive_by"
