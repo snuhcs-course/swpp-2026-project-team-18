@@ -36,16 +36,13 @@ class ObservationUploadWorker(
     override suspend fun doWork(): Result {
         // 로그아웃 상태면 올릴 곳이 없다. **실패가 아니라 성공으로 끝낸다** —
         // 실패로 두면 WorkManager 가 백오프를 걸고 재시도하며 배터리를 쓴다.
-        if (!TokenStore(applicationContext).isLoggedIn) {
-            Log.i(TAG, "로그아웃 상태. 업로드를 건너뛴다")
-            return Result.success()
-        }
-
+        //
         // 프로세스가 워커 때문에 처음 깨어났으면 ApiClient 가 아직 비어 있다.
         // Application.onCreate 가 먼저 돌지만, 순서를 가정하지 않고 확인한다.
-        if (!ApiClient.isReady) {
-            Log.w(TAG, "ApiClient 초기화 전이다. 다시 시도한다")
-            return Result.retry()
+        WorkerOutcomes.precheck(TokenStore(applicationContext).isLoggedIn, ApiClient.isReady)?.let { outcome ->
+            if (outcome == WorkOutcome.SUCCESS) Log.i(TAG, "로그아웃 상태. 업로드를 건너뛴다")
+            else Log.w(TAG, "ApiClient 초기화 전이다. 다시 시도한다")
+            return outcome.toResult()
         }
 
         // 두 큐를 모두 비운다. 같은 네트워크 창에서 처리해야 라디오를 한 번만
@@ -69,18 +66,13 @@ class ObservationUploadWorker(
 
         Log.i(TAG, "관측 업로드: 대기 ${before}건 → 처리 ${sent}건, 남음 ${after}건")
 
-        return when {
-            after == 0 -> Result.success()
-
-            SyncDecision.shouldRetryUpload(after, runAttemptCount + 1) -> Result.retry()
-
-            else -> {
-                // 포기한다. 큐는 그대로 남아 다음 정기 실행이나 앱을 열 때
-                // 다시 시도된다. 관측은 실시간이 아니라 늦어도 된다.
-                Log.w(TAG, "재시도 상한에 닿았다. 관측 ${after}건을 큐에 남긴다")
-                Result.success()
-            }
+        val outcome = WorkerOutcomes.afterUpload(after, runAttemptCount + 1)
+        if (after > 0 && outcome == WorkOutcome.SUCCESS) {
+            // 포기한다. 큐는 그대로 남아 다음 정기 실행이나 앱을 열 때
+            // 다시 시도된다. 관측은 실시간이 아니라 늦어도 된다.
+            Log.w(TAG, "재시도 상한에 닿았다. 관측 ${after}건을 큐에 남긴다")
         }
+        return outcome.toResult()
     }
 
     internal companion object {

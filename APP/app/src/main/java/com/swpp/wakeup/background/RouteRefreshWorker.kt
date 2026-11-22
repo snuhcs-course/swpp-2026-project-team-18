@@ -85,9 +85,9 @@ class RouteRefreshWorker(
                     Log.w(TAG, "일정 $eventId 재계산 실패: ${result.message}")
             }
         }
-        if (refreshed == 0) {
+        WorkerOutcomes.afterRecompute(refreshed)?.let {
             Log.w(TAG, "대상 ${due.size}건이 모두 실패했다. 다시 시도한다")
-            return Result.retry()
+            return it.toResult()
         }
 
         // 3) 알람 시각이 바뀌었을 수 있다. 등록을 다시 맞춘다.
@@ -97,7 +97,7 @@ class RouteRefreshWorker(
         return when (val result = repository.loadHome()) {
             is EventRepository.Result.Success -> {
                 val data = result.data
-                if (SyncDecision.shouldResyncAlarms(true, fromCache = data.fromCache)) {
+                if (WorkerOutcomes.afterRouteRefreshLoad(succeeded = true, fromCache = data.fromCache)) {
                     runCatching { AlarmScheduler(applicationContext).sync(data.schedules) }
                         .onFailure { Log.e(TAG, "알람 등록 실패", it) }
                     // 새 "바꿀까요" 제안이 생겼으면 앱이 꺼져 있을 때 헤드업(BE-H3d)

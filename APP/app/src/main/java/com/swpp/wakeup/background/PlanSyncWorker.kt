@@ -41,14 +41,11 @@ class PlanSyncWorker(
 
     override suspend fun doWork(): Result {
         val tokenStore = TokenStore(applicationContext)
-        if (!tokenStore.isLoggedIn) {
-            // 정기 작업은 살려 둔다. 다시 로그인하면 바로 동기화가 이어진다.
-            Log.i(TAG, "로그아웃 상태. 동기화를 건너뛴다")
-            return Result.success()
-        }
-        if (!ApiClient.isReady) {
-            Log.w(TAG, "ApiClient 초기화 전이다. 다시 시도한다")
-            return Result.retry()
+        WorkerOutcomes.precheck(tokenStore.isLoggedIn, ApiClient.isReady)?.let { outcome ->
+            // 로그아웃이어도 정기 작업은 살려 둔다. 다시 로그인하면 바로 동기화가 이어진다.
+            if (outcome == WorkOutcome.SUCCESS) Log.i(TAG, "로그아웃 상태. 동기화를 건너뛴다")
+            else Log.w(TAG, "ApiClient 초기화 전이다. 다시 시도한다")
+            return outcome.toResult()
         }
 
         // 같은 네트워크 창에서 관측도 올린다. 따로 깨우면 라디오를 두 번 켠다.
@@ -60,29 +57,26 @@ class PlanSyncWorker(
         return when (val result = repository.loadHome()) {
             is EventRepository.Result.Success -> {
                 val data = result.data
-                if (SyncDecision.shouldResyncAlarms(
-                        networkSucceeded = true,
-                        fromCache = data.fromCache,
-                    )
-                ) {
+                val (resync, outcome) = WorkerOutcomes.afterPlanSync(succeeded = true, fromCache = data.fromCache)
+                if (resync) {
                     runCatching { AlarmScheduler(applicationContext).sync(data.schedules) }
                         .onSuccess {
                             Log.i(TAG, "알람 동기화 완료: 후보 ${data.schedules.size}건")
                         }
                         .onFailure { Log.e(TAG, "알람 등록 실패", it) }
                     runCatching { com.swpp.wakeup.alarm.ProposalHeadsUp.notifyNew(applicationContext, data.events) }
-                    Result.success()
+                    outcome.toResult()
                 } else {
                     // 캐시로 채워진 성공이다. 서버에 닿지 못했다는 뜻이므로
                     // 알람은 그대로 두고 다음 기회를 기다린다.
                     Log.i(TAG, "캐시로 응답했다. 알람은 건드리지 않고 재시도한다")
-                    Result.retry()
+                    outcome.toResult()
                 }
             }
 
             is EventRepository.Result.Failure -> {
                 Log.w(TAG, "계획 조회 실패: ${result.message}. 알람은 그대로 둔다")
-                Result.retry()
+                WorkerOutcomes.afterPlanSync(succeeded = false, fromCache = false).second.toResult()
             }
         }
     }
