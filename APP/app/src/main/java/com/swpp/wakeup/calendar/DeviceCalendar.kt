@@ -84,31 +84,14 @@ object DeviceCalendar {
             it.build()
         }
 
-        // 취소된 일정과 내가 거절한 일정을 뺀다. NULL 은 통과시킨다 —
-        // 상태를 기록하지 않는 캘린더 제공자가 있다.
-        val selection = StringBuilder(
-            "(${CalendarContract.Instances.STATUS} IS NULL OR " +
-                "${CalendarContract.Instances.STATUS} != ?) AND " +
-                "(${CalendarContract.Instances.SELF_ATTENDEE_STATUS} IS NULL OR " +
-                "${CalendarContract.Instances.SELF_ATTENDEE_STATUS} != ?)"
-        )
-        val args = mutableListOf(
-            CalendarContract.Instances.STATUS_CANCELED.toString(),
-            CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED.toString(),
-        )
-        // 연동하지 않은 캘린더는 읽지도 않는다. 화면에서 거르면 읽은 사실 자체는 남는다.
-        calendarIds?.let { ids ->
-            selection.append(" AND ${CalendarContract.Instances.CALENDAR_ID} IN (")
-            selection.append(ids.joinToString(",") { "?" })
-            selection.append(")")
-            args += ids.map(Long::toString)
-        }
+        // 취소·거절한 일정과 연동하지 않은 캘린더를 뺀다([instancesSelection]).
+        val (selection, args) = instancesSelection(calendarIds)
 
         return try {
             context.contentResolver.query(
                 uri,
                 PROJECTION,
-                selection.toString(),
+                selection,
                 args.toTypedArray(),
                 "${CalendarContract.Instances.BEGIN} ASC",
             )?.use { cursor -> collect(cursor, zone, now) } ?: emptyList()
@@ -150,38 +133,7 @@ object DeviceCalendar {
                     "${CalendarContract.Calendars.SYNC_EVENTS} = 1)",
                 null,
                 null,
-            )?.use { cursor ->
-                val idIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars._ID)
-                val nameIndex =
-                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
-                val accountIndex =
-                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_NAME)
-                val colorIndex =
-                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR)
-                val primaryIndex =
-                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.IS_PRIMARY)
-                val accountTypeIndex =
-                    cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_TYPE)
-                buildList {
-                    while (cursor.moveToNext()) {
-                        val account = cursor.getString(accountIndex)?.trim()?.takeIf { it.isNotEmpty() }
-                        add(
-                            DeviceCalendarSource(
-                                id = cursor.getLong(idIndex),
-                                // 이름이 빈 캘린더도 있다. 무엇인지 알 수 있게 계정 이름으로 대신한다.
-                                name = cursor.getString(nameIndex)?.trim()?.takeIf { it.isNotEmpty() }
-                                    ?: account
-                                    ?: "이름 없는 캘린더",
-                                accountName = account,
-                                color = if (cursor.isNull(colorIndex)) null else cursor.getInt(colorIndex),
-                                primary = !cursor.isNull(primaryIndex) && cursor.getInt(primaryIndex) == 1,
-                                accountType = cursor.getString(accountTypeIndex)?.trim()
-                                    ?.takeIf { it.isNotEmpty() },
-                            )
-                        )
-                    }
-                }
-            } ?: emptyList()
+            )?.use { cursor -> readCalendarSources(cursor) } ?: emptyList()
         } catch (e: SecurityException) {
             Log.w(TAG, "캘린더 권한이 회수됐다", e)
             emptyList()
@@ -191,7 +143,70 @@ object DeviceCalendar {
         }
     }
 
-    private fun collect(cursor: Cursor, zone: ZoneId, now: Long): List<CalendarEvent> {
+    // Partly AI-generated (Claude) — 아래 셋은 Android 질의와 떼어 낸 부분이다. 커서는 인터페이스라
+    // JVM 테스트(DeviceCalendarRowsTest)가 가짜 커서로 행 거르기와 매핑을 확인한다. 동작은 그대로다.
+
+    /**
+     * Instances 질의의 selection 과 인자.
+     *
+     * 취소된 일정과 내가 거절한 일정을 뺀다. NULL 은 통과시킨다 — 상태를 기록하지 않는 캘린더
+     * 제공자가 있다. 연동하지 않은 캘린더는 읽지도 않는다. 화면에서 거르면 읽은 사실 자체는 남는다.
+     */
+    internal fun instancesSelection(calendarIds: Set<Long>?): Pair<String, List<String>> {
+        val selection = StringBuilder(
+            "(${CalendarContract.Instances.STATUS} IS NULL OR " +
+                "${CalendarContract.Instances.STATUS} != ?) AND " +
+                "(${CalendarContract.Instances.SELF_ATTENDEE_STATUS} IS NULL OR " +
+                "${CalendarContract.Instances.SELF_ATTENDEE_STATUS} != ?)"
+        )
+        val args = mutableListOf(
+            CalendarContract.Instances.STATUS_CANCELED.toString(),
+            CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED.toString(),
+        )
+        calendarIds?.let { ids ->
+            selection.append(" AND ${CalendarContract.Instances.CALENDAR_ID} IN (")
+            selection.append(ids.joinToString(",") { "?" })
+            selection.append(")")
+            args += ids.map(Long::toString)
+        }
+        return selection.toString() to args
+    }
+
+    /** 캘린더 목록 커서 → 고를 수 있는 캘린더. */
+    internal fun readCalendarSources(cursor: Cursor): List<DeviceCalendarSource> {
+        val idIndex = cursor.getColumnIndexOrThrow(CalendarContract.Calendars._ID)
+        val nameIndex =
+            cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_DISPLAY_NAME)
+        val accountIndex =
+            cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_NAME)
+        val colorIndex =
+            cursor.getColumnIndexOrThrow(CalendarContract.Calendars.CALENDAR_COLOR)
+        val primaryIndex =
+            cursor.getColumnIndexOrThrow(CalendarContract.Calendars.IS_PRIMARY)
+        val accountTypeIndex =
+            cursor.getColumnIndexOrThrow(CalendarContract.Calendars.ACCOUNT_TYPE)
+        return buildList {
+            while (cursor.moveToNext()) {
+                val account = cursor.getString(accountIndex)?.trim()?.takeIf { it.isNotEmpty() }
+                add(
+                    DeviceCalendarSource(
+                        id = cursor.getLong(idIndex),
+                        // 이름이 빈 캘린더도 있다. 무엇인지 알 수 있게 계정 이름으로 대신한다.
+                        name = cursor.getString(nameIndex)?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: account
+                            ?: "이름 없는 캘린더",
+                        accountName = account,
+                        color = if (cursor.isNull(colorIndex)) null else cursor.getInt(colorIndex),
+                        primary = !cursor.isNull(primaryIndex) && cursor.getInt(primaryIndex) == 1,
+                        accountType = cursor.getString(accountTypeIndex)?.trim()
+                            ?.takeIf { it.isNotEmpty() },
+                    )
+                )
+            }
+        }
+    }
+
+    internal fun collect(cursor: Cursor, zone: ZoneId, now: Long): List<CalendarEvent> {
         val idIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.EVENT_ID)
         val beginIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.BEGIN)
         val titleIndex = cursor.getColumnIndexOrThrow(CalendarContract.Instances.TITLE)
