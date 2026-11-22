@@ -79,14 +79,14 @@ class AlarmScheduler(private val context: Context) {
      * 11:10 으로 미뤘는데 화면에 11:04 가 뜨는 것을 에뮬레이터에서 확인했다.
      */
     fun snooze(schedule: AlarmSchedule, minutes: Int) {
-        val at = System.currentTimeMillis() + minutes * 60_000L
-        val local = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault())
+        val at = snoozeAtMillis(System.currentTimeMillis(), minutes)
+        val (label, meridiem) = alarmClockLabel(at)
 
         // Partly AI-generated (Claude) — 계획의 알람 시각은 기록용으로 남긴다(AlarmSchedule.snoozedTo).
         val next = schedule.snoozedTo(
             atMillis = at,
-            label = local.format(LABEL_FORMAT),
-            meridiem = if (local.hour < 12) "AM" else "PM",
+            label = label,
+            meridiem = meridiem,
         )
         store.upsert(next)
         register(next)
@@ -255,11 +255,11 @@ class AlarmScheduler(private val context: Context) {
             Log.i(TAG, "제안 마감: 일정 $eventId 는 지금 시각을 지킨다 (${current.alarmLabel})")
             return null
         }
-        val local = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault())
+        val (label, meridiem) = alarmClockLabel(at)
         val next = cleared.copy(
             alarmAtMillis = at,
-            alarmLabel = local.format(LABEL_FORMAT),
-            meridiem = if (local.hour < 12) "AM" else "PM",
+            alarmLabel = label,
+            meridiem = meridiem,
         )
         cancelPendingIntent(eventId)
         store.upsert(next)
@@ -274,9 +274,7 @@ class AlarmScheduler(private val context: Context) {
     private fun syncProposalDeadlines(before: List<AlarmSchedule>, upcoming: List<AlarmSchedule>, nowMillis: Long) {
         val am = manager ?: return
         (before + upcoming).map { it.eventId }.distinct().forEach { am.cancel(deadlinePendingIntent(it)) }
-        upcoming.forEach { s ->
-            val at = s.proposalAnswerByMillis ?: return@forEach
-            if (s.proposedAlarmAtMillis == null || at <= nowMillis) return@forEach
+        proposalDeadlinesToArm(upcoming, nowMillis).forEach { (s, at) ->
             runCatching { am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, deadlinePendingIntent(s.eventId)) }
                 .onFailure { Log.w(TAG, "제안 마감 작업을 걸지 못했다: 일정 ${s.eventId}", it) }
         }
@@ -285,10 +283,10 @@ class AlarmScheduler(private val context: Context) {
     private fun deadlinePendingIntent(eventId: Long): PendingIntent =
         PendingIntent.getBroadcast(
             context,
-            DEADLINE_REQUEST_OFFSET + eventId.toInt(),
+            AlarmRequestCodes.deadline(eventId),
             Intent(context, ProposalDeadlineReceiver::class.java).apply {
                 putExtra(AlarmReceiver.EXTRA_EVENT_ID, eventId)
-                data = android.net.Uri.parse("jit://proposal/$eventId")
+                data = android.net.Uri.parse(AlarmRequestCodes.deadlineUri(eventId))
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -304,7 +302,7 @@ class AlarmScheduler(private val context: Context) {
         // showIntent 는 사용자가 상태바의 알람 아이콘을 눌렀을 때 열리는 화면이다.
         val show = PendingIntent.getActivity(
             context,
-            SHOW_REQUEST_OFFSET + schedule.eventId.toInt(),
+            AlarmRequestCodes.show(schedule.eventId),
             Intent(context, com.swpp.wakeup.MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -328,13 +326,13 @@ class AlarmScheduler(private val context: Context) {
     private fun firePendingIntent(eventId: Long): PendingIntent =
         PendingIntent.getBroadcast(
             context,
-            eventId.toInt(),
+            AlarmRequestCodes.fire(eventId),
             Intent(context, AlarmReceiver::class.java).apply {
                 action = AlarmReceiver.ACTION_FIRE
                 putExtra(AlarmReceiver.EXTRA_EVENT_ID, eventId)
                 // Intent 동등성은 extras 를 보지 않는다. data 를 달리 둬야
                 // 일정별로 다른 PendingIntent 가 된다.
-                data = android.net.Uri.parse("jit://alarm/$eventId")
+                data = android.net.Uri.parse(AlarmRequestCodes.fireUri(eventId))
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -350,14 +348,57 @@ class AlarmScheduler(private val context: Context) {
 
         /** 7일. 그보다 먼 알람은 어차피 그전에 다시 동기화된다. */
         const val HORIZON_MILLIS = 7L * 24 * 60 * 60 * 1000
-
-        /** showIntent 의 requestCode 가 발화용과 겹치지 않게 띄운다. */
-        const val SHOW_REQUEST_OFFSET = 1_000_000
-        /** 제안 마감 작업의 requestCode 구간. 알람 · 표시와 겹치지 않게 */
-        const val DEADLINE_REQUEST_OFFSET = 4_000_000
-
-        /** 알람 화면의 큰 시각. `EventRepository` 의 형식과 같아야 한다. */
-        /** 알람 숫자(12시간제). "AM"/"PM" 코드와 짝이고, 화면에서는 ClockText 로 낸다 */
-        val LABEL_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm")
     }
+}
+
+// Partly AI-generated (Claude) — 아래는 AlarmScheduler 에서 Android 없이 판단하는 부분을 떼어 낸 것이다.
+// 값만 다루므로 JVM 테스트(AlarmSchedulerLogicTest)로 고정한다. 동작은 그대로다.
+
+/**
+ * PendingIntent 의 requestCode 와 data URI.
+ *
+ * 같은 일정은 항상 같은 값이어야 재등록이 덮어쓰기가 되고 해제가 정확히 그 알람만 지운다.
+ * 세 용도(발화 · 상태바 표시 · 제안 마감)의 구간이 겹치면 한쪽을 해제할 때 다른 쪽이 지워진다.
+ */
+internal object AlarmRequestCodes {
+    /** showIntent 의 requestCode 가 발화용과 겹치지 않게 띄운다. */
+    const val SHOW_OFFSET = 1_000_000
+
+    /** 제안 마감 작업의 requestCode 구간. 알람 · 표시와 겹치지 않게 */
+    const val DEADLINE_OFFSET = 4_000_000
+
+    fun fire(eventId: Long): Int = eventId.toInt()
+    fun show(eventId: Long): Int = SHOW_OFFSET + eventId.toInt()
+    fun deadline(eventId: Long): Int = DEADLINE_OFFSET + eventId.toInt()
+
+    /** Intent 동등성은 extras 를 보지 않는다. data 를 달리 둬야 일정별로 다른 PendingIntent 가 된다. */
+    fun fireUri(eventId: Long): String = "jit://alarm/$eventId"
+    fun deadlineUri(eventId: Long): String = "jit://proposal/$eventId"
+}
+
+/** 알람 숫자(12시간제). "AM"/"PM" 코드와 짝이고, 화면에서는 ClockText 로 낸다. `EventRepository` 의 형식과 같아야 한다. */
+private val ALARM_LABEL_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm")
+
+/**
+ * 다시 건 알람의 표시 라벨과 오전/오후 코드. 미루기·제안 마감이 시각을 바꿀 때 함께 고친다 —
+ * 라벨은 계획을 받을 때 만든 문자열이라 시각만 바꾸면 화면이 원래 시각을 보여준다.
+ */
+internal fun alarmClockLabel(atMillis: Long, zone: ZoneId = ZoneId.systemDefault()): Pair<String, String> {
+    val local = Instant.ofEpochMilli(atMillis).atZone(zone)
+    return local.format(ALARM_LABEL_FORMAT) to (if (local.hour < 12) "AM" else "PM")
+}
+
+/** 미루기로 다시 울릴 시각. 지금부터 [minutes] 분 뒤. */
+internal fun snoozeAtMillis(nowMillis: Long, minutes: Int): Long = nowMillis + minutes * 60_000L
+
+/**
+ * 마감 작업을 걸 제안과 그 시각. 답을 기다리는 제안(제안 시각이 있고 마감이 아직 안 지남)만 고른다 —
+ * 제안이 사라졌거나 이미 지난 마감은 다시 걸지 않는다.
+ */
+internal fun proposalDeadlinesToArm(
+    upcoming: List<AlarmSchedule>,
+    nowMillis: Long,
+): List<Pair<AlarmSchedule, Long>> = upcoming.mapNotNull { s ->
+    val at = s.proposalAnswerByMillis ?: return@mapNotNull null
+    if (s.proposedAlarmAtMillis == null || at <= nowMillis) null else s to at
 }

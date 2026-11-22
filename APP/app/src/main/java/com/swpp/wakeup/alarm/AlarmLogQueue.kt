@@ -35,6 +35,8 @@ import kotlin.coroutines.cancellation.CancellationException
 class AlarmLogQueue(
     context: Context,
     private val api: () -> AlarmLogsApi = { ApiClient.alarmLogs },
+    /** 토큰 저장소가 준비됐는지. 테스트가 [ApiClient] 전역 상태 없이 [flush] 를 보도록 바꿔 끼운다. (Partly AI-generated (Claude)) */
+    private val isReady: () -> Boolean = { ApiClient.isReady },
 ) {
 
     private val appContext = context.applicationContext
@@ -88,7 +90,7 @@ class AlarmLogQueue(
      * @return 서버가 처리한 건수(신규 + 중복). 올릴 것이 없으면 0.
      */
     suspend fun flush(): Int {
-        if (!ApiClient.isReady) return 0
+        if (!isReady()) return 0
 
         val items = pending()
         if (items.isEmpty()) return 0
