@@ -312,6 +312,7 @@ open class FakeEventsApi : EventsApi {
         originLng: Double?,
         originLabel: String?,
         destLabel: String?,
+        arriveBy: String?,
     ): Response<RouteCandidateResponse> = unexpected("routeCandidates")
 
     override suspend fun riskOptions(id: Long): Response<RiskOptionsDto> = unexpected("riskOptions")

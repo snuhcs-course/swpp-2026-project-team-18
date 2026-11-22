@@ -14,7 +14,7 @@ import com.swpp.wakeup.domain.model.RouteOption
  * 단다. "자주 쓰는 수단" 근거는 채우지 않는다 — 경로 선택 화면에서 미리 골라 두기만 한다.
  *
  * 그 경로가 이번 후보에 없으면 같은 수단의 가장 빠른 후보를 고르는 것은 서버가 한다(`route_preference.py`).
- * 응답만으로는 둘을 구분할 수 없어 같은 표시를 쓴다.
+ * 서버 0.22.0 은 둘을 `preferred_match` 로 나눠 주고, 그때 경로 칸에는 "지난번과 같은 수단" 을 단다([caption]).
  */
 internal object RoutePrefill {
 
@@ -29,6 +29,9 @@ internal object RoutePrefill {
         val key = choice.preferredKey ?: return null
         return choice.options.firstOrNull { it.key == key }
     }
+
+    /** 경로 칸에 다는 말. 경로 선택 화면 카드와 같은 말(서버 `preferred_match` 에 따라 다름) */
+    fun caption(choice: RouteChoice): String = choice.preferredCaption ?: CAPTION
 
     /** 경로 칸 문구. 경로 선택 화면에서 고를 때와 같다("23분 · 지하철+도보+버스") */
     fun label(option: RouteOption): String = "${option.minutesLabel} · ${option.mode}"

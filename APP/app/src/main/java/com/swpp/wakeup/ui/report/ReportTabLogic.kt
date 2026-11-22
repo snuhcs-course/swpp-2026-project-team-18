@@ -142,11 +142,12 @@ internal object ReportTabLogic {
     fun lateSub(row: LateRow): String = listOfNotNull(row.startClock, row.title).joinToString(" ")
 
     /**
-     * 막대를 그리는가. 서버가 그 주 판정을 보류했으면(표본 부족) 그리지 않는다 — 2번 중 1번을
-     * "실제 50%" 로 보이면 앱이 크게 틀린 것처럼 읽힌다. 구버전 서버(판정 없음)는 그린다.
+     * 막대를 그리는가. **서버가 예상 · 실제 값을 둘 다 줬고, 판정을 보류하지 않았을 때만** 그린다(11-20 사용자).
+     * 그 밖에는 막대 없이 서버 판정 줄만 보인다 — 보류된 주의 "실제 50%" 는 앱이 크게 틀린 것처럼 읽힌다.
+     * 앱이 값을 만들거나 채우지 않는다. 구버전 서버(판정 없음)는 값이 있으면 그린다. (Partly AI-generated (Claude))
      */
     fun showBars(compare: ProbabilityCompare): Boolean =
-        compare.verdict != VERDICT_INSUFFICIENT && compare.promised != null
+        compare.verdict != VERDICT_INSUFFICIENT && compare.promised != null && compare.actual != null
 
     /**
      * 판정 한 줄(굵게). 서버 판정의 말 바꾸기(Figma 캡션 `546:2097`).
@@ -162,13 +163,14 @@ internal object ReportTabLogic {
     }
 
     /**
-     * 판정 아래 줄(보통 굵기). 표본 부족이면 "N번 더 다니면 보여 드릴게요"(N = 최소 횟수 − 지금 횟수).
+     * 판정 아래 줄(보통 굵기). 표본 부족이면 "N번 더 다니면 보여 드릴게요"(N = 서버 `samples_needed`, 0 이하 · 없으면 쓰지 않음).
      * 그 주에 서버가 여유 시간을 실제로 바꿨을 때만 알람 이야기를 덧붙인다 — 늘렸으면 "더 일찍",
      * 줄였으면 "조금 늦게". 진행 중인 주는 앞으로의 일, 지난 주는 한 일로 쓴다.
      */
     fun verdictBody(compare: ProbabilityCompare, bufferChangeMinutes: Int, inProgress: Boolean): List<String> =
         listOfNotNull(
-            "${compare.moreTrips}번 더 다니면 보여 드릴게요".takeIf { compare.verdict == VERDICT_INSUFFICIENT },
+            compare.moreTrips?.takeIf { it > 0 && compare.verdict == VERDICT_INSUFFICIENT }
+                ?.let { "${it}번 더 다니면 보여 드릴게요" },
             bufferLine(bufferChangeMinutes, inProgress),
         )
 
@@ -190,7 +192,7 @@ internal object ReportTabLogic {
 
     /** 실제가 예상보다 나쁜가. 실제 막대 · 글자를 주황으로 칠한다(Figma) */
     fun probabilityWorse(compare: ProbabilityCompare): Boolean =
-        compare.promised != null && compare.actual < compare.promised
+        compare.promised != null && compare.actual != null && compare.actual < compare.promised
 
     fun prepLonger(planned: Int, actual: Int): Boolean = actual > planned
 

@@ -614,6 +614,16 @@ private fun AlarmCard(
             AlarmDecisionLogic.userGapLine(plan.alarmAtMillis, plan.recommendedAlarmAtMillis)?.let {
                 Text(it, color = JitColor.TextSecondary, fontSize = 12.sp, modifier = Modifier.testTag("plan_user_gap"))
             }
+            // 서버가 계산한 준비 시간 모자람 · 남음(BE-H3f). 모자라면 빨강
+            plan.prepMarginLabel?.let {
+                Text(
+                    it,
+                    color = if (it.contains("모자라요")) JitColor.Red else JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.testTag("plan_prep_margin"),
+                )
+            }
             if (canRevert) {
                 Text(
                     text = "추천 시각으로 되돌리기",

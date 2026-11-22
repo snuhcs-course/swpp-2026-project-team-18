@@ -237,6 +237,8 @@ interface EventsApi {
         @Query("origin_lng") originLng: Double? = null,
         @Query("origin_label") originLabel: String? = null,
         @Query("dest_label") destLabel: String? = null,
+        /** 도착 목표(ISO 8601, 보통 일정 시작). 주면 후보마다 `depart_at` · `arrive_at` 이 온다(BE-11, 서버 0.22.0) */
+        @Query("arrive_by") arriveBy: String? = null,
     ): Response<RouteCandidateResponse>
 
     /**
@@ -469,10 +471,17 @@ data class RouteCandidateResponse(
     @SerializedName("preferred_mode") val preferredMode: String? = null,
     /** `same_destination` / `recent_mode` */
     @SerializedName("preferred_basis") val preferredBasis: String? = null,
+    /**
+     * `same_route`(지난번에 탄 그 경로) / `same_mode_fallback`(그 경로가 없어 같은 수단의 가장 빠른 후보) / null.
+     * BE-PREF, 서버 0.22.0. 구버전 서버는 주지 않는다. (Partly AI-generated (Claude))
+     */
+    @SerializedName("preferred_match") val preferredMatch: String? = null,
 ) {
     companion object {
         const val BASIS_SAME_DESTINATION = "same_destination"
         const val BASIS_RECENT_MODE = "recent_mode"
+        const val MATCH_SAME_ROUTE = "same_route"
+        const val MATCH_SAME_MODE = "same_mode_fallback"
     }
 }
 
@@ -495,6 +504,9 @@ data class RouteCandidateDto(
      * [minutes] 보다 크면 "34~36분" 처럼 범위로 쓴다. 합치지 않았거나 구버전 서버면 null.
      */
     @SerializedName("minutes_max") val minutesMax: Int? = null,
+    /** [arriveBy] 를 보냈을 때의 출발 · 도착 시각(ISO 8601, BE-11). 구버전 서버 · 안 보냈으면 null (Partly AI-generated (Claude)) */
+    @SerializedName("depart_at") val departAt: String? = null,
+    @SerializedName("arrive_at") val arriveAt: String? = null,
     @SerializedName("distance_m") val distanceM: Int?,
     val transfers: Int = 0,
     /**
@@ -686,6 +698,13 @@ data class AlarmPlanDto(
     @SerializedName("alarm_source") val alarmSource: String? = null,
     @SerializedName("user_alarm_at") val userAlarmAt: String? = null,
     @SerializedName("user_alarm_probability") val userAlarmProbability: Int? = null,
+    /**
+     * 울릴 시각에 일어나면 출발(`depart_by`)까지 준비할 수 있는 분(BE-H3f, 서버 0.22.0). 추천 시각이면 [prepMinutes] 와 같다.
+     * 준비 단계가 없는 일정 · 구버전 서버면 null. (Partly AI-generated (Claude))
+     */
+    @SerializedName("effective_prep_minutes") val effectivePrepMinutes: Int? = null,
+    /** (출발 − 울릴 시각) − 계획한 준비 시간(분). 음수면 그만큼 모자라고 양수면 남는다. 없으면 null */
+    @SerializedName("prep_margin_minutes") val prepMarginMinutes: Int? = null,
     /** 울릴 시각에 일어날 때의 정시 도착 확률 */
     @SerializedName("effective_on_time_probability") val effectiveOnTimeProbability: Int? = null,
     /** 울릴 시각을 사용자가 확인했는가(BE-H3a). 이번에는 받기만 한다 */

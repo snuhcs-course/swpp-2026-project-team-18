@@ -194,26 +194,22 @@ private fun Placed.toLateRow(zone: ZoneId): LateRow = LateRow(
 /**
  * "앱이 말한 확률" 카드. 도착 기록이 없으면 null.
  *
- * - 예상: 도착 기록이 있는 일정에서 앱이 보여 준 정시 도착 확률(`on_time_probability`)의 평균.
- *   그 값이 하나도 없으면(구버전 서버) 서버 목표(`target_rate`, 쓴 τ 의 평균)를 쓴다.
- * - 실제: 서버 정시율(`on_time_rate`).
- * - 판정: 서버가 그 주 일정만으로 낸 캘리브레이션. 표본이 부족하면 판정까지 남은 횟수를 센다 —
- *   가장 큰 τ 구간이 서버 기준 표본 수(`min_samples_for_reliable`)에 닿기까지다.
+ * - 예상: 서버 목표(`target_rate`)를 그대로 쓴다. 없으면 null — 앱이 평균을 내거나 다른 값으로 채우지 않는다(11-20).
+ * - 실제: 서버 정시율(`on_time_rate`). 없으면 null.
+ * - 막대는 둘 다 있을 때만 그린다([com.swpp.wakeup.ui.report.ReportTabLogic.showBars]).
+ * - 판정: 서버가 그 주 일정만으로 낸 캘리브레이션. 판정까지 남은 횟수는 서버 `samples_needed` 그대로다(BE-LLM1).
+ *   구버전 서버(0.21.0)는 주지 않아 null 이고, 그때 화면은 "N번 더" 줄을 비운다 — 앱이 세지 않는다.
  */
 private fun WeeklyReportDto.probabilityCompare(): ProbabilityCompare? {
     if (arrivedCount <= 0) return null
-    val actual = percent(onTimeRate) ?: return null
-    val said = outcomes.orEmpty()
-        .filter { it.result == OutcomeDto.RESULT_ON_TIME || it.result == OutcomeDto.RESULT_LATE }
-        .mapNotNull { it.onTimeProbability?.coerceIn(0, 100) }
-    val promised = if (said.isNotEmpty()) halfUp(said.average()) else percent(targetRate)
+    val actual = percent(onTimeRate)
+    val promised = percent(targetRate)
     val week = calibration
-    val largest = week?.buckets.orEmpty().maxOfOrNull { it.total } ?: 0
     return ProbabilityCompare(
         promised = promised,
         actual = actual,
         verdict = week?.verdict,
-        moreTrips = ((week?.minSamples ?: 3) - largest).coerceAtLeast(1),
+        moreTrips = week?.samplesNeeded,
     )
 }
 
@@ -762,7 +758,8 @@ internal fun CalibrationDto.toView(): CalibrationView {
 
         else -> Triple(
             "표본 부족",
-            "판정하려면 같은 구간에서 ${minSamples}번 이상의 결과가 필요해요",
+            // 서버 0.22.0 부터 판정은 구간이 아니라 전체 기록 수로 센다(BE-LLM1).
+            "판정하려면 기록이 ${minSamples}번 이상 필요해요",
             "아침에 이동 기록이 쌓이면 자동으로 채워져요",
         )
     }

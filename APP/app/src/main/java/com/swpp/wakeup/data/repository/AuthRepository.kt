@@ -1,5 +1,6 @@
 package com.swpp.wakeup.data.repository
 
+import com.swpp.wakeup.diagnostics.CrashReport
 import com.google.gson.Gson
 import com.swpp.wakeup.data.local.TokenStorageException
 import com.swpp.wakeup.data.local.TokenStore
@@ -409,6 +410,8 @@ class AuthRepository(
             email = user.email,
             nickname = user.nickname,
         )
+        // 크래시 보고에는 서버 숫자 id 만 붙인다(이메일 · 닉네임 X, A-6).
+        CrashReport.setUser(user.id)
         return AuthResult.Success(user)
     }
 

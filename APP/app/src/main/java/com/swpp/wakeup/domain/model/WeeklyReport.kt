@@ -137,14 +137,14 @@ data class LateRow(
  * 막대를 그리지 않는다 — 2번 중 1번을 "실제 50%" 로 보이면 앱이 크게 틀린 것처럼 읽힌다.
  */
 data class ProbabilityCompare(
-    /** 앱이 말한 정시 도착 확률의 평균(%). 도착 기록이 있는 일정 중 확률이 있는 것만, 없으면 목표(τ) 평균 */
+    /** 서버 목표(`target_rate`, %). 서버가 주지 않으면 null */
     val promised: Int?,
-    /** 실제로 제시간에 온 비율(%) */
-    val actual: Int,
+    /** 서버 정시율(`on_time_rate`, %). 서버가 주지 않으면 null */
+    val actual: Int?,
     /** 서버 판정 `calibrated` / `overconfident` / `conservative` / `insufficient`. 구버전 서버면 null */
     val verdict: String?,
-    /** 판정까지 더 다녀야 하는 횟수(최소 1). [verdict] 가 `insufficient` 일 때만 쓴다 */
-    val moreTrips: Int,
+    /** 판정까지 남은 기록 수(서버 `samples_needed`). [verdict] 가 `insufficient` 일 때만 쓴다. 구버전 서버면 null */
+    val moreTrips: Int?,
 )
 
 // Partly AI-generated (Claude)

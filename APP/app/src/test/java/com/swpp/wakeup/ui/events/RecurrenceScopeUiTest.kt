@@ -5,6 +5,7 @@ import com.swpp.wakeup.data.repository.EventScope
 import com.swpp.wakeup.ui.home.HomeViewModel.AddState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -54,10 +55,8 @@ class RecurrenceScopeUiTest {
 
     @Test
     fun `편집 안내 문구`() {
-        assertEquals(
-            "저장할 때 이 일정만 / 이후 일정 모두 중에 고를 수 있어요. 요일을 바꾸면 이후 일정에 적용돼요",
-            editNoteOf(recurringEdit),
-        )
+        // 범위를 고를 수 있는 반복 회차는 안내를 띄우지 않는다. 저장할 때 범위 시트가 묻는다(사용자 요청 11-22).
+        assertNull(editNoteOf(recurringEdit))
         // 구버전 서버에서는 지금처럼 이 회차만 바뀐다고 말한다.
         assertEquals("반복 일정의 이 회차만 바뀌어요. 요일은 고칠 수 없어요", editNoteOf(recurringEdit.copy(scopeSupported = false)))
         assertEquals(

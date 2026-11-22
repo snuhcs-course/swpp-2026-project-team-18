@@ -29,6 +29,8 @@ lifecycleCompose = "2.11.0"
 # 파일이 없으면 빌드가 실패하므로 플러그인과 파일은 항상 같이 있어야 한다.
 googleServices = "4.5.0"
 firebaseBom = "34.19.0"
+# Crashlytics Gradle 플러그인(A-6, 11-20). 라이브러리 버전은 firebase-bom 이 고정한다.
+firebaseCrashlyticsPlugin = "3.0.3"
 # --- 위치 (출발·도착 판별) ---
 # FusedLocationProvider. 플랫폼 LocationManager 대신 이걸 쓰는 이유는
 # GPS·WiFi·셀을 합쳐 주고 배터리 정책을 알아서 처리하기 때문이다. 아침 한 번의
@@ -95,6 +97,7 @@ androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "l
 # firebase. BOM 이 나머지 firebase 아티팩트 버전을 고정하므로 개별 버전을 쓰지 않는다.
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
+firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics" }
 
 # 위치
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
@@ -117,6 +120,7 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 # Compose 컴파일러. AGP 9.3.2 내장 Kotlin(2.3.20)과 버전을 맞춰야 한다.
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlinBundled" }
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
+firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlyticsPlugin" }
 # Room 의 애노테이션 처리기를 돌린다. kapt 대신 KSP 를 쓰는 이유는 kapt 가
 # 스텁 생성을 거쳐 2배쯤 느리고, Room 이 KSP 를 1급으로 지원하기 때문이다.
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

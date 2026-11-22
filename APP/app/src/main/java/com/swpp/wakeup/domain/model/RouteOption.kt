@@ -41,6 +41,10 @@ data class RouteOption(
     val routePath: List<GeoPoint> = emptyList(),
     /** 고른 카드 아래에 그대로 보여 줄 서버 안내. 없으면 숨긴다. */
     val guide: String? = null,
+    /** 서버가 도착 목표에 맞춰 준 출발 시각(기기 시간대, BE-11). 구버전 서버면 null */
+    val departAt: java.time.LocalDateTime? = null,
+    /** 서버가 준 도착 시각(= 요청한 도착 목표). 구버전 서버면 null */
+    val arriveAt: java.time.LocalDateTime? = null,
 ) {
     /** 자동차는 요금이 크게 다르므로 화면에서 구분해 표시한다. */
     val isCar: Boolean get() = key == "car" || key.startsWith("car:")

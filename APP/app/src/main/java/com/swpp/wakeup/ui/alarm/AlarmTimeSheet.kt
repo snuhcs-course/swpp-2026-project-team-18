@@ -119,6 +119,7 @@ fun AlarmTimeSheet(
         currentProbability = currentProbability,
         cellProbability = match?.probability,
         startMinutes = startMinutesOfDay,
+        table = options?.probabilityByMinutesBefore,
     )
 
     ModalBottomSheet(

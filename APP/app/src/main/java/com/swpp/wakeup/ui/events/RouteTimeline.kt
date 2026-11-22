@@ -33,9 +33,29 @@ internal data class TimelineRow(
     enum class Kind { START, STOP, END }
 }
 
-/** 도착 목표 시각에 맞춘 출발 시각. 목표가 없으면 null. */
+/** 도착 목표 시각에 맞춘 출발 시각. 목표가 없으면 null. 서버 시각이 없을 때만 쓴다([routeTimes]). */
 internal fun departAt(arriveBy: LocalDateTime?, minutes: Int): LocalDateTime? =
     arriveBy?.minusMinutes(minutes.toLong())
+
+// Partly AI-generated (Claude) — BE-11(서버 0.22.0)
+/**
+ * 카드에 쓸 출발 · 도착 시각. 서버가 도착 목표에 맞춘 시각을 줬고 그 목표가 지금 일정 시작([arriveBy])과 같으면
+ * **서버 값**을 쓴다. 서버 시각이 없거나(구버전 서버 0.21.0) 후보를 받은 뒤 일정 시각을 바꿨으면 예전처럼
+ * "일정 시작 − 소요 시간" 으로 둔다. 목표가 없으면 null.
+ */
+internal fun routeTimes(
+    serverDepart: LocalDateTime?,
+    serverArrive: LocalDateTime?,
+    arriveBy: LocalDateTime?,
+    minutes: Int,
+): Pair<LocalDateTime, LocalDateTime>? {
+    val target = arriveBy?.withSecond(0)?.withNano(0) ?: return null
+    if (serverDepart != null && serverArrive != null && serverArrive.withSecond(0).withNano(0) == target) {
+        return serverDepart to serverArrive
+    }
+    val depart = departAt(target, minutes) ?: return null
+    return depart to target
+}
 
 private fun meridiem(time: LocalTime) = com.swpp.wakeup.domain.model.ClockText.meridiem(time.hour)
 

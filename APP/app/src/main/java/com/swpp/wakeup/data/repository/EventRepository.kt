@@ -399,6 +399,8 @@ class EventRepository(
     suspend fun routeCandidates(
         destination: PlaceSearchItem,
         origin: PlaceSearchItem? = null,
+        /** 도착 목표(일정 시작, 기기 시간대). 주면 서버가 후보별 출발 · 도착 시각을 준다(BE-11) */
+        arriveBy: java.time.LocalDateTime? = null,
     ): Result<RouteChoice> = guard {
         val response = api.routeCandidates(
             destLat = destination.lat,
@@ -407,6 +409,7 @@ class EventRepository(
             originLng = origin?.lng,
             originLabel = origin?.name,
             destLabel = destination.name,
+            arriveBy = arriveBy?.atZone(ZoneId.systemDefault())?.toOffsetDateTime()?.toString(),
         )
         val body = unwrap(response)
             ?: return@guard failureFrom(response.code(), response.errorBody()?.string())
@@ -1209,13 +1212,7 @@ internal fun RouteCandidateResponse.toChoice(
         originLng = origin?.lng,
         preferredKey = preferred,
         preferredBasis = preferred?.let { preferredBasis },
-        preferredCaption = preferred?.let {
-            when (preferredBasis) {
-                RouteCandidateResponse.BASIS_SAME_DESTINATION -> "지난번에 고른 경로"
-                RouteCandidateResponse.BASIS_RECENT_MODE -> "자주 쓰는 수단"
-                else -> null
-            }
-        },
+        preferredCaption = preferred?.let { preferredCaptionOf(preferredBasis, preferredMatch) },
     )
 }
 
@@ -1256,6 +1253,8 @@ internal fun RouteCandidateDto.toOption(fetchedAtElapsedMs: Long = 0L): RouteOpt
         bikeRoadPercent = bikeRoadPercent?.takeIf { it in 0..100 },
         routePath = routePoints.toGeoPoints(),
         guide = guide?.trim()?.takeIf { it.isNotEmpty() },
+        departAt = localTimeOf(departAt),
+        arriveAt = localTimeOf(arriveAt),
         // segments 가 null 인 경우가 정상이다 — 구버전 서버 응답과 Gson 의
         // 기본값 무시가 겹치는 자리다. 근거는 RouteCandidateDto.segments 주석.
         segments = RouteSegments(
@@ -1609,7 +1608,9 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
     val routeBasis = RouteBasis.label(plan.routeKey, plan.routeDetail, plan.routeSummary, plan.routeDistanceM)
 
     val rows = buildList {
-        plan.prepMinutes?.takeIf { prepApplies }?.let {
+        // 직접 정한 시각이면 그 시각에 일어나 출발까지 준비할 수 있는 분(서버 effective_prep_minutes, BE-H3f)으로 그린다.
+        // 구버전 서버(필드 없음)는 예전처럼 계획한 준비 시간이다.
+        preparedMinutes(plan.prepMinutes, plan.effectivePrepMinutes, plan.isUserAlarm)?.takeIf { prepApplies }?.let {
             add(
                 PlanRow(
                     "준비 시간",
@@ -1696,6 +1697,7 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
         // 사용자가 알 필요가 없다.
         alarmAtMillis = alarmLocal?.toInstant()?.toEpochMilli(),
         userAlarm = plan.isUserAlarm,
+        prepMarginLabel = prepMarginLabel(plan.prepMarginMinutes, plan.isUserAlarm),
         departByMillis = departBy?.toInstant()?.toEpochMilli(),
         arriveAtMillis = arriveAt?.toInstant()?.toEpochMilli(),
         altRouteKey = plan.altRouteKey?.takeIf { it.isNotBlank() },
@@ -1832,3 +1834,31 @@ internal fun EventDto.toSchedule(zone: ZoneId, profile: ProfileDto): AlarmSchedu
     }
 }
 
+// Partly AI-generated (Claude) — BE-PREF(서버 0.22.0)
+/**
+ * 기본으로 고른 경로에 다는 말. 같은 도착지 근거여도 서버가 그 경로를 못 찾아 같은 수단의 다른 후보를 골랐으면
+ * (`preferred_match == same_mode_fallback`) "지난번에 고른 경로" 라고 하지 않는다. 구버전 서버(필드 없음)는 예전처럼
+ * "지난번에 고른 경로" 다.
+ */
+internal fun preferredCaptionOf(basis: String?, match: String?): String? = when (basis) {
+    RouteCandidateResponse.BASIS_SAME_DESTINATION ->
+        if (match == RouteCandidateResponse.MATCH_SAME_MODE) "지난번과 같은 수단" else "지난번에 고른 경로"
+    RouteCandidateResponse.BASIS_RECENT_MODE -> "자주 쓰는 수단"
+    else -> null
+}
+
+/** 서버 ISO 시각 → 기기 시간대의 날짜 · 시각. 없거나 읽을 수 없으면 null (Partly AI-generated (Claude)) */
+internal fun localTimeOf(iso: String?, zone: ZoneId = ZoneId.systemDefault()): java.time.LocalDateTime? =
+    iso?.let { runCatching { OffsetDateTime.parse(it).atZoneSameInstant(zone).toLocalDateTime() }.getOrNull() }
+
+// Partly AI-generated (Claude) — BE-H3f(서버 0.22.0)
+/** "왜 이 시각인가요" 막대의 준비 구간 분. 직접 정한 시각이고 서버가 값을 주면 그 값, 아니면 계획한 준비 시간 */
+internal fun preparedMinutes(planned: Int?, effective: Int?, userAlarm: Boolean): Int? =
+    if (userAlarm && effective != null) effective else planned
+
+/** 서버 `prep_margin_minutes` → 화면 말. 직접 정한 시각일 때만, 0 이면 쓰지 않는다 */
+internal fun prepMarginLabel(margin: Int?, userAlarm: Boolean): String? = when {
+    !userAlarm || margin == null || margin == 0 -> null
+    margin < 0 -> "준비 시간이 ${-margin}분 모자라요"
+    else -> "준비 시간이 ${margin}분 남아요"
+}

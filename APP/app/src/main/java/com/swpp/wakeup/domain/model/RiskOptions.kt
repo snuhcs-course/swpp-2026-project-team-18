@@ -24,6 +24,11 @@ data class RiskOptionsView(
     /** 총 소요시간 분포. 서버가 아직 만들 수 없으면 null */
     val distribution: DurationDistributionView?,
     val unavailableReason: String? = null,
+    /**
+     * 휠 시각의 확률 표(서버 `probability_table.whole`, BE-H3c). `[i]` = 일정 시작 i 분 전에 일어날 때의 확률.
+     * 구버전 서버(0.21.0)는 주지 않아 null 이고, 그때 시트는 세 칸 · 지금 알람 밖의 시각 확률을 비운다.
+     */
+    val probabilityByMinutesBefore: List<Int>? = null,
 ) {
     fun option(key: String?): RiskOptionView? = options.firstOrNull { it.key == key }
 }

@@ -98,7 +98,7 @@ class ReportTabMappingTest {
     }
 
     @Test
-    fun `예상은 도착한 일정에서 앱이 말한 확률의 평균, 실제는 서버 정시율`() {
+    fun `예상은 서버 목표, 실제는 서버 정시율 - 앱이 평균 내지 않는다`() {
         val view = week(
             listOf(
                 outcome(1, "2026-09-14", "2026-09-14T00:00:00Z", "on_time", slack = 8.0, probability = 90),
@@ -108,18 +108,19 @@ class ReportTabMappingTest {
                 outcome(4, "2026-09-16", "2026-09-16T05:00:00Z", "unobserved", probability = 40),
             ),
             onTimeRate = 0.8,
+            targetRate = 0.9,
             calibration = CalibrationDto(buckets = listOf(bucket(5)), verdict = "overconfident"),
         )
 
         val compare = view.probability!!
-        assertEquals(88, compare.promised)
+        assertEquals("일정별 확률(90·88·86) 평균이 아니라 서버 target_rate", 90, compare.promised)
         assertEquals(80, compare.actual)
         assertEquals("overconfident", compare.verdict)
-        assertEquals("판정이 났으면 남은 횟수는 의미 없지만 1 이상", 1, compare.moreTrips)
+        assertNull("구버전 서버(samples_needed 없음)는 앱이 세지 않는다", compare.moreTrips)
     }
 
     @Test
-    fun `확률이 없으면 목표 평균, 표본이 부족하면 판정까지 남은 횟수`() {
+    fun `서버 값이 없으면 비우고, 표본이 부족하면 판정까지 남은 횟수`() {
         val outcomes = listOf(
             outcome(1, "2026-09-14", "2026-09-14T00:00:00Z", "on_time", slack = 8.0),
             outcome(2, "2026-09-15", "2026-09-15T00:00:00Z", "on_time", slack = 4.0),
@@ -131,15 +132,20 @@ class ReportTabMappingTest {
             calibration = CalibrationDto(
                 buckets = listOf(bucket(1), bucket(2)),
                 minSamples = 3,
+                samplesNeeded = 1,
                 verdict = "insufficient",
             ),
         ).probability!!
         assertEquals(90, thin.promised)
         assertEquals(100, thin.actual)
-        assertEquals("가장 큰 구간 2번 → 1번 더", 1, thin.moreTrips)
+        assertEquals("서버 samples_needed 그대로", 1, thin.moreTrips)
 
         val empty = week(outcomes, calibration = CalibrationDto(buckets = emptyList(), verdict = "insufficient"))
-        assertEquals(3, empty.probability!!.moreTrips)
+        assertNull("서버가 주지 않으면 비운다", empty.probability!!.moreTrips)
+        // 서버가 target_rate · on_time_rate 를 주지 않으면 앱이 채우지 않는다 → 막대 없음
+        val noValues = week(outcomes, onTimeRate = null, targetRate = null).probability!!
+        assertNull(noValues.promised)
+        assertNull(noValues.actual)
 
         assertNull("구버전 서버(캘리브레이션 없음)는 판정이 없다", week(outcomes).probability!!.verdict)
     }

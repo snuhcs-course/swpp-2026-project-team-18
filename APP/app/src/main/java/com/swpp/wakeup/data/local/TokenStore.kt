@@ -1,5 +1,6 @@
 package com.swpp.wakeup.data.local
 
+import com.swpp.wakeup.diagnostics.CrashReport
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
@@ -82,6 +83,8 @@ class TokenStore(
 
     fun clear() {
         prefs.edit().clear().apply()
+        // 로그아웃 · 세션 만료. 다음 크래시가 앞 사용자에게 붙지 않게(A-6).
+        CrashReport.clearUser()
     }
 
     // --- 내부 -------------------------------------------------------------

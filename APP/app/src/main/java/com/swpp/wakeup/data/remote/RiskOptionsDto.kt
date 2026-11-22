@@ -12,6 +12,18 @@ data class RiskOptionsDto(
     @SerializedName("auto_reason") val autoReason: String? = null,
     val distribution: RiskDistributionDto? = null,
     @SerializedName("unavailable_reason") val unavailableReason: String? = null,
+    /** 휠 시각의 확률 표(BE-H3c, 서버 0.22.0). 구버전 서버 · 확률을 낼 수 없으면 null (Partly AI-generated (Claude)) */
+    @SerializedName("probability_table") val probabilityTable: ProbabilityTableDto? = null,
+)
+
+/**
+ * `whole[i]` = 일정 시작 i 분 전에 일어날 때의 정시 도착 확률(0~99). `i > max_minutes` 면 마지막 칸, `i ≤ 0` 이면 0
+ * (docs/iter4/server-alarm-control.md 3.7절). (Partly AI-generated (Claude))
+ */
+data class ProbabilityTableDto(
+    val unit: String? = null,
+    val whole: List<Int>? = null,
+    @SerializedName("max_minutes") val maxMinutes: Int? = null,
 )
 
 data class RiskOptionDto(

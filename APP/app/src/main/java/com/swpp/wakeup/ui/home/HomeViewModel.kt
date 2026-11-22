@@ -4077,7 +4077,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 마지막 요청의 응답만 쓴다(fix/iter4-he-bugs 이식, 11-19). 받는 동안 도착지 · 출발지를 바꾸면 후보를 비우는데,
         // 늦게 온 응답이 비운 자리를 이전 구간의 후보로 다시 채웠다.
         val generation = ++routeChoiceGeneration
-        val result = repository.routeCandidates(place, origin)
+        // 일정 시작 = 도착 목표. 서버가 후보별 출발 · 도착 시각을 맞춰 준다(BE-11, 0.22.0). 구버전 서버는 무시한다.
+        val arriveBy = _add.value.let { it.date.atTime(it.hour, it.minute) }
+        val result = repository.routeCandidates(place, origin, arriveBy)
         if (!com.swpp.wakeup.ui.home.candidatesApply(_routeChoice.value == null, generation, routeChoiceGeneration)) return
         when (result) {
             is EventRepository.Result.Success -> _routeChoice.update { current ->
@@ -5090,7 +5092,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val origin = add.origin
         routePrefillJob = viewModelScope.launch {
             val result = withTimeoutOrNull(com.swpp.wakeup.ui.events.RoutePrefill.TIMEOUT_MS) {
-                runCatching { repository.routeCandidates(place, origin) }.getOrNull()
+                runCatching { repository.routeCandidates(place, origin, add.date.atTime(add.hour, add.minute)) }.getOrNull()
             }
             val choice = (result as? EventRepository.Result.Success)?.data ?: return@launch
             val now = _add.value
@@ -5108,7 +5110,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     routeKey = option.key,
                     routeLabel = com.swpp.wakeup.ui.events.RoutePrefill.label(option),
                     routeMinutes = option.minutes,
-                    routeAutoCaption = com.swpp.wakeup.ui.events.RoutePrefill.CAPTION,
+                    routeAutoCaption = com.swpp.wakeup.ui.events.RoutePrefill.caption(choice),
                     fieldErrors = cur.fieldErrors - AddField.ROUTE,
                 )
             }

@@ -154,7 +154,7 @@ class ReportRepositoryTest {
         val view = calibrationView("""{"verdict":"insufficient","min_samples_for_reliable":4}""")
 
         assertEquals("표본 부족", view.verdictLabel)
-        assertEquals("판정하려면 같은 구간에서 4번 이상의 결과가 필요해요", view.verdictNote)
+        assertEquals("판정하려면 기록이 4번 이상 필요해요", view.verdictNote)
         assertFalse(view.isTrustworthy)
     }
 

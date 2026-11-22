@@ -338,14 +338,16 @@ private fun LateRowItem(row: LateRow, enabled: Boolean, onOpenDay: (LocalDate, L
 
 /**
  * "앱이 말한 확률, 맞았을까요?"(Figma `card 앱이 말한 확률`). 예상 · 실제 막대 두 개와 판정 한 줄.
- * 서버가 그 주 판정을 보류했으면(표본 부족) 막대 없이 "기록이 아직 적어요 · N번 더 다니면…" 만 쓴다.
+ * 막대는 서버가 예상(`target_rate`) · 실제(`on_time_rate`)를 둘 다 줬고 판정을 보류하지 않았을 때만 그린다.
+ * 보류된 주는 막대 없이 "기록이 아직 적어요 · N번 더 다니면…" 만 쓴다. 판정 줄은 서버 판정 그대로다(11-20).
  */
 @Composable
 private fun ProbabilityCard(compare: ProbabilityCompare, bufferChangeMinutes: Int, inProgress: Boolean) {
     JitCard(padding = 16.dp, gap = 12.dp, modifier = Modifier.testTag("report_probability")) {
         Text("정시 도착 확률", color = JitColor.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         val promised = compare.promised
-        if (ReportTabLogic.showBars(compare) && promised != null) {
+        val actual = compare.actual
+        if (ReportTabLogic.showBars(compare) && promised != null && actual != null) {
             val actualColor = if (ReportTabLogic.probabilityWorse(compare)) JitColor.Amber else JitColor.Green
             BarRow(
                 label = "예상",
@@ -357,8 +359,8 @@ private fun ProbabilityCard(compare: ProbabilityCompare, bufferChangeMinutes: In
             )
             BarRow(
                 label = "실제",
-                value = "${compare.actual}%",
-                fraction = ReportTabLogic.percentFraction(compare.actual),
+                value = "$actual%",
+                fraction = ReportTabLogic.percentFraction(actual),
                 fill = actualColor,
                 valueColor = actualColor,
                 tag = "report_actual",

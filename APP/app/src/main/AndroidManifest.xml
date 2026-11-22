@@ -84,6 +84,11 @@
         android:theme="@style/Theme.APP"
         android:usesCleartextTraffic="${usesCleartextTraffic}"
         tools:targetApi="34">
+
+        <!-- 크래시 보고(A-6). 빌드마다 켜고 끈다(app/build.gradle.kts crashlyticsEnabled). -->
+        <meta-data
+            android:name="firebase_crashlytics_collection_enabled"
+            android:value="${crashlyticsEnabled}" />
         <!--
           usesCleartextTraffic 은 빌드가 결정한다(app/build.gradle.kts).
 

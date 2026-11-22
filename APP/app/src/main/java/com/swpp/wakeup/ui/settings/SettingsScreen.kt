@@ -52,6 +52,8 @@ fun SettingsScreen(
     /** 개발 빌드에서만 채운다. null 이면 진단 줄을 그리지 않는다 */
     devInfo: String? = null,
     onDevCheck: (() -> Unit)? = null,
+    /** 디버그 빌드 전용 "테스트 크래시"(A-6). 크래시 보고가 콘솔에 뜨는지 확인할 때만 쓴다. null 이면 그리지 않는다 */
+    onDevCrash: (() -> Unit)? = null,
     /** "모든 기기에서 로그아웃"(token-security-api.md §5). null 이면 그리지 않는다 */
     onLogoutAll: (() -> Unit)? = null,
     /** 모든 기기 로그아웃을 서버에 요청하는 중 */
@@ -141,6 +143,19 @@ fun SettingsScreen(
                     modifier = Modifier
                         .clip(RoundedCornerShape(JitRadius.Hint))
                         .clickable(onClick = check)
+                        .padding(vertical = 4.dp),
+                )
+            }
+            onDevCrash?.let { crash ->
+                Text(
+                    text = "테스트 크래시",
+                    color = JitColor.Red,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .testTag("dev_test_crash")
+                        .clip(RoundedCornerShape(JitRadius.Hint))
+                        .clickable(onClick = crash)
                         .padding(vertical = 4.dp),
                 )
             }

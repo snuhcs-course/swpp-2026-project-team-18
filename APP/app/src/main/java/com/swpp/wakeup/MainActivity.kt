@@ -1,5 +1,6 @@
 package com.swpp.wakeup
 
+import com.swpp.wakeup.diagnostics.CrashReport
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.domain.model.UserAlarmRule
 import android.Manifest
@@ -302,6 +303,8 @@ private fun MainHost(
     val viewModel: HomeViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val nav by viewModel.nav.collectAsStateWithLifecycle()
+    // 크래시 보고에 지금 화면 이름만 붙인다(일정 id 등 값은 넣지 않는다, A-6).
+    LaunchedEffect(nav.current) { CrashReport.setKey(CrashReport.KEY_SCREEN, nav.current::class.simpleName) }
     val plan by viewModel.plan.collectAsStateWithLifecycle()
     val planError by viewModel.planError.collectAsStateWithLifecycle()
     val editLoadingId by viewModel.editLoadingId.collectAsStateWithLifecycle()
@@ -1321,6 +1324,12 @@ private fun MainHost(
                             append("서버 = ${ApiClient.baseUrl}")
                             serverStatus?.let { append("\n$it") }
                         }
+                    } else {
+                        null
+                    },
+                    // 디버그 빌드 전용(A-6). 누르면 앱이 죽고, 다시 열 때 크래시 보고가 올라간다.
+                    onDevCrash = if (BuildConfig.DEV_TOOLS) {
+                        { throw RuntimeException("JustInTime 테스트 크래시(설정 › 개발 정보)") }
                     } else {
                         null
                     },

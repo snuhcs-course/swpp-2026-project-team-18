@@ -61,8 +61,8 @@ internal object RouteChoiceLogic {
 
     /** "오전 8:08 - 8:50 · 1,550원". 도착 목표를 모르면 시각을 빼고, 요금이 없으면 요금을 뺀다 */
     fun timeLine(option: RouteOption, arriveBy: LocalDateTime?): String? {
-        val time = departAt(arriveBy, option.minutes)?.let { d ->
-            timeRangeLabel(d.toLocalTime(), d.plusMinutes(option.minutes.toLong()).toLocalTime())
+        val time = routeTimes(option.departAt, option.arriveAt, arriveBy, option.minutes)?.let { (d, a) ->
+            timeRangeLabel(d.toLocalTime(), a.toLocalTime())
         }
         return listOfNotNull(time, fare(option)).joinToString(" · ").takeIf { it.isNotEmpty() }
     }

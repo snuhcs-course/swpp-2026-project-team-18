@@ -43,6 +43,7 @@ class BaseRouteSegmentsTest {
             originLng: Double?,
             originLabel: String?,
             destLabel: String?,
+            arriveBy: String?,
         ): Response<RouteCandidateResponse> {
             candidateCalls++
             return ok(fromJson(candidatesJson))

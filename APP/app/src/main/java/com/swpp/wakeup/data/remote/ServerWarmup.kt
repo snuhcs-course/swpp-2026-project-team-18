@@ -1,5 +1,6 @@
 package com.swpp.wakeup.data.remote
 
+import com.swpp.wakeup.diagnostics.CrashReport
 import android.util.Log
 import com.swpp.wakeup.BuildConfig
 import kotlinx.coroutines.sync.Mutex
@@ -104,6 +105,7 @@ object ServerWarmup {
     private fun rememberVersion(version: String) {
         if (serverVersion == version) return
         serverVersion = version
+        CrashReport.setKey(CrashReport.KEY_SERVER_VERSION, version)
 
         if (ServerVersion.isServerBehind(BuildConfig.VERSION_NAME, version)) {
             // Log.e 를 쓴다. 이 상태에서는 앱이 하는 모든 새 요청이 404 로

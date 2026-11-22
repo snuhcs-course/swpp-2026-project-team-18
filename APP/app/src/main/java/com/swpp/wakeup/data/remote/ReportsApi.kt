@@ -303,6 +303,8 @@ data class CalibrationDto(
     @SerializedName("unscored_count") val unscoredCount: Int = 0,
     @SerializedName("reliable_bucket_count") val reliableBucketCount: Int = 0,
     @SerializedName("min_samples_for_reliable") val minSamples: Int = 3,
+    /** 판정까지 남은 기록 수(BE-LLM1, 서버 0.22.0). 판정했으면 0. 구버전 서버는 주지 않아 null (Partly AI-generated (Claude)) */
+    @SerializedName("samples_needed") val samplesNeeded: Int? = null,
     /** 실제 − 예측의 평균. 음수면 과신. 표본이 부족하면 null */
     @SerializedName("mean_gap") val meanGap: Double? = null,
     @SerializedName("on_time_rate") val onTimeRate: Double? = null,

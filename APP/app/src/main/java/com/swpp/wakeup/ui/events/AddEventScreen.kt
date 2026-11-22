@@ -394,12 +394,14 @@ fun AddEventScreen(
         }
         if (editing) {
             // 반복 회차는 저장할 때 범위를 고른다(iter4 A2). 범위 수정을 모르는 서버면 그 회차만 바뀌고 요일은 못 고친다.
-            Text(
-                text = editNoteOf(state),
-                color = JitColor.TextSecondary,
-                fontSize = 12.sp,
-                modifier = Modifier.testTag("edit_note"),
-            )
+            editNoteOf(state)?.let { note ->
+                Text(
+                    text = note,
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.testTag("edit_note"),
+                )
+            }
         } else if (!inSheet) {
             Text(
                 text = "* 필수 3가지만 정하면 바로 추가할 수 있어요",
@@ -803,10 +805,13 @@ internal fun ScreenHeader(
 }
 
 // Partly AI-generated (Claude)
-/** 수정 화면 맨 위 안내. 반복 회차는 저장할 때 범위를 고를 수 있는지에 따라 다르다(iter4 A2) */
-internal fun editNoteOf(state: HomeViewModel.AddState): String = when {
+/**
+ * 수정 화면 맨 위 안내. 반복 회차는 저장할 때 범위를 고를 수 있는지에 따라 다르다(iter4 A2).
+ * 범위를 고를 수 있으면 안내를 띄우지 않는다(null) — 저장할 때 범위 시트가 묻는다(사용자 요청 11-22).
+ */
+internal fun editNoteOf(state: HomeViewModel.AddState): String? = when {
     !state.recurring -> "바꾼 항목만 저장해요. 장소나 출발지를 바꾸면 경로를 다시 골라요"
-    state.scopeSupported -> "저장할 때 이 일정만 / 이후 일정 모두 중에 고를 수 있어요. 요일을 바꾸면 이후 일정에 적용돼요"
+    state.scopeSupported -> null
     else -> "반복 일정의 이 회차만 바뀌어요. 요일은 고칠 수 없어요"
 }
 

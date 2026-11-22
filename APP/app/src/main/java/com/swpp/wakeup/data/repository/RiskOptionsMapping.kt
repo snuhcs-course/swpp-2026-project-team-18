@@ -29,6 +29,10 @@ internal fun RiskOptionsDto.toView(zone: ZoneId): RiskOptionsView {
         autoAdjusted = autoAdjusted,
         autoReason = autoReason,
         unavailableReason = unavailableReason,
+        // 단위가 "시작 몇 분 전" 인 표만 쓴다. 모르는 단위면 읽지 않는다(구버전 · 바뀐 계약).
+        probabilityByMinutesBefore = probabilityTable
+            ?.takeIf { it.unit == null || it.unit == "minutes_before_start" }
+            ?.whole?.takeIf { it.isNotEmpty() },
         distribution = distribution?.let { model ->
             DurationDistributionView(
                 bins = model.bins.map { DurationDistributionView.Bin(it.min, it.max, it.mass) },

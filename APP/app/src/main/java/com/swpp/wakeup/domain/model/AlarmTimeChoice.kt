@@ -126,8 +126,9 @@ object AlarmTimeChoice {
      * - 시작 시각이 됐거나 지나서 일어나면 0 이다. 계산이 아니라 정시 도착이 불가능하다는 사실이다(저장도 막는다).
      * - 지금 알람 시각([current])이면 서버가 그 알람에 준 확률([currentProbability], 홈 카드 · 알람 화면과 같은 값).
      * - 서버의 세 칸 중 하나와 같은 시각이면 그 칸의 확률([cellProbability]).
-     * - 그 밖의 시각은 서버가 확률을 주지 않으므로 null — 화면은 확률 줄을 비운다. 예전에는 분포에서 앱이 직접
-     *   계산해 9:21 알람이 시트에서만 90% 로 보였다(홈 97% · 알람 화면 100%). 임의 시각의 확률은 서버 요청(BE-H3c)이다.
+     * - 그 밖의 시각은 서버의 1분 단위 표([table], `probability_table.whole`, BE-H3c)에서 그 칸을 그대로 읽는다.
+     *   `i` = 일정 시작까지 남은 분, 표보다 길면 마지막 칸. 서버가 같은 식으로 만든 값이라 저장 뒤 확률과 같다.
+     * - 표가 없으면(구버전 서버 0.21.0) null — 화면은 확률 줄을 비운다. 앱이 분포로 계산하지 않는다.
      */
     fun shownProbability(
         picked: Int,
@@ -135,9 +136,13 @@ object AlarmTimeChoice {
         currentProbability: Int?,
         cellProbability: Int?,
         startMinutes: Int?,
+        table: List<Int>? = null,
     ): Int? {
-        if (startMinutes != null && availableMinutes(picked, startMinutes) <= 0) return 0
+        val before = startMinutes?.let { availableMinutes(picked, it) }
+        if (before != null && before <= 0) return 0
         if (current != null && picked == current && currentProbability != null) return currentProbability
-        return cellProbability
+        if (cellProbability != null) return cellProbability
+        if (before == null || table.isNullOrEmpty()) return null
+        return table[minOf(before, table.lastIndex)]
     }
 }

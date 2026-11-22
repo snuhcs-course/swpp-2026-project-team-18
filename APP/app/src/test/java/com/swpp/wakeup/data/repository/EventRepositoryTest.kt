@@ -744,6 +744,7 @@ class EventRepositoryTest {
             override suspend fun routeCandidates(
                 destLat: Double, destLng: Double, originLat: Double?, originLng: Double?, originLabel: String?,
                 destLabel: String?,
+                arriveBy: String?,
             ) = ok(fromJson<RouteCandidateResponse>("""{"origin":null,"results":[]}"""))
         }
 

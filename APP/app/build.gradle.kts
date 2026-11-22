@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.compose.compiler)
     // app/google-services.json 을 읽어 리소스를 생성한다. 파일이 없으면 빌드 실패.
     alias(libs.plugins.google.services)
+    // 크래시 보고(A-6). 수집 여부는 manifestPlaceholders["crashlyticsEnabled"] 가 빌드마다 정한다.
+    alias(libs.plugins.firebase.crashlytics)
     // Room 의 DAO·DB 구현을 생성한다.
     alias(libs.plugins.ksp)
     // 커버리지 리포트(jacocoDebugUnitTestReport, jacocoDebugAndroidTestReport). 아래 정의 참고.
@@ -151,6 +153,9 @@ android {
         buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$kakaoNativeAppKey\"")
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
         manifestPlaceholders["kakaoScheme"] = "kakao$kakaoNativeAppKey"
+        // 크래시 보고(A-6). release · debug 는 모은다. e2e(QA 자동 실행)는 아래에서 끈다. 기기 테스트 실행 중에는
+        // 앱이 스스로 끈다(diagnostics/CrashReport.kt).
+        manifestPlaceholders["crashlyticsEnabled"] = "true"
     }
 
     buildFeatures {
@@ -206,6 +211,8 @@ android {
             buildConfigField("String", "BASE_URL", "\"$qaUrl\"")
             buildConfigField("String", "EMULATOR_BASE_URL", "\"$qaUrl\"")
             manifestPlaceholders["usesCleartextTraffic"] = (!qaUrl.startsWith("https://")).toString()
+            // QA 자동 실행의 크래시는 보고하지 않는다(FCM 처럼 끈다, A-6).
+            manifestPlaceholders["crashlyticsEnabled"] = "false"
         }
     }
 
@@ -277,6 +284,7 @@ dependencies {
     // 지금은 FCM(P4) 만 쓴다. analytics 는 명세에 없어 넣지 않는다.
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    implementation(libs.firebase.crashlytics)
 
     // 위치. 출발·도착 판별에 쓴다(sensing 패키지).
     implementation(libs.play.services.location)

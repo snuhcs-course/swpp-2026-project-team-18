@@ -151,7 +151,11 @@ class ReportTabLogicTest {
         val thin = compare("insufficient", more = 2)
         assertEquals("기록이 아직 적어요.", ReportTabLogic.verdictTitle(thin))
         assertEquals(listOf("2번 더 다니면 보여 드릴게요"), ReportTabLogic.verdictBody(thin, 0, inProgress = true))
-        assertFalse("표본이 부족하면 막대를 그리지 않는다", ReportTabLogic.showBars(thin))
+        assertEquals("남은 수를 모르면(구버전 서버) 그 줄을 쓰지 않는다", emptyList<String>(),
+            ReportTabLogic.verdictBody(ProbabilityCompare(88, 80, "insufficient", null), 0, inProgress = true))
+        // 막대 = 서버가 두 값을 줬고 + 판정 보류가 아닐 때만(11-20)
+        assertFalse("판정 보류면 두 값이 있어도 그리지 않는다", ReportTabLogic.showBars(thin))
+        assertFalse("실제 값이 없으면 그리지 않는다", ReportTabLogic.showBars(ProbabilityCompare(88, null, "calibrated", 1)))
 
         assertEquals("거의 맞았어요.", ReportTabLogic.verdictTitle(compare("calibrated")))
         assertEquals("조금 낙관적이었어요.", ReportTabLogic.verdictTitle(compare("overconfident")))

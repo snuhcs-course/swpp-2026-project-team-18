@@ -1,5 +1,6 @@
 package com.swpp.wakeup
 
+import com.swpp.wakeup.diagnostics.CrashReport
 import android.app.Application
 import android.util.Log
 import com.kakao.sdk.common.KakaoSdk
@@ -28,6 +29,10 @@ class JitApplication : Application() {
         super.onCreate()
         tokenStore = TokenStore(this)
         ApiClient.init(tokenStore)
+
+        // 크래시 보고(A-6). 기기 테스트 실행 중에는 끄고, 앱 버전만 붙인다. 개인정보는 CrashReport 가 거른다.
+        CrashReport.disableIfInstrumented()
+        CrashReport.setKey(CrashReport.KEY_APP_VERSION, BuildConfig.VERSION_NAME)
 
         // 카카오 로그인 SDK. 앱 키가 없는 빌드는 초기화하지 않고, 그 버튼이 "쓸 수 없음" 을
         // 보인다(ui/auth/SocialSignIn). (Partly AI-generated (Claude))

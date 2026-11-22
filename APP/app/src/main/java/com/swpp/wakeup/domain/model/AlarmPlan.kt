@@ -114,6 +114,11 @@ data class AlarmPlanView(
     val alarmAtMillis: Long? = null,
     /** 사용자가 직접 정한 시각으로 울린다(서버 `alarm_source == "user"`, BE-H3b). ④ 알약 · 시트 [추천 시각으로 되돌리기] */
     val userAlarm: Boolean = false,
+    /**
+     * 직접 정한 시각일 때 준비 시간이 모자라거나 남는 말("준비 시간이 15분 모자라요"). 서버 `prep_margin_minutes` 그대로
+     * (BE-H3f). 추천 시각 · 0분 · 구버전 서버면 null
+     */
+    val prepMarginLabel: String? = null,
     // --- ④ 다시 그림(iter4 H2-3 · H2-6, Figma `545:920`) — Partly AI-generated (Claude)
     /** 일정 제목만(시각 없이). [eventTitle] 은 "09:00 제목" 이다 */
     val title: String = "",
