@@ -199,14 +199,10 @@ class TripTrackingService : Service() {
         }
 
         val raw = intent?.getStringExtra(EXTRA_SCHEDULE)
-        val parsed = raw?.let {
-            runCatching {
-                // 이 JSON 은 같은 버전이 만들었을 것이나, 시스템이 들고 있던
-                // 낡은 Intent 가 재전달될 수 있다. 되살리는 모든 경로를 같은
-                // 방식으로 다룬다 — 이유는 [withDiskDefaults] 에 있다.
-                gson.fromJson(it, AlarmSchedule::class.java)?.withDiskDefaults()
-            }.getOrNull()
-        }
+        // 이 JSON 은 같은 버전이 만들었을 것이나, 시스템이 들고 있던
+        // 낡은 Intent 가 재전달될 수 있다. 되살리는 모든 경로를 같은
+        // 방식으로 다룬다 — 이유는 [withDiskDefaults] 에 있다.
+        val parsed = TripTrackingLogic.parseSchedule(gson, raw)
 
         if (parsed == null) {
             Log.w(TAG, "추적할 일정 정보가 없다. 멈춘다")
@@ -223,7 +219,7 @@ class TripTrackingService : Service() {
         }
 
         // 앱을 다시 열어 끊긴 추적을 잇는 것(ACTION_RESUME)도 시스템 재전달과 같이 다룬다 — 이동 단계와 도착을 이어 간다.
-        val redelivered = flags and START_FLAG_REDELIVERY != 0 || intent?.action == ACTION_RESUME
+        val redelivered = TripTrackingLogic.isRedelivery(flags, START_FLAG_REDELIVERY, intent?.action)
 
         // 정상 ACTION_START 는 새 추적 세션의 경계다. 같은 event id가 다음 날
         // 다시 쓰이더라도 어제 좌표의 경로를 잠깐 보여 주지 않는다. 반대로
@@ -261,12 +257,8 @@ class TripTrackingService : Service() {
         // "안 감" 표시 때 추적을 멈출지가 이 값으로 정해진다.
         TripLiveState.beginTracking(parsed.eventId)
         geofence = TripGeofence(
-            home = parsed.homeLat?.let { lat ->
-                parsed.homeLng?.let { lng -> GeoPoint(lat, lng) }
-            },
-            destination = parsed.destLat?.let { lat ->
-                parsed.destLng?.let { lng -> GeoPoint(lat, lng) }
-            },
+            home = TripTrackingLogic.homeOf(parsed),
+            destination = TripTrackingLogic.destinationOf(parsed),
         ).also { fence ->
             resumed?.let { fence.resumeInTransit(it.sawOriginFix, it.departureMissed) }
         }
@@ -349,7 +341,7 @@ class TripTrackingService : Service() {
         val fence = geofence
         if (fence?.phase == TripGeofence.Phase.ARRIVED || manualArrivedAtMillis != null) return
 
-        val destination = current.destLat?.let { lat -> current.destLng?.let { lng -> GeoPoint(lat, lng) } }
+        val destination = TripTrackingLogic.destinationOf(current)
         val recorded = ManualArrival.record(
             context = this,
             eventId = eventId,
@@ -360,7 +352,7 @@ class TripTrackingService : Service() {
         if (!recorded) return
         manualArrivedAtMillis = now
         scope.launch { queue.flush() }
-        updateNotification(TITLE_ARRIVED, "${current.eventLine} · 도착을 기록했어요")
+        updateNotification(TITLE_ARRIVED, TripTrackingLogic.manualArrivedText(current))
         handler.postDelayed(manualGraceRunnable, MANUAL_GRACE_MILLIS)
     }
 
@@ -604,12 +596,14 @@ class TripTrackingService : Service() {
             return
         }
 
-        val fix = LocationFix(
+        // accuracy 를 보고하지 않는 fix 는 신뢰할 수 없다. 최악으로 본다.
+        val fix = TripTrackingLogic.fixOf(
             lat = location.latitude,
             lng = location.longitude,
-            // accuracy 를 보고하지 않는 fix 는 신뢰할 수 없다. 최악으로 본다.
-            accuracyM = if (location.hasAccuracy()) location.accuracy else Float.MAX_VALUE,
-            atMillis = if (location.time > 0) location.time else System.currentTimeMillis(),
+            hasAccuracy = location.hasAccuracy(),
+            accuracyM = location.accuracy,
+            timeMillis = location.time,
+            nowMillis = System.currentTimeMillis(),
         )
 
         // 버스·지하철에 타고 있는지(속도로). 탄 동안은 경로를 바꾸자고 하지 않는다(todo §2 ③).
@@ -715,9 +709,7 @@ class TripTrackingService : Service() {
         }
 
         // 집을 나섰으면 목적지 반경을 봐야 하므로 정확도를 올린다.
-        if (phaseBefore == TripGeofence.Phase.BEFORE_DEPARTURE &&
-            fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE
-        ) {
+        if (TripTrackingLogic.leftHome(phaseBefore, fence.phase)) {
             when {
                 // Partly AI-generated (Claude) — 흐린 fix 로 나간 것을 안 경우(TripGeofence 규칙 4).
                 !TripGeofence.isUsable(fix) -> Log.i(
@@ -732,9 +724,7 @@ class TripTrackingService : Service() {
         }
 
         // 출발했으니 출발 전 확인은 끝이다. 알린 제안 키는 이번 이동 동안 그대로 두어 같은 제안을 다시 알리지 않는다.
-        if (phaseBefore == TripGeofence.Phase.BEFORE_DEPARTURE &&
-            fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE
-        ) {
+        if (TripTrackingLogic.leftHome(phaseBefore, fence.phase)) {
             handler.removeCallbacks(preDepartureRunnable)
             TripLiveState.clearPreDeparture(current.eventId)
         }
@@ -851,7 +841,7 @@ class TripTrackingService : Service() {
         if (this.highAccuracy == highAccuracy && startedUpdates) return
         this.highAccuracy = highAccuracy
 
-        val interval = if (highAccuracy) TRANSIT_INTERVAL_MS else IDLE_INTERVAL_MS
+        val interval = TripTrackingLogic.updateIntervalMillis(highAccuracy)
         val request = LocationRequest.Builder(
             if (highAccuracy) Priority.PRIORITY_HIGH_ACCURACY
             else Priority.PRIORITY_BALANCED_POWER_ACCURACY,
@@ -946,8 +936,7 @@ class TripTrackingService : Service() {
         // 사용자가 알림에서 바로 끝낼 수 있다(todo §2 "도착 판정 버튼").
         val arriveIntent = schedule?.eventId
             ?.takeIf {
-                phase == AlarmNotifications.TripPhaseLabel.IN_TRANSIT && manualArrivedAtMillis == null &&
-                    TripLiveState.arrivalFor(it) == null
+                TripTrackingLogic.offersManualArrive(phase, manualArrivedAtMillis, TripLiveState.arrivalFor(it) != null)
             }
             ?.let(::arrivePendingIntent)
 
@@ -980,56 +969,26 @@ class TripTrackingService : Service() {
         // 출발 전이라는 판정이 낡았으면 단계를 말하지 않는다. 흐린 위치만 오는 동안
         // 판정기는 마지막으로 확인한 "집" 에 머무는데, 그대로 "준비 중" 이라고 하면 이미
         // 나간 사람에게 틀린 말을 계속한다. 근거는 [TripGeofence.atHomeConfirmed].
-        val unknown = fence.phase == TripGeofence.Phase.BEFORE_DEPARTURE &&
-            !fence.atHomeConfirmed(nowMillis)
-        val phase = if (unknown) null else phaseLabel(fence.phase)
+        //
         // 남은 거리도 판정에 쓴 위치 기준이다. 그 위치가 낡았으면(흐린 위치로 나간 직후)
         // 집에서 잰 거리를 지금 거리처럼 보이게 된다.
-        val remaining = fence.distanceToDestinationM?.takeIf {
-            val last = fence.lastAcceptedFix
-            last != null && nowMillis - last.atMillis <= TripGeofence.EVIDENCE_MAX_AGE_MS
-        }
-
+        //
         // 단계마다 사용자가 알고 싶은 것이 다르다. 준비 중에는 "아직 안 나갔다"
         // 는 사실이, 이동 중에는 남은 거리가 중요하다. 준비 중에 목적지까지의
         // 거리를 보여 주면 집에서 그 숫자를 보며 초조해질 뿐 할 수 있는 것이 없다.
-        val text = buildString {
-            append(current.eventLine)
-            append(" · ")
-            when {
-                unknown -> append("위치 확인 중")
-
-                fence.phase == TripGeofence.Phase.BEFORE_DEPARTURE -> append("아직 출발 전")
-
-                fence.phase == TripGeofence.Phase.IN_TRANSIT -> {
-                    if (remaining != null) {
-                        append("목적지까지 ")
-                        append(formatDistance(remaining))
-                    } else {
-                        append("목적지로 가는 중")
-                    }
-                }
-
-                else -> append("도착을 기록했어요")
-            }
-        }
-        updateNotification(phase?.label ?: TITLE_TRACKING, text, phase)
+        // 문구는 [TripTrackingLogic.progress] 가 정한다.
+        val progress = TripTrackingLogic.progress(
+            eventLine = current.eventLine,
+            phase = fence.phase,
+            atHomeConfirmed = fence.atHomeConfirmed(nowMillis),
+            remainingM = TripTrackingLogic.freshRemainingMeters(
+                fence.distanceToDestinationM,
+                fence.lastAcceptedFix?.atMillis,
+                nowMillis,
+            ),
+        )
+        updateNotification(progress.title, progress.text, progress.phase)
     }
-
-    /**
-     * 판정기 단계를 알림 문구로 옮긴다.
-     *
-     * 출발 판별 기준점이 없으면 판정기가 처음부터 [TripGeofence.Phase.IN_TRANSIT]
-     * 로 시작한다. 그건 "출발을 알 수 없어서 건너뛴 것" 이지만 사용자에게는
-     * 그대로 "이동 중" 으로 보여 주는 것이 맞다 — 준비 중이라고 하면 출발을
-     * 기다리는 것처럼 보이는데 실제로는 아무것도 기다리지 않는다.
-     */
-    private fun phaseLabel(phase: TripGeofence.Phase): AlarmNotifications.TripPhaseLabel =
-        when (phase) {
-            TripGeofence.Phase.BEFORE_DEPARTURE -> AlarmNotifications.TripPhaseLabel.PREPARING
-            TripGeofence.Phase.IN_TRANSIT -> AlarmNotifications.TripPhaseLabel.IN_TRANSIT
-            TripGeofence.Phase.ARRIVED -> AlarmNotifications.TripPhaseLabel.ARRIVED
-        }
 
     /**
      * 도착 결과를 알린다. 약속 시각과 비교해 얼마나 이르거나 늦었는지 말한다.
@@ -1060,7 +1019,7 @@ class TripTrackingService : Service() {
             return
         }
 
-        val line = listOfNotNull(current.eventLine, current.placeName).joinToString(" · ")
+        val line = TripTrackingLogic.arrivalLine(current)
 
         runCatching {
             NotificationManagerCompat.from(this).notify(
@@ -1078,23 +1037,7 @@ class TripTrackingService : Service() {
         Log.i(TAG, "도착 결과: ${verdict.headline} (${verdict.detail()})")
     }
 
-    private fun initialNotificationText(current: AlarmSchedule): String = buildString {
-        append(current.eventLine)
-        append(" · ")
-        append(
-            when {
-                current.canDetectDeparture && current.canDetectArrival ->
-                    "집을 나서는 시각과 도착 시각을 기록해요"
-
-                current.canDetectArrival -> "도착 시각을 기록해요"
-                else -> "집을 나서는 시각을 기록해요"
-            }
-        )
-    }
-
-    private fun formatDistance(meters: Double): String =
-        if (meters >= 1000) "%.1fkm".format(meters / 1000)
-        else "${meters.roundToInt()}m"
+    private fun initialNotificationText(current: AlarmSchedule): String = TripTrackingLogic.initialText(current)
 
     private fun stopPendingIntent(): PendingIntent = PendingIntent.getService(
         this,
@@ -1117,10 +1060,10 @@ class TripTrackingService : Service() {
         private const val TAG = "TripTrackingService"
 
         /** 단계를 아직 모르거나 단정할 수 없을 때의 알림 제목 */
-        private const val TITLE_TRACKING = "이동 기록 중"
+        private const val TITLE_TRACKING = TripTrackingLogic.TITLE_TRACKING
 
         /** 수동 도착 뒤의 알림 제목 */
-        private const val TITLE_ARRIVED = "도착을 기록했어요"
+        private const val TITLE_ARRIVED = TripTrackingLogic.TITLE_ARRIVED
 
         /** 수동 도착 뒤 GPS 도착을 더 기다리는 시간 */
         private const val MANUAL_GRACE_MILLIS = 3 * 60_000L
@@ -1149,12 +1092,6 @@ class TripTrackingService : Service() {
         const val ACTION_RESUME = "com.swpp.wakeup.action.TRIP_RESUME"
         const val ACTION_STOP = "com.swpp.wakeup.action.TRIP_STOP"
         private const val EXTRA_SCHEDULE = "schedule"
-
-        /** 출발을 기다리는 동안. 150m 를 구분하면 되므로 느슨하게 본다. */
-        private const val IDLE_INTERVAL_MS = 30_000L
-
-        /** 이동 중. 100m 반경 진입을 빠르게 확인한다. */
-        private const val TRANSIT_INTERVAL_MS = 10_000L
 
         /**
          * 추적을 시작한다. 알람 해제 시점에 호출된다.
