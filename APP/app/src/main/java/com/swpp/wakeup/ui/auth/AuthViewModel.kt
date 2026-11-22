@@ -1,6 +1,8 @@
 package com.swpp.wakeup.ui.auth
 
 import android.app.Application
+import android.content.Context
+import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.swpp.wakeup.data.local.LastEmailStore
@@ -31,37 +33,43 @@ import kotlinx.coroutines.launch
  * [AndroidViewModel] 을 쓰는 이유는 [TokenStore] 가 Context 를 필요로 하기
  * 때문이다. Hilt 를 넣으면 생성자 주입으로 바꾼다(FE-P0-03 미완 항목).
  */
-class AuthViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val tokenStore = TokenStore(application)
-
+class AuthViewModel internal constructor(
+    application: Application,
+    private val repository: AuthRepository,
     /** 마지막으로 이메일 로그인한 주소(기기 단위, 로그아웃해도 남는다). 다음 로그인 칸을 채운다 */
-    private val lastEmailStore = LastEmailStore(application)
+    private val lastEmailStore: LastEmailStore,
+    /** 로그인 잠금이 풀리는 시각을 남기는 곳(BE-A3). 화면을 나갔다 들어와도 남은 시간이 맞는다 */
+    private val lockPrefs: SharedPreferences,
+    private val warmup: Warmup = Warmup.Server,
+    /** 잠금 카운트다운의 시계. 테스트가 바꿔 끼운다 */
+    private val clock: () -> Long = System::currentTimeMillis,
+) : AndroidViewModel(application) {
 
     /**
-     * 로그인 성공 직전에 앞 사용자의 캐시를 지운다.
-     *
-     * 이 호출은 로그인 코루틴 안에서 **기다려서** 돈다. 그래야 새 사용자의 첫
-     * 조회가 캐시를 쓰기 전에 삭제가 끝난다. 디스크 삭제는 수 밀리초라 이미
-     * 네트워크를 기다리는 사용자에게 보이지 않는다.
+     * 앱이 쓰는 생성자(`viewModel()` 의 기본 팩토리가 찾는다). 저장소와 서버 깨우기를 여기서 만든다.
+     * 위 생성자는 JVM 테스트(`AuthViewModelTest`)가 가짜를 넣는 자리다. (Partly AI-generated (Claude))
      */
-    private val repository = AuthRepository(
-        tokenStore = tokenStore,
-        onBeforeAuthenticated = {
-            // 소유자를 모르는 상태이므로 전부 지운다. 새 계정의 캐시는 아직 없다.
-            OfflineCache(application, ownerEmail = null).wipe()
-            // 앞 사용자의 알람 사본·관측 큐·아침 기록도 같이 지운다. 로그아웃이
-            // 이미 지웠겠지만, 앱이 강제 종료됐으면 그 경로가 돌지 않았다.
-            //
-            // 여기서는 토큰이 아직 저장되기 전이라 소유자 판정이 "모름" 이다.
-            // 그래서 소유자를 가리지 않고 전부 지운다 — 어느 계정의 잔재가
-            // 남아 있는지 앱이 확신할 수 없다.
-            LocalStores.wipeAll(application)
-            // 앞 세션이 남긴 만료 표시를 내린다. 남아 있으면 로그인에 성공해도
-            // MainActivity 가 곧바로 로그인 화면으로 되돌린다.
-            SessionState.clearExpired()
-        },
+    constructor(application: Application) : this(
+        application = application,
+        repository = authRepository(application),
+        lastEmailStore = LastEmailStore(application),
+        lockPrefs = application.getSharedPreferences(LOCK_PREFS, Context.MODE_PRIVATE),
     )
+
+    // Partly AI-generated (Claude)
+    /** 쓰기 요청 앞의 서버 깨우기. 실제는 [ServerWarmup] 이고, 테스트는 네트워크 없이 바로 돌아오는 가짜를 쓴다 */
+    internal interface Warmup {
+        suspend fun ensureAwake()
+        fun invalidate()
+
+        object Server : Warmup {
+            override suspend fun ensureAwake() {
+                ServerWarmup.ensureAwake()
+            }
+
+            override fun invalidate() = ServerWarmup.invalidate()
+        }
+    }
 
     /**
      * 어떤 화면을 보여줄지. 네비게이션 라이브러리 없이 몇 화면만 오간다. [SOCIAL_TERMS] 는 소셜로
@@ -322,7 +330,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 delay(WAKE_HINT_DELAY_MILLIS)
                 _state.update { it.copy(waking = true) }
             }
-            ServerWarmup.ensureAwake()
+            warmup.ensureAwake()
             hint.cancel()
             _state.update { it.copy(waking = false) }
 
@@ -339,7 +347,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 is AuthRepository.ResetRequestResult.Failure -> {
-                    ServerWarmup.invalidate()
+                    warmup.invalidate()
                     _state.update { it.copy(loading = false, error = result.message) }
                 }
             }
@@ -410,7 +418,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 delay(WAKE_HINT_DELAY_MILLIS)
                 _state.update { it.copy(waking = true) }
             }
-            ServerWarmup.ensureAwake()
+            warmup.ensureAwake()
             hint.cancel()
             _state.update { it.copy(waking = false) }
 
@@ -452,7 +460,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 is AuthRepository.SocialResult.Failure -> {
-                    ServerWarmup.invalidate()
+                    warmup.invalidate()
                     _state.update { it.copy(socialBusy = null, error = result.message) }
                 }
             }
@@ -473,22 +481,21 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
      * 시계를 돌려 카운트다운을 그린다. 시각이 지나면 스스로 풀린다.
      */
     private var lockTicker: kotlinx.coroutines.Job? = null
-    private val lockPrefs = application.getSharedPreferences("jit_login_lock", android.content.Context.MODE_PRIVATE)
 
     private fun applyLock(email: String, untilMillis: Long) {
         lockPrefs.edit().putString("email", email.trim()).putLong("until", untilMillis).apply()
-        _state.update { it.copy(lockedEmail = email.trim(), lockedUntilMillis = untilMillis, nowMillis = System.currentTimeMillis()) }
+        _state.update { it.copy(lockedEmail = email.trim(), lockedUntilMillis = untilMillis, nowMillis = clock()) }
         startLockTicker()
     }
 
     private fun restoreLock() {
         val until = lockPrefs.getLong("until", 0L)
         val email = lockPrefs.getString("email", null)
-        if (email == null || until <= System.currentTimeMillis()) {
+        if (email == null || until <= clock()) {
             lockPrefs.edit().clear().apply()
             return
         }
-        _state.update { it.copy(lockedEmail = email, lockedUntilMillis = until, nowMillis = System.currentTimeMillis()) }
+        _state.update { it.copy(lockedEmail = email, lockedUntilMillis = until, nowMillis = clock()) }
         startLockTicker()
     }
 
@@ -502,7 +509,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         lockTicker?.cancel()
         lockTicker = viewModelScope.launch {
             while (true) {
-                val now = System.currentTimeMillis()
+                val now = clock()
                 val until = _state.value.lockedUntilMillis ?: break
                 if (now >= until) {
                     clearLock()
@@ -548,6 +555,34 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         /** 재설정 확인 코드 자릿수 */
         const val RESET_CODE_LENGTH = 6
+
+        /** 로그인 잠금 파일 */
+        const val LOCK_PREFS = "jit_login_lock"
+
+        /**
+         * 로그인 성공 직전에 앞 사용자의 캐시를 지운다.
+         *
+         * 이 호출은 로그인 코루틴 안에서 **기다려서** 돈다. 그래야 새 사용자의 첫
+         * 조회가 캐시를 쓰기 전에 삭제가 끝난다. 디스크 삭제는 수 밀리초라 이미
+         * 네트워크를 기다리는 사용자에게 보이지 않는다.
+         */
+        fun authRepository(application: Application) = AuthRepository(
+            tokenStore = TokenStore(application),
+            onBeforeAuthenticated = {
+                // 소유자를 모르는 상태이므로 전부 지운다. 새 계정의 캐시는 아직 없다.
+                OfflineCache(application, ownerEmail = null).wipe()
+                // 앞 사용자의 알람 사본·관측 큐·아침 기록도 같이 지운다. 로그아웃이
+                // 이미 지웠겠지만, 앱이 강제 종료됐으면 그 경로가 돌지 않았다.
+                //
+                // 여기서는 토큰이 아직 저장되기 전이라 소유자 판정이 "모름" 이다.
+                // 그래서 소유자를 가리지 않고 전부 지운다 — 어느 계정의 잔재가
+                // 남아 있는지 앱이 확신할 수 없다.
+                LocalStores.wipeAll(application)
+                // 앞 세션이 남긴 만료 표시를 내린다. 남아 있으면 로그인에 성공해도
+                // MainActivity 가 곧바로 로그인 화면으로 되돌린다.
+                SessionState.clearExpired()
+            },
+        )
     }
 
     private fun submit(block: suspend () -> AuthRepository.AuthResult) {
@@ -561,7 +596,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 delay(WAKE_HINT_DELAY_MILLIS)
                 _state.update { it.copy(waking = true) }
             }
-            ServerWarmup.ensureAwake()
+            warmup.ensureAwake()
             hint.cancel()
             _state.update { it.copy(waking = false) }
 
@@ -584,7 +619,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 is AuthRepository.AuthResult.Failure -> {
                     // 타임아웃으로 실패했으면 "깨어 있다" 는 기록을 지운다.
                     // 그러지 않으면 다음 시도에서 깨우기를 건너뛴다.
-                    ServerWarmup.invalidate()
+                    warmup.invalidate()
                     // 로그인 잠금 · 남은 횟수(BE-A3). 잠겼으면 서버 문구 대신 카운트다운 카드가 보인다.
                     result.lockedUntilMillis?.let { applyLock(_state.value.email, it) }
                     val attemptsHint = com.swpp.wakeup.domain.model.LoginLock.attemptsLine(result.remainingAttempts)
