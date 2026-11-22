@@ -14,6 +14,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.swpp.wakeup.data.local.TokenStore
 import com.swpp.wakeup.data.remote.ApiClient
+import com.swpp.wakeup.data.remote.ReportsApi
 import com.swpp.wakeup.data.repository.toView
 import com.swpp.wakeup.domain.model.WeeklyReportView
 import kotlinx.coroutines.CancellationException
@@ -54,11 +55,9 @@ class WeeklyReportReminderWorker(
         // 로그아웃 상태면 이번 주는 건너뛴다. 예약은 그대로 둔다.
         if (!TokenStore(context).isLoggedIn) return
 
-        val message = when (val fetched = fetch(now.toLocalDate())) {
-            Fetched.Unauthorized -> null
-            Fetched.Failed -> WeeklyReportReminderLogic.message(null)
-            is Fetched.Ok -> WeeklyReportReminderLogic.message(fetched.view)
-        } ?: return
+        val message = reminderMessageFor(
+            fetchWeeklyReport(now.toLocalDate(), ApiClient.isReady) { ApiClient.reports },
+        ) ?: return
 
         WeeklyReportReminder.ensureChannel(context)
         // 권한 확인을 여기에 펼쳐 쓴다(AlarmReceiver 와 같은 이유 — lint MissingPermission 이 도우미 함수를 넘어 보지 못한다).
@@ -78,35 +77,6 @@ class WeeklyReportReminderWorker(
         }.onFailure { Log.e(TAG, "주간 리포트 알림 실패", it) }
     }
 
-    private sealed interface Fetched {
-        data class Ok(val view: WeeklyReportView) : Fetched
-        /** 로그인이 풀렸다. 알림을 보내지 않는다 */
-        data object Unauthorized : Fetched
-        data object Failed : Fetched
-    }
-
-    /** [today] 가 든 주의 리포트. 저장소를 쓰지 않는 이유는 401 을 실패와 갈라야 해서다 */
-    private suspend fun fetch(today: LocalDate): Fetched {
-        if (!ApiClient.isReady) return Fetched.Failed
-        return try {
-            val response = ApiClient.reports.weekly(today.toString())
-            val body = response.body()
-            when {
-                response.code() == 401 -> Fetched.Unauthorized
-                response.isSuccessful && body != null -> Fetched.Ok(body.toView())
-                else -> Fetched.Failed
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: IOException) {
-            Log.w(TAG, "주간 리포트를 받지 못했다", e)
-            Fetched.Failed
-        } catch (e: Exception) {
-            Log.e(TAG, "주간 리포트 처리 실패", e)
-            Fetched.Failed
-        }
-    }
-
     companion object {
         private const val TAG = "WeeklyReportReminder"
         private const val UNIQUE_NAME = "weekly_report_reminder"
@@ -121,3 +91,49 @@ class WeeklyReportReminderWorker(
         }
     }
 }
+
+// Partly AI-generated (Claude) — 워커에서 Android 없이 판단하는 부분. JVM 테스트(WeeklyReportReminderFetchTest)로 고정한다.
+
+/** 주간 리포트를 받아 온 결과. 401 을 실패와 갈라야 해서 저장소를 쓰지 않는다 */
+internal sealed interface WeeklyFetch {
+    data class Ok(val view: WeeklyReportView) : WeeklyFetch
+
+    /** 로그인이 풀렸다. 알림을 보내지 않는다 */
+    data object Unauthorized : WeeklyFetch
+    data object Failed : WeeklyFetch
+}
+
+/** [today] 가 든 주의 리포트. 준비 전이거나 네트워크가 없으면 실패다 — 실패해도 "이번 주 결과를 확인해 보세요" 는 보낸다 */
+internal suspend fun fetchWeeklyReport(
+    today: LocalDate,
+    isReady: Boolean,
+    api: () -> ReportsApi,
+): WeeklyFetch {
+    if (!isReady) return WeeklyFetch.Failed
+    return try {
+        val response = api().weekly(today.toString())
+        val body = response.body()
+        when {
+            response.code() == 401 -> WeeklyFetch.Unauthorized
+            response.isSuccessful && body != null -> WeeklyFetch.Ok(body.toView())
+            else -> WeeklyFetch.Failed
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: IOException) {
+        Log.w(WEEKLY_FETCH_TAG, "주간 리포트를 받지 못했다", e)
+        WeeklyFetch.Failed
+    } catch (e: Exception) {
+        Log.e(WEEKLY_FETCH_TAG, "주간 리포트 처리 실패", e)
+        WeeklyFetch.Failed
+    }
+}
+
+/** 받아 온 결과 → 알림 문구. 로그인이 풀렸으면 null(보내지 않는다) */
+internal fun reminderMessageFor(fetched: WeeklyFetch): WeeklyReportReminderLogic.Message? = when (fetched) {
+    WeeklyFetch.Unauthorized -> null
+    WeeklyFetch.Failed -> WeeklyReportReminderLogic.message(null)
+    is WeeklyFetch.Ok -> WeeklyReportReminderLogic.message(fetched.view)
+}
+
+private const val WEEKLY_FETCH_TAG = "WeeklyReportReminder"
