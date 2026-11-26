@@ -1,0 +1,4211 @@
+{
+ "version": 1,
+ "declared": "2026-11-16 (Testing, Iteration 4, section 5.3); set built 2026-11-26",
+ "module": "apps.reports.summary (build_facts, llm_allowed, check_text, render_template, SYSTEM_PROMPT)",
+ "server_version": "0.22.0 (PROMPT_VERSION 5, LLM_MIN_ARRIVALS 1)",
+ "rules": [
+  "Cases may be added after the first run but never removed or edited; every addition is listed on the Testing page.",
+  "All figures are constructed by the team. No real user data.",
+  "Each case's report is the input of build_facts and llm_allowed, evaluated at the case's 'now' (server time zone Asia/Seoul)."
+ ],
+ "notes": [
+  "buffer_shift: the summary facts (FACT_KEYS) carry no buffer field in 0.22.0, so a buffer change reaches the summary only through the week-over-week rate change and the slack. These cases model that.",
+  "not_allowed follows the 4.3 note of 2026-11-20: weeks with 0 arrivals, weeks in progress before Sunday 12:00, weeks older than LLM_MAX_WEEKS_BACK. thin (1–2 arrivals) has its own cases."
+ ],
+ "thresholds": {
+  "first_call_accept_rate": {
+   "min": 0.8,
+   "text": "LLM answers accepted by check_text on the first call, over allowed cases"
+  },
+  "shown_valid_rate": {
+   "min": 1.0,
+   "text": "Shown summaries (LLM if accepted, otherwise template) that pass check_text"
+  },
+  "invented_numbers": {
+   "max": 0,
+   "text": "Shown summaries containing a number not in the facts"
+  },
+  "not_allowed_template_rate": {
+   "min": 1.0,
+   "text": "Not-allowed weeks answered by the template with no LLM call"
+  },
+  "human_mean": {
+   "min": 4.0,
+   "text": "Mean 1–5 rating of 10 allowed cases ('accurate and useful') by two raters who did not build the set"
+  }
+ },
+ "cases": [
+  {
+   "id": "ord-01",
+   "category": "ordinary",
+   "note": "Design example: 7 events, 6 arrivals, 5 on time, one travel-over late on Tue; previous week 60%",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 7,
+    "arrived_count": 6,
+    "judged_count": 6,
+    "unobserved_count": 1,
+    "on_time_count": 5,
+    "late_count": 1,
+    "on_time_rate": 0.8333,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 9.0,
+    "tightest_slack_minutes": -10,
+    "previous_week": {
+     "week_start": "2026-11-02",
+     "arrived_count": 5,
+     "on_time_rate": 0.6,
+     "on_time_rate_change_pp": 23
+    },
+    "deviation": {
+     "prep_over": {
+      "count": 2,
+      "mean_minutes": 4.0,
+      "sd_minutes": 1.0
+     },
+     "depart_late": {
+      "count": 5,
+      "mean_minutes": 3.0,
+      "sd_minutes": 2.0
+     },
+     "travel_over": {
+      "count": 5,
+      "mean_minutes": -1.0,
+      "sd_minutes": 7.0
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 12,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 15,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -10,
+      "weekday": 1,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 6,
+       "depart_late": 7,
+       "travel_over": 13
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 3,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": true
+  },
+  {
+   "id": "ord-02",
+   "category": "ordinary",
+   "note": "5 arrivals, all on time, comfortable slack",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 5,
+    "arrived_count": 5,
+    "judged_count": 5,
+    "unobserved_count": 0,
+    "on_time_count": 5,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": true,
+    "median_slack_minutes": 12,
+    "tightest_slack_minutes": 9,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 14,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 11,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 18,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 12,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "ord-03",
+   "category": "ordinary",
+   "note": "4 arrivals, 1 late by leaving late (mean 6 min)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 3,
+    "late_count": 1,
+    "on_time_rate": 0.75,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 7.5,
+    "tightest_slack_minutes": -4,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 4,
+      "mean_minutes": 0.5,
+      "sd_minutes": 1.0
+     },
+     "depart_late": {
+      "count": 4,
+      "mean_minutes": 2.0,
+      "sd_minutes": 2.5
+     },
+     "travel_over": {
+      "count": 4,
+      "mean_minutes": -0.5,
+      "sd_minutes": 1.5
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -4,
+      "weekday": 1,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 6,
+       "travel_over": -1
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": true
+  },
+  {
+   "id": "ord-04",
+   "category": "ordinary",
+   "note": "6 arrivals, 1 prep-over late, prep longer than planned on average",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 6,
+    "arrived_count": 6,
+    "judged_count": 6,
+    "unobserved_count": 0,
+    "on_time_count": 5,
+    "late_count": 1,
+    "on_time_rate": 0.8333,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 5.5,
+    "tightest_slack_minutes": -7,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 6,
+      "mean_minutes": 3.5,
+      "sd_minutes": 3.0
+     },
+     "depart_late": {
+      "count": 6,
+      "mean_minutes": 0.5,
+      "sd_minutes": 1.0
+     },
+     "travel_over": {
+      "count": 6,
+      "mean_minutes": 0.0,
+      "sd_minutes": 2.0
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -7,
+      "weekday": 2,
+      "cause": "prep_over",
+      "deviation": {
+       "prep_over": 9,
+       "depart_late": 1,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 4,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 12,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 5,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "ord-05",
+   "category": "ordinary",
+   "note": "3 arrivals, 2 on time, 1 late from a tight plan (target 80%)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 3,
+    "arrived_count": 3,
+    "judged_count": 3,
+    "unobserved_count": 0,
+    "on_time_count": 2,
+    "late_count": 1,
+    "on_time_rate": 0.6667,
+    "target_rate": 0.8,
+    "target_met": false,
+    "median_slack_minutes": 5,
+    "tightest_slack_minutes": -2,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -2,
+      "weekday": 2,
+      "cause": "plan_too_tight",
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "ord-06",
+   "category": "ordinary",
+   "note": "7 arrivals, 6 on time, previous week equal rate",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 7,
+    "arrived_count": 7,
+    "judged_count": 7,
+    "unobserved_count": 0,
+    "on_time_count": 6,
+    "late_count": 1,
+    "on_time_rate": 0.8571,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 9,
+    "tightest_slack_minutes": -3,
+    "previous_week": {
+     "week_start": "2026-11-02",
+     "arrived_count": 7,
+     "on_time_rate": 0.8571,
+     "on_time_rate_change_pp": 0
+    },
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -3,
+      "weekday": 3,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 5
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 11,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 13,
+      "weekday": 5,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 6,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": true
+  },
+  {
+   "id": "ord-07",
+   "category": "ordinary",
+   "note": "5 arrivals, 1 late with unmeasured cause",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 5,
+    "arrived_count": 5,
+    "judged_count": 5,
+    "unobserved_count": 0,
+    "on_time_count": 4,
+    "late_count": 1,
+    "on_time_rate": 0.8,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 8,
+    "tightest_slack_minutes": -5,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -5,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "ord-08",
+   "category": "ordinary",
+   "note": "4 arrivals, all on time but one with 2 minutes to spare",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 4,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": true,
+    "median_slack_minutes": 10.5,
+    "tightest_slack_minutes": 2,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 12,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 2,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 15,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "ord-09",
+   "category": "ordinary",
+   "note": "6 events, 5 arrivals, travel took 4 min longer on average over 5 trips",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 6,
+    "arrived_count": 5,
+    "judged_count": 5,
+    "unobserved_count": 1,
+    "on_time_count": 4,
+    "late_count": 1,
+    "on_time_rate": 0.8,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 5,
+    "tightest_slack_minutes": -6,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 5,
+      "mean_minutes": 0.0,
+      "sd_minutes": 1.0
+     },
+     "depart_late": {
+      "count": 5,
+      "mean_minutes": 1.0,
+      "sd_minutes": 1.0
+     },
+     "travel_over": {
+      "count": 5,
+      "mean_minutes": 4.0,
+      "sd_minutes": 3.0
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 3,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -6,
+      "weekday": 2,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 9
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 5,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "ord-10",
+   "category": "ordinary",
+   "note": "3 arrivals on weekend and Monday, target 95% not met by 1 late",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 3,
+    "arrived_count": 3,
+    "judged_count": 3,
+    "unobserved_count": 0,
+    "on_time_count": 2,
+    "late_count": 1,
+    "on_time_rate": 0.6667,
+    "target_rate": 0.95,
+    "target_met": false,
+    "median_slack_minutes": 9,
+    "tightest_slack_minutes": -1,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 20,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -1,
+      "weekday": 5,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 2,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 6,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "late-01",
+   "category": "many_late",
+   "note": "6 arrivals, 4 late, mostly leaving late",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 6,
+    "arrived_count": 6,
+    "judged_count": 6,
+    "unobserved_count": 0,
+    "on_time_count": 2,
+    "late_count": 4,
+    "on_time_rate": 0.3333,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": -6.5,
+    "tightest_slack_minutes": -12,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 6,
+      "mean_minutes": 0.5,
+      "sd_minutes": 1.0
+     },
+     "depart_late": {
+      "count": 6,
+      "mean_minutes": 5.5,
+      "sd_minutes": 5.0
+     },
+     "travel_over": {
+      "count": 6,
+      "mean_minutes": 1.5,
+      "sd_minutes": 4.0
+     }
+    },
+    "outcomes": [
+     {
+      "result": "late",
+      "slack_minutes": -8,
+      "weekday": 0,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 1,
+       "depart_late": 9,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -12,
+      "weekday": 1,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 14,
+       "travel_over": 1
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 3,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -5,
+      "weekday": 3,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 6,
+       "travel_over": -1
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -9,
+      "weekday": 4,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 1,
+       "travel_over": 10
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 4,
+      "weekday": 5,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": true
+  },
+  {
+   "id": "late-02",
+   "category": "many_late",
+   "note": "5 arrivals, all 5 late from travel taking longer",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 5,
+    "arrived_count": 5,
+    "judged_count": 5,
+    "unobserved_count": 0,
+    "on_time_count": 0,
+    "late_count": 5,
+    "on_time_rate": 0.0,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": -9,
+    "tightest_slack_minutes": -15,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 5,
+      "mean_minutes": 0.2,
+      "sd_minutes": 0.5
+     },
+     "depart_late": {
+      "count": 5,
+      "mean_minutes": 0.2,
+      "sd_minutes": 0.5
+     },
+     "travel_over": {
+      "count": 5,
+      "mean_minutes": 10.4,
+      "sd_minutes": 4.3
+     }
+    },
+    "outcomes": [
+     {
+      "result": "late",
+      "slack_minutes": -6,
+      "weekday": 0,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 8
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -11,
+      "weekday": 1,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 1,
+       "travel_over": 12
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -4,
+      "weekday": 2,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 5
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -9,
+      "weekday": 3,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 1,
+       "depart_late": 0,
+       "travel_over": 10
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -15,
+      "weekday": 4,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 17
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": true
+  },
+  {
+   "id": "late-03",
+   "category": "many_late",
+   "note": "4 arrivals, 3 late from long prep",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 1,
+    "late_count": 3,
+    "on_time_rate": 0.25,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": -5.0,
+    "tightest_slack_minutes": -13,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 4,
+      "mean_minutes": 7.5,
+      "sd_minutes": 6.0
+     },
+     "depart_late": {
+      "count": 4,
+      "mean_minutes": 0.8,
+      "sd_minutes": 1.0
+     },
+     "travel_over": {
+      "count": 4,
+      "mean_minutes": 0.2,
+      "sd_minutes": 0.5
+     }
+    },
+    "outcomes": [
+     {
+      "result": "late",
+      "slack_minutes": -7,
+      "weekday": 0,
+      "cause": "prep_over",
+      "deviation": {
+       "prep_over": 10,
+       "depart_late": 2,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -13,
+      "weekday": 2,
+      "cause": "prep_over",
+      "deviation": {
+       "prep_over": 15,
+       "depart_late": 1,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -3,
+      "weekday": 4,
+      "cause": "prep_over",
+      "deviation": {
+       "prep_over": 5,
+       "depart_late": 0,
+       "travel_over": 1
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "late-04",
+   "category": "many_late",
+   "note": "7 arrivals, 4 late, mixed causes, previous week 71%",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 7,
+    "arrived_count": 7,
+    "judged_count": 7,
+    "unobserved_count": 0,
+    "on_time_count": 3,
+    "late_count": 4,
+    "on_time_rate": 0.4286,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": -3,
+    "tightest_slack_minutes": -8,
+    "previous_week": {
+     "week_start": "2026-11-02",
+     "arrived_count": 7,
+     "on_time_rate": 0.7143,
+     "on_time_rate_change_pp": -28
+    },
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "late",
+      "slack_minutes": -5,
+      "weekday": 0,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 6
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 4,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -8,
+      "weekday": 2,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 9,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -3,
+      "weekday": 4,
+      "cause": "prep_over",
+      "deviation": {
+       "prep_over": 4,
+       "depart_late": 0,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 2,
+      "weekday": 5,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -6,
+      "weekday": 6,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 7
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "late-05",
+   "category": "many_late",
+   "note": "3 arrivals, none on time, causes unmeasured",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 3,
+    "arrived_count": 3,
+    "judged_count": 3,
+    "unobserved_count": 0,
+    "on_time_count": 0,
+    "late_count": 3,
+    "on_time_rate": 0.0,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": -4,
+    "tightest_slack_minutes": -6,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "late",
+      "slack_minutes": -4,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -6,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -2,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "buf-01",
+   "category": "buffer_shift",
+   "note": "Buffer raised after a bad week: 40% → 100%, slack grew",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 5,
+    "arrived_count": 5,
+    "judged_count": 5,
+    "unobserved_count": 0,
+    "on_time_count": 5,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": true,
+    "median_slack_minutes": 11,
+    "tightest_slack_minutes": 9,
+    "previous_week": {
+     "week_start": "2026-11-02",
+     "arrived_count": 5,
+     "on_time_rate": 0.4,
+     "on_time_rate_change_pp": 60
+    },
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 11,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 13,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 12,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": true
+  },
+  {
+   "id": "buf-02",
+   "category": "buffer_shift",
+   "note": "Buffer lowered after good weeks: 100% → 67%, two narrow lates",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 6,
+    "arrived_count": 6,
+    "judged_count": 6,
+    "unobserved_count": 0,
+    "on_time_count": 4,
+    "late_count": 2,
+    "on_time_rate": 0.6667,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 1.5,
+    "tightest_slack_minutes": -2,
+    "previous_week": {
+     "week_start": "2026-11-02",
+     "arrived_count": 6,
+     "on_time_rate": 1.0,
+     "on_time_rate_change_pp": -33
+    },
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 2,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -1,
+      "weekday": 1,
+      "cause": "plan_too_tight",
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 3,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -2,
+      "weekday": 3,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 3
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 1,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 4,
+      "weekday": 5,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "buf-03",
+   "category": "buffer_shift",
+   "note": "Small improvement 75% → 80%",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 5,
+    "arrived_count": 5,
+    "judged_count": 5,
+    "unobserved_count": 0,
+    "on_time_count": 4,
+    "late_count": 1,
+    "on_time_rate": 0.8,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 6,
+    "tightest_slack_minutes": -3,
+    "previous_week": {
+     "week_start": "2026-11-02",
+     "arrived_count": 4,
+     "on_time_rate": 0.75,
+     "on_time_rate_change_pp": 5
+    },
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -3,
+      "weekday": 2,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 4,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "buf-04",
+   "category": "buffer_shift",
+   "note": "Drop 83% → 50% with travel variance (sd 9 over 4 trips)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 2,
+    "late_count": 2,
+    "on_time_rate": 0.5,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": -3.0,
+    "tightest_slack_minutes": -14,
+    "previous_week": {
+     "week_start": "2026-11-02",
+     "arrived_count": 6,
+     "on_time_rate": 0.8333,
+     "on_time_rate_change_pp": -33
+    },
+    "deviation": {
+     "prep_over": {
+      "count": 4,
+      "mean_minutes": 0.0,
+      "sd_minutes": 1.0
+     },
+     "depart_late": {
+      "count": 4,
+      "mean_minutes": 0.5,
+      "sd_minutes": 1.0
+     },
+     "travel_over": {
+      "count": 4,
+      "mean_minutes": 6.0,
+      "sd_minutes": 9.0
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -9,
+      "weekday": 1,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 12
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 3,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -14,
+      "weekday": 3,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 18
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": true
+  },
+  {
+   "id": "buf-05",
+   "category": "buffer_shift",
+   "note": "Previous week had too few arrivals to compare (2), so no change figure",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 3,
+    "late_count": 1,
+    "on_time_rate": 0.75,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 5.5,
+    "tightest_slack_minutes": -2,
+    "previous_week": {
+     "week_start": "2026-11-02",
+     "arrived_count": 2,
+     "on_time_rate": 1.0,
+     "on_time_rate_change_pp": null
+    },
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 4,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -2,
+      "weekday": 3,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 3,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "miss-01",
+   "category": "missing_records",
+   "note": "6 events, 3 arrivals, 3 unobserved with alarms on (half missing)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 6,
+    "arrived_count": 3,
+    "judged_count": 3,
+    "unobserved_count": 3,
+    "on_time_count": 3,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": true,
+    "median_slack_minutes": 8,
+    "tightest_slack_minutes": 6,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 5,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": true
+  },
+  {
+   "id": "miss-02",
+   "category": "missing_records",
+   "note": "5 events, 4 arrivals, 1 unobserved event had its alarm off",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 5,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 1,
+    "on_time_count": 3,
+    "late_count": 1,
+    "on_time_rate": 0.75,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 6.0,
+    "tightest_slack_minutes": -4,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": false
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -4,
+      "weekday": 4,
+      "cause": "prep_over",
+      "deviation": {
+       "prep_over": 6,
+       "depart_late": 0,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "miss-03",
+   "category": "missing_records",
+   "note": "Skipped events left a short week: 3 events, all arrived",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 3,
+    "arrived_count": 3,
+    "judged_count": 3,
+    "unobserved_count": 0,
+    "on_time_count": 3,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": true,
+    "median_slack_minutes": 10,
+    "tightest_slack_minutes": 8,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 12,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "miss-04",
+   "category": "missing_records",
+   "note": "7 events, 3 arrivals; alarm state unknown (null) for the unobserved ones",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 7,
+    "arrived_count": 3,
+    "judged_count": 3,
+    "unobserved_count": 4,
+    "on_time_count": 2,
+    "late_count": 1,
+    "on_time_rate": 0.6667,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 6,
+    "tightest_slack_minutes": -3,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": null
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": null
+     },
+     {
+      "result": "late",
+      "slack_minutes": -3,
+      "weekday": 4,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 4,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 5,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": null
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 6,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": null
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "miss-05",
+   "category": "missing_records",
+   "note": "4 events, 3 arrivals, deviation stats missing (no departure records)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 3,
+    "judged_count": 3,
+    "unobserved_count": 1,
+    "on_time_count": 2,
+    "late_count": 1,
+    "on_time_rate": 0.6667,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 5,
+    "tightest_slack_minutes": -6,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -6,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "edge-01",
+   "category": "edge",
+   "note": "All 7 on time (100%)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 7,
+    "arrived_count": 7,
+    "judged_count": 7,
+    "unobserved_count": 0,
+    "on_time_count": 7,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": true,
+    "median_slack_minutes": 12,
+    "tightest_slack_minutes": 9,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 15,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 12,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 14,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 11,
+      "weekday": 5,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 13,
+      "weekday": 6,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "edge-02",
+   "category": "edge",
+   "note": "None of 4 on time (0%)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 0,
+    "late_count": 4,
+    "on_time_rate": 0.0,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": -4.0,
+    "tightest_slack_minutes": -8,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "late",
+      "slack_minutes": -5,
+      "weekday": 0,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 6,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -3,
+      "weekday": 1,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 4
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -8,
+      "weekday": 2,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 9,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -2,
+      "weekday": 3,
+      "cause": "prep_over",
+      "deviation": {
+       "prep_over": 3,
+       "depart_late": 0,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "edge-03",
+   "category": "edge",
+   "note": "Rate 5/6 = 83.3% (rounds to 83), target 90% not met",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 6,
+    "arrived_count": 6,
+    "judged_count": 6,
+    "unobserved_count": 0,
+    "on_time_count": 5,
+    "late_count": 1,
+    "on_time_rate": 0.8333,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 6.5,
+    "tightest_slack_minutes": -4,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -4,
+      "weekday": 5,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 6
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": true
+  },
+  {
+   "id": "edge-04",
+   "category": "edge",
+   "note": "One day 35 minutes late on Thursday",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 5,
+    "arrived_count": 5,
+    "judged_count": 5,
+    "unobserved_count": 0,
+    "on_time_count": 4,
+    "late_count": 1,
+    "on_time_rate": 0.8,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 9,
+    "tightest_slack_minutes": -35,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -35,
+      "weekday": 3,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 2,
+       "travel_over": 38
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 11,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "edge-05",
+   "category": "edge",
+   "note": "No lates, tightest arrival exactly at the start (0 min)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 4,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": true,
+    "median_slack_minutes": 7.0,
+    "tightest_slack_minutes": 0,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 0,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "thin-01",
+   "category": "thin",
+   "note": "1 arrival, on time",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 1,
+    "arrived_count": 1,
+    "judged_count": 1,
+    "unobserved_count": 0,
+    "on_time_count": 1,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": null,
+    "median_slack_minutes": 9,
+    "tightest_slack_minutes": 9,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": true
+   },
+   "human_rating": true
+  },
+  {
+   "id": "thin-02",
+   "category": "thin",
+   "note": "1 arrival, late by leaving late",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 1,
+    "arrived_count": 1,
+    "judged_count": 1,
+    "unobserved_count": 0,
+    "on_time_count": 0,
+    "late_count": 1,
+    "on_time_rate": 0.0,
+    "target_rate": 0.9,
+    "target_met": null,
+    "median_slack_minutes": -6,
+    "tightest_slack_minutes": -6,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "late",
+      "slack_minutes": -6,
+      "weekday": 1,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 7,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": true
+   },
+   "human_rating": false
+  },
+  {
+   "id": "thin-03",
+   "category": "thin",
+   "note": "2 arrivals: 1 on time, 1 late from travel",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 2,
+    "arrived_count": 2,
+    "judged_count": 2,
+    "unobserved_count": 0,
+    "on_time_count": 1,
+    "late_count": 1,
+    "on_time_rate": 0.5,
+    "target_rate": 0.9,
+    "target_met": null,
+    "median_slack_minutes": 0.5,
+    "tightest_slack_minutes": -4,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 5,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -4,
+      "weekday": 3,
+      "cause": "travel_over",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 0,
+       "travel_over": 6
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": true
+   },
+   "human_rating": false
+  },
+  {
+   "id": "thin-04",
+   "category": "thin",
+   "note": "2 arrivals out of 5 events, 3 unobserved with alarms",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 5,
+    "arrived_count": 2,
+    "judged_count": 2,
+    "unobserved_count": 3,
+    "on_time_count": 2,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": null,
+    "median_slack_minutes": 5.5,
+    "tightest_slack_minutes": 4,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 4,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": true
+   },
+   "human_rating": false
+  },
+  {
+   "id": "thin-05",
+   "category": "thin",
+   "note": "2 arrivals, both on time, previous week strong (rates must not be compared)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 2,
+    "arrived_count": 2,
+    "judged_count": 2,
+    "unobserved_count": 0,
+    "on_time_count": 2,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": null,
+    "median_slack_minutes": 9.0,
+    "tightest_slack_minutes": 8,
+    "previous_week": {
+     "week_start": "2026-11-02",
+     "arrived_count": 5,
+     "on_time_rate": 1.0,
+     "on_time_rate_change_pp": null
+    },
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": true
+   },
+   "human_rating": false
+  },
+  {
+   "id": "no-01",
+   "category": "not_allowed",
+   "note": "0 arrivals: 4 events all unobserved with alarms on",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 0,
+    "judged_count": 0,
+    "unobserved_count": 4,
+    "on_time_count": 0,
+    "late_count": 0,
+    "on_time_rate": null,
+    "target_rate": null,
+    "target_met": null,
+    "median_slack_minutes": null,
+    "tightest_slack_minutes": null,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "unobserved",
+      "slack_minutes": null,
+      "weekday": 3,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": false,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "no-02",
+   "category": "not_allowed",
+   "note": "No events in the week",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-09",
+    "week_complete": true,
+    "event_count": 0,
+    "arrived_count": 0,
+    "judged_count": 0,
+    "unobserved_count": 0,
+    "on_time_count": 0,
+    "late_count": 0,
+    "on_time_rate": null,
+    "target_rate": null,
+    "target_met": null,
+    "median_slack_minutes": null,
+    "tightest_slack_minutes": null,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": []
+   },
+   "expect": {
+    "llm_allowed": false,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "no-03",
+   "category": "not_allowed",
+   "note": "Week in progress, Wednesday 10:00 (before Sunday 12:00)",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-23",
+    "week_complete": false,
+    "event_count": 2,
+    "arrived_count": 2,
+    "judged_count": 2,
+    "unobserved_count": 0,
+    "on_time_count": 2,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": null,
+    "median_slack_minutes": 9.0,
+    "tightest_slack_minutes": 8,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": false,
+    "thin_data": true
+   },
+   "human_rating": false
+  },
+  {
+   "id": "no-04",
+   "category": "not_allowed",
+   "note": "Week in progress, Sunday 11:59 (one minute before the LLM opens)",
+   "now": "2026-11-29T11:59:00+09:00",
+   "report": {
+    "week_start": "2026-11-23",
+    "week_complete": false,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 3,
+    "late_count": 1,
+    "on_time_rate": 0.75,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 7.5,
+    "tightest_slack_minutes": -3,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -3,
+      "weekday": 3,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 4,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": false,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "no-05",
+   "category": "not_allowed",
+   "note": "Week starting 2026-08-31: its Monday is more than 12 weeks (84 days) before the evaluation date, so it is too old",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-08-31",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 3,
+    "late_count": 1,
+    "on_time_rate": 0.75,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 7.5,
+    "tightest_slack_minutes": -3,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -3,
+      "weekday": 3,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 4,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": false,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "bound-01",
+   "category": "boundary",
+   "note": "Week in progress, Sunday 12:00 (the LLM opens)",
+   "now": "2026-11-29T12:00:00+09:00",
+   "report": {
+    "week_start": "2026-11-23",
+    "week_complete": false,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 3,
+    "late_count": 1,
+    "on_time_rate": 0.75,
+    "target_rate": 0.9,
+    "target_met": false,
+    "median_slack_minutes": 7.5,
+    "tightest_slack_minutes": -3,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "late",
+      "slack_minutes": -3,
+      "weekday": 3,
+      "cause": "depart_late",
+      "deviation": {
+       "prep_over": 0,
+       "depart_late": 4,
+       "travel_over": 0
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 7,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  },
+  {
+   "id": "bound-02",
+   "category": "boundary",
+   "note": "Week starting 2026-09-07: the oldest week still within 12 weeks (84 days) of the evaluation date",
+   "now": "2026-11-25T10:00:00+09:00",
+   "report": {
+    "week_start": "2026-09-07",
+    "week_complete": true,
+    "event_count": 4,
+    "arrived_count": 4,
+    "judged_count": 4,
+    "unobserved_count": 0,
+    "on_time_count": 4,
+    "late_count": 0,
+    "on_time_rate": 1.0,
+    "target_rate": 0.9,
+    "target_met": true,
+    "median_slack_minutes": 8.5,
+    "tightest_slack_minutes": 6,
+    "previous_week": null,
+    "deviation": {
+     "prep_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "depart_late": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     },
+     "travel_over": {
+      "count": 0,
+      "mean_minutes": null,
+      "sd_minutes": null
+     }
+    },
+    "outcomes": [
+     {
+      "result": "on_time",
+      "slack_minutes": 8,
+      "weekday": 0,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 10,
+      "weekday": 1,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 6,
+      "weekday": 2,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     },
+     {
+      "result": "on_time",
+      "slack_minutes": 9,
+      "weekday": 4,
+      "cause": null,
+      "deviation": {
+       "prep_over": null,
+       "depart_late": null,
+       "travel_over": null
+      },
+      "alarm_on": true
+     }
+    ]
+   },
+   "expect": {
+    "llm_allowed": true,
+    "thin_data": false
+   },
+   "human_rating": false
+  }
+ ]
+}
