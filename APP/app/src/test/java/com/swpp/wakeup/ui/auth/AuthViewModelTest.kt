@@ -26,6 +26,9 @@ import com.swpp.wakeup.testing.prefsContext
 import com.swpp.wakeup.ui.auth.AuthViewModel.Screen
 import com.swpp.wakeup.ui.auth.AuthViewModel.SystemBack
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -63,7 +66,7 @@ class AuthViewModelTest {
     private inner class Api : FakeAuthApi() {
         var onLogin: (LoginRequest) -> Response<AuthResponse> = { error("login 응답을 정하지 않았다") }
         var onRegister: (RegisterRequest) -> Response<AuthResponse> = { error("register 응답을 정하지 않았다") }
-        var onCheck: (PasswordCheckRequest) -> Response<PasswordCheckResponse> = { ok(validPassword) }
+        var onCheck: suspend (PasswordCheckRequest) -> Response<PasswordCheckResponse> = { ok(validPassword) }
         var onResetRequest: (PasswordResetRequest) -> Response<PasswordResetResponse> =
             { ok(PasswordResetResponse(sent = true, expiresIn = 600)) }
         var onResetConfirm: (PasswordResetConfirmRequest) -> Response<AuthResponse> = { ok(authOk()) }
@@ -785,5 +788,143 @@ class AuthViewModelTest {
         vm.cancelSocialTerms()
         assertEquals(Screen.LOGIN, vm.state.value.screen)
         assertEquals("me@snu.ac.kr", vm.state.value.email)
+    }
+
+    @Test
+    fun `코드 재전송 실패는 확인 화면과 입력한 코드를 보존한다`() = test {
+        val vm = viewModel()
+        vm.goToResetRequest()
+        vm.onEmailChange("me@snu.ac.kr")
+        vm.requestReset()
+        advanceUntilIdle()
+        vm.onResetCodeChange("123456")
+        api.onResetRequest = { httpError(429, """{"error":{"code":"throttled","message":"잠시 뒤에"}}""") }
+
+        vm.resendReset()
+        advanceUntilIdle()
+
+        assertEquals(Screen.RESET_CONFIRM, vm.state.value.screen)
+        assertEquals("123456", vm.state.value.resetCode)
+        assertEquals("me@snu.ac.kr", vm.state.value.resetSentTo)
+        assertNotNull(vm.state.value.error)
+        assertFalse(vm.state.value.loading)
+        assertEquals(1, warmup.invalidated)
+    }
+
+    @Test
+    fun `만료된 재설정 코드는 이유를 보이고 비밀번호 입력과 세션을 보존한다`() = test {
+        val vm = viewModel()
+        vm.goToResetRequest()
+        vm.onEmailChange("me@snu.ac.kr")
+        vm.requestReset()
+        advanceUntilIdle()
+        vm.onResetCodeChange("123456")
+        vm.onPasswordChange("new12345")
+        vm.onPasswordConfirmChange("new12345")
+        advanceUntilIdle()
+        api.onResetConfirm = { httpError(400, """{"error":{"code":"reset_code_expired","message":"expired"}}""") }
+
+        vm.confirmReset()
+        advanceUntilIdle()
+
+        assertEquals("코드가 만료됐어요. 코드를 다시 받아 주세요", vm.state.value.error)
+        assertEquals(Screen.RESET_CONFIRM, vm.state.value.screen)
+        assertEquals("new12345", vm.state.value.password)
+        assertEquals("123456", vm.state.value.resetCode)
+        assertNull(vm.state.value.authenticatedNickname)
+        assertFalse(tokenStore.isLoggedIn)
+    }
+
+    @Test
+    fun `비밀번호 재설정 성공은 기존 로그인 잠금 기록도 지운다`() = test {
+        lockPrefs.edit().putString("email", "me@snu.ac.kr").putLong("until", base + 120_000).apply()
+        val vm = viewModel()
+        vm.goToResetRequest()
+        vm.onEmailChange("me@snu.ac.kr")
+        vm.requestReset()
+        runCurrent()
+        vm.onResetCodeChange("123456")
+        vm.onPasswordChange("new12345")
+        vm.onPasswordConfirmChange("new12345")
+        runCurrent()
+
+        vm.confirmReset()
+        runCurrent()
+
+        assertEquals("수연", vm.state.value.authenticatedNickname)
+        assertNull(lockPrefs.getString("email", null))
+        assertEquals(0L, lockPrefs.getLong("until", 0L))
+        assertNull(vm.state.value.lockedUntilMillis)
+    }
+
+    @Test
+    fun `로그인 연속 탭은 깨우기와 서버 요청을 한 번만 실행한다`() = test {
+        warmup = CountingWarmup(wait = 5_000)
+        var loginCalls = 0
+        api.onLogin = { loginCalls++; ok(authOk()) }
+        val vm = viewModel()
+        vm.onEmailChange("me@snu.ac.kr")
+        vm.onPasswordChange("abc12345")
+
+        vm.login()
+        vm.login()
+        runCurrent()
+        vm.login()
+        assertEquals(1, warmup.awakened)
+        assertEquals(0, loginCalls)
+        advanceUntilIdle()
+        assertEquals(1, loginCalls)
+        assertFalse(vm.state.value.busy)
+        assertFalse(vm.state.value.waking)
+    }
+
+    @Test
+    fun `토큰이 없는 로그인 성공 응답은 인증 완료로 이동하지 않는다`() = test {
+        api.onLogin = { ok(authOk().copy(access = "", refresh = "")) }
+        val vm = viewModel()
+        vm.onEmailChange("me@snu.ac.kr")
+        vm.onPasswordChange("abc12345")
+        vm.login()
+        advanceUntilIdle()
+
+        assertNull(vm.state.value.authenticatedNickname)
+        assertFalse(tokenStore.isLoggedIn)
+        assertNotNull(vm.state.value.error)
+        assertFalse(vm.state.value.loading)
+        assertEquals(1, warmup.invalidated)
+    }
+
+    @Test
+    fun `가입 이메일과 닉네임 형식이 틀리면 서버에 보내지 않는다`() = test {
+        val vm = filledSignup()
+        vm.onEmailChange("not-an-email")
+        vm.signup()
+        assertNull(api.registered)
+        vm.onEmailChange("new@snu.ac.kr")
+        vm.onNicknameChange(" ")
+        vm.signup()
+        assertNull(api.registered)
+        vm.onNicknameChange("😀".repeat(21))
+        vm.signup()
+        assertNull(api.registered)
+        assertFalse(vm.state.value.canSubmitSignup)
+    }
+
+    @Test
+    fun `가입 화면을 떠난 뒤 늦게 끝난 비밀번호 검사는 로그인에 반영하지 않는다`() = test {
+        val answer = CompletableDeferred<Response<PasswordCheckResponse>>()
+        api.onCheck = { withContext(NonCancellable) { answer.await() } }
+        val vm = viewModel()
+        vm.goToSignup()
+        vm.onPasswordChange("abc12345")
+        runCurrent()
+        vm.goToLogin()
+        answer.complete(ok(validPassword))
+        runCurrent()
+
+        assertEquals(Screen.LOGIN, vm.state.value.screen)
+        assertEquals("", vm.state.value.password)
+        assertNull(vm.state.value.passwordCheck)
+        assertNull(vm.state.value.passwordCheckError)
     }
 }

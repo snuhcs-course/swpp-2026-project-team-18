@@ -20,15 +20,15 @@ class ManualArrivalTest {
     private val dest = GeoPoint(37.4600, 126.9500)
 
     @Test
-    fun `최근 위치가 있으면 같이 보내고 목적지까지 거리를 단다`() {
+    fun `최근 위치로 거리를 계산하지만 좌표는 보내지 않는다`() {
         val fix = LocationFix(lat = 37.4601, lng = 126.9501, accuracyM = 85f, atMillis = now - 30_000)
 
         val obs = manualArrivalOf(eventId = 7, atMillis = now, fix = fix, destination = dest, zone = zone)
 
         assertEquals(TripObservationInput.KIND_ARRIVE, obs.kind)
         assertEquals(TripObservationInput.DETECTOR_MANUAL, obs.detector)
-        assertEquals(37.4601, obs.lat!!, 1e-9)
-        assertEquals(126.9501, obs.lng!!, 1e-9)
+        assertNull(obs.lat)
+        assertNull(obs.lng)
         assertEquals("수동은 오차가 커도 그대로 보낸다", 85.0, obs.accuracyM!!, 1e-9)
         assertTrue(obs.distanceM!! < 20.0)
         assertNull(obs.dwellSeconds)

@@ -81,6 +81,7 @@ internal fun MeTabScreen(
     contactEmail: String? = null,
     /** 신고를 보낸 뒤(스낵바) */
     onReportSent: () -> Unit = {},
+    onRooms: (() -> Unit)? = null,
 ) {
     // Partly AI-generated (Claude) — 도움말의 [문의하기] 와 같은 시트를 신고로 연다(시트는 하나, A-7)
     var reportOpen by rememberSaveable { mutableStateOf(false) }
@@ -125,6 +126,10 @@ internal fun MeTabScreen(
         }
 
         Group("일정") {
+            onRooms?.let {
+                MeRow(LineIcons.calendar, "약속방", MeTabLogic.Value("함께 약속을 정하고 각자 알람을 맞춰요"), "me_rooms", it)
+                RowDivider()
+            }
             MeRow(LineIcons.calendar, "캘린더에서 가져오기", MeTabLogic.calendar(calendarLink), "me_calendar", onCalendar)
             RowDivider()
             MeRow(LineIcons.bell, "알림·권한", MeTabLogic.permissions(permissions), "me_permissions", onPermissions)
@@ -203,7 +208,7 @@ private fun Profile(nickname: String, email: String?) {
                 Text(
                     text = it,
                     color = JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -257,7 +262,7 @@ private fun MeRow(icon: ImageVector, title: String, value: MeTabLogic.Value, tag
             Text(
                 text = value.text,
                 color = if (value.warn) JitColor.Amber else JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

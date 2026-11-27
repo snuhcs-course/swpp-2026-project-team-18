@@ -155,6 +155,7 @@ object ApiClient {
     val profile: ProfileApi by lazy { retrofit.create(ProfileApi::class.java) }
     /** 저장한 집(계정에 저장). (Partly AI-generated (Claude)) */
     val savedPlaces: SavedPlacesApi by lazy { retrofit.create(SavedPlacesApi::class.java) }
+    val rooms: RoomsApi by lazy { retrofit.create(RoomsApi::class.java) }
 
     val observations: ObservationsApi by lazy {
         retrofit.create(ObservationsApi::class.java)

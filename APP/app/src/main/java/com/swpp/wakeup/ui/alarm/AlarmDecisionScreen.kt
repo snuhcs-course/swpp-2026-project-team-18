@@ -187,6 +187,8 @@ fun AlarmDecisionScreen(
     confirmBusy: Boolean = false,
     /** 직접 정한 시각일 때 [추천 시각으로 되돌리기](BE-H3b) */
     onRevertAlarm: () -> Unit = {},
+    /** ④에서도 다시 계산된 시각을 확인해요(I5-05). */
+    onConfirmAlarm: () -> Unit = {},
     /** 남은 시간을 셀 지금 시각. 테스트가 고정한다 */
     nowMillis: Long = System.currentTimeMillis(),
 ) {
@@ -279,6 +281,9 @@ fun AlarmDecisionScreen(
                     onProbabilityClick = openProbability,
                     canRevert = serverSupportsConfirm && !confirmBusy,
                     onRevert = onRevertAlarm,
+                    onConfirm = onConfirmAlarm,
+                    confirmBusy = confirmBusy,
+                    canConfirm = serverSupportsConfirm,
                 )
             }
             // 답을 기다리는 "바꿀까요" 제안(BE-H3d). 알람 카드 바로 아래 — 바뀔 시각과 같이 읽힌다.
@@ -421,7 +426,7 @@ private fun SkippedCard(onUnskip: () -> Unit, enabled: Boolean) {
         Text(
             text = "알람이 울리지 않고 리포트·학습에서 빠져요",
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
         Text(
             text = "되돌리기",
@@ -472,7 +477,7 @@ private fun Pill(text: String, color: Color, tag: String, alpha: Float = 0.18f, 
     Text(
         text = text,
         color = color,
-        fontSize = 10.sp,
+        fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
         modifier = modifier
@@ -535,6 +540,9 @@ private fun AlarmCard(
     onProbabilityClick: (() -> Unit)?,
     canRevert: Boolean,
     onRevert: () -> Unit,
+    onConfirm: () -> Unit,
+    confirmBusy: Boolean,
+    canConfirm: Boolean,
 ) {
     val shape = RoundedCornerShape(JitRadius.Card)
     Column(
@@ -605,9 +613,28 @@ private fun AlarmCard(
                 modifier = Modifier.testTag("plan_alarm_status"),
             )
         }
-        // 확률이 없으면 알약 대신 이유 한 줄(숫자를 지어내지 않는다)
-        // 확률을 아직 못 낼 때의 이유 · 할 일 문구는 보이지 않는다(11-17 사용자: 빼 달라고 함). 알약도 없다 —
-        // 숫자를 지어내지 않는다.
+        if (plan.confidence.isUnavailable) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "이동 기록이 더 쌓이면 정시 도착 확률을 알려 드려요",
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.weight(1f).testTag("plan_probability_reason"),
+                )
+                onProbabilityClick?.let { action ->
+                    com.swpp.wakeup.ui.common.JitSecondaryButton("정보", action)
+                }
+            }
+        }
+        if (canConfirm && !plan.skipped && plan.alarmOn && !plan.alarmPassed && plan.alarmConfirmed == false) {
+            Text("아직 알람을 확인하지 않았어요", color = JitColor.TextSecondary, fontSize = 12.sp)
+            com.swpp.wakeup.ui.common.JitPrimaryButton(
+                label = "이 알람 확인",
+                onClick = onConfirm,
+                loading = confirmBusy,
+                modifier = Modifier.testTag("plan_confirm_alarm"),
+            )
+        }
 
         // 직접 정한 시각: 추천과의 차이 + [추천 시각으로 되돌리기](주황 글자, 꽉 찬 버튼 아님)
         if (plan.userAlarm) {
@@ -625,16 +652,10 @@ private fun AlarmCard(
                 )
             }
             if (canRevert) {
-                Text(
-                    text = "추천 시각으로 되돌리기",
-                    color = JitColor.Accent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(role = Role.Button, onClick = onRevert)
-                        .testTag("plan_revert_alarm")
-                        .padding(vertical = 6.dp),
+                com.swpp.wakeup.ui.common.JitSecondaryButton(
+                    label = "추천 시각으로 되돌리기",
+                    onClick = onRevert,
+                    modifier = Modifier.testTag("plan_revert_alarm"),
                 )
             }
         }
@@ -724,7 +745,12 @@ private fun WhyCard(plan: AlarmPlanView, onInfo: (() -> Unit)?) {
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             timeline.segments.forEach { seg ->
-                val note = when (seg.kind) {
+                val sourceKind = when (seg.kind) {
+                    AlarmConfirmView.Kind.PREP -> PlanRow.Kind.PREP
+                    AlarmConfirmView.Kind.TRAVEL -> PlanRow.Kind.TRAVEL
+                    AlarmConfirmView.Kind.BUFFER -> PlanRow.Kind.BUFFER
+                }
+                val note = plan.breakdown.firstOrNull { it.kind == sourceKind }?.sourceLabel ?: when (seg.kind) {
                     AlarmConfirmView.Kind.PREP -> AlarmDecisionLogic.PREP_NOTE
                     AlarmConfirmView.Kind.TRAVEL -> AlarmDecisionLogic.travelNote(plan.travelMode)
                     AlarmConfirmView.Kind.BUFFER -> AlarmDecisionLogic.bufferNote(plan.bufferSource)
@@ -777,8 +803,8 @@ private fun TickRow(points: List<AlarmConfirmView.Point>) {
     ) { i ->
         val p = points[i]
         Column(horizontalAlignment = if (i == 0) Alignment.Start else Alignment.End) {
-            Text(p.clock, color = JitColor.TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(p.name, color = JitColor.TextSecondary, fontSize = 10.sp, maxLines = 1)
+            Text(p.clock, color = JitColor.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(p.name, color = JitColor.TextSecondary, fontSize = 12.sp, maxLines = 1)
         }
     }
 }
@@ -807,7 +833,7 @@ private fun ActionTile(
         verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterVertically),
     ) {
         Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(18.dp))
-        Text(label, color = color, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 
@@ -835,7 +861,7 @@ private fun NotComputedCard(plan: AlarmPlanView, onRecompute: (() -> Unit)?, rec
             fontSize = 13,
             dotSize = 8.dp,
         )
-        Text(text = body, color = JitColor.TextSecondary, fontSize = 11.sp)
+        Text(text = body, color = JitColor.TextSecondary, fontSize = 12.sp)
         // 경로 조회 실패에서만 다시 계산할 수 있다(Figma F-48 `526:176`). 카카오를 한 번 더 부르므로 눌렀을 때만.
         if (plan.status == "route_failed" && onRecompute != null) {
             Text(
@@ -849,7 +875,7 @@ private fun NotComputedCard(plan: AlarmPlanView, onRecompute: (() -> Unit)?, rec
                     .clickable(enabled = !recomputeBusy, onClick = onRecompute)
                     .padding(vertical = 8.dp),
             )
-            Text(text = "경로를 한 번 더 찾아봐요", color = JitColor.TextSecondary, fontSize = 10.sp)
+            Text(text = "경로를 한 번 더 찾아봐요", color = JitColor.TextSecondary, fontSize = 12.sp)
         }
     }
 }

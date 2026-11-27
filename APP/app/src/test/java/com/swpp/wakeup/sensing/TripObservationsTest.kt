@@ -76,6 +76,8 @@ class TripObservationsTest {
         val json = JsonParser.parseString(gson.toJson(arrival(decidedAt - 150_000))).asJsonObject
         assertEquals("2026-10-05T08:52:30+09:00", json["entered_at"].asString)
         assertTrue(json.has("dwell_seconds"))
+        assertFalse(json.has("lat"))
+        assertFalse(json.has("lng"))
         assertFalse("카멜 이름이 새면 서버가 모르는 키로 버린다", json.has("enteredAt"))
     }
 
@@ -95,6 +97,21 @@ class TripObservationsTest {
 
         assertEquals("old-1", items.single().clientUuid)
         assertNull(items.single().enteredAt)
+        assertNull(items.single().lat)
+        assertNull(items.single().lng)
+        val json = gson.toJsonTree(items.single()).asJsonObject
+        assertFalse(json.has("lat"))
+        assertFalse(json.has("lng"))
+    }
+
+    @Test
+    fun `기존 호출자가 좌표를 주어도 관측 JSON에는 좌표 키가 없다`() {
+        val legacy = arrival(decidedAt).copy(lat = 37.4, lng = 126.9)
+        val json = Gson().newBuilder().serializeNulls().create().toJsonTree(legacy).asJsonObject
+        assertFalse(json.has("lat"))
+        assertFalse(json.has("lng"))
+        assertEquals(18.0, json["distance_m"].asDouble, 0.0)
+        assertEquals(12.0, json["accuracy_m"].asDouble, 0.0)
     }
 
     @Test

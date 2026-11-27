@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
@@ -36,6 +37,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -104,10 +106,17 @@ fun RouteMapCard(
     ) {
         if (showCaption) {
             Text(
-                text = if (moving) "이동 중 · 현재 위치부터 가장 빠른 길" else "경로",
+                text = if (moving) "이동 중 · 선택한 경로" else "경로",
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
             )
+            if (moving) {
+                Text(
+                    text = "현재 위치는 기기에서만 처리해요",
+                    color = JitColor.TextSecondary,
+                    fontSize = 12.sp,
+                )
+            }
         }
 
         BoxWithConstraints(
@@ -259,15 +268,6 @@ fun RouteMapCard(
                     modifier = Modifier.align(Alignment.TopStart).padding(14.dp),
                 )
 
-                if (showCurrentLocation) {
-                    CurrentLocationButton(
-                        loading = state.locating,
-                        onClick = onRecenter,
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(end = 14.dp, bottom = 14.dp),
-                    )
-                }
                 state.image?.let {
                     KakaoMapAttribution(
                         bitmap = it,
@@ -316,7 +316,7 @@ fun RouteMapCard(
                 Text(
                     text = state.altSummary.orEmpty(),
                     color = JitColor.Purple,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                 )
             }
@@ -546,7 +546,7 @@ private fun MapStatusMessage(
     Text(
         text = text,
         color = JitColor.TextPrimary,
-        fontSize = 10.sp,
+        fontSize = 12.sp,
         textAlign = TextAlign.Center,
         maxLines = 2,
         modifier = modifier
@@ -559,40 +559,6 @@ private fun MapStatusMessage(
 
 /** 현재 GPS 위치를 새로 확인한 뒤 그곳으로 지도를 옮긴다. */
 @Composable
-private fun CurrentLocationButton(
-    loading: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .size(48.dp)
-            .semantics {
-                contentDescription = if (loading) "현재 위치 확인 중" else "현재 위치로 이동"
-            }
-            .clip(CircleShape)
-            .background(JitColor.Bg.copy(alpha = 0.9f))
-            .clickable(enabled = !loading, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (loading) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                color = JitColor.Accent,
-                strokeWidth = 2.dp,
-            )
-        } else {
-            Text(
-                text = "◎",
-                color = JitColor.Accent,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-    }
-}
-
-@Composable
 private fun MapPill(
     text: String,
     icon: String,
@@ -601,14 +567,15 @@ private fun MapPill(
 ) {
     Row(
         modifier = modifier
+            .heightIn(min = 48.dp)
             .clip(CircleShape)
             .background(JitColor.Bg.copy(alpha = 0.86f))
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 11.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(icon, color = JitColor.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text(icon, color = JitColor.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.width(5.dp))
-        Text(text, color = JitColor.TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(text, color = JitColor.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }

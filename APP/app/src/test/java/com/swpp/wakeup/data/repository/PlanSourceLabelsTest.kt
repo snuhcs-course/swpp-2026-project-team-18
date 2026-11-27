@@ -32,27 +32,27 @@ class TravelSourceNoteTest {
 
     @Test
     fun `계획의 실제 이동 기록 수를 표시한다`() {
-        assertEquals("카카오 추정 · 이동 기록 47회로 보정", travelNote(47))
+        assertEquals("고정 예상 · 카카오 추정 · 이동 기록 47회로 보정", travelNote(47))
     }
 
     @Test
-    fun `기록 수가 없거나 0이면 구버전 문구를 유지한다`() {
+    fun `기록 수가 없거나 0이면 횟수를 알 수 없다고 밝힌다`() {
         listOf(null, 0).forEach {
-            assertEquals("카카오 추정 · 이 경로 이동 기록으로 보정", travelNote(it))
+            assertEquals("고정 예상 · 카카오 추정 · 이 경로 이동 기록으로 보정 · 횟수는 아직 알 수 없어요", travelNote(it))
         }
     }
 
     @Test
     fun `보정 꼬리에 따라 문구가 갈린다`() {
-        assertEquals("카카오 추정 · 이 경로 이동 기록으로 보정", travelSourceNote("kakao_transit+observed_route"))
-        assertEquals("카카오 추정 · 전체 이동 기록으로 보정", travelSourceNote("kakao_walk+observed_global"))
-        assertEquals("카카오 경로 추정", travelSourceNote("kakao_transit"))
+        assertEquals("고정 예상 · 카카오 추정 · 이 경로 이동 기록으로 보정 · 횟수는 아직 알 수 없어요", travelSourceNote("kakao_transit+observed_route"))
+        assertEquals("고정 예상 · 카카오 추정 · 전체 이동 기록으로 보정 · 횟수는 아직 알 수 없어요", travelSourceNote("kakao_walk+observed_global"))
+        assertEquals("고정 예상 · 카카오 경로 추정", travelSourceNote("kakao_transit"))
     }
 
     @Test
     fun `출처가 없거나 비어도 추정이라고 쓴다`() {
-        assertEquals("카카오 경로 추정", travelSourceNote(null))
-        assertEquals("카카오 경로 추정", travelSourceNote(""))
+        assertEquals("고정 예상 · 카카오 경로 추정", travelSourceNote(null))
+        assertEquals("고정 예상 · 카카오 경로 추정", travelSourceNote(""))
     }
 
     @Test

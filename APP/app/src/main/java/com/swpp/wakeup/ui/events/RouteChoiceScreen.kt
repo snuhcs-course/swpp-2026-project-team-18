@@ -271,7 +271,7 @@ private fun GroupTabs(
                 Column(
                     modifier = Modifier
                         .width(IntrinsicSize.Max)
-                        .heightIn(min = 40.dp)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .clickable(role = Role.Tab, onClick = { onSelect(g) })
                         .testTag("route_group_${g.name.lowercase()}")
@@ -358,7 +358,7 @@ private fun ModeTabs(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(JitRadius.Hint))
                         .background(if (on) JitColor.Surface2 else JitColor.Surface)
-                        .clickable(enabled = available && !on) { onSelect(mode) }
+                        .clickable(enabled = available && !on, role = Role.Tab) { onSelect(mode) }
                         .padding(vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -378,7 +378,7 @@ private fun ModeTabs(
                     Text(
                         text = mode.label,
                         color = tint,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = if (on) FontWeight.Bold else FontWeight.Medium,
                         textAlign = TextAlign.Center,
                     )
@@ -472,7 +472,7 @@ private fun RouteCard(
                     Text(
                         text = it,
                         color = JitColor.Accent,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.align(Alignment.CenterVertically).testTag("route_preferred"),
                     )
@@ -482,7 +482,7 @@ private fun RouteCard(
                     Text(
                         text = badge,
                         color = JitColor.Accent,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         modifier = Modifier
@@ -511,14 +511,18 @@ private fun RouteCard(
             MetricCells(bicycleMetrics(option))
         } else if (!RouteChoiceLogic.isTransit(option) && option.detailLine.isNotBlank()) {
             // 자동차 · 도보는 서버 요약 한 줄 그대로("택시 예상액 · 4.3km · 7,600원", "1.2km")
-            Text(text = option.detailLine, color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text(text = option.detailLine, color = JitColor.TextSecondary, fontSize = 12.sp)
         }
         if (RouteChoiceLogic.isTransit(option)) {
             val cells = RouteChoiceLogic.barCells(option)
             if (cells.isNotEmpty()) {
                 SegmentBar(cells)
+                TransitColorLegend(
+                    cells.map { it.ride ?: RouteSegment(it.kind, it.minutes * 60, "") },
+                    neutralFill = JitColor.Surface2,
+                )
                 RouteChoiceLogic.totalsNote(option)?.let {
-                    Text(it, color = JitColor.TextSecondary, fontSize = 11.sp)
+                    Text(it, color = JitColor.TextSecondary, fontSize = 12.sp)
                 }
             }
             val steps = RouteChoiceLogic.steps(option)
@@ -586,7 +590,7 @@ private fun SegmentBar(cells: List<RouteChoiceLogic.BarCell>) {
                     Text(
                         text = "${cell.minutes}분",
                         color = on,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         softWrap = false,
@@ -625,7 +629,7 @@ private fun StepList(steps: List<RouteChoiceLogic.Step>, destination: String) {
                 Spacer(Modifier.width(10.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(step.name, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Text(step.sub, color = JitColor.TextSecondary, fontSize = 11.sp)
+                    Text(step.sub, color = JitColor.TextSecondary, fontSize = 12.sp)
                 }
             }
         }

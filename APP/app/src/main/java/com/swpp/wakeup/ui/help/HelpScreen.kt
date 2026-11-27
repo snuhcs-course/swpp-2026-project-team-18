@@ -133,7 +133,7 @@ internal fun HelpScreen(
             Text(
                 text = HelpFaq.countLabel(results.size),
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.testTag("help_count"),
             )
@@ -249,6 +249,7 @@ private fun ExpandedCard(item: FaqItem, onToggle: (HelpTopic) -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 48.dp)
                 .clickable(role = Role.Button) { onToggle(item.topic) }
                 .testTag("help_q_${item.topic.name}"),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -268,7 +269,7 @@ private fun ExpandedCard(item: FaqItem, onToggle: (HelpTopic) -> Unit) {
         Answer(item)
         if (item.topic == HelpTopic.ALARM_TIME) {
             Formula()
-            Text(HelpFaq.FORMULA_NOTE, color = JitColor.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(HelpFaq.FORMULA_NOTE, color = JitColor.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -393,6 +394,7 @@ private fun CollapsedCard(items: List<FaqItem>, onToggle: (HelpTopic) -> Unit) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 48.dp)
                     .clickable(role = Role.Button) { onToggle(item.topic) }
                     .padding(vertical = 13.dp)
                     .testTag("help_q_${item.topic.name}"),
@@ -427,7 +429,7 @@ private fun SmallButton(
     Row(
         modifier = Modifier
             .testTag(tag)
-            .height(36.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(container)
             .clickable(role = Role.Button, onClick = onClick)
@@ -456,7 +458,7 @@ internal fun InfoButton(
     Box(
         modifier = modifier
             .testTag(tag)
-            .size(size.dp)
+            .size(size.coerceAtLeast(48).dp)
             .clip(CircleShape)
             .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,

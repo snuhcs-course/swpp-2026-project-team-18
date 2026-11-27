@@ -31,6 +31,28 @@ import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.ui.theme.JitColor
 import com.swpp.wakeup.ui.theme.JitRadius
 
+/** 회색 보조 동작. Figma fb/ButtonSm Secondary, Iteration 5. */
+@Composable
+fun JitSecondaryButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.heightIn(min = 48.dp),
+        shape = RoundedCornerShape(JitRadius.Button),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = JitColor.Surface2,
+            contentColor = JitColor.TextPrimary,
+            disabledContainerColor = JitColor.Track,
+            disabledContentColor = JitColor.TextSecondary,
+        ),
+    ) { Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+}
+
 /**
  * Figma 의 기본 CTA 버튼. 강조색 배경 + 어두운 글자.
  *

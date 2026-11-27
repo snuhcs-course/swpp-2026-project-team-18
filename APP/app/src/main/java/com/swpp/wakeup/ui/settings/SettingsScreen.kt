@@ -1,5 +1,7 @@
 package com.swpp.wakeup.ui.settings
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -90,7 +92,7 @@ fun SettingsScreen(
         if (onVerifyEmail != null && state.emailVerified != null && state.accountEmail != null) {
             Box(Modifier.testTag("settings_email_verify")) {
                 if (state.emailVerified) {
-                    SettingRow(label = "이메일 인증", value = "인증됨", valueColor = JitColor.Green)
+                    SettingRow(label = "이메일 인증", value = "인증했어요", valueColor = JitColor.Green)
                 } else {
                     SettingRow(
                         label = "이메일 인증",
@@ -127,13 +129,13 @@ fun SettingsScreen(
             Text(
                 text = "마지막 로그인 방법은 끊을 수 없어요. 소셜로만 가입한 계정은 비밀번호가 없어요",
                 color = JitColor.TextSecondary,
-                fontSize = 9.sp,
+                fontSize = 12.sp,
             )
         }
 
         devInfo?.let { info ->
             SectionLabel("개발 정보")
-            Text(text = info, color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text(text = info, color = JitColor.TextSecondary, fontSize = 12.sp)
             onDevCheck?.let { check ->
                 Text(
                     text = "서버 확인",
@@ -201,7 +203,7 @@ fun SettingsScreen(
                 Text(
                     text = "다른 기기에 남은 로그인도 모두 끝나요. 인터넷에 연결돼 있어야 해요",
                     color = JitColor.TextSecondary,
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                 )
             }
         }
@@ -223,24 +225,26 @@ internal fun SectionLabel(text: String) {
 // Partly AI-generated (Claude)
 /** 다른 집 한 줄(Figma ⑯ 변형 `498:9`). [기본으로]는 서버의 집을 바꾼다 */
 @Composable
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 internal fun SavedHomeRow(
     home: SavedHome,
     busy: Boolean,
     enabled: Boolean,
     onMakeDefault: () -> Unit,
     onRemove: () -> Unit,
+    onRename: (() -> Unit)? = null,
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .testTag("saved_home_row")
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Card))
             .background(JitColor.Surface)
             .padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(text = home.label, color = JitColor.TextSecondary, fontSize = 11.sp)
+        Column(Modifier.fillMaxWidth()) {
+            Text(text = home.label, color = JitColor.TextSecondary, fontSize = 12.sp)
             Spacer(Modifier.height(3.dp))
             Text(
                 text = home.address?.takeIf { it.isNotBlank() } ?: home.name,
@@ -249,15 +253,19 @@ internal fun SavedHomeRow(
                 fontWeight = FontWeight.Medium,
             )
         }
-        Spacer(Modifier.width(8.dp))
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        onRename?.let {
+            SmallPill(label = "이름 바꾸기", color = JitColor.TextPrimary, enabled = enabled, onClick = it)
+        }
         SmallPill(
             label = if (busy) "바꾸는 중…" else "기본으로",
-            color = JitColor.Accent,
+            color = JitColor.TextPrimary,
             enabled = enabled,
             onClick = onMakeDefault,
         )
         Spacer(Modifier.width(6.dp))
         SmallPill(label = "삭제", color = JitColor.TextSecondary, enabled = enabled, onClick = onRemove)
+        }
     }
 }
 
@@ -266,13 +274,15 @@ internal fun SmallPill(label: String, color: androidx.compose.ui.graphics.Color,
     Text(
         text = label,
         color = color,
-        fontSize = 11.sp,
+        fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(JitRadius.Button))
             .background(JitColor.Surface2)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 11.dp, vertical = 6.dp),
+            .clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick)
+            .padding(horizontal = 11.dp, vertical = 6.dp)
+            .wrapContentHeight(Alignment.CenterVertically),
     )
 }
 
@@ -309,7 +319,7 @@ private fun LoginConnections(
             val status = when {
                 methods == null && failed -> "연결 상태를 확인하지 못했어요"
                 methods == null -> "확인 중"
-                linked -> "연결됨 · 이 계정으로 로그인할 수 있어요"
+                linked -> "연결했어요 · 이 계정으로 로그인할 수 있어요"
                 else -> "연결 안 됨"
             }
             val action: Pair<String, (() -> Unit)?>? = when {
@@ -333,7 +343,7 @@ private fun LoginConnections(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(provider.label, color = JitColor.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    Text(status, color = JitColor.TextSecondary, fontSize = 10.sp)
+                    Text(status, color = JitColor.TextSecondary, fontSize = 12.sp)
                 }
                 action?.let { (label, onClick) ->
                     Text(
@@ -378,7 +388,7 @@ internal fun SettingRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(text = label, color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text(text = label, color = JitColor.TextSecondary, fontSize = 12.sp)
             Spacer(Modifier.height(3.dp))
             Text(
                 text = value,
@@ -392,7 +402,7 @@ internal fun SettingRow(
             Text(
                 text = action,
                 color = if (onClick != null) JitColor.Accent else JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))

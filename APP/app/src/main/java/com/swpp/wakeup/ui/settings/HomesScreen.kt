@@ -13,6 +13,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.AlertDialog
+import com.swpp.wakeup.ui.common.JitTextField
+import com.swpp.wakeup.ui.common.JitPrimaryButton
+import com.swpp.wakeup.ui.common.JitSecondaryButton
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
@@ -40,7 +51,39 @@ fun HomesScreen(
     onRemoveHome: (String) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onRenameHome: suspend (String, String) -> String? = { _, _ -> "다시 시도해 주세요" },
 ) {
+    var renameId by rememberSaveable { mutableStateOf<String?>(null) }
+    var label by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    if (renameId != null) {
+        AlertDialog(
+            onDismissRequest = { if (!busy) renameId = null },
+            containerColor = JitColor.Surface,
+            title = { Text("집 이름 바꾸기", color = JitColor.TextPrimary) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    JitTextField(label = "새 이름", value = label, onValueChange = { label = it; error = null }, enabled = !busy, inputTag = "home_rename_input")
+                    Text(error ?: "1~20자로 적어 주세요", color = if (error == null) JitColor.TextSecondary else JitColor.Red, fontSize = 12.sp)
+                }
+            },
+            confirmButton = {
+                JitPrimaryButton("이름 저장", enabled = label.trim().length in 1..20, loading = busy, onClick = {
+                    val id = renameId ?: return@JitPrimaryButton
+                    busy = true
+                    scope.launch {
+                        try {
+                            error = onRenameHome(id, label)
+                            if (error == null) renameId = null
+                        } finally { busy = false }
+                    }
+                })
+            },
+            dismissButton = { JitSecondaryButton("취소", { renameId = null }, enabled = !busy) },
+        )
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -75,6 +118,7 @@ fun HomesScreen(
                 enabled = state.savedHomeBusyId == null,
                 onMakeDefault = { onMakeHomeDefault(home.id) },
                 onRemove = { onRemoveHome(home.id) },
+                onRename = { renameId = home.id; label = home.label; error = null },
             )
         }
         Text(
@@ -96,7 +140,7 @@ fun HomesScreen(
                     "그 집이 기본 집이 되고 예전 집은 목록에 남아요"
             },
             color = JitColor.TextSecondary,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
         )
     }
 }

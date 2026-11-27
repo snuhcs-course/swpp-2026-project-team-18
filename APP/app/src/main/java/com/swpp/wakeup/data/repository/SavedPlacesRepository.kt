@@ -42,6 +42,15 @@ sealed interface SavedPlacesResult {
  * 404·405 를 [SavedPlacesResult.Unsupported] 로 모을 뿐이다.
  */
 class SavedPlacesRepository(private val api: SavedPlacesApi = ApiClient.savedPlaces) {
+    suspend fun rename(serverId: Long, label: String): SavedPlacesResult = guard {
+        val response = api.rename(serverId, com.swpp.wakeup.data.remote.SavedPlaceRename(label.trim()))
+        val row = response.body()?.takeIf { response.isSuccessful }
+            ?: return@guard if (response.code() == 404) failure(response).copy(code = CODE_NOT_FOUND)
+            else unsupportedOrFailure(response)
+        val home = row.toSavedHome() ?: return@guard SavedPlacesResult.Failure(MESSAGE_BAD_ROW)
+        SavedPlacesResult.Ok(listOf(home))
+    }
+
     /** 서버의 저장한 집 목록 */
     suspend fun list(): SavedPlacesResult = guard {
         val response = api.list()
@@ -108,6 +117,8 @@ class SavedPlacesRepository(private val api: SavedPlacesApi = ApiClient.savedPla
 
     private inline fun guard(block: () -> SavedPlacesResult): SavedPlacesResult = try {
         block()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
     } catch (e: IOException) {
         Log.w(TAG, "network failure", e)
         SavedPlacesResult.Failure(MESSAGE_NETWORK, network = true)

@@ -39,33 +39,34 @@ class RouteMapLiveAvailabilityTest {
     )
 
     @Test
-    fun `이동 중 live route가 없으면 계획 경로로 되돌아가지 않는다`() {
+    fun `이동 중에는 사용자가 선택한 경로를 계속 보여 준다`() {
         val result = state().copy(inTransit = true)
             .withLiveRouteDisplay(inTransit = true, liveRoute = null)
 
         assertTrue(result.inTransit)
-        assertTrue(result.path.isEmpty())
+        assertEquals(planned, result.path)
         assertFalse(result.pathFromCurrent)
-        assertFalse(result.path == result.plannedPath)
-        assertEquals("현재 위치에서 가장 빠른 경로 확인 중", result.summary)
+        assertEquals("계획 경로", result.summary)
     }
 
     @Test
-    fun `이동 중에는 유효한 현재 위치 경로만 표시한다`() {
+    fun `이전 앱의 현재 위치 경로가 들어와도 경로와 지도 중심에 반영하지 않는다`() {
         val result = state().withLiveRouteDisplay(inTransit = true, liveRoute = live)
 
         assertTrue(result.inTransit)
-        assertEquals(live.path, result.path)
-        assertEquals(live.summary, result.summary)
-        assertTrue(result.pathFromCurrent)
+        assertEquals(planned, result.path)
+        assertEquals("계획 경로", result.summary)
+        assertFalse(result.pathFromCurrent)
+        assertEquals(state().center, result.center)
+        assertEquals(state().level, result.level)
     }
 
     @Test
-    fun `좌표가 부족한 live route는 갱신 대기 상태로 만든다`() {
+    fun `깨진 이전 경로도 무시하고 선택한 경로를 유지한다`() {
         val broken = live.copy(path = listOf(live.path.first()))
         val result = state().withLiveRouteDisplay(inTransit = true, liveRoute = broken)
 
-        assertTrue(result.path.isEmpty())
+        assertEquals(planned, result.path)
         assertFalse(result.pathFromCurrent)
     }
 
@@ -88,7 +89,7 @@ class RouteMapLiveAvailabilityTest {
     }
 
     @Test
-    fun `이동이 끝난 뒤에만 계획 경로를 복원한다`() {
+    fun `이동이 끝난 뒤에도 같은 선택 경로를 유지한다`() {
         val liveState = state().withLiveRouteDisplay(inTransit = true, liveRoute = live)
         val result = liveState.withLiveRouteDisplay(inTransit = false, liveRoute = null)
 
@@ -96,5 +97,15 @@ class RouteMapLiveAvailabilityTest {
         assertEquals(planned, result.path)
         assertEquals("계획 경로", result.summary)
         assertFalse(result.pathFromCurrent)
+    }
+
+    @Test
+    fun `기기에서 측위한 마커는 보존하지만 서버로 보낼 지도 중심은 바꾸지 않는다`() {
+        val measured = HomeViewModel.MapLocationFix(GeoPoint(37.8, 127.8), 10f, 1_000L)
+        val before = state().copy(currentLocation = measured)
+        val result = before.withLiveRouteDisplay(inTransit = true, liveRoute = live)
+        assertEquals(measured, result.currentLocation)
+        assertEquals(before.center, result.center)
+        assertEquals(before.level, result.level)
     }
 }

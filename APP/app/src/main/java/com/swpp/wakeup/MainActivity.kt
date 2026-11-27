@@ -1,5 +1,6 @@
 package com.swpp.wakeup
 
+import com.swpp.wakeup.ui.me.MeTabLogic
 import com.swpp.wakeup.diagnostics.CrashReport
 import com.swpp.wakeup.data.remote.ServerWarmup
 import com.swpp.wakeup.domain.model.UserAlarmRule
@@ -843,6 +844,8 @@ private fun MainHost(
                 // 홈 다시 그림(iter4 H2-2, Figma `540:123`). 리포트 · 아침 루틴 · 캘린더 가져오기 입구는
                 // 리포트 탭과 내 정보 탭으로 옮겼다. ? 는 도움말(H2-4)이다.
                 AppRoute.Home -> HomeScreen(
+                    notificationsEnabled = rememberDevicePermissions().notifications,
+                    onEnableNotifications = { com.swpp.wakeup.ui.settings.openPermissionSettings(context, MeTabLogic.PermissionKind.NOTIFICATIONS) },
                     state = state,
                     onEventClick = { viewModel.openAlarmDecision(it.id) },
                     onAlarmToggle = viewModel::setAlarmEnabled,
@@ -1024,6 +1027,9 @@ private fun MainHost(
                         serverSupportsConfirm = UserAlarmRule.supported(ServerWarmup.serverVersion),
                         confirmBusy = confirmBusyId == route.eventId,
                         onRevertAlarm = { viewModel.revertAlarmFromPlan(route.eventId) },
+                        onConfirmAlarm = {
+                            viewModel.confirmAlarm(route.eventId, plan?.alarmAtMillis?.let { java.time.Instant.ofEpochMilli(it).toString() })
+                        },
                         recomputeBusy = state.recomputeBusyId == route.eventId,
                         modifier = Modifier.padding(innerPadding),
                         nickname = state.nickname,
@@ -1174,6 +1180,13 @@ private fun MainHost(
                     }
                     val tripPlan = tripTab.plan?.takeIf { it.eventId == tripEvent?.id }
                     TripTabScreen(
+                        canTrack = com.swpp.wakeup.sensing.LocationPermissions.granted(context),
+                        coarseOnly = com.swpp.wakeup.sensing.LocationPermissions.coarseOnly(context),
+                        live = tripLive,
+                        homePoint = state.homePlace?.let { com.swpp.wakeup.sensing.GeoPoint(it.lat, it.lng) },
+                        nickname = state.nickname,
+                        initials = viewModel.avatarInitials(),
+                        onArrive = tripEvent?.let { e -> { viewModel.markArrived(e.id) } },
                         event = tripEvent,
                         hasEvents = state.totalCount > 0,
                         today = state.today,
@@ -1241,6 +1254,7 @@ private fun MainHost(
                 // Partly AI-generated (Claude)
                 // 하단 탭 "내 정보" 의 첫 화면(iter4 H2-2, Figma `547:1244`). 도움 묶음은 도움말 · 처음 안내 다시 보기(H2-4).
                 AppRoute.Me -> MeTabScreen(
+                    onRooms = viewModel::openRooms,
                     state = state,
                     routineNames = routineNames,
                     calendarLink = calendarLinkState,
@@ -1263,6 +1277,7 @@ private fun MainHost(
                     onReportSent = viewModel::onInquirySent,
                 )
                 AppRoute.Homes -> HomesScreen(
+                    onRenameHome = viewModel::renameSavedHome,
                     state = state,
                     onChangeHome = {
                         viewModel.resetHomeSetup()
@@ -1275,6 +1290,16 @@ private fun MainHost(
                     onBack = viewModel::goBack,
                     modifier = Modifier.padding(innerPadding),
                 )
+                AppRoute.Rooms -> {
+                    val roomsViewModel: com.swpp.wakeup.ui.rooms.RoomsViewModel = viewModel()
+                    Box(Modifier.padding(innerPadding)) {
+                        com.swpp.wakeup.ui.rooms.RoomsScreen(
+                            viewModel = roomsViewModel,
+                            onExit = viewModel::goBack,
+                            onMembershipChanged = { viewModel.refresh() },
+                        )
+                    }
+                }
                 AppRoute.Permissions -> PermissionsScreen(
                     state = state,
                     permissions = rememberDevicePermissions(),

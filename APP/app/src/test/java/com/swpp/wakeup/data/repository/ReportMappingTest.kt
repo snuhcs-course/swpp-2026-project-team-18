@@ -27,6 +27,17 @@ import java.time.ZoneId
  */
 class ReportMappingTest {
 
+    @Test
+    fun `서버가 늦은 기상으로 판정한 날은 기상 원인과 다음 행동을 안내한다`() {
+        val view = map("""{"week_start":"2026-10-05","late_count":1,"outcomes":[
+            {"event":1,"date":"2026-10-05","result":"late","slack_minutes":-4.0,
+             "cause":"wake_late","planned":{"alarm_at":"2026-10-04T22:00:00Z"}}]}""")
+        val cause = view.days[0].outcomes.single().cause!!
+        assertEquals("늦게 일어났어요", cause.title)
+        assertTrue(cause.body.contains("알람을 끈 시각"))
+        assertTrue(cause.action?.contains("알람") == true)
+    }
+
     private val gson = Gson()
     private val seoul = ZoneId.of("Asia/Seoul")
 
@@ -232,7 +243,7 @@ class ReportMappingTest {
         assertEquals("도착 기록 없음", morning.headline)
         assertEquals("도착을 기록하지 못해 채점하지 않았어요", morning.headlineNote)
         assertEquals("오전 10:00 실험 · 알람 오전 8:35", morning.contextLine)
-        assertEquals("적용 τ 0.90", morning.confidenceLine)
+        assertEquals("목표 정시 도착 확률 90%", morning.confidenceLine)
         assertNull(morning.cause)
         assertFalse(morning.isOnlyLateOfWeek)
 

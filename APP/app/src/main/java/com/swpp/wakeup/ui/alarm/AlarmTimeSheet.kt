@@ -175,7 +175,7 @@ fun AlarmTimeSheet(
                     Text(
                         text = UserAlarmRule.USER_LABEL,
                         color = JitColor.TextSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
@@ -184,16 +184,11 @@ fun AlarmTimeSheet(
                     )
                     Spacer(Modifier.weight(1f))
                     if (customSupported) {
-                        Text(
-                            text = "추천 시각으로 되돌리기",
-                            color = JitColor.Accent,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable(enabled = !saving, role = Role.Button, onClick = onRevert)
-                                .testTag("alarm_time_revert")
-                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                        com.swpp.wakeup.ui.common.JitSecondaryButton(
+                            label = "되돌리기",
+                            onClick = onRevert,
+                            enabled = !saving,
+                            modifier = Modifier.testTag("alarm_time_revert"),
                         )
                     }
                 }
@@ -264,7 +259,7 @@ fun AlarmTimeSheet(
                 Text(
                     text = UserAlarmRule.LOCKED_NOTE,
                     color = JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     modifier = Modifier.testTag("alarm_time_pending"),
                 )
             }
@@ -273,7 +268,7 @@ fun AlarmTimeSheet(
                 Text(
                     text = UserAlarmRule.AFTER_START_NOTE,
                     color = JitColor.Red,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.testTag("alarm_time_after_start"),
                 )
@@ -340,7 +335,7 @@ private fun QuickPickCell(
             Text(
                 text = com.swpp.wakeup.domain.model.ClockText.meridiemOf(option.meridiem) ?: "",
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
             )
             Text(option.alarmAt, color = JitColor.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -349,11 +344,11 @@ private fun QuickPickCell(
             Text(
                 text = AlarmTimeChoice.quickLabel(option.key, option.label),
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
             )
             if (recommended) {
-                Text("· 추천", color = JitColor.Accent, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Text("· 추천", color = JitColor.Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
         }
         // 확률이 없으면 자리를 비운다. 빈 0% 도 숫자처럼 읽힌다.
@@ -406,10 +401,10 @@ private fun ResultLine(
                 }
             }
             ProbabilityRule.warning(percent)?.let {
-                Text(it, color = JitColor.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(it, color = JitColor.Red, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
             AlarmTimeChoice.gapLine(pickedMinutes, recommendedMinutes)?.let {
-                Text(it, color = JitColor.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Text(it, color = JitColor.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
         }
     }

@@ -11,7 +11,6 @@ import android.location.Location
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -32,16 +31,12 @@ import com.swpp.wakeup.data.remote.TripObservationInput
 import com.swpp.wakeup.data.repository.EventRepository
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.domain.model.ArrivalVerdict
-import com.swpp.wakeup.domain.model.LiveRoute
-import com.swpp.wakeup.domain.model.LiveRouteRefreshGate
-import com.swpp.wakeup.domain.model.PreDepartureCheck
 import com.swpp.wakeup.domain.model.RerouteAlert
 import com.swpp.wakeup.domain.model.TripProgress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -76,11 +71,6 @@ class TripTrackingService : Service() {
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
     private val repository by lazy { EventRepository() }
 
-    /** 화면 수명과 무관하게 서비스가 소유하는 1분 호출 게이트. */
-    private val liveRouteGate = LiveRouteRefreshGate()
-    private var liveRouteJob: Job? = null
-    @Volatile private var liveRouteSessionGeneration = 0L
-
     private var schedule: AlarmSchedule? = null
     private var geofence: TripGeofence? = null
 
@@ -111,13 +101,6 @@ class TripTrackingService : Service() {
         stopSelf()
     }
 
-    /**
-     * 출발 전 "지금 나가도 늦나" 확인을 이 추적에서 몇 번 했는가([PreDepartureCheck.MAX_CALLS] 까지).
-     * 메모리에만 둔다. 프로세스가 죽었다 살아나면 첫 확인은 했다고 보고 두 번째만 한다.
-     * (Partly AI-generated (Claude))
-     */
-    private var preDepartureCalls = 0
-    private val preDepartureRunnable = Runnable { runPreDepartureCheck() }
     private val manualGraceRunnable = Runnable {
         Log.i(TAG, "수동 도착 뒤 기다림이 끝나 추적을 멈춘다")
         stopSelf()
@@ -192,7 +175,6 @@ class TripTrackingService : Service() {
         }
         if (intent?.action == ACTION_REFRESH_LIVE) {
             // 화면에서 경로를 바꿨다. 다음 위치에서 바로 새 경로를 받는다.
-            liveRouteGate.reset()
             runCatching { NotificationManagerCompat.from(this).cancel(AlarmNotifications.NOTIFICATION_REROUTE) }
             if (schedule == null) stopSelf()
             return START_NOT_STICKY
@@ -224,18 +206,17 @@ class TripTrackingService : Service() {
         // 정상 ACTION_START 는 새 추적 세션의 경계다. 같은 event id가 다음 날
         // 다시 쓰이더라도 어제 좌표의 경로를 잠깐 보여 주지 않는다. 반대로
         // 프로세스 복구의 redelivery라면 5분 안의 마지막 성공 결과를 유지한다.
-        liveRouteJob?.cancel()
-        liveRouteGate.reset()
-        liveRouteSessionGeneration++
         liveRouteStore.beginSession()
         // 디스크의 도착을 먼저 되살린다. 프로세스가 죽었다 살아났으면 메모리가 비어 있다.
         ArrivalRecords.restore(this)
         // 집을 나선 뒤 죽은 추적이면 그 단계부터 이어 간다(todo §2 "추적 서비스 재시작 복원").
         val resumed = if (redelivered) progressStore.current(parsed.eventId) else null
-        if (redelivered) {
-            TripLiveState.restoreLiveRoute(liveRouteStore.current(parsed.eventId))
-        } else {
-            liveRouteStore.clear()
+        // Discard live routes from older builds, including process redelivery.
+        // Device-local progress and geofence evidence are restored independently.
+        liveRouteStore.clear()
+        TripLiveState.clearLiveRoute()
+        TripLiveState.clearPreDeparture()
+        if (!redelivered) {
             progressStore.clear()
             // 앞 일정의 도착은 남긴다. 지우면 이미 도착한 일정이 홈에 다시 나타난다.
             TripLiveState.resetForNewTrip(parsed.eventId)
@@ -303,9 +284,6 @@ class TripTrackingService : Service() {
         handler.removeCallbacks(blindRunnable)
         if (geofence?.phase == TripGeofence.Phase.BEFORE_DEPARTURE) armBlindTimer()
         // 알람을 끈 직후 아직 집이면 "지금 나가도 늦나" 를 확인한다(출발 전 재계획).
-        handler.removeCallbacks(preDepartureRunnable)
-        preDepartureCalls = 0
-        if (geofence?.phase == TripGeofence.Phase.BEFORE_DEPARTURE) startPreDepartureChecks(parsed, redelivered)
 
         // 밀린 관측이 있으면 이 기회에 올린다.
         scope.launch { queue.flush() }
@@ -379,7 +357,6 @@ class TripTrackingService : Service() {
                             NotificationManagerCompat.from(this@TripTrackingService)
                                 .cancel(AlarmNotifications.NOTIFICATION_REROUTE)
                         }
-                        liveRouteGate.reset()
                     }
 
                     is EventRepository.Result.Failure -> {
@@ -397,101 +374,6 @@ class TripTrackingService : Service() {
         }
     }
 
-    // Partly AI-generated (Claude)
-    /**
-     * 알람을 끈 직후와 출발 10분 전, 집을 나서기 전에 "지금 나가도 늦나" 를 최대 두 번 확인한다
-     * ([PreDepartureCheck]). 지금 있는 곳은 출발지로 본다 — 출발 전 단계라 사용자는 거기 있고,
-     * 실내 GPS 를 기다릴 필요가 없다.
-     *
-     * 서버가 허용한다(`routes/live` 는 출발 전에도 되고, `reroute` 는 일정 시작 ±6시간 안이면 된다).
-     * 일정에 저장한 경로는 건드리지 않는다. 이동 중 지도·카드가 쓰는 [LiveRouteStore] 에도 쓰지 않는다.
-     */
-    private fun startPreDepartureChecks(current: AlarmSchedule, redelivered: Boolean) {
-        if (!current.canDetectDeparture) return
-        val now = System.currentTimeMillis()
-        // 다시 전달된 경우 첫 확인은 이미 했다고 본다. 두 번째가 한 번 되풀이될 수는 있다.
-        val firstAt = if (redelivered) {
-            preDepartureCalls = 1
-            now - PreDepartureCheck.MIN_GAP_MILLIS
-        } else {
-            runPreDepartureCheck()
-            now
-        }
-        val secondAt = PreDepartureCheck.secondCallAtMillis(
-            current.departByMillis,
-            firstAt,
-            current.startAtMillis,
-        ) ?: return
-        handler.postDelayed(preDepartureRunnable, (secondAt - now).coerceAtLeast(0L))
-    }
-    // Partly AI-generated (Claude)
-    private fun runPreDepartureCheck() {
-        val current = schedule ?: return
-        val fence = geofence ?: return
-        if (fence.phase != TripGeofence.Phase.BEFORE_DEPARTURE) return
-        if (preDepartureCalls >= PreDepartureCheck.MAX_CALLS) return
-        if (!ApiClient.isReady) return
-        val lat = current.homeLat ?: return
-        val lng = current.homeLng ?: return
-        preDepartureCalls++
-        val sessionGeneration = liveRouteSessionGeneration
-        scope.launch {
-            val result = repository.liveRoute(current.eventId, GeoPoint(lat, lng), preDeparture = true)
-            val route = (result as? EventRepository.Result.Success)?.data
-            if (route == null) {
-                Log.i(TAG, "출발 전 경로 확인 결과 없음: 일정 ${current.eventId}")
-                return@launch
-            }
-            withContext(Dispatchers.Main) {
-                // 그 사이 출발했거나 다른 추적이 시작됐으면 버린다.
-                if (liveRouteSessionGeneration != sessionGeneration ||
-                    schedule?.eventId != current.eventId ||
-                    geofence?.phase != TripGeofence.Phase.BEFORE_DEPARTURE
-                ) {
-                    return@withContext
-                }
-                TripLiveState.publishPreDeparture(
-                    TripLiveState.PreDepartureSnapshot(current.eventId, System.currentTimeMillis(), route)
-                )
-                Log.i(TAG, "출발 전 경로 확인: 일정 ${current.eventId}, 늦음=${route.lateMinutes}")
-                // 알림은 바꿀 경로가 있을 때만. 경로가 없는 "늦음" 은 화면 카드로만 보여 준다.
-                if (route.suggestion != null) {
-                    maybeAlertReroute(current, route, PreDepartureCheck.headline(route.lateMinutes))
-                }
-            }
-        }
-    }
-    // Partly AI-generated (Claude)
-    /** 새 현재-위치 경로를 받은 뒤. 늦고 더 일찍 닿는 경로가 있으면 한 번 알린다([RerouteAlert]). */
-    private fun maybeAlertReroute(
-        current: AlarmSchedule,
-        route: LiveRoute,
-        title: String = RerouteAlert.headline(route.lateMinutes),
-    ) {
-        val suggestion = route.suggestion ?: return
-        val notify = RerouteAlert.shouldNotify(
-            suggestion = suggestion,
-            notifiedKeys = rerouteNotifiedKeys,
-            nowMillis = System.currentTimeMillis(),
-            ridingUntilMillis = ridingUntilMillis,
-            remainingMinutes = route.minutes,
-            remainingMeters = geofence?.distanceToDestinationM,
-        )
-        if (!notify) return
-        rerouteNotifiedKeys += suggestion.routeKey
-        // 다시 시작해도 같은 제안을 또 띄우지 않는다.
-        persistProgress()
-        postRerouteNotification(
-            eventId = current.eventId,
-            title = title,
-            text = RerouteAlert.body(suggestion),
-            switchIntent = reroutePendingIntent(current.eventId, suggestion.routeKey),
-        )
-        Log.i(TAG, "경로 바꾸기 제안: 일정 ${current.eventId} → ${suggestion.routeKey}")
-    }
-
-    // Partly AI-generated (Claude)
-    /** 이동 중인 추적의 단계·기준 시각을 디스크에 남긴다([TripProgress]). 집을 나선 뒤에만 */
     private fun persistProgress() {
         val current = schedule ?: return
         val fence = geofence ?: return
@@ -553,10 +435,8 @@ class TripTrackingService : Service() {
         handler.removeCallbacks(deadlineRunnable)
         handler.removeCallbacks(blindRunnable)
         handler.removeCallbacks(manualGraceRunnable)
-        handler.removeCallbacks(preDepartureRunnable)
         // 이동이 끝났다. 바꾸자는 제안도 더 이상 뜻이 없다.
         runCatching { NotificationManagerCompat.from(this).cancel(AlarmNotifications.NOTIFICATION_REROUTE) }
-        liveRouteSessionGeneration++
         runCatching { fused.removeLocationUpdates(callback) }
         // 남은 관측을 마지막으로 한 번 올려 본다. scope 를 바로 닫으면
         // 이 요청이 취소되므로 별도 스코프를 쓴다.
@@ -577,7 +457,6 @@ class TripTrackingService : Service() {
         schedule?.eventId?.let(activeTripStore::clear)
         // 정상으로 끝났다. 점검도 멈춘다. (추적 없이 알림 버튼으로 잠깐 뜬 인스턴스는 건드리지 않는다)
         if (schedule != null) TripWatchdog.cancel(this)
-        liveRouteGate.reset()
         TripLiveState.clearTracking()
         Log.i(TAG, "추적 종료 (대기 관측 ${pending}건)")
         super.onDestroy()
@@ -654,10 +533,7 @@ class TripTrackingService : Service() {
             )
         )
 
-        // 위치를 계속 받는 포그라운드 서비스가 경로 갱신도 소유한다. Activity가
-        // STOPPED/파괴된 동안에도 이 지점은 10초마다 실행되고, 게이트가 실제
-        // 서버 호출을 최대 1분에 한 번으로 제한한다.
-        maybeRefreshLiveRoute(current, fix, fence.phase)
+        // 진행률·이탈·도착 판정은 기기 안에서 계속 처리한다. 측위 좌표로 서버 경로를 조회하지 않는다.
 
         when (decision) {
             is TripEvent.Departed -> {
@@ -725,8 +601,7 @@ class TripTrackingService : Service() {
 
         // 출발했으니 출발 전 확인은 끝이다. 알린 제안 키는 이번 이동 동안 그대로 두어 같은 제안을 다시 알리지 않는다.
         if (TripTrackingLogic.leftHome(phaseBefore, fence.phase)) {
-            handler.removeCallbacks(preDepartureRunnable)
-            TripLiveState.clearPreDeparture(current.eventId)
+                TripLiveState.clearPreDeparture(current.eventId)
         }
         // 판정에 쓸 위치를 받았으면 "위치를 못 받는 중" 시계를 다시 잰다. 나간 뒤에는 필요 없다.
         when {
@@ -762,72 +637,6 @@ class TripTrackingService : Service() {
         queue.enqueue(observation)
         scope.launch { queue.flush() }
     }
-
-    /** 현재 위치부터 목적지까지의 최신 경로를 백그라운드에서도 갱신한다. */
-    private fun maybeRefreshLiveRoute(
-        current: AlarmSchedule,
-        fix: LocationFix,
-        phase: TripGeofence.Phase,
-    ) {
-        if (phase != TripGeofence.Phase.IN_TRANSIT) return
-        if (fix.accuracyM > TripGeofence.MAX_ACCURACY_M) return
-        if (!ApiClient.isReady) return
-
-        val here = GeoPoint(fix.lat, fix.lng)
-        val token = liveRouteGate.beginIfDue(SystemClock.elapsedRealtime()) ?: return
-        val sessionGeneration = liveRouteSessionGeneration
-
-        liveRouteJob = scope.launch {
-            val result = repository.liveRoute(current.eventId, here)
-            val route = (result as? EventRepository.Result.Success)?.data
-
-            // 다른 ACTION_START/종료 뒤 도착한 응답은 디스크와 화면에 쓰지 않는다.
-            if (!liveRouteGate.finish(token)) return@launch
-            if (!isCurrentLiveRouteSession(current.eventId, sessionGeneration)) return@launch
-
-            if (route == null) {
-                val reason = (result as? EventRepository.Result.Failure)?.message
-                    ?: "쓸 수 있는 경로가 없어요"
-                Log.w(TAG, "현재 위치 경로 갱신 실패: $reason")
-                // 직전 성공 경로는 유지한다. 잠깐의 지하 구간 때문에 지도를
-                // 출발지 경로로 되돌리는 것보다, 다음 1분 재시도까지 마지막으로
-                // 확인된 현재-위치 경로를 보여 주는 편이 안전하다.
-                return@launch
-            }
-
-            val snapshot = LiveRouteStore.Snapshot(
-                eventId = current.eventId,
-                origin = here,
-                fetchedAtMillis = System.currentTimeMillis(),
-                route = route,
-            )
-            // 디스크 기록이 먼저다. 직후 Activity가 재생성돼도 Flow에는 있는데
-            // 디스크에는 없는 짧은 창이 생기지 않게 한다.
-            var published = false
-            val saved = liveRouteStore.save(snapshot) {
-                if (isCurrentLiveRouteSession(current.eventId, sessionGeneration)) {
-                    TripLiveState.publishLiveRoute(snapshot)
-                    published = true
-                }
-            }
-            if (!saved) {
-                Log.i(TAG, "로그아웃 상태라 현재 위치 경로를 저장하지 않는다")
-                return@launch
-            }
-            if (!published) {
-                // save 직후 새 여정이 시작됐다. 방금 쓴 사본도 남기지 않는다.
-                liveRouteStore.clear(current.eventId)
-                return@launch
-            }
-            Log.i(TAG, "현재 위치 경로 갱신: 일정 ${current.eventId}, ${route.minutes}분")
-            withContext(Dispatchers.Main) { maybeAlertReroute(current, route) }
-        }
-    }
-
-    private fun isCurrentLiveRouteSession(eventId: Long, generation: Long): Boolean =
-        liveRouteSessionGeneration == generation &&
-            schedule?.eventId == eventId &&
-            geofence?.phase == TripGeofence.Phase.IN_TRANSIT
 
     // --- 위치 요청 ---------------------------------------------------------
 

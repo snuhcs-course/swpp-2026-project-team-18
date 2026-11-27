@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -97,7 +100,7 @@ fun PlacePicker(
                 onValueChange = onQueryChange,
                 placeholder = label,
                 enabled = enabled && !state.searching,
-                minHeight = 44.dp,
+                minHeight = 48.dp,
                 leadingIcon = LineIcons.search,
                 imeAction = ImeAction.Search,
                 onImeAction = onSearch,
@@ -218,18 +221,18 @@ private fun SelectedPlaceRow(
                 Text(
                     text = "카카오맵에서 평점·사진 보기 ›",
                     color = JitColor.Blue,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable(enabled = enabled) { onOpenPlaceUrl(url) },
+                    modifier = Modifier.minimumInteractiveComponentSize().clickable(enabled = enabled, role = Role.Button) { onOpenPlaceUrl(url) },
                 )
             }
         }
         Text(
             text = "변경",
             color = JitColor.Accent,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.clickable(enabled = enabled, onClick = onClear),
+            modifier = Modifier.minimumInteractiveComponentSize().clickable(enabled = enabled, role = Role.Button, onClick = onClear),
         )
     }
 }
@@ -256,20 +259,20 @@ private fun ResultHeader(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(text = "검색 결과", color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text(text = "검색 결과", color = JitColor.TextSecondary, fontSize = 12.sp)
             state.countLabel?.let {
-                Text(text = " · $it", color = JitColor.TextSecondary, fontSize = 10.sp)
+                Text(text = " · $it", color = JitColor.TextSecondary, fontSize = 12.sp)
             }
             Spacer(Modifier.weight(1f))
             if (onOpenMap != null) {
                 Text(
                     text = "지도",
                     color = JitColor.Accent,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .clickable(enabled = enabled, onClick = onOpenMap)
+                        .minimumInteractiveComponentSize().clickable(enabled = enabled, role = Role.Button, onClick = onOpenMap)
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                 )
             }
@@ -286,12 +289,17 @@ private fun ResultHeader(
                 )
                 Spacer(Modifier.width(6.dp))
                 SortChip(
-                    text = "거리순",
+                    text = "가까운 순",
                     active = state.sort == PlaceSearchResponse.SORT_DISTANCE,
                     enabled = enabled,
                     onClick = { onSortChange(PlaceSearchResponse.SORT_DISTANCE) },
                 )
             }
+            Text(
+                text = "선택한 출발지·집 기준으로 찾아요",
+                color = JitColor.TextSecondary,
+                fontSize = 12.sp,
+            )
         }
     }
 }
@@ -354,7 +362,7 @@ private fun ResultList(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = enabled, onClick = onLoadMore)
+                    .minimumInteractiveComponentSize().clickable(enabled = enabled, role = Role.Button, onClick = onLoadMore)
                     .padding(vertical = 13.dp),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
@@ -376,7 +384,7 @@ private fun ResultRow(
         modifier = Modifier
             .testTag("place_result_${place.name}")
             .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
+            .minimumInteractiveComponentSize().clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -402,9 +410,9 @@ private fun ResultRow(
                 Text(
                     text = "카카오맵에서 평점·사진 보기 ›",
                     color = JitColor.Blue,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable(enabled = enabled) { onOpenPlaceUrl(url) },
+                    modifier = Modifier.minimumInteractiveComponentSize().clickable(enabled = enabled, role = Role.Button) { onOpenPlaceUrl(url) },
                 )
             }
         }
@@ -436,18 +444,18 @@ private fun MetaLine(place: PlaceSearchItem) {
             Text(
                 text = distance,
                 color = JitColor.Green,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
             )
             if (address != null) {
-                Text(text = " · ", color = JitColor.TextSecondary, fontSize = 11.sp)
+                Text(text = " · ", color = JitColor.TextSecondary, fontSize = 12.sp)
             }
         }
         if (address != null) {
             Text(
                 text = address,
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 maxLines = 1,
             )
         }
@@ -459,7 +467,7 @@ private fun CategoryChip(text: String) {
     Text(
         text = text,
         color = JitColor.TextSecondary,
-        fontSize = 10.sp,
+        fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier
             .clip(CircleShape)
@@ -473,12 +481,12 @@ private fun SortChip(text: String, active: Boolean, enabled: Boolean, onClick: (
     Text(
         text = text,
         color = if (active) JitColor.Bg else JitColor.TextSecondary,
-        fontSize = 10.sp,
+        fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier
             .clip(CircleShape)
             .background(if (active) JitColor.Accent else JitColor.Surface2)
-            .clickable(enabled = enabled, onClick = onClick)
+            .minimumInteractiveComponentSize().clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 5.dp),
     )
 }
@@ -493,10 +501,10 @@ private fun SquareButton(
 ) {
     Box(
         modifier = Modifier
-            .size(46.dp)
+            .size(48.dp)
             .clip(RoundedCornerShape(JitRadius.Button))
             .background(JitColor.Surface2)
-            .clickable(enabled = enabled, onClick = onClick),
+            .minimumInteractiveComponentSize().clickable(enabled = enabled, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Text(text = text, color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -508,10 +516,10 @@ private fun SearchButton(onClick: () -> Unit, loading: Boolean, enabled: Boolean
     Box(
         modifier = Modifier
             .testTag("place_search")
-            .size(46.dp)
+            .size(48.dp)
             .clip(RoundedCornerShape(JitRadius.Button))
             .background(JitColor.Surface2)
-            .clickable(enabled = enabled && !loading, onClick = onClick),
+            .clickable(enabled = enabled && !loading, role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         if (loading) {
@@ -521,7 +529,7 @@ private fun SearchButton(onClick: () -> Unit, loading: Boolean, enabled: Boolean
                 strokeWidth = 2.dp,
             )
         } else {
-            Text("검색", color = JitColor.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Text("검색", color = JitColor.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
     }
 }

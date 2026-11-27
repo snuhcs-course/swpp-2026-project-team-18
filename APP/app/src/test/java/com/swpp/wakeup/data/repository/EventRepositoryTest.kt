@@ -562,7 +562,7 @@ class EventRepositoryTest {
 
     // Partly AI-generated (Claude)
     @Test
-    fun `출발 전 확인은 context pre_departure 를 싣고 기본 호출은 싣지 않는다`() = runTest {
+    fun `출발 전과 이동 중 측위 경로 조회는 네트워크를 호출하지 않는다`() = runTest {
         val bodies = mutableListOf<LiveRouteRequest>()
         val api = object : FakeEventsApi() {
             override suspend fun liveRoute(body: LiveRouteRequest): Response<LiveRouteResponse> {
@@ -574,10 +574,8 @@ class EventRepositoryTest {
         val here = GeoPoint(37.48, 126.95)
         assertTrue(repo.liveRoute(7L, here, preDeparture = true) is Result.Success)
         assertTrue(repo.liveRoute(7L, here) is Result.Success)
-        val gson = Gson()
-        assertEquals("pre_departure", gson.toJsonTree(bodies[0]).asJsonObject.get("context").asString)
-        assertFalse(gson.toJsonTree(bodies[1]).asJsonObject.has("context"))
-        assertEquals(7L, gson.toJsonTree(bodies[1]).asJsonObject.get("event_id").asLong)
+        assertTrue(bodies.isEmpty())
+        assertEquals(Result.Success(null), repo.liveRoute(7L, here))
     }
 
     // --- 삭제·태그 ------------------------------------------------------------

@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.swpp.wakeup.ui.report.ReportPreviewData
 import com.swpp.wakeup.ui.report.WeeklyReportScreen
@@ -17,6 +18,13 @@ import java.time.LocalDate
 /** 주간 리포트에 서버 요약 문장이 그대로 보인다(11-18). 요약이 없으면 그 자리만 비운다 */
 @RunWith(AndroidJUnit4::class)
 class ReportSummaryCardTest {
+
+    @Test
+    fun AI_요약에는_출처_라벨을_보인다() {
+        val report = ReportPreviewData.exampleWeek
+        show(report.copy(summary = com.swpp.wakeup.domain.model.ReportSummary("한 주를 정리했어요", isAi = true)))
+        compose.onNodeWithText("AI 요약").performScrollTo().assertExists()
+    }
 
     @get:Rule
     val compose = createComposeRule()

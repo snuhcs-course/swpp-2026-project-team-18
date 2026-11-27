@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -251,7 +252,7 @@ private fun Raise(onChangeTime: (() -> Unit)?) {
             Row(
                 modifier = Modifier
                     .testTag("on_time_change_time")
-                    .height(36.dp)
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(JitColor.Surface2)
                     .clickable(role = Role.Button, onClick = change)

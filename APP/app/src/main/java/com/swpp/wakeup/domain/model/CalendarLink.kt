@@ -85,7 +85,7 @@ data class CalendarOnboardingState(
 
     fun submitLabel(link: CalendarLinkState): String {
         val count = chosen(link).size
-        return if (count > 0) "${count}개 연동하고 시작하기" else "연동할 캘린더를 고를 것"
+        return if (count > 0) "${count}개 연동하고 시작하기" else "연동할 캘린더를 골라 주세요"
     }
 }
 

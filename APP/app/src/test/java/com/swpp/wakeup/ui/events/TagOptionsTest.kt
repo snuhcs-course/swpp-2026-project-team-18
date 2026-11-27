@@ -20,8 +20,8 @@ class TagOptionsTest {
         val options = tagOptionsOf(listOf(tag("class", "수업", 0.9), tag("exam", "시험", 0.99)))
         assertEquals(listOf("class", "exam"), options.map { it.key })
         assertEquals(listOf("수업", "시험"), options.map { it.label })
-        assertEquals("τ 0.90", options[0].tau)
-        assertEquals("τ 0.99", options[1].tau)
+        assertEquals("목표 90%", options[0].tau)
+        assertEquals("목표 99%", options[1].tau)
     }
 
     @Test

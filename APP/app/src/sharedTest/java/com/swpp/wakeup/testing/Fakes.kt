@@ -363,6 +363,7 @@ open class FakeReportsApi : ReportsApi {
 
 // Partly AI-generated (Claude)
 open class FakeSavedPlacesApi : SavedPlacesApi {
+    override suspend fun rename(id: Long, body: com.swpp.wakeup.data.remote.SavedPlaceRename): Response<SavedPlaceDto> = unexpected("savedPlaces.rename")
     override suspend fun list(): Response<SavedPlacesListDto> = unexpected("savedPlaces.list")
     override suspend fun create(body: SavedPlaceInput): Response<SavedPlaceDto> = unexpected("savedPlaces.create")
     override suspend fun delete(id: Long): Response<Unit> = unexpected("savedPlaces.delete")

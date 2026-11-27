@@ -35,8 +35,6 @@ internal fun tripObservationOf(
         event = eventId,
         kind = kind,
         observedAt = isoAt(fix.atMillis, zone),
-        lat = fix.lat,
-        lng = fix.lng,
         accuracyM = fix.accuracyM.toDouble(),
         distanceM = distanceM,
         dwellSeconds = dwellMillis?.takeIf { arrival }?.let { (it / 1000).toInt() },
@@ -51,8 +49,8 @@ internal fun tripObservationOf(
  * "도착했어요" 를 누른 것. `detector=manual` 도착 관측이다(백엔드 P0 수동 도착).
  *
  * GPS 가 도착을 못 잡았을 때의 보조다. 서버는 GPS 도착이 있으면 그쪽을 먼저 쓰고, 시작 + 1시간
- * 뒤에 누른 것은 읽을 때 거른다. 최근 위치가 있으면 같이 보낸다(오차는 따지지 않는다).
- * 위치가 없으면 lat·lng 를 둘 다 뺀다. 목적지를 모르면 거리도 뺀다.
+ * 뒤에 누른 것은 읽을 때 거른다. 최근 위치로 기기에서 거리·정확도만 계산하고 좌표는 보내지 않는다.
+ * 위치가 없거나 목적지를 모르면 거리도 뺀다.
  *
  * @param fix [FIX_MAX_AGE_MILLIS] 안의 최근 위치. 없으면 null
  */
@@ -72,8 +70,6 @@ internal fun manualArrivalOf(
         kind = TripObservationInput.KIND_ARRIVE,
         detector = TripObservationInput.DETECTOR_MANUAL,
         observedAt = isoAt(atMillis, zone),
-        lat = usable?.lat,
-        lng = usable?.lng,
         accuracyM = usable?.accuracyM?.takeIf { it.isFinite() && it >= 0f }?.toDouble(),
         distanceM = usable?.let { f -> destination?.let { TripGeofence.distanceMeters(f.point, it) } },
         clientUuid = clientUuid,

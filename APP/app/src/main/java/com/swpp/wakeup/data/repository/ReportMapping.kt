@@ -417,6 +417,7 @@ private fun Placed.toLateLine(): LateDayLine? {
 internal const val CAUSE_UNKNOWN_SHORT = "원인을 재지 못했어요"
 
 private val KNOWN_CAUSES = setOf(
+    LateCauseDto.LABEL_WAKE,
     LateCauseDto.LABEL_PREP,
     LateCauseDto.LABEL_TRAVEL,
     LateCauseDto.LABEL_DEPART,
@@ -529,7 +530,7 @@ internal fun OutcomeDto.toMorning(zone: ZoneId, weekLateCount: Int): MorningOutc
         },
         contextLine = listOfNotNull(heading, alarmPart).joinToString(" · "),
         confidenceLine = onTimeProbability?.let { "앱이 본 정시 확률 ${ProbabilityRule.displayLabel(it)}" }
-            ?: tau?.let { "적용 τ ${tauLabel(it)}" },
+            ?: tau?.let { "목표 정시 도착 확률 ${ProbabilityRule.displayLabel((it * 100).toInt())}" },
         rows = rows,
         arrival = arrivalRow(planned?.arriveAt, actual?.arriveAt, outcome, zone),
         cause = if (outcome == OutcomeResult.LATE) causeExplanation() else null,
@@ -625,6 +626,7 @@ private fun overrun(value: Double?): String =
     value?.let(::halfUp)?.takeIf { it >= 1 }?.let { "${it}분 " }.orEmpty()
 
 private val STAGE_NAMES = mapOf(
+    LateCauseDto.LABEL_WAKE to "기상",
     LateCauseDto.LABEL_PREP to "준비",
     LateCauseDto.LABEL_DEPART to "출발",
     LateCauseDto.LABEL_TRAVEL to "이동",
@@ -642,6 +644,11 @@ private fun OutcomeDto.causeExplanation(): CauseExplanation {
     val biggest = "$stages 중 계획보다 가장 크게 늘어난 단계예요"
     val missing = unmeasured.orEmpty()
     return when (cause) {
+        LateCauseDto.LABEL_WAKE -> CauseExplanation(
+            title = "늦게 일어났어요",
+            body = "알람을 끈 시각이 계획한 기상 시각보다 늦었어요",
+            action = "알람을 미루는 횟수를 줄이거나 알람 시각을 앞당겨 보세요",
+        )
         LateCauseDto.LABEL_TRAVEL -> CauseExplanation(
             title = "이동이 ${overrun(deviation?.travelOver)}더 걸렸어요",
             body = biggest,

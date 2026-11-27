@@ -56,11 +56,12 @@ data class TripObservationInput(
     /** 판정 시각. ISO 8601 (오프셋 포함) */
     @SerializedName("observed_at") val observedAt: String,
     /**
-     * 위치. **수동 도착(`detector=manual`)은 없을 수 있다.** 그때는 lat·lng 를 둘 다
-     * 빼고 보낸다(서버 제약 `obs_lat_lng_together`). GPS 는 넷 다 필수다.
+     * 이전 앱의 큐/호출부와 소스 호환만 유지한다. Gson은 transient 필드를 읽지도 쓰지도
+     * 않으므로 옛 큐에 좌표가 있어도 업로드하지 않는다. 위치 판정은 기기에서만 한다.
+     * 서버의 obs_gps_has_location 제약 해제와 기존 좌표 삭제를 먼저 배포해야 한다.
      */
-    val lat: Double?,
-    val lng: Double?,
+    @Transient val lat: Double? = null,
+    @Transient val lng: Double? = null,
     /** 판정에 쓴 fix 의 오차 반경(m). 서버가 GPS 의 50m 초과를 거부한다. 수동은 아무 값이나 받는다 */
     @SerializedName("accuracy_m") val accuracyM: Double?,
     /** 기준점까지 거리(m). 출발은 집, 도착은 목적지 기준. 모르면 null */

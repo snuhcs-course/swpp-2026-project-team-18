@@ -25,6 +25,8 @@ import com.swpp.wakeup.domain.model.takeCodePoints
 import com.swpp.wakeup.domain.model.SocialProvider
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /**
  * 인증 저장소. back-spec.md 5.1.
@@ -134,7 +136,7 @@ class AuthRepository(
         if (response.isSuccessful && body?.minLength != null &&
             body.lettersAndDigits != null && body.messages != null
         ) Result.success(body)
-        else Result.failure(IOException("비밀번호 조건을 확인하지 못했다. 잠시 후 다시 입력한다."))
+        else Result.failure(IOException("비밀번호 조건을 확인하지 못했어요. 잠시 뒤 다시 입력해 주세요"))
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {
@@ -225,6 +227,9 @@ class AuthRepository(
         newPasswordConfirm: String,
     ): PasswordChangeResult = try {
         val response = api.changePassword(PasswordChangeRequest(current, newPassword, newPasswordConfirm))
+        // Settings owner may have logged out while an uncooperative transport was returning.
+        // Check before updating tokens, rather than relying only on the UI's stale-result guard.
+        currentCoroutineContext().ensureActive()
         if (response.isSuccessful) {
             val access = response.body()?.access?.trim().orEmpty()
             val refresh = response.body()?.refresh?.trim().orEmpty()

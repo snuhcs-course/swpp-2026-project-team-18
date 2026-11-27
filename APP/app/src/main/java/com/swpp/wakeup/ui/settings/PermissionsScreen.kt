@@ -163,7 +163,10 @@ internal fun rememberDevicePermissions(): MeTabLogic.Permissions {
 }
 
 internal fun readDevicePermissions(context: Context): MeTabLogic.Permissions = MeTabLogic.Permissions(
-    notifications = NotificationManagerCompat.from(context).areNotificationsEnabled(),
+    notifications = NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+        context.getSystemService(NotificationManager::class.java)
+            ?.getNotificationChannel(com.swpp.wakeup.alarm.AlarmNotifications.CHANNEL_ALARM)
+            ?.importance != NotificationManager.IMPORTANCE_NONE,
     // Android 14 부터 알람 · 전화 앱이 아니면 사용자가 꺼 둘 수 있다. 읽지 못하면 켜진 것으로 둔다.
     fullScreen = context.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() ?: true,
     preciseLocation = LocationPermissions.granted(context),
@@ -177,8 +180,15 @@ internal fun readDevicePermissions(context: Context): MeTabLogic.Permissions = M
 internal fun openPermissionSettings(context: Context, kind: MeTabLogic.PermissionKind) {
     val packageUri = "package:${context.packageName}".toUri()
     val intent = when (kind) {
-        MeTabLogic.PermissionKind.NOTIFICATIONS -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        MeTabLogic.PermissionKind.NOTIFICATIONS -> {
+            val channelBlocked = context.getSystemService(NotificationManager::class.java)
+                ?.getNotificationChannel(com.swpp.wakeup.alarm.AlarmNotifications.CHANNEL_ALARM)
+                ?.importance == NotificationManager.IMPORTANCE_NONE
+            Intent(if (NotificationManagerCompat.from(context).areNotificationsEnabled() && channelBlocked)
+                Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS else Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                .putExtra(Settings.EXTRA_CHANNEL_ID, com.swpp.wakeup.alarm.AlarmNotifications.CHANNEL_ALARM)
+        }
         MeTabLogic.PermissionKind.FULL_SCREEN -> Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, packageUri)
         MeTabLogic.PermissionKind.LOCATION -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
         // "항상 허용" 은 앱 안 대화상자로 줄 수 없다(Android 11+). 앱 정보 › 권한 › 위치에서 고른다.

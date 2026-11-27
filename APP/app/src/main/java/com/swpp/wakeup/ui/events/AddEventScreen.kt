@@ -98,7 +98,7 @@ internal fun tagOptionsOf(tags: List<com.swpp.wakeup.data.remote.EventTagDto>): 
         TagOption(
             key = tag.key,
             label = tag.label,
-            tau = tag.defaultTau?.let { "τ ${"%.2f".format(java.util.Locale.ROOT, it)}" } ?: "프로필 기본",
+            tau = tag.defaultTau?.let { "목표 ${com.swpp.wakeup.domain.model.ProbabilityRule.displayLabel((it * 100).toInt())}" } ?: "프로필 기본",
             custom = tag.custom == true,
         )
     }
@@ -485,7 +485,7 @@ fun AddEventScreen(
             Text(
                 text = it,
                 color = JitColor.Accent,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -511,7 +511,7 @@ fun AddEventScreen(
             Text(
                 text = "비우면 장소 이름을 제목으로 써요",
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 modifier = Modifier.padding(start = 72.dp).testTag("title_hint"),
             )
         }
@@ -616,7 +616,7 @@ internal fun IncludePrepRow(checked: Boolean, enabled: Boolean, onChange: (Boole
             Text(
                 text = if (checked) "준비 시간을 넣어 알람을 앞당겨요" else "끄면 이동 시간만 계산해요",
                 color = JitColor.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         }
         Spacer(Modifier.width(12.dp))
@@ -972,7 +972,7 @@ private fun TagDropdown(
                     fontWeight = FontWeight.Medium,
                 )
                 Spacer(Modifier.weight(1f))
-                Text(current.tau, color = JitColor.TextSecondary, fontSize = 11.sp)
+                Text(current.tau, color = JitColor.TextSecondary, fontSize = 12.sp)
                 Spacer(Modifier.width(10.dp))
                 Text(
                     text = if (expanded) "▴" else "▾",
@@ -1002,7 +1002,7 @@ private fun TagDropdown(
                                 Text(
                                     text = if (on) "✓" else " ",
                                     color = JitColor.Accent,
-                                    fontSize = 11.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
                                 )
                                 Spacer(Modifier.width(8.dp))
@@ -1016,7 +1016,7 @@ private fun TagDropdown(
                                 Text(
                                     text = option.tau,
                                     color = JitColor.TextSecondary,
-                                    fontSize = 10.sp,
+                                    fontSize = 12.sp,
                                 )
                                 // 내가 만든 종류만 이름 바꾸기·지우기가 된다(전역 종류는 서버가 404).
                                 // 줄을 누르면 고르고, 이 버튼을 누르면 고르지 않고 대화상자만 연다.
@@ -1031,7 +1031,7 @@ private fun TagDropdown(
                                         contentPadding = PaddingValues(horizontal = 8.dp),
                                         modifier = Modifier.testTag("tag_edit_$editKey"),
                                     ) {
-                                        Text("편집", color = JitColor.Accent, fontSize = 11.sp)
+                                        Text("편집", color = JitColor.Accent, fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -1064,11 +1064,11 @@ private fun TagDropdown(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("종류", color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text("종류", color = JitColor.TextSecondary, fontSize = 12.sp)
             Text(
-                text = "시험·발표는 τ 를 높게",
+                text = "시험·발표처럼 늦으면 안 되는 일정은 알람을 여유 있게 잡아요",
                 color = JitColor.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         }
         body()
@@ -1084,7 +1084,7 @@ private fun EndpointError(text: String, tag: String) {
     Text(
         text = text,
         color = JitColor.Red,
-        fontSize = 11.sp,
+        fontSize = 12.sp,
         modifier = Modifier
             .fillMaxWidth()
             .testTag(tag),
@@ -1239,7 +1239,7 @@ private fun DestinationSection(
         )
     }
     if (!homeAvailable && recent.isEmpty() && selected == null) {
-        Text("장소를 검색해 골라 주세요", color = JitColor.TextSecondary, fontSize = 11.sp)
+        Text("장소를 검색해 골라 주세요", color = JitColor.TextSecondary, fontSize = 12.sp)
     }
     if (sameEndpoints) {
         Row(
@@ -1248,7 +1248,7 @@ private fun DestinationSection(
         ) {
             Icon(LineIcons.alert, contentDescription = null, tint = JitColor.Amber, modifier = Modifier.size(14.dp))
             Spacer(Modifier.width(6.dp))
-            Text(SameEndpoints.WARNING, color = JitColor.Amber, fontSize = 11.sp)
+            Text(SameEndpoints.WARNING, color = JitColor.Amber, fontSize = 12.sp)
         }
     }
     state.fieldErrors[AddField.DESTINATION]?.let { EndpointError(it, tag = "destination_error") }
@@ -1318,7 +1318,7 @@ private fun RepeatDaysRow(selected: Set<Int>, onToggle: (Int) -> Unit, enabled: 
             Text(
                 text = repeatSummary(selected),
                 color = JitColor.Accent,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 72.dp).testTag("repeat_summary"),
             )

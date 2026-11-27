@@ -35,46 +35,32 @@ class WeeklyReportReminderWorker(
 
     override suspend fun doWork(): Result {
         val context = applicationContext
-        try {
-            notifyIfDue(context, ZonedDateTime.now())
-        } finally {
-            WeeklyReportReminder.scheduleNext(context)
-        }
+        val tokens = TokenStore(context)
+        runWeeklyReminder(
+            now = ZonedDateTime.now(),
+            store = WeeklyReportReminderStore(context),
+            account = { tokens.email?.takeIf { tokens.isLoggedIn } },
+            fetch = { today -> fetchWeeklyReport(today, ApiClient.isReady) { ApiClient.reports } },
+            show = { message, week ->
+                WeeklyReportReminder.ensureChannel(context)
+                // lint가 권한 검사를 직접 볼 수 있게 실제 알림 호출과 같은 범위에 둔다.
+                val canPost = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.POST_NOTIFICATIONS,
+                ) == PackageManager.PERMISSION_GRANTED
+                if (canPost) {
+                    runCatching {
+                        NotificationManagerCompat.from(context).notify(
+                            WeeklyReportReminder.NOTIFICATION_ID,
+                            WeeklyReportReminder.notification(context, message, week),
+                        )
+                    }.onFailure { Log.e(TAG, "주간 리포트 알림 실패", it) }
+                } else {
+                    Log.w(TAG, "알림 권한이 없어 주간 리포트 알림을 띄우지 못한다")
+                }
+            },
+            reschedule = { WeeklyReportReminder.scheduleNext(context) },
+        )
         return Result.success()
-    }
-
-    private suspend fun notifyIfDue(context: Context, now: ZonedDateTime) {
-        val store = WeeklyReportReminderStore(context)
-        if (!store.enabled) return
-        // 18시를 넘겼거나, 이미 이번 주를 처리했거나, 알람 창보다 일찍 깼다. 다음 주(또는 오늘 12시)로 넘긴다.
-        if (!WeeklyReportReminderLogic.shouldNotify(now, store.lastNotifiedWeek)) return
-        val week = WeeklyReportReminderLogic.weekStart(now.toLocalDate())
-        // **무엇보다 먼저** 이번 주를 처리한 것으로 적는다. 보내지 않고 끝나는 길(로그아웃 · 일정 없음 · 예외)
-        // 에서 적지 않으면 다음 예약이 "지금" 이 되어 18시까지 계속 깨어난다.
-        store.lastNotifiedWeek = week
-        // 로그아웃 상태면 이번 주는 건너뛴다. 예약은 그대로 둔다.
-        if (!TokenStore(context).isLoggedIn) return
-
-        val message = reminderMessageFor(
-            fetchWeeklyReport(now.toLocalDate(), ApiClient.isReady) { ApiClient.reports },
-        ) ?: return
-
-        WeeklyReportReminder.ensureChannel(context)
-        // 권한 확인을 여기에 펼쳐 쓴다(AlarmReceiver 와 같은 이유 — lint MissingPermission 이 도우미 함수를 넘어 보지 못한다).
-        val canPost = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.POST_NOTIFICATIONS,
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!canPost) {
-            Log.w(TAG, "알림 권한이 없어 주간 리포트 알림을 띄우지 못한다")
-            return
-        }
-        runCatching {
-            NotificationManagerCompat.from(context).notify(
-                WeeklyReportReminder.NOTIFICATION_ID,
-                WeeklyReportReminder.notification(context, message, week),
-            )
-        }.onFailure { Log.e(TAG, "주간 리포트 알림 실패", it) }
     }
 
     companion object {
@@ -89,6 +75,30 @@ class WeeklyReportReminderWorker(
                     .enqueueUniqueWork(UNIQUE_NAME, ExistingWorkPolicy.KEEP, request)
             }.onFailure { Log.w(TAG, "주간 리포트 알림 작업 등록 실패", it) }
         }
+    }
+}
+
+/** 실기기 효과는 주입하고, 중복 방지·로그아웃·취소 이후 다음 예약은 JVM에서 검증한다. */
+internal suspend fun runWeeklyReminder(
+    now: ZonedDateTime,
+    store: WeeklyReportReminderStore,
+    account: () -> String?,
+    fetch: suspend (LocalDate) -> WeeklyFetch,
+    show: (WeeklyReportReminderLogic.Message, LocalDate) -> Unit,
+    reschedule: () -> Unit,
+) {
+    try {
+        if (!store.enabled || !WeeklyReportReminderLogic.shouldNotify(now, store.lastNotifiedWeek)) return
+        val week = WeeklyReportReminderLogic.weekStart(now.toLocalDate())
+        // 건너뛰거나 실패해도 같은 주를 계속 깨우지 않도록 요청 전에 처리 표시를 남긴다.
+        store.lastNotifiedWeek = week
+        val owner = account() ?: return
+        val message = reminderMessageFor(fetch(now.toLocalDate())) ?: return
+        // 서버 응답을 기다리는 동안 계정이 바뀌면 이전 사용자의 결과를 알리지 않는다.
+        if (account() != owner) return
+        show(message, week)
+    } finally {
+        reschedule()
     }
 }
 

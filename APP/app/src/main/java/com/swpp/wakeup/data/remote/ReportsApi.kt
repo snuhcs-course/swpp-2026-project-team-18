@@ -291,6 +291,8 @@ data class LateCauseDto(
         const val LABEL_PREP = "prep_over"
         const val LABEL_TRAVEL = "travel_over"
         const val LABEL_DEPART = "depart_late"
+        /** 알람 해제 로그로 서버가 판정해요. 앱에서 원인을 추측하지 않아요. */
+        const val LABEL_WAKE = "wake_late"
         const val LABEL_UNKNOWN = "unknown"
         const val LABEL_PLAN_TIGHT = "plan_too_tight"
     }

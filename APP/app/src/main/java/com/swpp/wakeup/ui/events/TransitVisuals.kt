@@ -6,11 +6,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,7 +80,7 @@ internal fun TransitSegmentBar(segments: RouteSegments, modifier: Modifier = Mod
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(18.dp),
+            .height(24.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         items.forEachIndexed { index, segment ->
@@ -91,7 +95,7 @@ internal fun TransitSegmentBar(segments: RouteSegments, modifier: Modifier = Mod
                 Text(
                     text = segment.minutesLabel,
                     color = Color(SegmentPalette.onFill(segment)),
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     softWrap = false,
@@ -99,6 +103,35 @@ internal fun TransitSegmentBar(segments: RouteSegments, modifier: Modifier = Mod
                     // 폰트 여백을 줄 상자에 넣어 글리프를 아래로 밀어낸다.
                     style = JitTextStyle.TightCentered,
                 )
+            }
+        }
+    }
+}
+
+/** Color always has a matching name so a route remains readable without distinguishing colors. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun TransitColorLegend(segments: List<RouteSegment>, neutralFill: Color? = null) {
+    val items = segments.distinctBy { it.kind to it.label }
+    if (items.isEmpty()) return
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().testTag("route_color_legend"),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        items.forEach { segment ->
+            val neutral = segment.kind == RouteSegment.Kind.WALK || segment.kind == RouteSegment.Kind.WAIT
+            val fill = if (neutral) neutralFill ?: Color(SegmentPalette.fill(segment)) else Color(SegmentPalette.fill(segment))
+            val label = when (segment.kind) {
+                RouteSegment.Kind.WALK -> "도보"
+                RouteSegment.Kind.WAIT -> "대기"
+                RouteSegment.Kind.BUS -> "버스 ${segment.label}".trim()
+                RouteSegment.Kind.SUBWAY -> segment.label.ifBlank { "지하철" }
+                else -> segment.label.ifBlank { "이동" }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.size(10.dp).clip(RoundedCornerShape(2.dp)).background(fill))
+                Text(label, color = JitColor.TextSecondary, fontSize = 12.sp)
             }
         }
     }
@@ -152,7 +185,7 @@ internal fun TransitLineChip(segment: RouteSegment) {
     Text(
         text = segment.label,
         color = Color(SegmentPalette.onFill(segment)),
-        fontSize = 9.sp,
+        fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
         style = JitTextStyle.TightCentered,
@@ -190,11 +223,12 @@ internal fun TransitLineChips(primary: RouteSegment, max: Int = MAX_LINE_CHIPS) 
                     Text(
                         text = "+${chips.size - shown.size}",
                         color = JitColor.TextSecondary,
-                        fontSize = 9.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         style = JitTextStyle.TightCentered,
                         modifier = Modifier
                             .testTag("line_chips_more")
+                            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                             .clickable(role = Role.Button, onClickLabel = "다른 버스 모두 보기") {
                                 expanded = true
                             }
@@ -226,7 +260,7 @@ internal fun MetricCells(cells: List<Pair<String, String>>) {
                     .background(JitColor.Surface2)
                     .padding(horizontal = 9.dp, vertical = 7.dp),
             ) {
-                Text(name, color = JitColor.TextSecondary, fontSize = 10.sp)
+                Text(name, color = JitColor.TextSecondary, fontSize = 12.sp)
                 // 빈 값이어도 줄 높이를 지키려고 공백 한 칸을 쓴다.
                 Text(value.ifEmpty { " " }, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
@@ -258,7 +292,7 @@ internal fun RouteBadges(badges: List<String>) {
             Text(
                 text = badge,
                 color = JitColor.Accent,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 modifier = Modifier

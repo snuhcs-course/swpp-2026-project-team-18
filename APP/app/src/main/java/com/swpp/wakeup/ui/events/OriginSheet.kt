@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -151,7 +152,7 @@ internal fun OriginSheet(
                     onClick = { onSavedHome(home) },
                 )
             }
-            // 검색·현재 위치로 고른 곳은 따로 한 줄로 보여 준다. 그래야 지금 무엇이 골라져 있는지 안다.
+            // 검색으로 고른 곳은 따로 한 줄로 보여 준다.
             if (pick == OriginPick.OTHER) {
                 OriginOption(
                     caption = "현재 출발지",
@@ -163,15 +164,6 @@ internal fun OriginSheet(
                     onClick = {},
                 )
             }
-            OriginOption(
-                caption = "지금 있는 곳에서 출발",
-                title = if (state.originLocating) "현재 위치를 확인하는 중" else "현재 위치",
-                selected = false,
-                icon = LineIcons.mapPin,
-                tag = "origin_opt_current",
-                enabled = enabled && !state.originLocating,
-                onClick = onUseCurrentLocation,
-            )
             OriginOption(
                 caption = "주소나 장소 이름으로 찾기",
                 title = "장소 검색",
@@ -203,8 +195,8 @@ internal fun OriginSheet(
             }
 
             Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("이번 알람의 출발지만 바뀌어요.", color = JitColor.TextSecondary, fontSize = 11.sp)
-                Text("저장된 집 주소는 그대로 유지돼요.", color = JitColor.TextSecondary, fontSize = 11.sp)
+                Text("이번 알람의 출발지만 바뀌어요.", color = JitColor.TextSecondary, fontSize = 12.sp)
+                Text("저장된 집 주소는 그대로 유지돼요.", color = JitColor.TextSecondary, fontSize = 12.sp)
             }
         }
     }
@@ -222,11 +214,13 @@ private fun OriginOption(
     accent: Boolean = false,
 ) {
     val shape = RoundedCornerShape(JitRadius.Card)
+    val selectedNow = selected
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(JitColor.Surface2)
+            .semantics { this.selected = selectedNow }
             .border(width = if (selected) 1.5.dp else 0.dp, color = if (selected) JitColor.Accent else JitColor.Surface2, shape = shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .testTag(tag)
@@ -234,7 +228,7 @@ private fun OriginOption(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(caption, color = JitColor.TextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(caption, color = JitColor.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 text = title,
                 color = if (accent) JitColor.Accent else JitColor.TextPrimary,
@@ -247,7 +241,7 @@ private fun OriginOption(
         Spacer(Modifier.width(10.dp))
         Icon(
             imageVector = if (selected) LineIcons.check else icon,
-            contentDescription = if (selected) "선택됨" else null,
+            contentDescription = null,
             tint = if (selected) JitColor.Accent else JitColor.TextSecondary,
             modifier = Modifier.size(18.dp),
         )

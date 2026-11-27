@@ -424,67 +424,13 @@ class EventRepository(
         Result.Success(choice)
     }
 
-    /**
-     * 지금 있는 곳부터 더 빠른 길. 이동 중에만 부른다.
-     *
-     * 성공하면 선택 경로가 이미 최단이어도 현재 위치 기준 경로가 온다. 그래야
-     * 도보·자동차나 대안 없는 대중교통도 출발지부터의 낡은 선을 계속 쓰지 않는다.
-     *
-     * 호출 간격은 [com.swpp.wakeup.domain.model.LiveRouteDecision] 이 정한다.
-     * 이 함수는 부르라고 하면 부르기만 한다 — 간격 판단을 여기 섞으면 시험할
-     * 수 없다.
-     *
-     * [preDeparture] 가 true 면 출발 전 확인(알람 끈 뒤, 출발 10분 전)이라고 서버에 알린다
-     * (`context: "pre_departure"`, reroute-api.md §4-1). 서버는 이 호출을 따로 기록하고 따로
-     * 센다. 기본 false 는 필드를 보내지 않아 이동 중 호출과 같다.
-     */
+    /** Device GPS stays on the device; legacy callers receive no remote live route. */
+    @Suppress("UNUSED_PARAMETER")
     suspend fun liveRoute(
         eventId: Long,
         here: GeoPoint,
         preDeparture: Boolean = false,
-    ): Result<LiveRoute?> = guard {
-        val response = api.liveRoute(
-            LiveRouteRequest(
-                eventId = eventId,
-                lat = here.lat,
-                lng = here.lng,
-                context = LIVE_CONTEXT_PRE_DEPARTURE.takeIf { preDeparture },
-            )
-        )
-        val body = unwrap(response) ?: return@guard Result.Failure(errorMessage(response))
-
-        // **"없다" 와 "확인하지 못했다" 를 가른다.** `degraded` 는 카카오 호출이
-        // 실패했다는 뜻이다. 그때 Success(null) 로 내리면 호출자가 "더 빠른 길이
-        // 없다" 로 읽고 이미 그려 둔 선을 지운다 — 1분에 한 번 실패할 때마다 선이
-        // 깜빡인다. 실패는 실패로 알려 이전 값을 그대로 두게 한다.
-        if (body.degraded) {
-            return@guard Result.Failure("경로를 확인하지 못했어요.")
-        }
-
-        val route = body.route ?: return@guard Result.Success(null)
-        val path = route.points.toGeoPoints()
-        val minutes = route.minutes ?: 0
-        // 성공 응답인데 선이나 소요시간이 없으면 "경로 없음" 으로 지우지 않는다.
-        // 깨진 응답은 실패로 올려 직전의 쓸 수 있는 선을 유지한다.
-        if (path.size < 2 || minutes <= 0) {
-            return@guard Result.Failure("경로를 확인하지 못했어요.")
-        }
-        Result.Success(
-            LiveRoute(
-                routeKey = route.routeKey.orEmpty(),
-                label = route.label?.trim()?.takeIf { it.isNotEmpty() },
-                minutes = minutes,
-                isAlternative = route.isAlternative,
-                fasterMinutes = route.fasterMinutes?.takeIf { it > 0 },
-                path = path,
-                lateMinutes = body.arrival?.lateMinutes?.takeIf { it >= 0 },
-                suggestion = body.switchSuggestion?.toSuggestion(),
-                arriveAtMillis = body.arrival?.arriveAt
-                    ?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() }
-                    ?.toInstant()?.toEpochMilli(),
-            )
-        )
-    }
+    ): Result<LiveRoute?> = Result.Success(null)
 
     // Partly AI-generated (Claude)
     /**
@@ -1474,10 +1420,10 @@ private fun prepSourceNote(plan: AlarmPlanDto, blockCount: Int): String {
     val blocks = if (blockCount > 0) "블록 ${blockCount}개" else "블록"
     return when (plan.prepSource) {
         AlarmPlanDto.PREP_OBSERVED ->
-            "기록으로 맞춤 · $blocks 의 실제 걸린 시간으로 맞췄어요"
+            "측정 · 기록으로 맞춤 · $blocks 의 실제 걸린 시간으로 맞췄어요"
 
         AlarmPlanDto.PREP_DECLARED_RANGE ->
-            "적어 둔 범위 기준 · $blocks. 실제 기록이 쌓이면 그 값으로 바뀌어요"
+            "적어 둔 범위 기준(고정) · $blocks. 실제 기록이 쌓이면 그 값으로 바뀌어요"
 
         // 준비 범위만으로는 확률이 나오지 않는다(이동 분산도 필요).
         AlarmPlanDto.PREP_DECLARED_POINT ->
@@ -1562,10 +1508,10 @@ internal fun AlarmPlanDto.toConfidence(): ConfidenceView {
  * 출처는 `kakao_*` 에 보정 꼬리(`+observed_route`/`+observed_global`)가 붙는 모양이다.
  */
 internal fun travelSourceNote(source: String?, sampleCount: Int? = null): String = when {
-    sampleCount != null && sampleCount > 0 -> "카카오 추정 · 이동 기록 ${sampleCount}회로 보정"
-    source?.contains("+observed_route") == true -> "카카오 추정 · 이 경로 이동 기록으로 보정"
-    source?.contains("+observed_global") == true -> "카카오 추정 · 전체 이동 기록으로 보정"
-    else -> "카카오 경로 추정"
+    sampleCount != null && sampleCount > 0 -> "고정 예상 · 카카오 추정 · 이동 기록 ${sampleCount}회로 보정"
+    source?.contains("+observed_route") == true -> "고정 예상 · 카카오 추정 · 이 경로 이동 기록으로 보정 · 횟수는 아직 알 수 없어요"
+    source?.contains("+observed_global") == true -> "고정 예상 · 카카오 추정 · 전체 이동 기록으로 보정 · 횟수는 아직 알 수 없어요"
+    else -> "고정 예상 · 카카오 경로 추정"
 }
 
 // AI-generated (Claude)
@@ -1617,6 +1563,7 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
                     it,
                     prepNote(plan, prepBlocks.size, prepEnabledByUser(includePrep, originLat, originPlaceId)),
                     PlanRow.Kind.PREP,
+                    if (plan.prepSource == AlarmPlanDto.PREP_OBSERVED) "측정 · 준비 기록" else "고정 · 설정한 준비 시간",
                 ),
             )
         }
@@ -1634,10 +1581,17 @@ internal fun EventDto.toPlanView(zone: ZoneId): AlarmPlanView? {
                     plan.routeSummary?.takeIf(String::isNotBlank)?.let(::add)
                 }
             }
-            add(PlanRow(label, it, bits.joinToString(" · "), PlanRow.Kind.TRAVEL))
+            val source = when {
+                (plan.travelSampleCount ?: 0) > 0 -> "고정 예상 · 기록 ${plan.travelSampleCount}회로 보정"
+                plan.travelTimeSource?.contains("+observed_") == true -> "고정 예상 · 기록으로 보정(횟수 미확인)"
+                plan.travelSampleCount == null && plan.travelTimeSource.isNullOrBlank() -> "고정 예상 · 보정 횟수 미확인"
+                else -> "고정 예상 · 보정 0회"
+            }
+            add(PlanRow(label, it, bits.joinToString(" · "), PlanRow.Kind.TRAVEL, source))
         }
         plan.bufferMinutes?.let {
-            add(PlanRow("안전 버퍼", it, bufferNote(plan.bufferSource), PlanRow.Kind.BUFFER))
+            add(PlanRow("안전 버퍼", it, bufferNote(plan.bufferSource), PlanRow.Kind.BUFFER,
+                if (plan.bufferSource == "learned") "측정 · 늦은 기록으로 조정" else "고정 · 기본 여유"))
         }
     }
 

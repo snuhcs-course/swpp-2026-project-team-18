@@ -302,7 +302,7 @@ fun MapPickScreen(
                 Text(
                     text = "이전 지도를 표시 중 · 탭하여 재시도",
                     color = JitColor.TextSecondary,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(12.dp)
@@ -327,19 +327,11 @@ fun MapPickScreen(
                 )
             }
 
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 14.dp, bottom = 14.dp),
-            ) {
-                LocationFab(locating = state.locating, onClick = onRecenter)
-            }
-
             state.error?.let {
                 Text(
                     text = it,
                     color = JitColor.Red,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -416,7 +408,7 @@ private fun PlaceMarker(
             .zIndex(if (selected) 3f else 1f)
             .size(48.dp)
             .semantics {
-                contentDescription = "${number}번 $name${if (selected) ", 선택됨" else ""}"
+                contentDescription = "${number}번 $name${if (selected) ", 선택했어요" else ""}"
                 role = Role.Button
             }
             .clickable(onClick = onClick),
@@ -459,7 +451,7 @@ private fun PlaceMarker(
         Text(
             text = number.toString(),
             color = color,
-            fontSize = 8.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier
                 .align(Alignment.Center)
@@ -495,7 +487,7 @@ private fun CurrentLocationMarker(
             .semantics {
                 contentDescription = accuracyM?.let {
                     "현재 위치, 오차 약 ${it.roundToInt()}미터"
-                } ?: "현재 위치, 정확도 정보 없음"
+                } ?: "현재 위치, 정확도를 아직 알 수 없어요"
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -525,9 +517,10 @@ private fun MapPill(
 ) {
     Row(
         modifier = modifier
+            .heightIn(min = 48.dp)
             .clip(CircleShape)
             .background(JitColor.Bg)
-            .clickable(enabled = !loading, onClick = onClick)
+            .clickable(enabled = !loading, role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -545,70 +538,6 @@ private fun MapPill(
     }
 }
 
-@Composable
-private fun LocationFab(locating: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .size(48.dp)
-            .clip(CircleShape)
-            .background(JitColor.Bg)
-            .semantics {
-                contentDescription = if (locating) "현재 위치 확인 중" else "현재 위치로 지도 이동"
-                role = Role.Button
-            }
-            .clickable(enabled = !locating, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (locating) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                color = JitColor.Blue,
-                strokeWidth = 2.dp,
-            )
-        } else {
-            // 글꼴마다 모양이 달라지는 특수문자 대신 직접 그린 표준 위치 표식.
-            Canvas(Modifier.size(24.dp)) {
-                val center = Offset(size.width / 2f, size.height / 2f)
-                drawCircle(
-                    color = JitColor.Blue,
-                    radius = size.minDimension * 0.30f,
-                    center = center,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = size.minDimension * 0.08f,
-                    ),
-                )
-                drawCircle(
-                    color = JitColor.Blue,
-                    radius = size.minDimension * 0.08f,
-                    center = center,
-                )
-                val arm = size.minDimension * 0.16f
-                val stroke = size.minDimension * 0.08f
-                drawLine(JitColor.Blue, Offset(center.x, 0f), Offset(center.x, arm), stroke)
-                drawLine(
-                    JitColor.Blue,
-                    Offset(center.x, size.height - arm),
-                    Offset(center.x, size.height),
-                    stroke,
-                )
-                drawLine(JitColor.Blue, Offset(0f, center.y), Offset(arm, center.y), stroke)
-                drawLine(
-                    JitColor.Blue,
-                    Offset(size.width - arm, center.y),
-                    Offset(size.width, center.y),
-                    stroke,
-                )
-            }
-        }
-    }
-}
-
-/**
- * 하단 시트.
- *
- * 지도 핀과 목록은 같은 순서·번호를 쓴다. 어느 쪽을 눌러도 같은 장소가
- * 선택되고, 지도에서는 그 핀 하나만 보라색으로 바뀐다.
- */
 @Composable
 private fun MapSheet(
     state: HomeViewModel.MapPickState,
@@ -650,7 +579,7 @@ private fun MapSheet(
         Text(
             text = "지도에 표시된 ${state.markers.size}곳",
             color = JitColor.TextSecondary,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
         )
 
@@ -707,7 +636,7 @@ private fun MapSheetRow(
             Text(
                 text = number.toString(),
                 color = Color.White,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -727,7 +656,7 @@ private fun MapSheetRow(
                     Text(
                         text = it,
                         color = JitColor.TextSecondary,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .clip(CircleShape)
@@ -742,15 +671,15 @@ private fun MapSheetRow(
                     Text(
                         text = it,
                         color = JitColor.Green,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                     )
-                    Text(text = " · ", color = JitColor.TextSecondary, fontSize = 11.sp)
+                    Text(text = " · ", color = JitColor.TextSecondary, fontSize = 12.sp)
                 }
                 Text(
                     text = place.address.orEmpty(),
                     color = JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     maxLines = 1,
                 )
             }
@@ -760,7 +689,7 @@ private fun MapSheetRow(
                 Text(
                     text = "카카오맵에서 평점·사진 보기 ›",
                     color = JitColor.Blue,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable { onOpenPlaceUrl(url) },
                 )

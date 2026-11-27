@@ -51,7 +51,11 @@ class TripObservationQueue(
 
         val raw = prefs.getString(KEY_PENDING, null) ?: return emptyList()
         return try {
-            gson.fromJson<List<TripObservationInput>>(raw, TYPE).orEmpty()
+            val items = gson.fromJson<List<TripObservationInput>>(raw, TYPE).orEmpty()
+            // 이전 버전이 적재한 측위 좌표도 즉시 디스크에서 지운다. transient 필드는
+            // 역직렬화 때 읽히지 않으며 재직렬화에도 포함되지 않는다.
+            if (gson.toJson(items) != raw) write(items)
+            items
         } catch (e: JsonSyntaxException) {
             Log.w(TAG, "큐를 읽을 수 없어 버린다", e)
             prefs.edit { remove(KEY_PENDING) }
@@ -69,7 +73,7 @@ class TripObservationQueue(
      */
     fun enqueue(observation: TripObservationInput) {
         val next = pending().filterNot { it.clientUuid == observation.clientUuid } +
-            observation
+            observation.copy(lat = null, lng = null)
         write(next)
         Log.i(TAG, "관측 적재: ${observation.kind} (대기 ${next.size}건)")
         JitWork.requestObservationUpload(appContext)

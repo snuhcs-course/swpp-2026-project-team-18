@@ -112,6 +112,13 @@ fun TripTabScreen(
     fasterRoute: com.swpp.wakeup.domain.model.FasterRouteOffer? = null,
     fasterRouteBusy: Boolean = false,
     onSwitchFasterRoute: (com.swpp.wakeup.domain.model.FasterRouteOffer) -> Unit = {},
+    live: com.swpp.wakeup.sensing.TripLiveState.Snapshot? = null,
+    homePoint: com.swpp.wakeup.sensing.GeoPoint? = null,
+    nickname: String = "나",
+    initials: String = "나",
+    onArrive: (() -> Unit)? = null,
+    canTrack: Boolean = true,
+    coarseOnly: Boolean = false,
 ) {
     // 오늘 갈 곳이 없을 때 [내일 가는 길 보기] 를 누르면 그 일정을 펼친다. 일정이 바뀌면 다시 접는다.
     var showLater by rememberSaveable(event?.id) { mutableStateOf(false) }
@@ -145,12 +152,42 @@ fun TripTabScreen(
             return@Column
         }
 
-        if (inTransit) InTransitCard(onClick = { onOpenEvent(event.id) })
-
         val plan = trip.plan?.takeIf { it.eventId == event.id }
         when {
             plan != null -> {
-                NextTripCard(event = event, plan = plan, today = today, onClick = { onOpenEvent(event.id) })
+                if (inTransit) {
+                    val tick by produceState(System.currentTimeMillis(), event.id) {
+                        while (true) { delay(30_000); value = System.currentTimeMillis() }
+                    }
+                    val now = maxOf(tick, System.currentTimeMillis())
+                    val fix = live?.takeIf {
+                        it.eventId == event.id && it.accuracyM.isFinite() &&
+                            it.accuracyM <= com.swpp.wakeup.sensing.TripGeofence.MAX_ACCURACY_M &&
+                            now - it.atMillis in 0..120_000L
+                    }
+                    val progress = fix?.let {
+                        com.swpp.wakeup.domain.model.RouteProgress.ofJourney(plan.routePath, plan.originPoint ?: homePoint, plan.destinationPoint, it.point)
+                    }
+                    val remaining = progress?.takeIf { it.onRoute }?.let { p ->
+                        fix?.movingSinceMillis?.let { departed ->
+                            com.swpp.wakeup.domain.model.TripEta.remainingMinutes(plan.travelMinutes, p.totalM, p.traveledM, (now - departed) / 60_000.0)
+                        }
+                    }
+                    val outlook = remaining?.let { com.swpp.wakeup.domain.model.ArrivalOutlook.of(plan.startAtMillis, it, now) }
+                    com.swpp.wakeup.ui.alarm.TripProgressCard(
+                        nickname = nickname, initials = initials,
+                        stage = com.swpp.wakeup.domain.model.TripStage.IN_TRANSIT,
+                        progress = progress, outlook = outlook,
+                        arrivalAt = outlook?.let { java.time.Instant.ofEpochMilli(it.predictedMillis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("a h:mm", java.util.Locale.KOREAN)) },
+                        freshness = if (fix == null) "새 위치를 기다리고 있어요" else "기기에서 이동 상황을 확인해요",
+                        onArrive = onArrive,
+                        canTrack = canTrack,
+                        coarseOnly = coarseOnly,
+                    )
+                    Text("현재 위치는 기기에서만 처리해요. 이동 중 새 경로를 요청하지 않아요", color = JitColor.TextSecondary, fontSize = 12.sp)
+                } else {
+                    NextTripCard(event = event, plan = plan, today = today, onClick = { onOpenEvent(event.id) })
+                }
                 // 더 빠른 경로가 있으면 가는 길 위에서 바로 바꾼다(11-17 사용자). 지도의 점선 대안과 같은 경로다.
                 fasterRoute?.takeIf { !plan.skipped && it.isOpen(System.currentTimeMillis()) }?.let { offer ->
                     com.swpp.wakeup.ui.alarm.FasterRouteCard(
@@ -171,7 +208,7 @@ fun TripTabScreen(
                     onMap = { onOpenEvent(event.id) },
                     onChangeRoute = { onChangeRoute(event.id) },
                 )
-                Hint(alarmOn = plan.alarmOn)
+                if (!inTransit) Hint(alarmOn = plan.alarmOn)
             }
 
             trip.failed && trip.eventId == event.id -> FailedCard(onRetry)
@@ -207,7 +244,7 @@ private fun SavedRouteNotice(savedAtMillis: Long?, onRetry: () -> Unit) {
         Text(
             text = TripTabLogic.savedRouteBody(savedAtMillis),
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
         JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 3.dp).testTag("trip_route_retry"))
     }
@@ -383,7 +420,7 @@ private fun RouteCard(
         ) {
             Text(text = "가는 길", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
             TripTabLogic.summary(totalMinutes, segments?.items)?.let {
-                Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Text(text = it, color = JitColor.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
         }
 
@@ -488,7 +525,7 @@ private fun StepRow(step: TripTabLogic.Step, last: Boolean) {
                 )
             }
             if (step.sub.isNotEmpty()) {
-                Text(text = step.sub, color = JitColor.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Text(text = step.sub, color = JitColor.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
@@ -500,7 +537,7 @@ private fun LineChip(segment: RouteSegment) {
     Text(
         text = segment.label,
         color = Color(SegmentPalette.onFill(segment)),
-        fontSize = 10.sp,
+        fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
         softWrap = false,
@@ -540,7 +577,7 @@ private fun Hint(alarmOn: Boolean) {
         Text(
             text = if (alarmOn) "집을 나서면 이동 기록이 저절로 시작돼요" else "알람이 꺼져 있어 이동 기록은 시작되지 않아요",
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
         )
     }
@@ -564,7 +601,7 @@ private fun InTransitCard(onClick: () -> Unit) {
             Text(
                 text = "지금 어디쯤인지, 늦을 것 같으면 더 빠른 길을 보여 드려요",
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
             )
         }
         Text(text = "›", color = JitColor.TextSecondary, fontSize = 18.sp)

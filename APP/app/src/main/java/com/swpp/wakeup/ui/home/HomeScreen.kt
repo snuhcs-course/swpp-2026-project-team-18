@@ -115,6 +115,8 @@ fun HomeScreen(
     /** 다음 알람의 "바꿀까요" 제안에 답하기(BE-H3d). true = 받아들이기 */
     onAnswerProposal: (UpcomingEvent, Boolean) -> Unit = { _, _ -> },
     proposalBusyId: Long? = null,
+    notificationsEnabled: Boolean = true,
+    onEnableNotifications: () -> Unit = {},
 ) {
     // Partly AI-generated (Claude) — 확률 칩을 누르면 "정시 도착 확률이 뭐예요?"(iter4 H2-4, Figma `548:1798`)
     var onTimeFor by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -154,6 +156,16 @@ fun HomeScreen(
         ) {
             item(key = "header") {
                 HomeHeader(today = state.today, onHelpClick = onHelpClick)
+            }
+
+            if (!notificationsEnabled) {
+                item(key = "notifications-disabled") {
+                    com.swpp.wakeup.ui.common.JitCard {
+                        Text("알림이 꺼져 있어요", color = JitColor.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("알람을 놓치지 않도록 알림을 켜 주세요", color = JitColor.TextSecondary, fontSize = 12.sp)
+                        com.swpp.wakeup.ui.common.JitSecondaryButton("알림 켜기", onEnableNotifications, Modifier.testTag("home_enable_notifications"))
+                    }
+                }
             }
 
             // 울리지 않은 알람. 출발 전에만 뜨고, 지금 추적을 시작할 수 있는 유일한
@@ -469,7 +481,7 @@ private fun NoHomeNotice(onClick: () -> Unit) {
         Text(
             text = "이동 시간을 구하려면 출발지가 필요해요. 눌러서 정해 주세요",
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
     }
 }
@@ -506,7 +518,7 @@ private fun OfflineNotice(ageLabel: String?, onRetry: () -> Unit) {
         Text(
             text = "인터넷에 연결되지 않아 마지막으로 받은 정보를 보여 드려요. 이미 맞춰 둔 알람은 그대로 울려요",
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
         JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 3.dp).testTag("home_offline_retry"))
     }
@@ -541,12 +553,12 @@ private fun MorningShortcut(blocksLeft: Int, onClick: () -> Unit) {
             text = "항목을 마칠 때마다 누르면 실제로 걸린 시간이 기록돼요. 이 기록이 준비 시간을 " +
                 "맞추는 유일한 재료예요",
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
         Text(
             text = "눌러서 이어가기",
             color = JitColor.Accent,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
         )
     }
@@ -587,7 +599,7 @@ private fun MissedAlarmCard(
         Text(
             text = notice.schedule.eventLine,
             color = JitColor.TextPrimary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
         Text(
             text = when {
@@ -597,14 +609,14 @@ private fun MissedAlarmCard(
                 else -> "정밀 위치 권한이 없어 이동 기록은 시작할 수 없어요"
             },
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             if (notice.canTrack) {
                 Text(
                     text = "이동 기록 시작",
                     color = JitColor.Accent,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .testTag("missed_alarm_track")
@@ -615,7 +627,7 @@ private fun MissedAlarmCard(
             Text(
                 text = "닫기",
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .testTag("missed_alarm_dismiss")
@@ -643,7 +655,7 @@ private fun ErrorNotice(message: String, onRetry: () -> Unit) {
             fontSize = 12,
             dotSize = 6.dp,
         )
-        Text(text = message, color = JitColor.TextSecondary, fontSize = 11.sp)
+        Text(text = message, color = JitColor.TextSecondary, fontSize = 12.sp)
         JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 3.dp).testTag("home_error_retry"))
     }
 }
@@ -875,7 +887,7 @@ private fun SectionHeader(section: EventSection) {
         Text(
             text = HomeLabels.sectionSummary(section),
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
         )
     }
@@ -978,7 +990,7 @@ private fun EventRow(
                     Text(
                         text = place,
                         color = JitColor.TextSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1002,7 +1014,7 @@ private fun EventRow(
                 Text(
                     text = HomeLabels.rowAlarmLabel(event),
                     color = alarmColor,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                 )

@@ -92,7 +92,7 @@ class CalendarOnboardingStateTest {
     fun `고른 것이 없으면 시작할 수 없다`() {
         val state = CalendarOnboardingState()
         assertFalse(state.canSubmit(link))
-        assertEquals("연동할 캘린더를 고를 것", state.submitLabel(link))
+        assertEquals("연동할 캘린더를 골라 주세요", state.submitLabel(link))
     }
 
     @Test

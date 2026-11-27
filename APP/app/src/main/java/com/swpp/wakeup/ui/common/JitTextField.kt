@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
@@ -105,7 +106,7 @@ fun JitTextField(
         Text(
             text = label,
             color = labelColor,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Medium
         )
         Spacer(Modifier.height(2.dp))
@@ -154,10 +155,10 @@ fun JitTextField(
                 Spacer(Modifier.width(4.dp))
                 Box(
                     modifier = Modifier
-                        .sizeIn(minWidth = 40.dp, minHeight = 40.dp)
+                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                         .then(if (inputTag != null) Modifier.testTag("${inputTag}_toggle") else Modifier)
                         .semantics { contentDescription = if (revealed) "비밀번호 숨기기" else "비밀번호 보기" }
-                        .clickable(enabled = enabled) { revealed = !revealed },
+                        .clickable(enabled = enabled, role = Role.Button) { revealed = !revealed },
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(

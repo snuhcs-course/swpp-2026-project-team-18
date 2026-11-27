@@ -120,6 +120,7 @@ internal fun RoutePreviewScreen(
         // 어디서 타고 내리는지는 막대가 말한다.
         if (option.travelMode == RouteMode.TRANSIT && option.hasSegmentBar) {
             TransitSegmentBar(option.segments)
+            TransitColorLegend(barSegments(option.segments))
         }
         if (option.travelMode == RouteMode.BICYCLE) {
             MetricCells(bicycleMetrics(option))

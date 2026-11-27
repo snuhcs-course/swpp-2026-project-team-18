@@ -157,7 +157,7 @@ fun TripProgressCard(
                         else -> "도착 예정"
                     },
                     color = JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     textAlign = TextAlign.End,
                     maxLines = 1,
                 )
@@ -203,7 +203,7 @@ fun TripProgressCard(
                     modifier = Modifier
                         .testTag("trip_arrive")
                         .fillMaxWidth()
-                        .heightIn(min = 44.dp)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(JitColor.Surface2)
                         .clickable(role = Role.Button, onClick = onArrive),
@@ -217,7 +217,7 @@ fun TripProgressCard(
                 Text(
                     text = "도착이 확인되면 사라져요. 이동 알림에도 같은 버튼이 있어요",
                     color = JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                 )
             }
         }

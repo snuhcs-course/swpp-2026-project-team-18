@@ -271,6 +271,8 @@ data class PlanRow(
     val minutes: Int,
     val note: String?,
     val kind: Kind,
+    /** 숫자 옆의 짧은 측정·고정 출처. 상세 안내와 분리해요. */
+    val sourceLabel: String? = null,
 ) {
     enum class Kind { PREP, TRAVEL, BUFFER }
 }

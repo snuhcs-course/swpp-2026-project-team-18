@@ -137,7 +137,7 @@ internal fun ContactSheet(
                 )
             }
 
-            Text(Inquiry.INFO, color = JitColor.TextSecondary, fontSize = 11.sp, lineHeight = 16.sp)
+            Text(Inquiry.INFO, color = JitColor.TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
 
             failure?.let {
                 Text(
@@ -192,7 +192,7 @@ private fun Field(
                 Text(
                     text = it,
                     color = if (trailingWarn) JitColor.Red else JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.testTag("contact_count"),
                 )
@@ -206,7 +206,7 @@ private fun Field(
                 .then(if (error != null) Modifier.border(1.dp, JitColor.Red, RoundedCornerShape(12.dp)) else Modifier),
         ) { content() }
         error?.let {
-            Text(it, color = JitColor.Red, fontSize = 11.sp, fontWeight = FontWeight.Medium, modifier = Modifier.testTag(errorTag))
+            Text(it, color = JitColor.Red, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.testTag(errorTag))
         }
     }
 }

@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,7 +69,7 @@ fun JitPillChip(
     val content = if (selected) JitColor.Bg else JitColor.TextPrimary
     Row(
         modifier = modifier
-            .heightIn(min = 32.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(percent = 50))
             .background(if (selected) JitColor.Accent else JitColor.Surface2)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
@@ -81,7 +82,7 @@ fun JitPillChip(
         Text(
             text = text,
             color = content,
-            fontSize = fontSize.sp,
+            fontSize = fontSize.coerceAtLeast(12).sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -120,7 +121,7 @@ fun JitFieldCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(label, color = JitColor.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(label, color = JitColor.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
             Text(
                 text = value,
                 color = if (enabled) valueColor else JitColor.Track,
@@ -150,7 +151,7 @@ fun JitSectionTitle(
             if (required) withStyle(SpanStyle(color = JitColor.Red)) { append(" *") }
         },
         color = JitColor.TextPrimary,
-        fontSize = fontSize.sp,
+        fontSize = fontSize.coerceAtLeast(12).sp,
         fontWeight = FontWeight.Bold,
         modifier = modifier.then(if (tag != null) Modifier.testTag(tag) else Modifier),
     )
@@ -246,6 +247,7 @@ fun JitSearchAction(loading: Boolean, enabled: Boolean, onClick: () -> Unit, tag
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier
+                .minimumInteractiveComponentSize()
                 .clip(RoundedCornerShape(8.dp))
                 .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
                 .testTag(tag)

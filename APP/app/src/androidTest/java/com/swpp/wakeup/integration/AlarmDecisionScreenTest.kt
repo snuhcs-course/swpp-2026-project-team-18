@@ -88,6 +88,7 @@ class AlarmDecisionScreenTest {
                     onEditBlocks = { calls += "blocks" },
                     onDelete = { calls += "delete" },
                     serverSupportsConfirm = supportsConfirm,
+                    onConfirmAlarm = { calls += "confirm" },
                 )
             }
         }
@@ -110,7 +111,7 @@ class AlarmDecisionScreenTest {
         compose.onNodeWithText("준비 30분").assertExists()
         compose.onNodeWithText("이동 40분").assertExists()
         compose.onNodeWithText("여유 10분").assertExists()
-        compose.onNodeWithText("기본 여유 시간이에요").assertExists()
+        compose.onNodeWithText("고정 · 기본 여유").assertExists()
         // 내부 말은 이 화면에서 뺐다
         compose.onNodeWithText("적용 τ", substring = true).assertDoesNotExist()
     }
@@ -138,7 +139,7 @@ class AlarmDecisionScreenTest {
     }
 
     @Test
-    fun `승인 버튼 없이 울리는 시각을 한 줄로 말한다`() {
+    fun `재계산한 알람을 상세 화면에서 확인한다`() {
         val unconfirmed = computedPlan.replace("\"status\":\"ok\"", "\"status\":\"ok\",\"alarm_confirmed\":false")
         show(planFrom(eventJson(unconfirmed)), supportsConfirm = true)
 
@@ -146,6 +147,8 @@ class AlarmDecisionScreenTest {
         compose.onNodeWithTag("plan_alarm_status").assertDoesNotExist()
         compose.onNodeWithText("오전 7:00에 알람이 울려요").assertDoesNotExist()
         compose.onNodeWithText("이 시각으로 알람 맞추기").assertDoesNotExist()
+        compose.onNodeWithTag("plan_confirm_alarm").performScrollTo().performClick()
+        assertEquals(listOf("confirm"), calls)
     }
 
     @Test

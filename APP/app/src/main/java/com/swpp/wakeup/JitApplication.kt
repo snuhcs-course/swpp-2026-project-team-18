@@ -21,13 +21,16 @@ import com.swpp.wakeup.reminder.WeeklyReportReminder
  */
 class JitApplication : Application() {
 
+    /** 토큰은 앱 수명, 화면 저장소는 로그인 수명으로 만드는 수동 DI 컨테이너. */
+    val container: AppContainer by lazy { AppContainer(this) }
+
     /** 앱 전체가 공유하는 토큰 저장소. */
     lateinit var tokenStore: TokenStore
         private set
 
     override fun onCreate() {
         super.onCreate()
-        tokenStore = TokenStore(this)
+        tokenStore = container.tokenStore
         ApiClient.init(tokenStore)
 
         // 크래시 보고(A-6). 기기 테스트 실행 중에는 끄고, 앱 버전만 붙인다. 개인정보는 CrashReport 가 거른다.

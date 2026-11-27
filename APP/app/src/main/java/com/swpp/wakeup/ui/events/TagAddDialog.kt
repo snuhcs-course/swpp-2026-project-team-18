@@ -64,15 +64,15 @@ internal fun TagAddDialog(
                 onImeAction = onSubmit,
             )
             Text(
-                text = "20자까지 · 이 계정의 다른 기기에서도 보여요 · τ 는 프로필 기본을 써요",
+                text = "20자까지 써요 · 다른 기기에서도 보여요",
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
             )
             state.error?.let {
                 Text(
                     text = it,
                     color = JitColor.Red,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     modifier = Modifier.fillMaxWidth().testTag("tag_add_error"),
                 )
             }
@@ -155,14 +155,14 @@ internal fun TagEditDialog(
                 Text(
                     text = "20자까지 · 이 종류를 단 일정에도 바뀐 이름이 보여요",
                     color = JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                 )
             }
             state.error?.let {
                 Text(
                     text = it,
                     color = JitColor.Red,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     modifier = Modifier.fillMaxWidth().testTag("tag_edit_error"),
                 )
             }

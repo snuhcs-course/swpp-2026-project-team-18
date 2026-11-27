@@ -7,7 +7,6 @@ import com.swpp.wakeup.data.remote.RerouteRequest
 import com.swpp.wakeup.data.remote.RerouteResponse
 import com.swpp.wakeup.data.remote.SwitchSuggestionDto
 import com.swpp.wakeup.data.repository.EventRepository.Result
-import com.swpp.wakeup.domain.model.LiveRoute
 import com.swpp.wakeup.domain.model.SwitchSuggestion
 import com.swpp.wakeup.sensing.GeoPoint
 import com.swpp.wakeup.testing.FakeEventsApi
@@ -23,30 +22,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import retrofit2.Response
 
-/** 이동 중 경로 바꾸기(reroute-api.md)의 응답 매핑과 저장소 동작. */
+/** 이전 제안의 매핑·경로 변경 호환성과 온디바이스 위치 정책을 확인한다. */
 class RerouteRepositoryTest {
 
     private val seoul = ZoneId.of("Asia/Seoul")
 
-    private val livePath = """[[37.50,127.00],[37.51,127.01]]"""
-
-    private fun liveJson(extra: String = "") =
-        """{"route":{"route_key":"transit:9호선","label":"9호선","minutes":24,
-            "is_alternative":false,"path":$livePath},"degraded":false$extra}"""
-
-    private fun liveApi(json: String) = object : FakeEventsApi() {
-        override suspend fun liveRoute(body: LiveRouteRequest): Response<LiveRouteResponse> =
-            ok(fromJson(json))
-    }
-
-    private fun liveRoute(json: String): LiveRoute {
-        val result = runBlockingLive(json)
-        assertTrue("성공이어야 한다: $result", result is Result.Success)
-        return (result as Result.Success).data!!
-    }
-
-    private fun runBlockingLive(json: String): Result<LiveRoute?> = kotlinx.coroutines.runBlocking {
-        EventRepository(liveApi(json), FakeProfileApi()).liveRoute(1L, GeoPoint(37.5, 127.0))
+    private class LiveApi : FakeEventsApi() {
+        val calls = mutableListOf<LiveRouteRequest>()
+        override suspend fun liveRoute(body: LiveRouteRequest): Response<LiveRouteResponse> {
+            calls += body
+            throw AssertionError("측위 좌표로 서버 경로를 조회하면 안 된다")
+        }
     }
 
     // --- 제안 매핑 -------------------------------------------------------------
@@ -94,37 +80,29 @@ class RerouteRepositoryTest {
     }
 
     @Test
-    fun `현재 위치 경로에 늦는 분과 제안을 붙인다`() {
-        val route = liveRoute(
-            liveJson(
-                ""","arrival":{"route_key":"transit:9호선","arrive_at":"2026-11-02T09:06:00+09:00",
-                    "late_minutes":6,"realtime":false},
-                   "switch_suggestion":{"reason":"late_now","route_key":"transit:2호선",
-                    "label":"9호선 → 2호선","late_minutes":0,"saves_minutes":9}"""
-            )
-        )
-        assertEquals(6, route.lateMinutes)
-        assertEquals("transit:2호선", route.suggestion?.routeKey)
-        assertEquals(9, route.suggestion?.savesMinutes)
-        assertEquals(
-            java.time.OffsetDateTime.parse("2026-11-02T09:06:00+09:00").toInstant().toEpochMilli(),
-            route.arriveAtMillis,
-        )
-    }
-    @Test
-    fun `도착 시각이 없거나 깨졌으면 null`() {
-        assertNull(liveRoute(liveJson()).arriveAtMillis)
-        assertNull(
-            liveRoute(liveJson(""","arrival":{"arrive_at":"내일","late_minutes":2}""")).arriveAtMillis
-        )
+    fun `이동 중 경로 확인은 측위 좌표를 API로 보내지 않는다`() = runTest {
+        val api = LiveApi()
+        val result = EventRepository(api, FakeProfileApi()).liveRoute(1L, GeoPoint(37.5, 127.0))
+        assertEquals(Result.Success(null), result)
+        assertTrue(api.calls.isEmpty())
     }
 
     @Test
-    fun `구버전 서버면 늦는 분과 제안이 없다`() {
-        val route = liveRoute(liveJson())
-        assertNull(route.lateMinutes)
-        assertNull(route.suggestion)
-        assertEquals(24, route.minutes)
+    fun `출발 전 경로 확인도 서버를 호출하지 않는다`() = runTest {
+        val api = LiveApi()
+        val result = EventRepository(api, FakeProfileApi()).liveRoute(1L, GeoPoint(37.5, 127.0), preDeparture = true)
+        assertEquals(Result.Success(null), result)
+        assertTrue(api.calls.isEmpty())
+    }
+
+    @Test
+    fun `측위 좌표의 값이나 일정 키에 상관없이 원격 경로 조회는 꺼져 있다`() = runTest {
+        val api = LiveApi()
+        val repository = EventRepository(api, FakeProfileApi())
+        for (point in listOf(GeoPoint(0.0, 0.0), GeoPoint(Double.NaN, Double.POSITIVE_INFINITY))) {
+            assertEquals(Result.Success(null), repository.liveRoute(-1L, point))
+        }
+        assertTrue(api.calls.isEmpty())
     }
 
     // --- 바꾸기 ---------------------------------------------------------------

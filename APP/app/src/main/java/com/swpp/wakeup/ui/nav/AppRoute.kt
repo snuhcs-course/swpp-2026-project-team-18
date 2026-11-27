@@ -85,6 +85,9 @@ sealed interface AppRoute {
     /** 집 주소(기본 집 + 다른 집, 예전 ⑯ 의 집 칸 · `498:9`). 내 정보 탭 › "집 주소" 줄에서 연다 */
     data object Homes : AppRoute
 
+    /** Iteration 5 약속방: 목록·생성·참가·멤버 알람. */
+    data object Rooms : AppRoute
+
     /** 알림 · 권한과 지금 상태(예전 ⑯ 의 진단 줄). 내 정보 탭 › "알림·권한" 줄에서 연다 */
     data object Permissions : AppRoute
 
@@ -209,7 +212,7 @@ enum class AppTab(val label: String, val root: AppRoute) {
 val AppRoute.showsTabBar: Boolean
     get() = when (this) {
         AppRoute.Home, AppRoute.Trip, AppRoute.WeeklyReport, AppRoute.Me,
-        AppRoute.Settings, AppRoute.Homes, AppRoute.Permissions,
+        AppRoute.Settings, AppRoute.Homes, AppRoute.Permissions, AppRoute.Rooms,
         is AppRoute.AlarmDecision, is AppRoute.ReportDay,
         -> true
         else -> false

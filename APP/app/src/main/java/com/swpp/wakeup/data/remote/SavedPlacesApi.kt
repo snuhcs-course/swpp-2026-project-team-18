@@ -6,6 +6,7 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.PATCH
 import retrofit2.http.Path
 
 // Partly AI-generated (Claude)
@@ -22,6 +23,9 @@ interface SavedPlacesApi {
     /** 201 새로 만듦, 200 같은 `client_uuid` 나 50m 안의 행이 있어 그것의 이름만 바꿈 */
     @POST("api/saved-places/")
     suspend fun create(@Body body: SavedPlaceInput): Response<SavedPlaceDto>
+
+    @PATCH("api/saved-places/{id}/")
+    suspend fun rename(@Path("id") id: Long, @Body body: SavedPlaceRename): Response<SavedPlaceDto>
 
     @DELETE("api/saved-places/{id}/")
     suspend fun delete(@Path("id") id: Long): Response<Unit>
@@ -74,3 +78,6 @@ data class SavedPlaceInput(
 )
 
 data class SavedPlacesBulkRequest(val items: List<SavedPlaceInput>)
+
+/** 이름만 보내요. 기존 주소·좌표는 바뀌지 않아요. */
+data class SavedPlaceRename(val label: String)

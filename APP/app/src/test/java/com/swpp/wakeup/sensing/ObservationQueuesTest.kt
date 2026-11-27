@@ -94,6 +94,24 @@ class ObservationQueuesTest {
     }
 
     @Test
+    fun `이전 앱의 큐 좌표는 디스크와 재전송에서 제거하고 판정 결과는 보존한다`() = runBlocking {
+        prefs.edit().putString("pending", """[{"event":1,"kind":"depart","detector":"gps","observed_at":"2026-11-20T08:00:00+09:00","lat":37.4,"lng":126.9,"accuracy_m":10.0,"distance_m":120.0,"client_uuid":"old"}]""").apply()
+        val q = tripQueue { ok(ObservationBatchResponse(accepted = 1)) }
+        val pending = q.pending().single()
+        assertNull(pending.lat)
+        assertNull(pending.lng)
+        val disk = com.google.gson.JsonParser.parseString(prefs.getString("pending", null)).asJsonArray.single().asJsonObject
+        assertTrue(!disk.has("lat") && !disk.has("lng"))
+        assertEquals("old", disk["client_uuid"].asString)
+        assertEquals(1, q.flush())
+        val sent = tripSent.single().observations.single()
+        assertNull(sent.lat)
+        assertNull(sent.lng)
+        assertEquals(120.0, sent.distanceM!!, 0.0)
+        assertEquals(10.0, sent.accuracyM!!, 0.0)
+    }
+
+    @Test
     fun `이동 관측 - 준비 전이거나 비어 있으면 올리지 않는다`() = runBlocking {
         assertEquals(0, tripQueue().flush())
         val notReady = tripQueue(ready = false)
