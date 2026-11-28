@@ -18,7 +18,7 @@ class ApiRequestLog(models.Model):
     """요청 한 건의 메타와 정리한 본문."""
 
     created_at = models.DateTimeField("요청 시각", auto_now_add=True, db_index=True)
-    # 인증된 요청만 채운다. 가입·로그인·익명 요청은 비어 있다.
+    # 인증된 요청과 성공한 가입·로그인만 채운다. 확인할 수 없는 익명 요청은 비어 있다.
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,

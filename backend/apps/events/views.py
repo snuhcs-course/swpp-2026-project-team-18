@@ -26,6 +26,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
 from rest_framework.views import APIView
 
+from apps.common import request_log
+
 from apps.observations import alarm_logs
 from apps.observations.models import TripReroute, current_route_key
 from apps.planning import alarm_control, live_switch
@@ -488,6 +490,7 @@ class EventCalendarImportView(_UserScopedMixin, APIView):
                     event = Event.objects.create(
                         user=request.user,
                         source=Event.Source.CALENDAR,
+                        creation_app_version=request_log.app_version(request),
                         external_id=row["external_id"],
                         title=row["title"],
                         start_at=row["start_at"],

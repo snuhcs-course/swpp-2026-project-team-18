@@ -15,6 +15,7 @@
 DRF 가 인증한 사용자는 뷰가 끝난 뒤 `request.user` 에 보인다(DRF 의 `Request.user` 가
 원래 요청에도 같은 값을 넣는다). 그래서 기록은 뷰 **뒤에** 만든다. 본문만 뷰 **앞에**
 읽는다 — DRF 가 스트림을 읽고 나면 `request.body` 를 다시 읽을 수 없다.
+성공한 가입·로그인은 뷰가 서버 내부 속성으로 연결한 사용자 id를 쓴다. 인증 본문은 저장하지 않는다.
 
 ## 보존
 
@@ -165,6 +166,10 @@ def _record(request, response, body, started: float) -> None:
 
 
 def _user_id(request) -> int | None:
+    # 성공한 가입·로그인이 서버 내부에서 연결한 id다. 헤더·본문에서는 읽지 않는다.
+    bound = getattr(request, "_api_request_log_user_id", None)
+    if type(bound) is int and bound > 0:
+        return bound
     user = getattr(request, "user", None)
     try:
         if user is not None and user.is_authenticated:

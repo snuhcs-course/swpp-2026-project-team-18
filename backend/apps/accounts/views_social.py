@@ -18,6 +18,8 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.common import request_log
+
 from . import social
 from .serializers import SocialLoginSerializer, SocialTokenSerializer, UserSerializer
 
@@ -48,7 +50,9 @@ class SocialLoginView(APIView):
             identity,
             terms_agreed=body.validated_data["terms_agreed"],
             nickname=body.validated_data["nickname"],
+            registration_app_version=request_log.app_version(request),
         )
+        request_log.bind_authenticated_user(request, user)
         refresh = RefreshToken.for_user(user)
         return Response(
             {

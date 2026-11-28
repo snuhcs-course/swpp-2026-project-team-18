@@ -99,6 +99,10 @@ class TripObservation(models.Model):
     client_uuid = models.CharField("클라이언트 UUID", max_length=40)
 
     created_at = models.DateTimeField("업로드 시각", auto_now_add=True)
+    # 최초 업로드 요청의 버전. 재전송이 이 값을 덮지 않는다.
+    app_version = models.CharField(
+        "업로드 앱 버전", max_length=32, blank=True, default="", db_default=""
+    )
 
     class Meta:
         db_table = "observations_trip"
@@ -261,6 +265,9 @@ class AlarmLog(models.Model):
     client_uuid = models.CharField("클라이언트 UUID", max_length=40)
 
     created_at = models.DateTimeField("수신 시각", auto_now_add=True)
+    app_version = models.CharField(
+        "업로드 앱 버전", max_length=32, blank=True, default="", db_default=""
+    )
 
     class Meta:
         db_table = "observations_alarm_log"

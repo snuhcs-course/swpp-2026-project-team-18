@@ -25,12 +25,13 @@ from __future__ import annotations
 
 import json
 
-from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from apps.common.cohort import eligible_user_ids, production_users
 from apps.planning import buffers, learning_reset, refresh
 from apps.prediction import learning
+from apps.prediction.models import ModelArtifact
 
 
 class Command(BaseCommand):
@@ -135,6 +136,12 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS("경로 보정만 갱신했다."))
             return
 
+        if not dry:
+            # Keep historical QA artifacts for audit, but never leave them active.
+            ModelArtifact.objects.filter(is_active=True, user__isnull=False).exclude(
+                user_id__in=eligible_user_ids()
+            ).update(is_active=False)
+
         # --- 2. 전역 아티팩트 ---------------------------------------------
         self.stdout.write("\n[2] 전역 아티팩트")
         payload = learning.build_artifact()
@@ -158,7 +165,10 @@ class Command(BaseCommand):
             if n_obs == 0:
                 # 관측이 0 이면 저장하지 않는다. 빈 아티팩트를 활성으로 두면
                 # 클라이언트가 "학습된 값" 으로 오해한다.
-                self.stdout.write("  관측이 없어 저장하지 않았다.")
+                ModelArtifact.objects.filter(
+                    user__isnull=True, is_active=True
+                ).update(is_active=False)
+                self.stdout.write("  관측이 없어 저장하지 않았다. 이전 전역 아티팩트는 비활성화했다.")
             else:
                 artifact = learning.save_artifact(payload)
                 self.stdout.write(
@@ -171,9 +181,8 @@ class Command(BaseCommand):
             return
 
         self.stdout.write("\n[3] 개인 아티팩트")
-        User = get_user_model()
         made = 0
-        for user in User.objects.all():
+        for user in production_users():
             n = learning.observation_count(user=user)
             if n < learning.MIN_PERSONAL_OBSERVATIONS:
                 continue

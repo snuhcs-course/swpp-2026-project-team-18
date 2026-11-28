@@ -17,6 +17,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 # 집도 출발지다. 일정의 `origin_*` 과 같은 범위 규칙을 써야 한다.
 from apps.events.geo import in_service_area
+from apps.common import request_log
 
 from . import login_lock
 from .models import Profile, User
@@ -98,6 +99,7 @@ class RegisterSerializer(serializers.Serializer):
             password=validated_data["password"],
             nickname=validated_data["nickname"],
             terms_agreed_at=timezone.now(),
+            registration_app_version=request_log.app_version(self.context.get("request")),
         )
         # 프로필은 `signals.create_profile_for_new_user` 가 같은 트랜잭션 안에서
         # 만든다. 여기서 또 만들지 않는다. 시그널로 옮긴 이유는
@@ -222,6 +224,7 @@ class LoginSerializer(TokenObtainPairSerializer):
                 raise AccountLocked(attempt) from None
             raise LoginFailed(attempt.remaining) from None
         login_lock.succeed(email)
+        request_log.bind_authenticated_user(self.context.get("request"), self.user)
         data["user"] = UserSerializer(self.user).data
         return data
 

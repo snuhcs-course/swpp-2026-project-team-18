@@ -61,6 +61,8 @@ from __future__ import annotations
 from django.db.models import Exists, ExpressionWrapper, F, FloatField, OuterRef, Q, Value
 from django.db.models.functions import Greatest
 
+from apps.common.cohort import exclude_test_accounts
+
 # 사용자가 정한 준비 시간(블록 신고 범위·온보딩 값) 대비 이 비율 밖이면 학습에서 뺀다.
 #
 # 고정 분(5~240분)으로 거르면 사람마다 다른 준비 시간을 무시한다. 평소 15분인
@@ -135,7 +137,8 @@ def within_block_range(qs):
 
 def usable_block_observations(qs):
     """알람·학습에 쓸 블록 기록. 머리말 표의 조건을 모두 건다."""
-    return within_block_range(exclude_after_departure(exclude_marked(exclude_skipped(qs))))
+    eligible = exclude_test_accounts(qs)
+    return within_block_range(exclude_after_departure(exclude_marked(exclude_skipped(eligible))))
 
 
 def within_expected(samples: list[float], expected_minutes: float) -> list[float]:
@@ -153,10 +156,12 @@ def gps_prep_samples(user_id: int) -> list[float]:
     사용자별 비율 검사(`within_expected`)는 여기서 하지 않는다. 기준인 예상 준비
     시간이 일정마다(고른 블록마다) 달라서 추정기가 한다.
     """
-    return [minutes for _, minutes in gps_prep_by_event(user_id)]
+    return [minutes for _, minutes in gps_prep_by_event(user_id, eligible_only=True)]
 
 
-def gps_prep_by_event(user_id: int, *, include_marked: bool = False) -> list[tuple[int, float]]:
+def gps_prep_by_event(
+    user_id: int, *, include_marked: bool = False, eligible_only: bool = False
+) -> list[tuple[int, float]]:
     """`(일정 id, GPS 준비 시간(분))` 목록. 최근 아침부터.
 
     `include_marked` 면 사용자가 학습에서 뺀 아침도 넣는다. 빼기 명령
@@ -190,6 +195,9 @@ def gps_prep_by_event(user_id: int, *, include_marked: bool = False) -> list[tup
         .exclude(event__include_prep=False)
         .exclude(event__skipped_at__isnull=False)
     )
+    if eligible_only:
+        # Runtime preparation learning shares the nightly-training QA policy.
+        departs = exclude_test_accounts(departs)
     if not include_marked:
         departs = exclude_marked(departs)
     departs = departs.order_by("event_id", "observed_at").values_list("event_id", "observed_at")

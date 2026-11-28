@@ -250,9 +250,22 @@ def query_dict(request) -> dict:
 
 def app_version(request) -> str:
     """`X-App-Version` 헤더. 버전 문자열에 쓰는 글자만 남기고 32자로 자른다."""
-    raw = request.headers.get("X-App-Version") or ""
+    raw = getattr(request, "headers", {}).get("X-App-Version") or ""
+    if not isinstance(raw, str):
+        return ""
     kept = "".join(ch for ch in raw if ch.isascii() and (ch.isalnum() or ch in ".+-_ ()"))
     return kept.strip()[:32]
+
+
+def bind_authenticated_user(request, user) -> None:
+    """성공한 가입·로그인의 사용자만 메타 로그에 연결한다. 인증 본문은 읽지 않는다.
+
+    DRF의 인증 없는 뷰는 request.user가 익명으로 남는다. 서버가 확인한 id를
+    원래 HttpRequest의 내부 속성에 두어 응답 뒤 미들웨어가 QA 계정을 구별한다.
+    """
+    if request is not None:
+        original = getattr(request, "_request", request)
+        original._api_request_log_user_id = user.pk
 
 
 def error_code(response) -> str:

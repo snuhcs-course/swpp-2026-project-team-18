@@ -17,6 +17,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from apps.common import request_log
+
 from apps.planning.learning_reset import recorded_before_reset
 
 from .models import AlarmLog, TripObservation
@@ -85,6 +87,7 @@ class ObservationBatchView(APIView):
                     k: v for k, v in item.items() if k not in _IDENTITY_FIELDS
                 }
                 defaults.setdefault("detector", TripObservation.Detector.GPS)
+                defaults["app_version"] = request_log.app_version(request)
 
                 obs, was_created = TripObservation.objects.get_or_create(
                     user=request.user,
@@ -178,7 +181,10 @@ class AlarmLogBatchView(APIView):
                 log, was_created = AlarmLog.objects.get_or_create(
                     user=request.user,
                     client_uuid=item["client_uuid"],
-                    defaults={**defaults, "source": AlarmLog.Source.APP},
+                    defaults={
+                        **defaults, "source": AlarmLog.Source.APP,
+                        "app_version": request_log.app_version(request),
+                    },
                 )
                 if was_created:
                     created.append(log.pk)

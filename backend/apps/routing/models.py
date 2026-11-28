@@ -245,7 +245,9 @@ def walk_factor(ratio: float, n: int) -> float:
 
 def walk_factor_for(user_id: int) -> float:
     """사용자의 걷는 속도 계수. 기록이 없으면 1.0."""
-    profile = UserTravelProfile.objects.filter(user_id=user_id).only(
+    from apps.common.cohort import exclude_test_accounts
+
+    profile = exclude_test_accounts(UserTravelProfile.objects.filter(user_id=user_id)).only(
         "walk_ratio", "walk_samples"
     ).first()
     return profile.walk_factor if profile is not None else 1.0

@@ -64,6 +64,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone as dj_tz
 
+from apps.common.cohort import exclude_test_accounts
 from apps.planning import history
 from apps.planning.estimators import walk_adjusted_minutes
 from apps.planning.models import AlarmPlan
@@ -145,7 +146,9 @@ def collect_travel_samples(user=None) -> tuple[list[TravelSample], dict[str, int
     """
     from apps.observations.models import TripObservation, TripReroute
 
-    qs = TripObservation.objects.annotate(event_skipped_at=F("event__skipped_at")).order_by(
+    qs = exclude_test_accounts(TripObservation.objects.all()).annotate(
+        event_skipped_at=F("event__skipped_at")
+    ).order_by(
         "event_id", "observed_at", "id"
     )
     if user is not None:
@@ -595,7 +598,7 @@ def observation_count(user=None) -> int:
     """아티팩트를 만들 가치가 있는지 판단할 관측 수."""
     from apps.routines.models import BlockObservation
 
-    qs = BlockObservation.objects.all()
+    qs = exclude_test_accounts(BlockObservation.objects.all())
     if user is not None:
         qs = qs.filter(user=user)
     return qs.count()

@@ -1,0 +1,21 @@
+{
+  "verified_date_kst": "2026-11-28",
+  "branch": "front-iter5",
+  "command": "python -m pytest -q",
+  "settings": "config.settings.test",
+  "database": "isolated in-memory SQLite",
+  "suite": {
+    "tests": 2500,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "new_regressions": {
+    "test_telemetry_daily": 31,
+    "test_telemetry_version": 10,
+    "test_test_account_exclusion": 34
+  },
+  "migration_check": "manage.py makemigrations --settings=config.settings.test --check --dry-run: No changes detected",
+  "warnings": "101 warnings about the existing short JWT signing key in test settings",
+  "limits": "No production DB, external API, physical-device beta measurement, or PostgreSQL execution was performed."
+}

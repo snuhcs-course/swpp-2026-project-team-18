@@ -311,7 +311,10 @@ def placeholder_email(identity: Identity) -> str:
     return f"{identity.provider.key}-{local}@{PLACEHOLDER_DOMAIN}"
 
 
-def sign_in(identity: Identity, *, terms_agreed: bool, nickname: str = "") -> tuple[User, bool]:
+def sign_in(
+    identity: Identity, *, terms_agreed: bool, nickname: str = "",
+    registration_app_version: str = "",
+) -> tuple[User, bool]:
     """연결된 사용자를 돌려주거나 새로 만든다. `(사용자, 새로 만들었나)`."""
     account = _linked(identity)
     if account is not None:
@@ -340,6 +343,7 @@ def sign_in(identity: Identity, *, terms_agreed: bool, nickname: str = "") -> tu
                     or f"{identity.provider.label} 사용자"
                 ),
                 terms_agreed_at=timezone.now(),
+                registration_app_version=registration_app_version,
             )
             SocialAccount.objects.create(
                 user=user,

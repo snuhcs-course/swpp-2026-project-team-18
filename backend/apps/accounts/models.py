@@ -67,6 +67,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_active = models.BooleanField("활성", default=True)
     is_staff = models.BooleanField("스태프", default=False)
     date_joined = models.DateTimeField("가입 시각", default=timezone.now)
+    # S-4: 가입 당시 요청의 버전. 과거·관리자 생성 계정은 미상(빈 문자열)이다.
+    registration_app_version = models.CharField(
+        "가입 앱 버전", max_length=32, blank=True, default="", db_default=""
+    )
 
     objects = UserManager()
 

@@ -327,6 +327,10 @@ class Event(models.Model):
     )
 
     created_at = models.DateTimeField("생성 시각", auto_now_add=True)
+    # 요청 생성 시에만 채운다. 서버가 펼친 반복 회차는 버전을 추측하지 않는다.
+    creation_app_version = models.CharField(
+        "생성 앱 버전", max_length=32, blank=True, default="", db_default=""
+    )
     updated_at = models.DateTimeField("수정 시각", auto_now=True)
 
     class Meta:

@@ -12,6 +12,8 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from apps.common import request_log
+
 from . import tokens
 from .serializers import (
     LoginSerializer,
@@ -40,6 +42,7 @@ class RegisterView(CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        request_log.bind_authenticated_user(request, user)
 
         refresh = RefreshToken.for_user(user)
         return Response(

@@ -53,8 +53,9 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from django.contrib.auth import get_user_model
 from django.utils import timezone
+
+from apps.common.cohort import exclude_test_accounts, production_users
 
 from . import history
 from .models import AlarmPlan, BufferAdjustment
@@ -134,7 +135,7 @@ class Decision:
 def current(user_id: int) -> Buffer:
     """사용자의 지금 버퍼."""
     row = (
-        BufferAdjustment.objects.filter(user_id=user_id)
+        exclude_test_accounts(BufferAdjustment.objects.filter(user_id=user_id))
         .order_by("-created_at", "-id")
         .values_list("minutes", "created_at")
         .first()
@@ -225,7 +226,7 @@ def adjust_all(*, dry_run: bool = False) -> Counter:
         ).values_list("user_id", flat=True)
     )
     outcomes: Counter = Counter()
-    for user in get_user_model().objects.filter(pk__in=user_ids).order_by("pk"):
+    for user in production_users().filter(pk__in=user_ids).order_by("pk"):
         decision = evaluate(user)
         outcomes[decision.outcome] += 1
         if decision.changed and not dry_run:

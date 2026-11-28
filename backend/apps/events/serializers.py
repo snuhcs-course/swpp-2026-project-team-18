@@ -9,6 +9,8 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 
+from apps.common import request_log
+
 from .alarms import alarm_states
 
 # 서비스 범위 판정. `views.py` 가 아니라 `geo.py` 에서 가져온다 — 시리얼라이저가
@@ -567,6 +569,7 @@ class EventWriteSerializer(serializers.ModelSerializer):
         event = Event(
             user=self.context["request"].user,
             source=Event.Source.MANUAL,
+            creation_app_version=request_log.app_version(self.context["request"]),
             **validated_data,
         )
         event.place = self._resolve_place(place_data)
