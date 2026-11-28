@@ -13,10 +13,10 @@
    비교할지 알 수 없는 관측은 학습에 쓸 수 없다.
 2. `client_uuid` 는 앱이 만들고 사용자당 유일하다. 업로드가 실패해 다시
    보내도 행이 늘지 않는다. 오프라인 큐가 재전송하므로 필수다.
-3. 좌표와 정확도를 함께 저장한다. **정확도 없는 좌표는 판정 근거가 될 수
-   없다.** 오차 100m 인 fix 로 "반경 50m 진입"을 말할 수 없다. GPS 관측은
-   위치가 필수다. 직접 누른 관측(`manual`)은 실내에서 위치를 못 잡을 수 있어
-   위치가 없어도 받는다 — 위치는 판정 근거가 아니라 참고값이다.
+3. 측위 좌표는 기기에서만 처리한다. 서버는 GPS 판정의 정확도·기준점까지 거리와
+   출발/도착 시각만 저장한다. **좌표를 없애도 GPS 판정을 수동으로 바꾸지 않는다.**
+   오차 100m 인 fix 로 반경 판정을 신뢰할 수 없어 GPS의 정확도·거리는 여전히
+   필수다. 직접 누른 관측(`manual`)의 파생값은 선택이다.
 4. 계획 대비 지연은 필드가 아니라 파생값이다([delay_minutes]). 계획이
    재계산되면 낡은 값이 남으면 안 된다.
 
@@ -70,8 +70,8 @@ class TripObservation(models.Model):
     # 몇 시간 뒤에 올라온다. 학습에 쓰는 것은 이쪽이다.
     observed_at = models.DateTimeField("관측 시각")
 
-    # 위치 네 값은 GPS 관측에서 필수다(`obs_gps_has_location`). 직접 누른
-    # 관측은 비어 있을 수 있다.
+    # 과거 스키마와의 호환을 위해 nullable 열만 남긴다. API는 구버전 입력의 좌표도
+    # 버리고 응답에 싣지 않으며, 0008이 이미 저장된 측위 좌표를 지운다.
     lat = models.FloatField("위도", null=True, blank=True)
     lng = models.FloatField("경도", null=True, blank=True)
     # 판정에 쓴 fix 의 오차 반경(m). 클수록 신뢰도가 낮다.
@@ -134,14 +134,13 @@ class TripObservation(models.Model):
                 condition=Q(distance_m__gte=0), name="obs_distance_nonneg"
             ),
             # Partly AI-generated (Claude)
-            # GPS 판정은 위치가 근거다. 위치 없는 GPS 관측은 배선 오류다.
+            # 좌표 없이도 GPS 판정의 정확도·거리는 필요하다(온디바이스 판정).
             models.CheckConstraint(
                 condition=Q(detector="manual")
                 | (
-                    Q(lat__isnull=False) & Q(lng__isnull=False)
-                    & Q(accuracy_m__isnull=False) & Q(distance_m__isnull=False)
+                    Q(accuracy_m__isnull=False) & Q(distance_m__isnull=False)
                 ),
-                name="obs_gps_has_location",
+                name="obs_gps_has_evidence",
             ),
             # 좌표는 둘 다 있거나 둘 다 없다.
             models.CheckConstraint(

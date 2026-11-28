@@ -54,7 +54,7 @@ class Iter5FrontendSmokeTest {
         capture("homes-large-font")
     }
 
-    @Test fun tripProgressAndArrivalAreAvailableWithoutOpeningAnotherScreen() {
+    @Test fun tripIndexOpensTheAlarmDetailWhereProgressAndArrivalLive() {
         val now = System.currentTimeMillis()
         val today = java.time.LocalDate.now()
         val a = com.swpp.wakeup.sensing.GeoPoint(37.48, 126.95)
@@ -75,21 +75,39 @@ class Iter5FrontendSmokeTest {
             phase = com.swpp.wakeup.sensing.TripGeofence.Phase.IN_TRANSIT, movingSinceMillis = now - 600_000,
         )
         var arrived = false
-        var opened = false
+        val opened = androidx.compose.runtime.mutableStateOf(false)
+        var segmentsRequested = 0
         compose.setContent { JitTheme {
+            // P18 (Schedule row124) supersedes the earlier duplicated trip-tab
+            // progress UI: the tab indexes the journey, detail owns its actions.
+            if (opened.value) {
+                AlarmDecisionScreen(
+                    plan = plan, onBack = { opened.value = false }, onChangeRisk = {}, onEditBlocks = {}, onDelete = {},
+                    stage = com.swpp.wakeup.domain.model.TripStage.IN_TRANSIT,
+                    progress = com.swpp.wakeup.domain.model.RouteProgress.ofJourney(plan.routePath, a, b, live.point),
+                    nickname = "검토 사용자", initials = "검토", onArrive = { arrived = true },
+                )
+            } else {
             com.swpp.wakeup.ui.trip.TripTabScreen(
                 event = event, hasEvents = true, today = today, trip = HomeViewModel.TripTabState(eventId = 1, plan = plan),
-                segments = null, inTransit = true, onOpenEvent = { opened = true }, onChangeRoute = {}, onAddEvent = {},
-                onNeedSegments = { _, _ -> }, onRetry = {}, live = live, homePoint = a, nickname = "김진호", initials = "진호",
+                segments = null, inTransit = true, onOpenEvent = { id -> assertEquals(1L, id); opened.value = true }, onChangeRoute = {}, onAddEvent = {},
+                onNeedSegments = { _, _ -> segmentsRequested++ }, onRetry = {}, live = live, homePoint = a, nickname = "검토 사용자", initials = "검토",
                 onArrive = { arrived = true },
             )
+            }
         } }
+        compose.onNodeWithTag("trip_status").assertDoesNotExist()
+        compose.onNodeWithTag("trip_arrive").assertDoesNotExist()
+        compose.onNodeWithTag("trip_open_details").performScrollTo().assertIsDisplayed()
+        assertEquals(0, segmentsRequested)
+        capture("trip-index")
+        compose.onNodeWithTag("trip_open_details").performClick()
         compose.onNodeWithTag("trip_status").assertExists()
         compose.onNodeWithTag("trip_arrive").performScrollTo().assertHeightIsAtLeast(48.dp)
         capture("trip-progress")
         compose.onNodeWithTag("trip_arrive").performClick()
         assertTrue(arrived)
-        assertFalse(opened)
+        assertTrue(opened.value)
     }
 
     @Test fun notificationBannerHasActionAndMinimumTouchArea() {
@@ -120,7 +138,7 @@ class Iter5FrontendSmokeTest {
         } }
         compose.onNodeWithTag("plan_probability_reason").performScrollTo().assertExists()
         compose.onNodeWithTag("plan_probability").assertDoesNotExist()
-        compose.onNodeWithTag("plan_confirm_alarm").performScrollTo().assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag("plan_confirm_alarm").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
         capture("alarm-confirm")
         compose.onNodeWithTag("plan_confirm_alarm").performClick()
         assertTrue(confirmed)

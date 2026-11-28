@@ -403,6 +403,10 @@ class TestWriteContract:
         for field in TripObservationWriteSerializer.Meta.fields:
             if field not in sent:
                 continue
+            # P3 explicitly discards legacy measured coordinates before ORM defaults.
+            if field in ("lat", "lng"):
+                assert getattr(obs, field) is None
+                continue
             # 문자열 ↔ datetime 변환은 이 검사가 볼 것이 아니다.
             if field == "observed_at":
                 continue

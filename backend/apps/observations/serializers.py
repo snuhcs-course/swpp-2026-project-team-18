@@ -4,6 +4,8 @@
 심을 수 있다. 뷰가 `request.user` 를 직접 넣는다.
 """
 
+import math
+
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound
 
@@ -22,7 +24,7 @@ MAX_DWELL_SECONDS = 7200
 
 
 class TripObservationSerializer(serializers.ModelSerializer):
-    """응답. 계획 대비 지연을 함께 내려 앱이 다시 계산하지 않게 한다."""
+    """좌표 없는 응답. 계획 대비 지연은 서버가 계산하고 측위 좌표는 반환하지 않는다."""
 
     kind_label = serializers.CharField(source="get_kind_display", read_only=True)
     planned_at = serializers.DateTimeField(read_only=True)
@@ -38,8 +40,6 @@ class TripObservationSerializer(serializers.ModelSerializer):
             "kind_label",
             "detector",
             "observed_at",
-            "lat",
-            "lng",
             "accuracy_m",
             "distance_m",
             "dwell_seconds",
@@ -59,6 +59,9 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
 
     `event` 는 요청자 소유여야 한다. 아니면 404 다 — 403 을 주면 그 id 의
     일정이 존재한다는 사실이 새어 나간다(events 앱과 같은 규칙).
+
+    구버전 앱의 lat/lng는 입력 호환만 유지한다. 검증 후 버리므로 저장·응답에
+    쓰지 않는다. 새 앱은 좌표 없이 GPS 판정 파생값만 보낸다.
     """
 
     class Meta:
@@ -77,6 +80,7 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
             "entered_at",
             "client_uuid",
         )
+        extra_kwargs = {"lat": {"write_only": True}, "lng": {"write_only": True}}
 
     def validate_event(self, value: Event) -> Event:
         request = self.context.get("request")
@@ -92,13 +96,13 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
 
     def validate_accuracy_m(self, value: float | None) -> float | None:
         # 50m 상한은 GPS 판정에만 있다. 판별기를 알아야 해서 `validate` 가 본다.
-        if value is not None and value < 0:
-            raise serializers.ValidationError("정확도는 음수일 수 없다.")
+        if value is not None and (not math.isfinite(value) or value < 0):
+            raise serializers.ValidationError("정확도는 0 이상의 유한한 값이어야 해요.")
         return value
 
     def validate_distance_m(self, value: float | None) -> float | None:
-        if value is not None and value < 0:
-            raise serializers.ValidationError("거리는 음수일 수 없다.")
+        if value is not None and (not math.isfinite(value) or value < 0):
+            raise serializers.ValidationError("거리는 0 이상의 유한한 값이어야 해요.")
         return value
 
     def validate_dwell_seconds(self, value):
@@ -129,14 +133,19 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
             )
         self._validate_location(attrs)
         self._validate_entered_at(attrs)
+        # Keep old queues uploadable, but never carry measured coordinates into ORM defaults.
+        # Manual presses can also contain a sensor fix, so the rule applies to both detectors.
+        attrs.pop("lat", None)
+        attrs.pop("lng", None)
         return attrs
 
     # Partly AI-generated (Claude)
     @staticmethod
     def _validate_location(attrs) -> None:
-        """GPS 관측은 위치 네 값이 필수이고 오차가 50m 이하여야 한다.
+        """GPS 관측은 정확도·거리만 필수이고 오차가 50m 이하여야 한다.
 
-        직접 누른 관측(`manual`)은 위치가 없어도, 오차가 커도 받는다. 실내에서
+        구버전의 선택적 좌표는 쌍·범위를 검증한 뒤 버린다. 직접 누른 관측(`manual`)은
+        파생값이 없어도, 오차가 커도 받는다. 실내에서
         누르면 fix 가 흐리거나 없다. 그때 거절하면 앱 큐가 **배치를 통째로 버려**
         같은 배치의 GPS 관측까지 사라진다. 믿을지는 읽는 쪽(`selection`)이 정한다.
         """
@@ -149,8 +158,8 @@ class TripObservationWriteSerializer(serializers.ModelSerializer):
             return
 
         missing = {
-            name: "GPS 관측에는 위치가 필요하다."
-            for name in ("lat", "lng", "accuracy_m", "distance_m")
+            name: "GPS 판정의 정확도와 기준점까지 거리가 필요해요."
+            for name in ("accuracy_m", "distance_m")
             if attrs.get(name) is None
         }
         if missing:

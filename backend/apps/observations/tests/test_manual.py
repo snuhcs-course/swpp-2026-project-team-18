@@ -91,7 +91,9 @@ class TestUpload:
         obs = TripObservation.objects.get(client_uuid="m1")
         assert obs.detector == "manual"
         assert obs.lat is None and obs.accuracy_m is None
-        assert res.data["results"][0]["lat"] is None
+        # P3: neither detector's measured coordinates are part of the response any more.
+        assert "lat" not in res.data["results"][0]
+        assert "lng" not in res.data["results"][0]
 
     def test_manual_with_blurry_fix_is_accepted(self, client, event):
         """실내라 오차가 커도 받는다. 거절하면 앱 큐가 배치를 통째로 버린다."""
@@ -106,7 +108,7 @@ class TestUpload:
         res = client.post(BATCH_URL, self.body(event, "m1", lat=37.46), format="json")
         assert res.status_code == 400
 
-    def test_gps_still_needs_location(self, client, event):
+    def test_gps_still_needs_derived_evidence(self, client, event):
         res = client.post(BATCH_URL, self.body(event, "g1", detector="gps"), format="json")
         assert res.status_code == 400
         assert TripObservation.objects.count() == 0
@@ -131,7 +133,16 @@ class TestUpload:
 
 @pytest.mark.django_db
 class TestDatabaseRules:
-    def test_gps_row_without_location_is_rejected(self, user, event):
+    def test_gps_row_without_coordinates_keeps_derived_evidence(self, user, event):
+        observation = TripObservation.objects.create(
+            user=user, event=event, kind="arrive", detector="gps",
+            observed_at=event.start_at, client_uuid="coordinate-free",
+            accuracy_m=12, distance_m=18,
+        )
+        assert observation.lat is None and observation.lng is None
+        assert observation.detector == "gps"
+
+    def test_gps_row_without_derived_evidence_is_rejected(self, user, event):
         with pytest.raises(IntegrityError), transaction.atomic():
             TripObservation.objects.create(
                 user=user, event=event, kind="arrive", detector="gps",

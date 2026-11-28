@@ -20,7 +20,13 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -88,30 +94,50 @@ fun AlarmTimeSheet(
     userAlarm: Boolean = false,
     /** [추천 시각으로 되돌리기]. [userAlarm] 이고 [customSupported] 일 때만 보인다 */
     onRevert: () -> Unit = {},
+    /** An explicit risk preset can also be reset to the event's true default. */
+    canRestoreDefault: Boolean = false,
+    /** Scope edits to an event, independently from an asynchronously arriving plan clock. */
+    selectionKey: Long? = null,
 ) {
-    val cells = options?.options.orEmpty()
-    val recommended = recommendedKey?.let { key -> cells.firstOrNull { it.key == key } }
-        ?: cells.firstOrNull { it.key == RiskOptionView.KEY_NORMAL }
+    val quickPicks = AlarmTimeChoice.quickPicks(options, recommendedKey ?: options?.recommendedKey)
+    val cells = quickPicks.options
+    val recommended = quickPicks.recommendedKey?.let { key -> cells.firstOrNull { it.key == key } }
     val recommendedMinutes = recommended?.let { AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) }
     val start = initialMinutesOfDay ?: recommendedMinutes ?: DEFAULT_WHEEL_MINUTES
 
-    // 세 칸이나 지금 알람이 5분 단위가 아니면 1분 휠 — 반올림해 다른 시각을 보이거나 저장하지 않는다.
+    var picked by rememberSaveable(selectionKey) { mutableIntStateOf(start) }
+    var selectedPresetKey by rememberSaveable(selectionKey) { mutableStateOf<String?>(null) }
+    var choiceTouched by rememberSaveable(selectionKey) { mutableStateOf(false) }
+    // A late initial plan can initialize an untouched wheel, but must not undo an explicit edit.
+    LaunchedEffect(selectionKey, start) { if (!choiceTouched) picked = start }
     val step = AlarmTimeChoice.wheelStep(
-        cells.map { AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) } + initialMinutesOfDay,
+        cells.map { AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) } +
+            initialMinutesOfDay + picked.takeIf { choiceTouched },
     )
-    var picked by rememberSaveable(start) {
-        mutableIntStateOf(TimeWheelMath.snapMinute(start % 60, step) + start / 60 * 60)
+    val original = options?.options.orEmpty()
+    val preferredPresetKey = if (choiceTouched) selectedPresetKey else {
+        options?.selectedKey?.takeIf { key -> !userAlarm && original.any {
+            it.key == key && AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) == picked
+        } }
     }
+    val manualSelection = if (choiceTouched) selectedPresetKey == null else userAlarm
+    val saveCells = (cells + original.filter { it.key == preferredPresetKey }).distinctBy { it.key }
     val pickedLabel = AlarmTimeChoice.clockLabel(picked)
 
     // 휠이 가리키는 시각과 같은 칸. 있으면 그 칸(τ)으로, 없으면 직접 정한 시각으로 저장한다.
-    val match = cells.firstOrNull { AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) == picked }
-    val save = UserAlarmRule.choose(
+    val match = saveCells.firstOrNull { it.key == preferredPresetKey && AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) == picked }
+        ?: cells.firstOrNull { AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) == picked }
+    val proposedSave = UserAlarmRule.choose(
         picked = picked,
-        presets = cells.associate { it.key to AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) },
+        presets = saveCells.associate { it.key to AlarmTimeChoice.minutesOfDay(it.alarmAt, it.meridiem) },
         supported = customSupported,
         startMinutes = startMinutesOfDay,
+        preferredPresetKey = preferredPresetKey,
     )
+    // A custom wheel time remains custom, even if it happens to equal a preset clock.
+    val save = if (manualSelection && customSupported && proposedSave is UserAlarmRule.Save.Preset) {
+        UserAlarmRule.Save.Custom(picked)
+    } else proposedSave
     // 서버가 준 값만 보인다: 지금 알람이면 그 알람의 확률, 세 칸이면 그 칸의 확률, 그 밖이면 비운다(11-19).
     val percent = AlarmTimeChoice.shownProbability(
         picked = picked,
@@ -142,9 +168,12 @@ fun AlarmTimeSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.9f)
                 .padding(start = 18.dp, end = 18.dp, top = 14.dp, bottom = 22.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -167,13 +196,13 @@ fun AlarmTimeSheet(
             }
 
             // 직접 정한 알람이면 그렇다고 말하고 되돌리는 길을 둔다(Figma `546:2398`).
-            if (userAlarm) {
-                Row(
+            if (userAlarm || canRestoreDefault) {
+                Column(
                     modifier = Modifier.fillMaxWidth().testTag("alarm_time_user"),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = UserAlarmRule.USER_LABEL,
+                        text = if (userAlarm) UserAlarmRule.USER_LABEL else "직접 고른 단계",
                         color = JitColor.TextSecondary,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
@@ -182,13 +211,12 @@ fun AlarmTimeSheet(
                             .background(JitColor.Surface2)
                             .padding(horizontal = 10.dp, vertical = 4.dp),
                     )
-                    Spacer(Modifier.weight(1f))
                     if (customSupported) {
                         com.swpp.wakeup.ui.common.JitSecondaryButton(
-                            label = "되돌리기",
+                            label = "기본 추천으로 되돌리기",
                             onClick = onRevert,
                             enabled = !saving,
-                            modifier = Modifier.testTag("alarm_time_revert"),
+                            modifier = Modifier.fillMaxWidth().testTag("alarm_time_revert"),
                         )
                     }
                 }
@@ -207,7 +235,7 @@ fun AlarmTimeSheet(
                                 enabled = !saving,
                                 onClick = {
                                     AlarmTimeChoice.minutesOfDay(option.alarmAt, option.meridiem)
-                                        ?.let { picked = it }
+                                        ?.let { picked = it; selectedPresetKey = option.key; choiceTouched = true }
                                 },
                                 modifier = Modifier.weight(1f),
                             )
@@ -231,6 +259,7 @@ fun AlarmTimeSheet(
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier
                                 .testTag("alarm_time_retry")
+                                .heightIn(min = 48.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable(role = Role.Button, onClick = onRetry)
                                 .padding(vertical = 4.dp),
@@ -239,6 +268,10 @@ fun AlarmTimeSheet(
                 }
             }
 
+            if (quickPicks.collapsed) {
+                Text("차이가 작은 시각은 하나로 묶었어요", color = JitColor.TextSecondary,
+                    fontSize = 12.sp, modifier = Modifier.testTag("alarm_time_collapsed"))
+            }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("직접 정하기", color = JitColor.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 // 칸을 누르면 휠도 그 시각으로 굴러간다(JitTimeWheel 이 바뀐 값을 따라간다). 간격이 바뀌면 열을 새로 만든다.
@@ -246,7 +279,11 @@ fun AlarmTimeSheet(
                     hour24 = picked / 60,
                     minute = picked % 60,
                     minuteStep = step,
-                    onChange = { hour, minute -> picked = AlarmTimeChoice.minutesOfDay(hour, minute) },
+                    onChange = { hour, minute ->
+                        val changed = AlarmTimeChoice.minutesOfDay(hour, minute)
+                        if (changed != picked) { selectedPresetKey = null; choiceTouched = true }
+                        picked = changed
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 ) }
                 ResultLine(pickedLabel, percent, goalTau, recommendedMinutes, picked)
@@ -274,6 +311,7 @@ fun AlarmTimeSheet(
                 )
             }
 
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SheetButton(
                     label = "취소",

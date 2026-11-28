@@ -39,7 +39,7 @@ fun AppTabBar(
                 selected = tab == selected,
                 onClick = { onSelect(tab) },
                 icon = { Icon(imageVector = TabIcons.of(tab), contentDescription = null) },
-                label = { Text(text = tab.label, fontSize = 11.sp) },
+                label = { Text(text = tab.label, fontSize = 12.sp) },
                 modifier = Modifier
                     .testTag("tab_${tab.name.lowercase()}")
                     // 홈 코치마크(H2-4)가 "이동" 탭 자리를 밝힌다

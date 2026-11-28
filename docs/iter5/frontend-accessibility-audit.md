@@ -25,3 +25,14 @@
 QA 에뮬레이터에서 집 관리 화면을 1.5배 글자로 표시하고 이름 변경·기본 집·삭제 동작이 보이며 48dp 이상인지 확인했다. [캡처](evidence/screenshots/iter5-frontend/homes-large-font.png)와 [24개 화면·초기화 테스트 로그](evidence/device-smoke.log)를 남겼다.
 
 Android Accessibility Scanner의 주요 화면 5개 스캔과 TalkBack 실제 탐색, 앱 전체의 큰 글자·화면 확대 상태, 밝기·대비는 이 검사만으로 완료할 수 없다. 실제 결과와 화면 증거를 남긴 뒤 N31을 최종 완료로 바꿔야 한다. 이 문서는 Scanner 실행이나 실기기 접근성 검증을 완료했다는 근거가 아니다.
+
+
+## 2026-11-28 일정표 P24 추가 범위
+
+Figma 설정 `727:2997`·리포트 `727:3037`·아침 기록 `729:3020`·큰 글자 수치 `732:3025`를 먼저 설계했다. 설정의 전체 로그아웃·소셜 연결/해제, 일정 종류·반복 요일·되돌리기, 아침 기록의 되돌리기·끝내기·안 가요, 주간 날짜에 48dp 영역과 적절한 버튼 역할을 적용했다. 요일은 줄바꿈하거나 가로 스크롤해 작은 화면에서도 누르는 영역을 줄이지 않는다.
+
+계정·권한·리포트·아침 기록의 명시적인 9~11sp 보조 문구를 12sp로 조정하고 범례·설명·날짜·막대 라벨을 고정 높이로 자르지 않게 했다. 탭 라벨도 12sp다. 큰 글자에서 세 근거 상자의 글자가 잘게 꺾이는 실제 캡처를 확인하고, 공간이 부족하면 수치와 출처를 넓은 세로 상자로 바꾸도록 보완했다.
+
+`Iter5FormActionsTest`, `Iter5PinnedActionsTest`, `Iter5SecondaryAccessibilityTest`, `ManualArrivalReviewDialogTest`가 좁은 할당 영역과 1.5배 글자에서 동작 표시·영역·역할·클릭 결과를 확인한다. 이는 소스 문자열만 검사한 결과가 아니다. [최신 검증과 캡처](schedule-frontend-verification.md)를 따른다.
+
+QA 에뮬레이터에는 TalkBack은 있지만 Accessibility Scanner 패키지는 설치되어 있지 않다. 이번 작업에서 TalkBack을 실제 사용자의 탐색으로 평가하거나 Google Scanner를 실행했다고 기록하지 않는다. Android Lint·Compose 의미 정보·48dp 자동 검사를 Scanner 결과로 바꾸지 않으며, 두 실제 확인은 계속 남아 있다.

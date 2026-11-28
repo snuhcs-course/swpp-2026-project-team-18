@@ -52,6 +52,10 @@ import com.swpp.wakeup.data.repository.ServerLogout
 import com.swpp.wakeup.domain.model.AlarmPlanView
 import com.swpp.wakeup.domain.model.takeCodePoints
 import com.swpp.wakeup.domain.model.AlarmTimeChoice
+import com.swpp.wakeup.domain.model.EventCompletion
+import com.swpp.wakeup.ui.alarm.ManualArrivalReview
+import com.swpp.wakeup.ui.alarm.ManualArrivalReviewController
+import com.swpp.wakeup.sensing.LocationFix
 import com.swpp.wakeup.domain.model.ArrivalLedger
 import com.swpp.wakeup.domain.model.Inquiry
 import com.swpp.wakeup.domain.model.LearningReset
@@ -187,9 +191,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         repository = dependencies.me,
         parentScope = viewModelScope,
         hooks = MeViewModel.Hooks(
-            openPassword = { if (_nav.value.current != AppRoute.ChangePassword) _nav.update { it.push(AppRoute.ChangePassword) } },
+            openPassword = { if (_nav.value.current != AppRoute.ChangePassword) navigation.update { it.push(AppRoute.ChangePassword) } },
             closePassword = { if (_nav.value.current == AppRoute.ChangePassword) goBack() },
-            openEmail = { if (_nav.value.current == AppRoute.Settings) _nav.update { it.push(AppRoute.VerifyEmail) } },
+            openEmail = { if (_nav.value.current == AppRoute.Settings) navigation.update { it.push(AppRoute.VerifyEmail) } },
             closeEmail = { if (_nav.value.current == AppRoute.VerifyEmail) goBack() },
             verified = { email -> _state.update {
                 it.copy(emailVerified = true, accountEmail = email?.let(SocialLogin::visibleEmail) ?: it.accountEmail)
@@ -445,8 +449,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
-    private val _nav = MutableStateFlow(NavState())
-    val nav: StateFlow<NavState> = _nav.asStateFlow()
+    private val navigation = HomeNavigation()
+    private val _nav: StateFlow<NavState> = navigation.state
+    val nav: StateFlow<NavState> = navigation.state
 
     // --- 장소 검색 --------------------------------------------------------
     //
@@ -724,6 +729,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 추적 종료 후 화면에 표시할 도착 결과. 현재 위치를 재사용하지 않는다. 일정 id 로 찾는다 */
     val tripArrivals: StateFlow<Map<Long, TripLiveState.Arrival>> = TripLiveState.arrivals
+
+    private val manualArrivalReview = ManualArrivalReviewController(
+        canRecord = ::canRecordManualArrival,
+        record = ::recordManualArrival,
+    )
+    internal val pendingManualArrival = manualArrivalReview.pending
 
     /**
      * 서비스가 받은 최신 현재-위치 경로. 늦을 때의 경로 바꾸기 카드가 읽는다
@@ -1165,13 +1176,41 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // --- "안 감" 표시 (skip-event-api.md §6) --------------------------------
 
     // Partly AI-generated (Claude)
-    /**
-     * "도착했어요"(수동 도착, todo §2). 추적 중이면 서비스가 마지막 위치를 붙여 기록한다.
-     * 화면은 [TripLiveState.arrival] 이 바뀌면서 "도착" 으로 넘어가고 홈 행도 다시 그려진다.
-     */
+    /** App buttons and notification actions both ask before recording a manual arrival. */
     fun markArrived(eventId: Long) {
+        if (!requestManualArrival(eventId)) notify("이 일정은 지금 도착을 기록할 수 없어요")
+    }
+
+    internal fun requestManualArrival(eventId: Long): Boolean {
+        val plan = manualArrivalPlan(eventId) ?: return false
+        val snapshot = TripLiveState.pointFor(eventId)
+        val fix = snapshot?.let { LocationFix(it.point.lat, it.point.lng, it.accuracyM, it.atMillis) }
+        val position = ManualArrivalReview.position(fix, plan.destinationPoint, System.currentTimeMillis())
+        return manualArrivalReview.request(eventId, position)
+    }
+
+    internal fun dismissManualArrival() = manualArrivalReview.dismiss()
+
+    internal fun confirmManualArrival() {
+        if (!manualArrivalReview.confirm()) notify("일정 상태가 바뀌어 도착을 기록하지 않았어요")
+    }
+
+    private fun manualArrivalPlan(eventId: Long): AlarmPlanView? =
+        _plan.value?.takeIf { it.eventId == eventId }
+            ?: tripViewModel.plan.value.plan?.takeIf { it.eventId == eventId }
+
+    private fun canRecordManualArrival(eventId: Long): Boolean {
+        val plan = manualArrivalPlan(eventId) ?: return false
+        if (plan.startAtMillis == null || plan.skipped) return false
+        return stageOf(plan, nowMillis = System.currentTimeMillis()).canMarkArrived
+    }
+
+    private fun recordManualArrival(eventId: Long) {
         runCatching { TripTrackingService.markArrived(getApplication(), eventId) }
-            .onFailure { Log.e(TAG, "수동 도착 기록 실패", it) }
+            .onFailure {
+                Log.e(TAG, "수동 도착 기록 실패", it)
+                notify("도착을 기록하지 못했어요. 다시 시도해 주세요")
+            }
         _state.update { it.copy(pendingObservations = pendingObservationCount()) }
     }
 
@@ -1358,7 +1397,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private fun popReportDayIfEmpty(date: LocalDate, eventId: Long) {
         val day = report.value.weekly?.days?.firstOrNull { it.date == date }
         if (day != null && !day.isEmptyWithout(eventId)) return
-        _nav.update {
+        navigation.update {
             if ((it.current as? AppRoute.ReportDay)?.date == date) {
                 it.copy(stack = it.stack.dropLast(1), forward = false)
             } else {
@@ -1447,7 +1486,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 다루는 것은 기기에 남는 **보존 기간**이다.
      */
     fun logout() {
-        // Stop account requests before clearing tokens so old replies cannot repopulate this session's UI.
+        // Stop old account navigation and requests before clearing this session.
+        navigation.endSession()
+        manualArrivalReview.endSession()
         meViewModel.close()
         // 서버에 이 refresh 를 취소하게 한다(token-security-api.md §5). 기기 토큰은 결과와
         // 상관없이 아래에서 지운다 — 서버 호출은 화면과 떼어 뒤에서 한다([ServerLogout]).
@@ -1614,7 +1655,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // --- 화면 이동 --------------------------------------------------------
 
     fun openAlarmDecision(eventId: Long) {
-        _nav.update { it.push(AppRoute.AlarmDecision(eventId)) }
+        navigation.update { it.push(AppRoute.AlarmDecision(eventId)) }
         loadPlan(eventId)
     }
 
@@ -2010,17 +2051,17 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // Partly AI-generated (Claude)
     /** 내 정보 › 설정. "로그인 연결" 에 쓸 로그인 방법을 열 때마다 새로 받는다(다른 기기에서 바꿨을 수 있다) */
     fun openMeSettings() {
-        _nav.update { it.push(AppRoute.Settings) }
+        navigation.update { it.push(AppRoute.Settings) }
         loadLoginMethods()
     }
 
     /** 내 정보 › 집 주소. 다른 집 목록을 서버와 맞춘다 */
     fun openHomes() {
-        _nav.update { it.push(AppRoute.Homes) }
+        navigation.update { it.push(AppRoute.Homes) }
         syncSavedHomes()
     }
 
-    fun openRooms() { _nav.update { it.push(AppRoute.Rooms) } }
+    fun openRooms() { navigation.update { it.push(AppRoute.Rooms) } }
 
     /** I5-07: 저장한 집의 이름만 바꾸고 서버가 확인한 행을 반영해요. */
     suspend fun renameSavedHome(id: String, requested: String): String? {
@@ -2054,7 +2095,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 내 정보 › 알림·권한. 권한은 화면이 기기에서 바로 읽는다 */
     fun openPermissions() {
-        _nav.update { it.push(AppRoute.Permissions) }
+        navigation.update { it.push(AppRoute.Permissions) }
     }
 
     // --- 첫 실행 안내 · 홈 코치마크 (iter4 H2-4) ---------------------------
@@ -2064,7 +2105,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun replayIntro() {
         if (_nav.value.current == AppRoute.Intro) return
         showCoachmarkNext()
-        _nav.update { it.push(AppRoute.Intro) }
+        navigation.update { it.push(AppRoute.Intro) }
     }
 
     /**
@@ -2072,28 +2113,21 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 가기가 연 자리로 돌아간다. 도움말 위에서 다시 부르면 쌓지 않고 바꾼다.
      */
     fun openHelp(topic: HelpTopic? = null) {
-        val route = AppRoute.Help(topic)
-        _nav.update { nav ->
-            val base = if (nav.current is AppRoute.Help) nav.stack.dropLast(1) else nav.stack
-            nav.copy(stack = base + route, forward = true)
-        }
+        navigation.openHelp(topic)
     }
 
     /**
-     * 안내의 [건너뛰기] · 3장의 [시작하기] · 1장에서 뒤로. 어느 장에서든 홈 탭 첫 화면으로 간다(Figma `545:1305`).
+     * 안내의 [건너뛰기] · 3장의 [시작하기] · 1장에서 뒤로는 안내를 연 화면으로 돌아간다.
      *
-     * 가입 흐름에서는 안내가 홈 바로 위에 있어 하나 빼면 홈이다. 내 정보에서 다시 본 경우에는 내 정보 탭을 첫
-     * 화면으로 돌려 두고 홈 탭으로 간다 — 코치마크는 홈 탭 첫 화면에서만 뜬다.
+     * 가입 흐름에서는 아래에 홈이 있어 홈으로, 다시 보기에서는 내 정보·도움말 등 실제 진입점으로 돌아간다.
+     * 코치마크는 사용자가 나중에 홈 탭 첫 화면을 방문했을 때 보여 준다.
      */
     fun finishIntro() {
         firstRunGuideStore.markIntroShown()
         // 계정에 남긴다(팀 결정 11-11). 다시 보기로 연 경우처럼 계정이 이미 알면 보내지 않는다.
         if (homeData?.introSeen != true) uploadGuideSeen(GuideSeenRules.Upload(intro = true, coachmark = false))
         val before = _nav.value
-        _nav.update { nav ->
-            val popped = if (nav.current == AppRoute.Intro) nav.back() else nav
-            if (popped.tab == AppTab.HOME && popped.current == AppRoute.Home) popped else popped.home()
-        }
+        navigation.finishIntro()
         afterTabChange(before)
     }
 
@@ -2157,7 +2191,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun selectTab(tab: AppTab) {
         val before = _nav.value
-        _nav.update { it.selectTab(tab) }
+        navigation.selectTab(tab)
         afterTabChange(before)
     }
 
@@ -2184,7 +2218,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openHomeSetup() {
         primeCurrentLocation()
-        _nav.update { it.push(AppRoute.HomeSetup) }
+        navigation.update { it.push(AppRoute.HomeSetup) }
     }
 
     // --- 아침 기록 --------------------------------------------------------
@@ -2257,7 +2291,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _morning.value = session
         _state.update { it.copy(morningBlocksLeft = session?.remaining?.size) }
         if (session == null) {
-            _nav.update {
+            navigation.update {
                 if (it.current == AppRoute.MorningProgress) {
                     it.copy(stack = it.stack.dropLast(1), forward = false)
                 } else {
@@ -2289,7 +2323,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun openMorning() {
         reloadMorning()
         if (_morning.value == null) return
-        _nav.update { it.push(AppRoute.MorningProgress) }
+        navigation.update { it.push(AppRoute.MorningProgress) }
     }
 
     /**
@@ -2419,7 +2453,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     // AI-generated (Claude)
     /** ⑨ 상세 리포트. ⑧ 이 이미 받은 주간 응답을 보므로 새로 부르지 않는다. */
     fun openReportDay(date: LocalDate, eventId: Long?) {
-        _nav.update {
+        navigation.update {
             it.push(AppRoute.ReportDay(date, eventId))
         }
     }
@@ -2437,7 +2471,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // 먼저 연다 — openCount 가 오른 뒤라 afterTabChange 가 이번 주로 다시 부르지 않는다.
         reportNavigator.openWeek(week)
         val before = _nav.value
-        _nav.update { nav ->
+        navigation.update { nav ->
             val report = nav.selectTab(AppTab.REPORT)
             if (report.current == AppRoute.WeeklyReport) report else report.selectTab(AppTab.REPORT)
         }
@@ -2459,7 +2493,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     val calendarImport: StateFlow<CalendarImportState> = _calendarImport.asStateFlow()
 
     fun openCalendarImport() {
-        _nav.update { it.push(AppRoute.CalendarImport) }
+        navigation.update { it.push(AppRoute.CalendarImport) }
         _calendarImport.value = CalendarImportState(loading = true)
         loadCalendarCandidates()
     }
@@ -2792,7 +2826,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 사실을 안내한다.
      */
     fun openRoutineEditor() {
-        _nav.update { it.push(AppRoute.RoutineEditor) }
+        navigation.update { it.push(AppRoute.RoutineEditor) }
         _routine.value = RoutineEditorState(loading = true)
         loadBlocks(eventId = null)
     }
@@ -2803,7 +2837,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 지금 화면을 아침 루틴으로 **바꿔 끼운다** — 뒤로 가면 ④ 로 돌아간다.
      */
     fun openRoutineEditorFromEvent() {
-        _nav.update { nav ->
+        navigation.update { nav ->
             val base = if (nav.stack.lastOrNull() is AppRoute.EventBlocks) nav.stack.dropLast(1) else nav.stack
             nav.copy(stack = base + AppRoute.RoutineEditor, forward = true)
         }
@@ -2823,7 +2857,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 .firstOrNull { it.id == eventId }
                 ?.let { "${it.startTime} ${it.title}" }
 
-        _nav.update {
+        navigation.update {
             it.push(AppRoute.EventBlocks(eventId))
         }
         _routine.value = RoutineEditorState(
@@ -3132,7 +3166,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val add = _add.value
         if (!add.canPickRoute(_state.value.hasHome, _state.value.homePlace)) return
         val place = add.selectedPlace ?: return
-        _nav.update { it.push(AppRoute.RouteChoice) }
+        navigation.update { it.push(AppRoute.RouteChoice) }
 
         val cached = _routeChoice.value?.choice
         if (cached != null) {
@@ -3281,7 +3315,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             selected = selected,
             currentLocation = rememberedLocation(MAP_LOCATION_MAX_AGE_MS),
         )
-        _nav.update { it.push(AppRoute.MapPick) }
+        navigation.update { it.push(AppRoute.MapPick) }
         // 화면 진입 자체가 GPS 고정밀 측정을 강제하지는 않는다. 값이 없으면
         // 배터리 부담이 작은 선점만 하고, 위치 버튼을 누른 순간 getFresh로
         // 정확한 fix를 받아 같은 탭 안에서 이동한다.
@@ -3679,13 +3713,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 저장을 마친 [match] 화면만 닫는다([NavState.close]). 그 사이 위에 다른 화면이 열렸으면 그 화면은 그대로다 */
     fun closeScreen(match: (AppRoute) -> Boolean) {
-        _nav.update { it.close(match) }
+        navigation.close(match)
     }
 
     fun goBack() {
         // 스택이 깊으면 하나 빼고, 홈이 아닌 탭의 첫 화면이면 홈 탭으로 간다(iter4 H2-2).
         val before = _nav.value
-        _nav.update { it.back() }
+        navigation.back()
         if (_nav.value.current != before.current) {
             when (before.current) {
                 AppRoute.ChangePassword -> meViewModel.leavePassword()
@@ -3705,7 +3739,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 홈 탭의 첫 화면으로([NavState.home]). 지금 탭은 첫 화면으로 되돌리고 다른 탭은 그대로 둔다 */
     fun goHome() {
-        _nav.update { it.home() }
+        navigation.home()
     }
 
     private fun loadPlan(eventId: Long) {
@@ -3994,26 +4028,24 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 판정기의 "출발 전" 은 판정에 쓴 위치가 2분 안일 때만 쓴다. 흐린 위치만 오는
      * 동안에도 판정기는 집에 머물러, 집을 나선 사람에게 "준비 중" 을 계속 보였다.
      *
-     * 시각 판정은 [AlarmPlanView.alarmPassed]·[AlarmPlanView.eventPassed] 가 이미
-     * 담고 있다. 여기서 시계를 다시 읽으면 화면에 보이는 문구("지난 알람")와
-     * 단계가 서로 다른 시점을 근거로 삼게 된다.
+     * [EventCompletion]은 같은 [nowMillis]로 시작·관측 마감 경계를 판단한다.
+     * 일정 시작 시각만으로 도착을 추정하지 않고, 관측 마감까지 수동 기록을 허용한다.
+     * 시작 시각을 주지 않는 구버전 응답에서만 과거 여부 불린을 사용한다.
      */
     fun stageOf(
         plan: AlarmPlanView,
         arrival: TripLiveState.Arrival? = TripLiveState.arrivalFor(plan.eventId),
         /** 추적 판정의 나이를 잴 시각. "출발 전" 은 싱싱할 때만 믿는다([TripStage.tracked]) */
         nowMillis: Long = System.currentTimeMillis(),
-    ): TripStage = if (arrival?.eventId == plan.eventId) TripStage.ARRIVED else TripStage.of(
+    ): TripStage = EventCompletion.stage(
+        plan = plan,
         tracked = TripLiveState.pointFor(plan.eventId)?.let { live ->
             TripStage.tracked(live.phase, live.phaseCheckedAtMillis, nowMillis)
         } ?: TripLiveState.liveRouteFor(plan.eventId)
             ?.takeIf { it.usableLiveRoute() != null }
             ?.let { TripStage.IN_TRANSIT },
-        alarmPassed = plan.alarmPassed,
-        eventPassed = plan.eventPassed,
-        prepApplies = plan.prepApplies,
-        alarmOn = plan.alarmOn,
-        departPassed = plan.departPassed,
+        arrivalRecorded = arrival?.eventId == plan.eventId,
+        nowMillis = nowMillis,
     )
 
     // --- 일정 추가 --------------------------------------------------------
@@ -4190,7 +4222,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (routeCacheStaleAfterHomeMove(_routeChoice.value, formChanged = _add.value != before)) {
             routeChoiceGeneration++
             _routeChoice.value = null
-            _nav.update { it.close { r -> r == AppRoute.RouteChoice } }
+            navigation.update { it.close { r -> r == AppRoute.RouteChoice } }
         }
         pendingAddDraft = pendingAddDraft?.afterHomeMoved(home)
     }
@@ -4256,6 +4288,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 화면이 사라질 때 쓰다 만 일정을 프로세스 안의 보관함에 맡긴다(로그인 만료 → 다시 로그인 대비) */
     override fun onCleared() {
+        navigation.endSession()
+        manualArrivalReview.endSession()
         eventEditorViewModel.close()
         tripViewModel.close()
         alarmDecisionViewModel.close()
@@ -4761,7 +4795,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     _routeChoice.value = null
                     loadEventTags()
-                    _nav.update { it.push(AppRoute.EditEvent(eventId)) }
+                    navigation.update { it.push(AppRoute.EditEvent(eventId)) }
                 }
             }
           } finally {
@@ -5157,7 +5191,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             minutes = _state.value.onboardingPrepMin?.toString().orEmpty(),
             fromSettings = true,
         )
-        _nav.update { it.push(AppRoute.PrepOnboarding) }
+        navigation.update { it.push(AppRoute.PrepOnboarding) }
     }
 
     fun resetPrepOnboarding() {
@@ -5264,7 +5298,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             // 좌표 선점도 여기서 따로 해야 온보딩 검색에 거리가 붙는다.
             primeCurrentLocation()
         }
-        _nav.update { it.copy(stack = it.stack + pending, forward = true) }
+        navigation.update { it.copy(stack = it.stack + pending, forward = true) }
     }
 
     /**

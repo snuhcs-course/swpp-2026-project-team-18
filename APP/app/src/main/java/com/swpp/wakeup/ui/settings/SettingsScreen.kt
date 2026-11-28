@@ -26,12 +26,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swpp.wakeup.domain.model.SavedHome
 import com.swpp.wakeup.domain.model.SocialProvider
+import com.swpp.wakeup.ui.common.JitSecondaryButton
 import com.swpp.wakeup.ui.events.ScreenHeader
 import com.swpp.wakeup.ui.home.HomeViewModel
 import com.swpp.wakeup.ui.theme.JitColor
@@ -144,7 +146,8 @@ fun SettingsScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(JitRadius.Hint))
-                        .clickable(onClick = check)
+                        .heightIn(min = 48.dp)
+                        .clickable(role = Role.Button, onClick = check)
                         .padding(vertical = 4.dp),
                 )
             }
@@ -157,7 +160,8 @@ fun SettingsScreen(
                     modifier = Modifier
                         .testTag("dev_test_crash")
                         .clip(RoundedCornerShape(JitRadius.Hint))
-                        .clickable(onClick = crash)
+                        .heightIn(min = 48.dp)
+                        .clickable(role = Role.Button, onClick = crash)
                         .padding(vertical = 4.dp),
                 )
             }
@@ -177,7 +181,8 @@ fun SettingsScreen(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(JitRadius.Button))
                 .background(JitColor.Surface2)
-                .clickable(onClick = onLogout)
+                .heightIn(min = 48.dp)
+                .clickable(role = Role.Button, onClick = onLogout)
                 .padding(vertical = 16.dp),
         )
 
@@ -189,16 +194,11 @@ fun SettingsScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                Text(
-                    text = if (logoutAllBusy) "로그아웃하는 중…" else "모든 기기에서 로그아웃",
-                    color = JitColor.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .testTag("logout_all")
-                        .clip(RoundedCornerShape(JitRadius.Hint))
-                        .clickable(enabled = !logoutAllBusy, onClick = logoutAll)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                JitSecondaryButton(
+                    label = if (logoutAllBusy) "로그아웃하는 중…" else "모든 기기에서 로그아웃",
+                    onClick = logoutAll,
+                    enabled = !logoutAllBusy,
+                    modifier = Modifier.fillMaxWidth().testTag("logout_all"),
                 )
                 Text(
                     text = "다른 기기에 남은 로그인도 모두 끝나요. 인터넷에 연결돼 있어야 해요",
@@ -346,16 +346,11 @@ private fun LoginConnections(
                     Text(status, color = JitColor.TextSecondary, fontSize = 12.sp)
                 }
                 action?.let { (label, onClick) ->
-                    Text(
-                        text = label,
-                        color = if (label == "연결" || label == "다시 시도") JitColor.Accent else JitColor.TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .testTag("social_${provider.path}_action")
-                            .clip(RoundedCornerShape(JitRadius.Hint))
-                            .clickable(enabled = onClick != null && busy == null) { onClick?.invoke() }
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    JitSecondaryButton(
+                        label = label,
+                        onClick = { onClick?.invoke() },
+                        enabled = onClick != null && busy == null,
+                        modifier = Modifier.testTag("social_${provider.path}_action"),
                     )
                 }
             }
@@ -383,7 +378,7 @@ internal fun SettingRow(
             .clip(RoundedCornerShape(JitRadius.Card))
             .background(JitColor.Surface)
             // 눌러도 할 일이 없는 줄(인증됨)과 처리 중인 줄은 누를 수 없다.
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

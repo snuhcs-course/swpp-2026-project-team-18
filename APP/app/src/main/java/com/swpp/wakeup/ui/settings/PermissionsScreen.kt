@@ -96,7 +96,7 @@ internal fun PermissionsScreen(
         Text(
             text = "기기 설정에서 바꾸고 돌아오면 바로 반영돼요",
             color = JitColor.TextSecondary,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
         )
 
         SectionLabel("알림")
@@ -125,7 +125,7 @@ private fun ReminderRow(value: MeTabLogic.Value, on: Boolean, onChange: (Boolean
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(text = "주간 리포트 알림", color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text(text = "주간 리포트 알림", color = JitColor.TextSecondary, fontSize = 12.sp)
             Spacer(Modifier.height(3.dp))
             Text(
                 text = value.text,

@@ -88,6 +88,8 @@ curl http://127.0.0.1:8000/api/health
 
 ## 검증과 학습
 
+- Iteration 5 관측 API는 측위 좌표 없이 GPS 판정을 받고, 구버전이 보낸 좌표는 저장·반환하지 않는다. `observations.0008` 적용과 서버 선행 배포는 [온디바이스 처리·이행 주의점](../docs/iter5/on-device-location.md)을 따른다.
+
 - S-4 날짜별 사용량·응답 시간·오류율은 `manage.py telemetry_daily --from YYYY-MM-DD --to YYYY-MM-DD [--app-version 0.22.0] [--users 12,15] [--csv out.csv]`로 집계한다. [텔레메트리 실행·버전 귀속·개인정보·N26](../docs/iter5/telemetry-daily.md)을 먼저 확인한다.
 
 두 명령 모두 공용 DB와 분리된 테스트 DB를 쓴다. 카카오 키가 없으면 관련 항목은 실패가 아니라 건너뜀이다.

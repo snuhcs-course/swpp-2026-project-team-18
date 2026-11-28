@@ -4,6 +4,7 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -233,9 +235,9 @@ private fun HeadlineCard(
 
         val dots = ReportTabLogic.dots(report, today)
         if (dots.isNotEmpty()) {
-            Row(modifier = Modifier.fillMaxWidth()) {
+            Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("report_days")) {
                 dots.forEachIndexed { index, dot ->
-                    DayDot(dot, index, enabled, onOpenDay, Modifier.weight(1f))
+                    DayDot(dot, index, enabled, onOpenDay, Modifier.widthIn(min = 48.dp))
                 }
             }
         }
@@ -268,10 +270,11 @@ private fun DayDot(
     Column(
         modifier = modifier
             .testTag("report_day_$index")
+            .heightIn(min = 48.dp)
             .then(tap)
             .semantics(mergeDescendants = true) { contentDescription = dot.description },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
     ) {
         // 낭독은 칸 전체의 설명이 맡는다.
         Text(

@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -79,17 +80,16 @@ internal fun verdictColor(verdict: String): Color = when (verdict) {
 @Composable
 internal fun CalibrationTable(view: CalibrationView, highlightLower: Double?) {
     JitCard(padding = 14.dp, gap = 8.dp, accented = view.verdict == CalibrationView.WIRE_OVERCONFIDENT) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text("예측 검증 · 최근 90일", color = JitColor.TextSecondary, fontSize = 11.sp)
-            Text("약속 → 실제", color = JitColor.TextSecondary, fontSize = 10.sp)
+            Text("예측 검증 · 최근 90일", color = JitColor.TextSecondary, fontSize = 12.sp)
+            Text("예상 정시율 → 실제 정시율", color = JitColor.TextSecondary, fontSize = 12.sp)
         }
 
         if (!view.hasData) {
-            Text("아직 채점된 아침이 없어요", color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text("아직 비교할 아침 기록이 없어요", color = JitColor.TextSecondary, fontSize = 12.sp)
         }
 
         view.points.forEach { point ->
@@ -113,20 +113,22 @@ internal fun CalibrationTable(view: CalibrationView, highlightLower: Double?) {
                 Text(
                     text = point.rangeLabel,
                     color = if (mine || point.reliable) JitColor.TextPrimary else JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = if (mine) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.width(12.dp))
                 Text(
                     text = point.actualLabel,
                     color = actualColor,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1.7f),
                 )
             }
         }
 
-        Text(text = view.verdictNote, color = JitColor.TextSecondary, fontSize = 10.sp)
+        Text(text = view.verdictNote, color = JitColor.TextSecondary, fontSize = 12.sp)
     }
 }
 
@@ -134,8 +136,8 @@ internal fun CalibrationTable(view: CalibrationView, highlightLower: Double?) {
 internal fun NoticeCard(dot: Color, title: String, body: String, caption: String? = null) {
     JitCard(padding = 14.dp, gap = 5.dp) {
         JitDotLabel(text = title, dotColor = dot, fontSize = 12, dotSize = 7.dp)
-        Text(body, color = JitColor.TextSecondary, fontSize = 10.sp)
-        caption?.let { Text(it, color = JitColor.TextSecondary, fontSize = 10.sp) }
+        Text(body, color = JitColor.TextSecondary, fontSize = 12.sp)
+        caption?.let { Text(it, color = JitColor.TextSecondary, fontSize = 12.sp) }
     }
 }
 
@@ -151,7 +153,7 @@ internal fun ErrorCard(message: String, onRetry: () -> Unit) {
             fontSize = 12,
             dotSize = 7.dp,
         )
-        Text(text = message, color = JitColor.TextSecondary, fontSize = 11.sp)
+        Text(text = message, color = JitColor.TextSecondary, fontSize = 12.sp)
         JitRetryButton(onClick = onRetry, modifier = Modifier.padding(top = 2.dp).testTag("report_retry"))
     }
 }

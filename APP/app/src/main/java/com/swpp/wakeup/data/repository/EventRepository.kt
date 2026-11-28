@@ -1351,6 +1351,7 @@ internal fun EventDto.toUpcoming(zone: ZoneId): UpcomingEvent? {
             )
         },
         proposal = plan?.alarmProposal?.toProposal(),
+        alarmConfirmed = plan?.alarmConfirmed,
     )
 }
 

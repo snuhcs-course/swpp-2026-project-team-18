@@ -29,10 +29,10 @@ class HomeViewModelStartupTest {
                 })
                 val home = provider[HomeViewModel::class.java]
                 assertNotNull(home.state.value)
-                home.openRooms()
-                assertEquals(AppRoute.Rooms, home.nav.value.current)
+                home.openPermissions()
+                assertEquals(AppRoute.Permissions, home.nav.value.current)
                 home.goBack()
-                assertNotEquals(AppRoute.Rooms, home.nav.value.current)
+                assertNotEquals(AppRoute.Permissions, home.nav.value.current)
             } finally { store.clear() }
         }
     }

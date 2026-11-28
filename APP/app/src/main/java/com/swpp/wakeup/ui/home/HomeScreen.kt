@@ -117,6 +117,10 @@ fun HomeScreen(
     proposalBusyId: Long? = null,
     notificationsEnabled: Boolean = true,
     onEnableNotifications: () -> Unit = {},
+    onRoutineClick: (() -> Unit)? = null,
+    onConfirmNextAlarm: ((UpcomingEvent) -> Unit)? = null,
+    confirmBusyId: Long? = null,
+    nowMillis: Long = System.currentTimeMillis(),
 ) {
     // Partly AI-generated (Claude) — 확률 칩을 누르면 "정시 도착 확률이 뭐예요?"(iter4 H2-4, Figma `548:1798`)
     var onTimeFor by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -136,7 +140,7 @@ fun HomeScreen(
         )
     }
 
-    Box(
+    Column(
         modifier = modifier
             .fillMaxSize()
             .background(JitColor.Bg),
@@ -144,13 +148,13 @@ fun HomeScreen(
         LazyColumn(
             modifier = Modifier
                 .testTag("home_list")
-                .fillMaxSize(),
+                .weight(1f)
+                .fillMaxWidth(),
             contentPadding = PaddingValues(
                 start = JitSpace.ScreenHorizontal,
                 end = JitSpace.ScreenHorizontal,
                 top = JitSpace.ScreenTop,
-                // 마지막 줄이 떠 있는 [+ 일정 추가] 아래에 숨지 않게 버튼 높이만큼 더 띄운다.
-                bottom = FAB_BOTTOM + FAB_HEIGHT + JitSpace.ScreenBottom,
+                bottom = JitSpace.ScreenBottom,
             ),
             verticalArrangement = Arrangement.spacedBy(JitSpace.Section),
         ) {
@@ -270,13 +274,36 @@ fun HomeScreen(
             }
         }
 
-        // 목록 위에 떠 있는 [+ 일정 추가](Figma `fab 일정 추가`). 빈 목록에서도 같은 자리에 둔다.
-        AddEventFab(
-            onClick = onAddEventClick,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = JitSpace.ScreenHorizontal, bottom = FAB_BOTTOM),
-        )
+        // P10/P13: the list scrolls independently; these actions remain visible.
+        Column(
+            Modifier.fillMaxWidth().background(JitColor.Bg)
+                .padding(horizontal = JitSpace.ScreenHorizontal, vertical = 12.dp)
+                .testTag("home_actions"),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            state.nextAlarm?.takeIf {
+                it.alarmConfirmed == false && it.alarmOn && !it.skipped && it.hasAlarm &&
+                    (it.alarmAtMillis ?: Long.MIN_VALUE) > nowMillis && !state.offline && !state.loading
+            }?.let { next ->
+                onConfirmNextAlarm?.let { confirm ->
+                    com.swpp.wakeup.ui.common.JitPrimaryButton(
+                        "이 알람 확인", { confirm(next) },
+                        Modifier.fillMaxWidth().testTag("home_confirm_alarm"),
+                        loading = confirmBusyId == next.id,
+                    )
+                }
+            }
+            onRoutineClick?.let {
+                com.swpp.wakeup.ui.common.JitSecondaryButton(
+                    "아침 루틴", it, Modifier.fillMaxWidth().testTag("home_routine"),
+                )
+            }
+            com.swpp.wakeup.ui.common.JitPrimaryButton(
+                "+ 일정 추가", onAddEventClick,
+                Modifier.fillMaxWidth().testTag("home_add_event")
+                    .coachmarkTarget(CoachTarget.ADD_EVENT),
+            )
+        }
     }
 }
 

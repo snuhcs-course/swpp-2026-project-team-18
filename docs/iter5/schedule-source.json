@@ -1,0 +1,403 @@
+{
+  "source": "https://docs.google.com/spreadsheets/d/1LFg4T2rs36rvV3eB_Dtr5b3RHpFELxXHylDz4j4qbN8/edit#gid=1533464390",
+  "range": "Schedule!A107:P150",
+  "retrieved_kst": "2026-11-28",
+  "tasks": [
+    {
+      "row": 107,
+      "iteration": "5",
+      "id": "P1",
+      "description": "Iteration 5 kickoff meeting: UAT Cycle 2 feedback ",
+      "type": "Team meeting - planning, admin & updates",
+      "deadline": "11/23/2026",
+      "sheet_status": "Started"
+    },
+    {
+      "row": 108,
+      "iteration": "5",
+      "id": "P2",
+      "description": "Confirm the One Store location rule and update the privacy policy and requirements",
+      "type": "Requirement Analysis",
+      "deadline": "11/24/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 109,
+      "iteration": "5",
+      "id": "P3",
+      "description": "Back - observation API without coordinates and a migration that erases stored ones",
+      "type": "Programming - features",
+      "deadline": "11/25/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 110,
+      "iteration": "5",
+      "id": "P4",
+      "description": "Front - upload departure and arrival decisions without coordinates",
+      "type": "Programming - features",
+      "deadline": "11/26/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 111,
+      "iteration": "5",
+      "id": "P5",
+      "description": "Front - stop live route calls, remove the current location button, search from the chosen origin",
+      "type": "Programming - features",
+      "deadline": "11/27/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 112,
+      "iteration": "5",
+      "id": "P6",
+      "description": "Deploy the on-device location change, server first and then the app",
+      "type": "Deployment - working demo",
+      "deadline": "11/27/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 113,
+      "iteration": "5",
+      "id": "P7",
+      "description": "Front - fix the outdated button name in the help answer",
+      "type": "Programming - debugging",
+      "deadline": "11/24/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 114,
+      "iteration": "5",
+      "id": "P8",
+      "description": "UAT wrap-up: results, evidence and the unmet acceptance criteria",
+      "type": "Testing - UAT",
+      "deadline": "11/25/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 115,
+      "iteration": "5",
+      "id": "P9",
+      "description": "Summarize the UAT findings in the Testing documentation and submit the sheet",
+      "type": "Documentation",
+      "deadline": "11/25/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 116,
+      "iteration": "5",
+      "id": "P10",
+      "description": "Front - keep the confirm button visible without scrolling on the home and route screens",
+      "type": "Programming - features",
+      "deadline": "11/27/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 117,
+      "iteration": "5",
+      "id": "P11",
+      "description": "Front - back from a settings screen returns to the previous screen instead of home",
+      "type": "Programming - debugging",
+      "deadline": "11/27/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 118,
+      "iteration": "5",
+      "id": "P12",
+      "description": "Front - reach the event edit and save buttons without scrolling",
+      "type": "Programming - features",
+      "deadline": "11/28/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 119,
+      "iteration": "5",
+      "id": "P13",
+      "description": "Front - morning routine button on the home screen",
+      "type": "Programming - features",
+      "deadline": "11/28/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 120,
+      "iteration": "5",
+      "id": "P14",
+      "description": "Quick pick presets that offer clearly different times",
+      "type": "Programming - features",
+      "deadline": "12/1/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 121,
+      "iteration": "5",
+      "id": "P15",
+      "description": "Fix the return to the recommended time landing on the tight preset",
+      "type": "Programming - debugging",
+      "deadline": "11/30/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 122,
+      "iteration": "5",
+      "id": "P16",
+      "description": "Back - take the fare into account when suggesting routes",
+      "type": "Programming - features",
+      "deadline": "12/2/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 123,
+      "iteration": "5",
+      "id": "P17",
+      "description": "Define when an event is complete and report arrivals away from the destination",
+      "type": "Programming - features",
+      "deadline": "12/2/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 124,
+      "iteration": "5",
+      "id": "P18",
+      "description": "Front - move the trip view into the alarm detail screen",
+      "type": "Programming - features",
+      "deadline": "12/3/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 125,
+      "iteration": "5",
+      "id": "P19",
+      "description": "Front - show the alarm detail figures as boxes and drop the unnecessary ones",
+      "type": "Programming - features",
+      "deadline": "12/3/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 126,
+      "iteration": "5",
+      "id": "P20",
+      "description": "Front - source line for measured and fixed values, reason for an unknown probability, AI summary label",
+      "type": "Programming - features",
+      "deadline": "11/30/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 127,
+      "iteration": "5",
+      "id": "P21",
+      "description": "Front - unconfirmed mark and a confirm button for recomputed alarms",
+      "type": "Programming - features",
+      "deadline": "12/2/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 128,
+      "iteration": "5",
+      "id": "P22",
+      "description": "Front - wording pass on sentence-style strings, short labels and the tau symbol",
+      "type": "Programming - other",
+      "deadline": "12/1/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 129,
+      "iteration": "5",
+      "id": "P23",
+      "description": "Front - button levels on the remaining screens and the route bar legend",
+      "type": "Programming - features",
+      "deadline": "12/5/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 130,
+      "iteration": "5",
+      "id": "P24",
+      "description": "Front - accessibility: touch targets, TalkBack labels and a scanner run",
+      "type": "Programming - other",
+      "deadline": "12/5/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 131,
+      "iteration": "5",
+      "id": "P25",
+      "description": "Front - notification-off banner and renaming saved places",
+      "type": "Programming - features",
+      "deadline": "12/5/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 132,
+      "iteration": "5",
+      "id": "P26",
+      "description": "Back - daily job that closes the trip records left open",
+      "type": "Programming - features",
+      "deadline": "12/2/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 133,
+      "iteration": "5",
+      "id": "P27",
+      "description": "Back - keep test and QA accounts out of training and aggregation",
+      "type": "Programming - other",
+      "deadline": "11/27/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 134,
+      "iteration": "5",
+      "id": "P28",
+      "description": "Back - polite default error messages, refresh-token rotation and API contract checks",
+      "type": "Programming - other",
+      "deadline": "12/3/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 135,
+      "iteration": "5",
+      "id": "P29",
+      "description": "Back - late wake-up as a lateness cause and several car routes",
+      "type": "Programming - features",
+      "deadline": "12/5/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 136,
+      "iteration": "5",
+      "id": "P30",
+      "description": "Physical device: seven mornings in a row with a battery comparison",
+      "type": "Testing - integration",
+      "deadline": "12/1/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 137,
+      "iteration": "5",
+      "id": "P31",
+      "description": "E2E and phone checks for lockout, rate limits, learning reset and inquiry",
+      "type": "Testing - integration",
+      "deadline": "12/4/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 138,
+      "iteration": "5",
+      "id": "P32",
+      "description": "Back - key event aggregation command with the alarm and route p95 figures",
+      "type": "Programming - features",
+      "deadline": "11/30/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 139,
+      "iteration": "5",
+      "id": "P33",
+      "description": "Back - weekly summary evaluation set, command and first run",
+      "type": "Testing - Alpha/Beta",
+      "deadline": "12/2/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 140,
+      "iteration": "5",
+      "id": "P34",
+      "description": "Human evaluation of ten weekly summaries",
+      "type": "Testing - Alpha/Beta",
+      "deadline": "12/4/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 141,
+      "iteration": "5",
+      "id": "P35",
+      "description": "Back - learning versus the fixed-buffer baseline on a fixed morning set",
+      "type": "Testing - Alpha/Beta",
+      "deadline": "12/3/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 142,
+      "iteration": "5",
+      "id": "P36",
+      "description": "Signed APK and install guide checked on a phone without developer tools",
+      "type": "Deployment - working demo",
+      "deadline": "12/4/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 143,
+      "iteration": "5",
+      "id": "P37",
+      "description": "Beta test: one week of real use on the signed build",
+      "type": "Testing - Alpha/Beta",
+      "deadline": "12/7/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 144,
+      "iteration": "5",
+      "id": "P38",
+      "description": "Back - beta aggregation of on-time rate, sleep change, snoozes and prediction errors",
+      "type": "Programming - features",
+      "deadline": "12/7/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 145,
+      "iteration": "5",
+      "id": "P39",
+      "description": "Refactoring the app: split HomeViewModel, repository interfaces and the DI decision",
+      "type": "Programming - refactoring",
+      "deadline": "12/4/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 146,
+      "iteration": "5",
+      "id": "P40",
+      "description": "Refactoring the server: prep estimator, alarm pipeline and replan alternatives",
+      "type": "Programming - refactoring",
+      "deadline": "12/4/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 147,
+      "iteration": "5",
+      "id": "P41",
+      "description": "Test coverage for ViewModel and Platform up to 30%",
+      "type": "Testing - unit",
+      "deadline": "12/6/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 148,
+      "iteration": "5",
+      "id": "P42",
+      "description": "Requirement and AT revisions including the dropped group feature, recorded in the revision history",
+      "type": "Documentation",
+      "deadline": "12/2/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 149,
+      "iteration": "5",
+      "id": "P43",
+      "description": "Documentation of iteration 5: testing, requirements and design, AI collaboration report",
+      "type": "Documentation",
+      "deadline": "12/8/2026",
+      "sheet_status": "Not started"
+    },
+    {
+      "row": 150,
+      "iteration": "5",
+      "id": "P44",
+      "description": "Review iteration 5",
+      "type": "Team meeting - other",
+      "deadline": "12/8/2026",
+      "sheet_status": "Not started"
+    }
+  ]
+}

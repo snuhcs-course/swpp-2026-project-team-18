@@ -1,0 +1,42 @@
+{
+  "date_kst": "2026-11-28",
+  "branch": "front-iter5",
+  "app": {
+    "version_name": "0.18.0",
+    "version_code": 19,
+    "min_sdk": 34,
+    "apk_bytes": 41018937,
+    "sha256": "463ccd4868a61bfa58553b557c60bf64c37caf19c072ce7c317b3ba38387afba",
+    "signer_certificate_sha256": "09cdd39643f2e1d5c28ab6c2440863e024591bb524bbb735d59b32651f6097fe"
+  },
+  "jvm": {
+    "tests": 1783,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "android_integration": {
+    "tests": 107,
+    "failures": 0,
+    "errors": 0,
+    "scope": "com.swpp.wakeup.integration",
+    "device": "read-only API 36 emulator",
+    "package": "com.swpp.wakeup.qa",
+    "fake_data": true
+  },
+  "backend": {
+    "tests": 2536,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "database": "isolated in-memory SQLite"
+  },
+  "lint": {
+    "errors": 0,
+    "warnings": 65,
+    "hints": 1
+  },
+  "production_database_touched": false,
+  "physical_device_measurement": false,
+  "human_ratings_completed": false
+}

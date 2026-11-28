@@ -8,6 +8,7 @@ import com.swpp.wakeup.ui.common.LineIcons
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.offset
@@ -191,6 +192,8 @@ fun AlarmDecisionScreen(
     onConfirmAlarm: () -> Unit = {},
     /** 남은 시간을 셀 지금 시각. 테스트가 고정한다 */
     nowMillis: Long = System.currentTimeMillis(),
+    routeSegments: com.swpp.wakeup.domain.model.RouteSegments? = null,
+    onNeedSegments: (Long, String?) -> Unit = { _, _ -> },
 ) {
     var askDeleteScope by rememberSaveable { mutableStateOf(false) }
     // Partly AI-generated (Claude) — i 시트(Figma `548:1798`)
@@ -277,13 +280,13 @@ fun AlarmDecisionScreen(
                 AlarmCard(
                     plan = plan,
                     nowMillis = nowMillis,
-                    onChangeTime = if (plan.skipped) null else onChangeRisk,
+                    onChangeTime = null, // P12: the primary action lives in the fixed footer.
                     onProbabilityClick = openProbability,
                     canRevert = serverSupportsConfirm && !confirmBusy,
                     onRevert = onRevertAlarm,
                     onConfirm = onConfirmAlarm,
                     confirmBusy = confirmBusy,
-                    canConfirm = serverSupportsConfirm,
+                    canConfirm = false, // P21: confirmation is pinned below the scroll content.
                 )
             }
             // 답을 기다리는 "바꿀까요" 제안(BE-H3d). 알람 카드 바로 아래 — 바뀔 시각과 같이 읽힌다.
@@ -337,6 +340,13 @@ fun AlarmDecisionScreen(
                 }
             }
 
+            if (!plan.skipped && stage != TripStage.IN_TRANSIT && stage != TripStage.ARRIVED) {
+                com.swpp.wakeup.ui.trip.TripItineraryCard(
+                    plan = plan, segments = routeSegments, onNeedSegments = onNeedSegments,
+                    onMap = onRouteMapFit, onChangeRoute = { onEdit?.invoke() }, showMapAction = false,
+                )
+            }
+
             routeMap?.let { map ->
                 RouteMapCard(
                     state = map,
@@ -356,15 +366,6 @@ fun AlarmDecisionScreen(
         // 화면 바닥에 늘 붙어 있으면 너무 크다). 내용이 짧으면 카드 아래에 그대로 이어진다.
         Spacer(Modifier.height(4.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // 알람을 정한 뒤에도 제목·시각·장소·출발지·경로·종류를 고친다(Figma ④ `489:9`).
-            ActionTile(
-                icon = LineIcons.pencil,
-                label = if (editBusy) "불러오는 중…" else "일정 수정",
-                tag = "event_edit",
-                enabled = onEdit != null && !editBusy,
-                onClick = { onEdit?.invoke() },
-                modifier = Modifier.weight(1f),
-            )
             // 이 아침에 할 준비 항목 고르기(예전 "이 아침 할 일 고르기" 카드)
             ActionTile(
                 icon = LineIcons.sliders,
@@ -406,6 +407,30 @@ fun AlarmDecisionScreen(
         }
     }
 
+    if (plan != null) {
+        Column(
+            Modifier.fillMaxWidth().background(JitColor.Bg)
+                .padding(horizontal = SIDE, vertical = 12.dp).testTag("plan_actions"),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (serverSupportsConfirm && plan.isComputed && !plan.skipped && plan.alarmOn &&
+                !plan.alarmPassed && (plan.alarmAtMillis ?: Long.MIN_VALUE) > nowMillis &&
+                plan.alarmConfirmed == false) {
+                JitPrimaryButton("이 알람 확인", onConfirmAlarm,
+                    Modifier.fillMaxWidth().testTag("plan_confirm_alarm"), loading = confirmBusy)
+            }
+            if (plan.isComputed && !plan.skipped) {
+                JitPrimaryButton("시각 바꾸기", onChangeRisk,
+                    Modifier.fillMaxWidth().testTag("risk_entry"))
+            }
+            onEdit?.let {
+                com.swpp.wakeup.ui.common.JitSecondaryButton(
+                    if (editBusy) "불러오는 중…" else "일정 수정", it,
+                    Modifier.fillMaxWidth().testTag("event_edit"), enabled = !editBusy,
+                )
+            }
+        }
+    }
     }
 }
 
@@ -436,7 +461,7 @@ private fun SkippedCard(onUnskip: () -> Unit, enabled: Boolean) {
             modifier = Modifier
                 .testTag("event_unskip")
                 .clip(RoundedCornerShape(8.dp))
-                .clickable(enabled = enabled, onClick = onUnskip)
+                .heightIn(min = 48.dp).clickable(enabled = enabled, role = Role.Button, onClick = onUnskip)
                 .padding(vertical = 6.dp),
         )
     }
@@ -653,7 +678,7 @@ private fun AlarmCard(
             }
             if (canRevert) {
                 com.swpp.wakeup.ui.common.JitSecondaryButton(
-                    label = "추천 시각으로 되돌리기",
+                    label = "기본 추천으로 되돌리기",
                     onClick = onRevert,
                     modifier = Modifier.testTag("plan_revert_alarm"),
                 )
@@ -703,7 +728,6 @@ private fun segmentColor(kind: AlarmConfirmView.Kind): Color = when (kind) {
  */
 @Composable
 private fun WhyCard(plan: AlarmPlanView, onInfo: (() -> Unit)?) {
-    val timeline = AlarmDecisionLogic.timeline(plan)
     Column(
         modifier = Modifier.planCard().testTag("plan_why").padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -727,48 +751,17 @@ private fun WhyCard(plan: AlarmPlanView, onInfo: (() -> Unit)?) {
             }
         }
 
-        val fractions = AlarmConfirmText.fractions(timeline.segments)
-        if (fractions.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(10.dp)
-                    .clip(RoundedCornerShape(5.dp))
-                    .testTag("plan_bar"),
-            ) {
-                timeline.segments.forEachIndexed { i, seg ->
-                    Box(Modifier.weight(fractions[i]).fillMaxHeight().background(segmentColor(seg.kind)))
+        // P19: large system text gets full-width boxes rather than narrow word fragments.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val scale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+            val stacked = maxWidth < (plan.breakdown.size * 88 * scale + 16).dp
+            if (stacked) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    plan.breakdown.forEach { source -> EvidenceMetric(source, Modifier.fillMaxWidth(), horizontal = true) }
                 }
-            }
-        }
-        TickRow(timeline.points)
-
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            timeline.segments.forEach { seg ->
-                val sourceKind = when (seg.kind) {
-                    AlarmConfirmView.Kind.PREP -> PlanRow.Kind.PREP
-                    AlarmConfirmView.Kind.TRAVEL -> PlanRow.Kind.TRAVEL
-                    AlarmConfirmView.Kind.BUFFER -> PlanRow.Kind.BUFFER
-                }
-                val note = plan.breakdown.firstOrNull { it.kind == sourceKind }?.sourceLabel ?: when (seg.kind) {
-                    AlarmConfirmView.Kind.PREP -> AlarmDecisionLogic.PREP_NOTE
-                    AlarmConfirmView.Kind.TRAVEL -> AlarmDecisionLogic.travelNote(plan.travelMode)
-                    AlarmConfirmView.Kind.BUFFER -> AlarmDecisionLogic.bufferNote(plan.bufferSource)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(7.dp).clip(CircleShape).background(segmentColor(seg.kind)))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = seg.label,
-                        color = JitColor.TextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false,
-                        // 최소 폭만 둔다 — 큰 글자에서 "준비 3 / 분" 처럼 꺾이지 않게(11-16 fontScale 1.5 캡처)
-                        modifier = Modifier.widthIn(min = 64.dp).padding(end = 8.dp),
-                    )
-                    Text(note, color = JitColor.TextSecondary, fontSize = 12.sp)
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    plan.breakdown.forEach { source -> EvidenceMetric(source, Modifier.weight(1f)) }
                 }
             }
         }
@@ -785,6 +778,31 @@ private fun WhyCard(plan: AlarmPlanView, onInfo: (() -> Unit)?) {
                 dotSize = 6.dp,
             )
         }
+    }
+}
+
+/** Same source and amount in both default and large-text layouts. */
+@Composable
+private fun EvidenceMetric(source: PlanRow, modifier: Modifier, horizontal: Boolean = false) {
+    Column(
+        modifier.clip(RoundedCornerShape(JitRadius.Card)).background(JitColor.Surface2)
+            .padding(horizontal = 10.dp, vertical = 12.dp)
+            .testTag("plan_metric_${source.kind.name}").semantics(mergeDescendants = true) {},
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (horizontal) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(source.label, color = JitColor.TextSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                Text(com.swpp.wakeup.domain.model.AlarmTimeChoice.minutesLabel(source.minutes),
+                    color = JitColor.TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            }
+        } else {
+            Text(source.label, color = JitColor.TextSecondary, fontSize = 12.sp)
+            Text(com.swpp.wakeup.domain.model.AlarmTimeChoice.minutesLabel(source.minutes),
+                color = JitColor.TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+        Text(source.sourceLabel ?: "근거를 확인하고 있어요", color = JitColor.TextSecondary, fontSize = 12.sp)
     }
 }
 

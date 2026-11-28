@@ -1,6 +1,8 @@
-# Iteration 5 프론트엔드 검증
+# Iteration 5 프론트엔드 검증 · 11월 27일 기록
 
 2026-11-27 · 김진호 · `front-iter5` · 기준 커밋 `c3ea88f`
+
+> 이 문서는 11월 27일 후보의 검증 이력이다. 최신 일정표 반영·그룹 제외·0.18.0 APK·검증은 [현재 검증 기록](schedule-frontend-verification.md)을 따른다.
 
 ## 실행 결과
 
@@ -12,7 +14,7 @@
 | 전체 JVM 줄 커버리지 | 33.0% · 화면 계층은 JVM 결과만으로 11.0% | 계층별 보고서 |
 | Android 화면·초기화 테스트 | **24개 통과** · API 36 에뮬레이터 | [최종 기기 실행 로그](evidence/device-smoke.log) |
 | 알람 근거 분석기 | Python 테스트 13개 통과 | `APP/scripts/tests/test_alarm_evidence.py` |
-| 릴리스 빌드 | `0.17.0` / versionCode 18 / minSdk 34 | [APK](../../APP/app/build/outputs/apk/release/app-release.apk) |
+| 릴리스 빌드 | `0.17.0` / versionCode 18 / minSdk 34 | 해당 시점의 후보 APK |
 | APK 서명 | 기존 팀 키, APK v2 검증 통과 | [서명 검사](evidence/release-signature.txt), [SHA-256](evidence/release-apk.sha256) |
 | Android Lint | 오류 0개 · 경고 65개 · 힌트 1개, 작업 성공 | `APP/app/build/reports/lint-results-debug.xml` |
 | 공백 검사 | `git diff --check` 통과 | 최종 작업 트리 |

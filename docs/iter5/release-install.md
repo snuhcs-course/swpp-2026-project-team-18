@@ -1,5 +1,7 @@
 # Iteration 5 설치와 첫 알람 확인
 
+현재 로컬 후보: **0.18.0 / versionCode 19**. [최신 검증·APK 해시](schedule-frontend-verification.md)를 확인해요. 실제 휴대전화에서의 무도움 설치 검증은 아직 남아 있어요.
+
 대상은 Android 14 이상 기기예요. 개발 도구 없이 팀이 배포한 **서명된 release APK**를 받아 설치해요. AAB는 기기에 직접 설치할 수 없어요. 이 문서는 설치 절차와 검증 체크리스트이며, 실기기 설치 완료 결과는 아니에요.
 
 ## 설치하기
@@ -26,7 +28,7 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 Get-FileHash -Algorithm SHA256 .\app\build\outputs\apk\release\app-release.apk
 ```
 
-SDK build-tools 버전은 설치된 버전에 맞춰요. `app-release-unsigned.apk`만 생겼다면 서명 설정이 빠진 것이므로 배포하지 않아요. 서명 검증, 서버 버전 호환 확인, 실제 기기 첫 알람 확인을 마친 APK와 체크섬을 전달해요. 특히 좌표 없는 관측 업로드는 BE의 `obs_gps_has_location` 해제와 기존 좌표 삭제 배포가 먼저 필요해요.
+SDK build-tools 버전은 설치된 버전에 맞춰요. `app-release-unsigned.apk`만 생겼다면 서명 설정이 빠진 것이므로 배포하지 않아요. 서명 검증, 서버 버전 호환 확인, 실제 기기 첫 알람 확인을 마친 APK와 체크섬을 전달해요. 특히 좌표 없는 관측 업로드는 이 브랜치의 `observations.0008`(좌표 필수 제약 교체·과거 관측 좌표 삭제)과 기본 추천 복원 수정의 서버 선행 배포가 필요해요. 관측 좌표 삭제는 역방향 복원이 불가능하므로 배포 담당자가 검토·적용해요.
 
 아래 결과는 테스터가 실제로 수행한 뒤에만 채워요.
 

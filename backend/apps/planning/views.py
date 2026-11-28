@@ -159,9 +159,30 @@ class AlarmTimeView(_EventAlarmView):
         if event is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
         with transaction.atomic():
+            # Lock the event before its plan: restoring the default includes undoing an
+            # earlier quick-pick tau override, not just clearing a manually entered clock.
+            event = Event.objects.select_for_update().filter(user=request.user, pk=pk).first()
+            if event is None:
+                return Response(status=status.HTTP_404_NOT_FOUND)
             plan, recommended = self._locked(event)
             if recommended is None:
                 return self._unavailable()
+            if event.tau_override is not None:
+                from . import refresh
+
+                event.tau_override = None
+                event.save(update_fields=["tau_override", "updated_at"])
+                # Reuse the saved upstream route. Restoring a choice must not spend
+                # provider quota or replace it with a stale/guessed recommendation.
+                plan = refresh.refresh_edited(event, start_before=event.start_at)
+                if plan is None:
+                    transaction.set_rollback(True)
+                    return _error(
+                        "alarm_recommendation_unavailable",
+                        "기본 추천을 다시 계산할 정보가 없어요. 일정에서 다시 계산한 뒤 시도해 주세요.",
+                        status.HTTP_409_CONFLICT,
+                    )
+                recommended = plan.alarm_at
             control = Control.of(plan)
             control.use_recommended(recommended, timezone.now())
             alarm_control.save(plan, control)

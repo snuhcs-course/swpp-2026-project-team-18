@@ -112,7 +112,7 @@ android {
         applicationId = "com.swpp.wakeup"
         minSdk = 34
         targetSdk = 37
-        versionCode = 18
+        versionCode = 19
         // 서버 APP_VERSION 과 같은 자리수를 쓴다. 실기기에서 "어느 빌드인가" 를
         // 서버 버전과 나란히 읽을 수 있어야 원인을 좁힐 수 있다.
         //   0.1.0  P1 — 고정 규칙 알람
@@ -142,7 +142,7 @@ android {
         //   0.16.0 알파 후보 · ONE store 첫 업로드(main 9496202 + 이 줄, 11-20). 팀 릴리스 키로
         //          서명하는 첫 빌드. 문제 신고, 시스템 뒤로 가기, 토큰 갱신 교착 수정 포함
         // Iteration 5 FE 후보. 좌표 없는 관측을 받는 서버를 먼저 배포해야 해요.
-        versionName = "0.17.0"
+        versionName = "0.18.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

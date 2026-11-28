@@ -856,12 +856,10 @@ class TripTrackingService : Service() {
     )
 
     /** 알림의 "도착했어요". 이동 중일 때만 단다. */
-    private fun arrivePendingIntent(eventId: Long): PendingIntent = PendingIntent.getService(
+    private fun arrivePendingIntent(eventId: Long): PendingIntent = PendingIntent.getActivity(
         this,
         1,
-        Intent(this, TripTrackingService::class.java)
-            .setAction(ACTION_MANUAL_ARRIVE)
-            .putExtra(EXTRA_EVENT_ID, eventId),
+        com.swpp.wakeup.MainActivity.manualArrivalIntent(this, eventId),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 

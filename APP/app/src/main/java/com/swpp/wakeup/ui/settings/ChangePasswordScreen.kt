@@ -78,7 +78,7 @@ fun ChangePasswordScreen(
                     text = "지금 비밀번호가 맞지 않아요",
                     modifier = Modifier.testTag("pw_current_error"),
                     color = JitColor.Red,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                 )
             }
         }
@@ -122,7 +122,7 @@ fun ChangePasswordScreen(
         Text(
             text = "바꾸면 다른 기기의 로그인이 모두 끝나요. 이 기기는 로그인된 채로 남아요",
             color = JitColor.TextSecondary,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Normal,
         )
 

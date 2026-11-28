@@ -10,9 +10,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -144,7 +146,7 @@ fun MorningProgressScreen(
                 text = "기록은 저장돼 다음 알람 계산에 반영돼요. 인터넷이 없으면 " +
                     "연결될 때 자동으로 올라가요",
                 color = JitColor.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         } else {
             JitPrimaryButton(
@@ -159,7 +161,7 @@ fun MorningProgressScreen(
                     "남은 항목을 하지 않았으면 그냥 두고 나가도 돼요. 안 한 것은 기록되지 않아요"
                 },
                 color = JitColor.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         }
 
@@ -174,9 +176,12 @@ fun MorningProgressScreen(
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onUndo)
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                        .clickable(role = Role.Button, onClick = onUndo)
+                        .testTag("morning_undo")
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .wrapContentHeight(Alignment.CenterVertically),
                 )
             }
             // 서버에 이미 올라간 값은 지우지 않는다. 그 한계를 숨기지 않는다.
@@ -184,7 +189,7 @@ fun MorningProgressScreen(
                 text = "화면의 진행만 되돌려요. 이미 저장된 기록은 남고, 다시 마쳐도 " +
                     "같은 기록으로 봐서 값이 바뀌지 않아요",
                 color = JitColor.TextSecondary,
-                fontSize = 9.sp,
+                fontSize = 12.sp,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -197,11 +202,14 @@ fun MorningProgressScreen(
                 Text(
                     text = "기록 끝내기",
                     color = JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     modifier = Modifier
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onFinish)
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .clickable(role = Role.Button, onClick = onFinish)
+                        .testTag("morning_finish")
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .wrapContentHeight(Alignment.CenterVertically),
                 )
             }
         }
@@ -218,16 +226,18 @@ fun MorningProgressScreen(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .testTag("morning_skip")
+                    .heightIn(min = 48.dp)
                     .alpha(if (skipping) 0.5f else 1f)
                     .clip(RoundedCornerShape(8.dp))
                     .clickable(enabled = !skipping, role = Role.Button, onClick = onSkipToday)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .wrapContentHeight(Alignment.CenterVertically),
             )
         }
         Text(
             text = "이 일정은 리포트와 학습에서 빠지고, 지금까지 누른 기록도 쓰지 않아요",
             color = JitColor.TextSecondary,
-            fontSize = 9.sp,
+            fontSize = 12.sp,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -254,7 +264,7 @@ private fun SlackCard(session: MorningSession, nowMillis: Long) {
             Text(
                 text = "여유는 보여 드릴 수 없지만 기록은 남아요. 이 기록이 다음 알람을 더 정확하게 만들어요",
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
             )
         }
         return
@@ -272,7 +282,7 @@ private fun SlackCard(session: MorningSession, nowMillis: Long) {
         Text(
             text = if (netSlack >= 0) "여유" else "이미 늦었어요",
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
@@ -294,12 +304,12 @@ private fun SlackCard(session: MorningSession, nowMillis: Long) {
             text = "출발까지 ${minutesLabel(leftMinutes)} · 남은 계획 " +
                 minutesLabel(session.remainingPlannedMinutes()),
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
         Text(
             text = "여유는 남은 시간에서 아직 할 일에 걸릴 시간을 뺀 값이에요",
             color = JitColor.TextSecondary,
-            fontSize = 9.sp,
+            fontSize = 12.sp,
         )
     }
 }
@@ -325,7 +335,7 @@ private fun ProgressCard(session: MorningSession, nowMillis: Long) {
             Text(
                 text = "일어난 뒤 ${minutesLabel(elapsed)}",
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
             )
         }
         JitProgressBar(
@@ -336,7 +346,7 @@ private fun ProgressCard(session: MorningSession, nowMillis: Long) {
             Text(
                 text = "계획 준비 ${it}분",
                 color = JitColor.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         }
     }
@@ -368,7 +378,8 @@ private fun BlockRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(JitRadius.Card))
             .background(if (isCurrent) JitColor.Surface2 else JitColor.Surface)
-            .clickable(enabled = doneAt == null, onClick = onMarkDone)
+            .heightIn(min = 48.dp)
+            .clickable(enabled = doneAt == null, role = Role.Button, onClick = onMarkDone)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -406,7 +417,7 @@ private fun BlockRow(
                 )
                 if (block.parallelizable) {
                     Spacer(Modifier.width(6.dp))
-                    JitChip("병렬", JitColor.Blue, fontSize = 9)
+                    JitChip("병렬", JitColor.Blue, fontSize = 12)
                 }
             }
 
@@ -425,7 +436,7 @@ private fun BlockRow(
                     actual != null -> JitColor.Green
                     else -> JitColor.TextSecondary
                 },
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         }
 
@@ -433,7 +444,7 @@ private fun BlockRow(
             Text(
                 text = if (isCurrent) "마침" else "대기",
                 color = if (isCurrent) JitColor.Accent else JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -453,12 +464,12 @@ private fun EmptyCard() {
             text = "알람을 해제하면 그 아침의 루틴 항목이 여기 나타나요. 항목을 마칠 때마다 " +
                 "탭하면 실제 소요가 기록되고, 그 기록이 준비 시간 학습의 재료가 됨",
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
         )
         Text(
             text = "루틴 항목이 하나도 없으면 이 화면은 뜨지 않아요",
             color = JitColor.TextSecondary,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
         )
     }
 }

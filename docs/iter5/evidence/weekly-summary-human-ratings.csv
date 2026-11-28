@@ -1,0 +1,11 @@
+case_id,category,summary_from_real_llm_run,rater_A_1_to_5,rater_B_1_to_5,factual_error,comment
+ord-01,ordinary,,,,,
+ord-03,ordinary,,,,,
+ord-06,ordinary,,,,,
+late-01,many_late,,,,,
+late-02,many_late,,,,,
+buf-01,buffer_shift,,,,,
+buf-04,buffer_shift,,,,,
+miss-01,missing_records,,,,,
+edge-03,edge,,,,,
+thin-01,thin,,,,,

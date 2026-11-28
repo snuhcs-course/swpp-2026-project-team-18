@@ -57,6 +57,8 @@ data class UpcomingEvent(
     val fasterRoute: FasterRouteOffer? = null,
     /** 답을 기다리는 "바꿀까요" 제안(BE-H3d). 홈 다음 알람 카드 아래에 보인다 */
     val proposal: AlarmProposal? = null,
+    /** null means an older server did not report confirmation state. */
+    val alarmConfirmed: Boolean? = null,
 ) {
     val hasAlarm: Boolean get() = alarmAt != null
 

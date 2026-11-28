@@ -155,60 +155,13 @@ fun TripTabScreen(
         val plan = trip.plan?.takeIf { it.eventId == event.id }
         when {
             plan != null -> {
-                if (inTransit) {
-                    val tick by produceState(System.currentTimeMillis(), event.id) {
-                        while (true) { delay(30_000); value = System.currentTimeMillis() }
-                    }
-                    val now = maxOf(tick, System.currentTimeMillis())
-                    val fix = live?.takeIf {
-                        it.eventId == event.id && it.accuracyM.isFinite() &&
-                            it.accuracyM <= com.swpp.wakeup.sensing.TripGeofence.MAX_ACCURACY_M &&
-                            now - it.atMillis in 0..120_000L
-                    }
-                    val progress = fix?.let {
-                        com.swpp.wakeup.domain.model.RouteProgress.ofJourney(plan.routePath, plan.originPoint ?: homePoint, plan.destinationPoint, it.point)
-                    }
-                    val remaining = progress?.takeIf { it.onRoute }?.let { p ->
-                        fix?.movingSinceMillis?.let { departed ->
-                            com.swpp.wakeup.domain.model.TripEta.remainingMinutes(plan.travelMinutes, p.totalM, p.traveledM, (now - departed) / 60_000.0)
-                        }
-                    }
-                    val outlook = remaining?.let { com.swpp.wakeup.domain.model.ArrivalOutlook.of(plan.startAtMillis, it, now) }
-                    com.swpp.wakeup.ui.alarm.TripProgressCard(
-                        nickname = nickname, initials = initials,
-                        stage = com.swpp.wakeup.domain.model.TripStage.IN_TRANSIT,
-                        progress = progress, outlook = outlook,
-                        arrivalAt = outlook?.let { java.time.Instant.ofEpochMilli(it.predictedMillis).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("a h:mm", java.util.Locale.KOREAN)) },
-                        freshness = if (fix == null) "새 위치를 기다리고 있어요" else "기기에서 이동 상황을 확인해요",
-                        onArrive = onArrive,
-                        canTrack = canTrack,
-                        coarseOnly = coarseOnly,
-                    )
-                    Text("현재 위치는 기기에서만 처리해요. 이동 중 새 경로를 요청하지 않아요", color = JitColor.TextSecondary, fontSize = 12.sp)
-                } else {
-                    NextTripCard(event = event, plan = plan, today = today, onClick = { onOpenEvent(event.id) })
-                }
-                // 더 빠른 경로가 있으면 가는 길 위에서 바로 바꾼다(11-17 사용자). 지도의 점선 대안과 같은 경로다.
-                fasterRoute?.takeIf { !plan.skipped && it.isOpen(System.currentTimeMillis()) }?.let { offer ->
-                    com.swpp.wakeup.ui.alarm.FasterRouteCard(
-                        offer = offer,
-                        busy = fasterRouteBusy,
-                        onSwitch = { onSwitchFasterRoute(offer) },
-                        tagPrefix = "trip_faster_route",
-                    )
-                }
-                // 구간을 서버에서 못 받았다(대개 오프라인). 사본이면 그 나이를, 없으면 그렇다고 밝힌다(11-17 사용자).
-                if (segmentsSavedAtMillis != null || segmentsFailed) {
-                    SavedRouteNotice(savedAtMillis = segmentsSavedAtMillis, onRetry = onRetrySegments)
-                }
-                RouteCard(
-                    plan = plan,
-                    segments = segments,
-                    onNeedSegments = onNeedSegments,
-                    onMap = { onOpenEvent(event.id) },
-                    onChangeRoute = { onChangeRoute(event.id) },
+                NextTripCard(event = event, plan = plan, today = today, onClick = { onOpenEvent(event.id) })
+                Text("이동 진행·도착 기록·경로는 알람 상세에서 확인해요",
+                    color = JitColor.TextSecondary, fontSize = 12.sp)
+                com.swpp.wakeup.ui.common.JitPrimaryButton(
+                    "알람 상세에서 이동 보기", { onOpenEvent(event.id) },
+                    Modifier.fillMaxWidth().testTag("trip_open_details"),
                 )
-                if (!inTransit) Hint(alarmOn = plan.alarmOn)
             }
 
             trip.failed && trip.eventId == event.id -> FailedCard(onRetry)
@@ -378,12 +331,13 @@ private fun NextTripCard(event: UpcomingEvent, plan: AlarmPlanView, today: Local
 // Partly AI-generated (Claude)
 /** "가는 길" 카드(Figma `card 가는 길`). 시각 · 점과 선 · 할 일, 아래에 [지도로 보기] [경로 바꾸기]. */
 @Composable
-private fun RouteCard(
+internal fun TripItineraryCard(
     plan: AlarmPlanView,
     segments: RouteSegments?,
     onNeedSegments: (Long, String?) -> Unit,
     onMap: () -> Unit,
     onChangeRoute: () -> Unit,
+    showMapAction: Boolean = true,
 ) {
     LaunchedEffect(plan.eventId, plan.routeKey) { onNeedSegments(plan.eventId, plan.routeKey) }
 
@@ -431,7 +385,7 @@ private fun RouteCard(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SecondaryButton(
+            if (showMapAction) SecondaryButton(
                 text = "지도로 보기",
                 icon = LineIcons.mapPin,
                 onClick = onMap,

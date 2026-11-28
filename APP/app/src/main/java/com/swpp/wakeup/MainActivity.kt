@@ -77,6 +77,7 @@ import com.swpp.wakeup.ui.auth.SocialSignIn
 import com.swpp.wakeup.domain.model.RouteProgress
 import com.swpp.wakeup.domain.model.TripEta
 import com.swpp.wakeup.domain.model.TripStage
+import com.swpp.wakeup.ui.alarm.ManualArrivalReviewDialog
 import com.swpp.wakeup.ui.alarm.AlarmDecisionScreen
 import com.swpp.wakeup.ui.alarm.arrivalClockLabel
 import com.swpp.wakeup.ui.alarm.liveNote
@@ -147,6 +148,7 @@ class MainActivity : ComponentActivity() {
 
     private var openMorning by mutableStateOf(false)
     private var openEventId by mutableStateOf<Long?>(null)
+    private var reviewArrivalEventId by mutableStateOf<Long?>(null)
     private var openReportWeek by mutableStateOf<LocalDate?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -172,11 +174,15 @@ class MainActivity : ComponentActivity() {
             openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
             // 경로 바꾸기 제안 알림을 눌러 온 경우. 그 일정의 알람 결정 화면으로 간다.
             openEventId = intent.openEventExtra()
+            reviewArrivalEventId = intent.reviewArrivalExtra()
             // 일요일 주간 리포트 알림을 눌러 온 경우. 리포트 탭의 그 주로 간다.
             openReportWeek = intent.reportWeekExtra()
         } else {
             openMorning = savedInstanceState.getBoolean(STATE_OPEN_MORNING, false)
             openEventId = savedInstanceState.getLong(STATE_OPEN_EVENT, -1L).takeIf { it > 0L }
+            reviewArrivalEventId = savedInstanceState.getLong(STATE_REVIEW_ARRIVAL, -1L).takeIf { it > 0L }
+            // A process restart loses the ViewModel stack while the review is still unopened.
+            if (openEventId == null) openEventId = reviewArrivalEventId
             openReportWeek = savedInstanceState.getString(STATE_OPEN_REPORT_WEEK)
                 ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         }
@@ -195,6 +201,11 @@ class MainActivity : ComponentActivity() {
                         openEventId = null
                         intent.removeExtra(EXTRA_OPEN_EVENT)
                     },
+                    reviewArrivalEventId = reviewArrivalEventId,
+                    onArrivalReviewOpened = {
+                        reviewArrivalEventId = null
+                        intent.removeExtra(EXTRA_REVIEW_ARRIVAL)
+                    },
                     openReportWeek = openReportWeek,
                     onReportOpened = {
                         openReportWeek = null
@@ -211,6 +222,7 @@ class MainActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_OPEN_MORNING, openMorning)
         openEventId?.let { outState.putLong(STATE_OPEN_EVENT, it) }
+        reviewArrivalEventId?.let { outState.putLong(STATE_REVIEW_ARRIVAL, it) }
         openReportWeek?.let { outState.putString(STATE_OPEN_REPORT_WEEK, it.toString()) }
     }
 
@@ -220,10 +232,13 @@ class MainActivity : ComponentActivity() {
         // 알람 해제는 CLEAR_TOP + SINGLE_TOP으로 이미 열린 홈을 재사용한다.
         openMorning = intent.getBooleanExtra(EXTRA_OPEN_MORNING, false)
         openEventId = intent.openEventExtra()
+        reviewArrivalEventId = intent.reviewArrivalExtra()
         openReportWeek = intent.reportWeekExtra()
     }
 
     private fun Intent.openEventExtra(): Long? = getLongExtra(EXTRA_OPEN_EVENT, -1L).takeIf { it > 0L }
+
+    private fun Intent.reviewArrivalExtra(): Long? = getLongExtra(EXTRA_REVIEW_ARRIVAL, -1L).takeIf { it > 0L }
 
     private fun Intent.reportWeekExtra(): LocalDate? =
         getStringExtra(EXTRA_OPEN_REPORT_WEEK)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
@@ -246,6 +261,8 @@ class MainActivity : ComponentActivity() {
         // 다시 만들 때 남기는 "아직 열지 못한 화면"(onSaveInstanceState)
         private const val STATE_OPEN_MORNING = "state_open_morning"
         private const val STATE_OPEN_EVENT = "state_open_event"
+        private const val STATE_REVIEW_ARRIVAL = "state_review_arrival"
+        private const val EXTRA_REVIEW_ARRIVAL = "review_arrival_event_id"
         private const val STATE_OPEN_REPORT_WEEK = "state_open_report_week"
 
         /**
@@ -275,6 +292,10 @@ class MainActivity : ComponentActivity() {
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
+        /** Notification arrival actions open the same review as the in-app button. */
+        fun manualArrivalIntent(context: android.content.Context, eventId: Long): Intent =
+            eventIntent(context, eventId).putExtra(EXTRA_REVIEW_ARRIVAL, eventId)
+
         /** 리포트 탭에서 열 주(아무 날짜, "YYYY-MM-DD"). 서버가 그 날짜가 든 주로 답한다 */
         const val EXTRA_OPEN_REPORT_WEEK = "open_report_week"
 
@@ -297,6 +318,8 @@ private fun MainHost(
     onMorningOpened: () -> Unit,
     openEventId: Long?,
     onEventOpened: () -> Unit,
+    reviewArrivalEventId: Long?,
+    onArrivalReviewOpened: () -> Unit,
     openReportWeek: LocalDate?,
     onReportOpened: () -> Unit,
     onLoggedOut: () -> Unit,
@@ -318,6 +341,7 @@ private fun MainHost(
     // 추적 서비스가 내보내는 실시간 위치. 추적 중이 아니면 null 이다.
     val tripLive by viewModel.tripLive.collectAsStateWithLifecycle()
     val tripArrivals by viewModel.tripArrivals.collectAsStateWithLifecycle()
+    val pendingManualArrival by viewModel.pendingManualArrival.collectAsStateWithLifecycle()
     val liveRouteSnapshot by viewModel.liveRoute.collectAsStateWithLifecycle()
     val checkpointState by viewModel.checkpoints.collectAsStateWithLifecycle()
     val tripTab by viewModel.tripTab.collectAsStateWithLifecycle()
@@ -539,6 +563,7 @@ private fun MainHost(
                 ).joinToString(" · ")
             },
             options = alarmTimeSheet.options,
+            selectionKey = sheetEventId,
             onConfirm = { viewModel.saveAlarmTimeOption(sheetEventId, it) },
             // 직접 정한 시각(BE-H3b). 서버 버전은 홈을 받을 때 이미 확인했다(ServerWarmup).
             customSupported = UserAlarmRule.supported(ServerWarmup.serverVersion),
@@ -554,6 +579,7 @@ private fun MainHost(
             },
             startMinutesOfDay = sheetPlan?.startAtMillis?.let { minutesOfDay(it) },
             currentProbability = sheetPlan?.onTimeProbability,
+            canRestoreDefault = sheetPlan?.tauSourceLabel == AlarmTimeChoice.MANUAL_TAU_SOURCE,
             loading = alarmTimeSheet.loading,
             saving = alarmTimeSheet.saving,
             error = alarmTimeSheet.error,
@@ -652,6 +678,7 @@ private fun MainHost(
     // 사용자가 뒤로 나갔는데 다시 밀어 넣으면 화면을 벗어날 수 없다.
     LaunchedEffect(openMorning) {
         if (openMorning) {
+            viewModel.dismissManualArrival()
             viewModel.openMorning()
             onMorningOpened()
         }
@@ -660,14 +687,40 @@ private fun MainHost(
     // 경로 바꾸기 제안 알림을 눌렀다. 아침 기록과 같은 이유로 한 번만 연다.
     LaunchedEffect(openEventId) {
         openEventId?.let {
+            viewModel.dismissManualArrival()
             viewModel.openTrip(it)
             onEventOpened()
         }
     }
 
+    // Load the target plan first; tapping a notification never records arrival on its own.
+    LaunchedEffect(reviewArrivalEventId, openEventId, nav.current, plan?.eventId, planError?.eventId) {
+        reviewArrivalEventId?.let { eventId ->
+            when {
+                // The event-opening effect runs first and consumes this marker.
+                openEventId == eventId -> Unit
+                nav.current != AppRoute.AlarmDecision(eventId) -> onArrivalReviewOpened()
+                plan?.eventId == eventId -> {
+                    viewModel.markArrived(eventId)
+                    onArrivalReviewOpened()
+                }
+                planError?.eventId == eventId -> onArrivalReviewOpened()
+            }
+        }
+    }
+
+    pendingManualArrival?.let { review ->
+        ManualArrivalReviewDialog(
+            position = review.position,
+            onConfirm = viewModel::confirmManualArrival,
+            onDismiss = viewModel::dismissManualArrival,
+        )
+    }
+
     // 일요일 주간 리포트 알림을 눌렀다. 위와 같은 이유로 한 번만 연다. (Partly AI-generated (Claude))
     LaunchedEffect(openReportWeek) {
         openReportWeek?.let {
+            viewModel.dismissManualArrival()
             viewModel.openReportWeek(it)
             onReportOpened()
         }
@@ -855,6 +908,11 @@ private fun MainHost(
                         viewModel.openHomeSetup()
                     },
                     onMorningClick = viewModel::openMorning,
+                    onRoutineClick = viewModel::openRoutineEditor,
+                    onConfirmNextAlarm = if (UserAlarmRule.supported(ServerWarmup.serverVersion)) {
+                        { event -> viewModel.confirmAlarm(event.id, event.alarmAtMillis?.let { java.time.Instant.ofEpochMilli(it).toString() }) }
+                    } else null,
+                    confirmBusyId = confirmBusyId,
                     onRetry = { viewModel.refresh() },
                     modifier = Modifier.padding(innerPadding),
                     // [시각 바꾸기] → 알람 시각 바꾸기 바텀시트(H2-3).
@@ -1000,6 +1058,8 @@ private fun MainHost(
                         // 다른 일정의 계획을 이 화면에 그리지 않는다(fix/iter4-he-bugs 이식)
                         plan = plan.forEvent(route.eventId),
                         planError = planError.messageFor(route.eventId),
+                        routeSegments = checkpointState?.takeIf { it.eventId == route.eventId && it.routeKey == baseKey }?.segments,
+                        onNeedSegments = viewModel::loadCheckpointsIfNeeded,
                         onRetryPlan = { viewModel.retryPlan(route.eventId) },
                         editBusy = editLoadingId == route.eventId,
                         deleteBusy = deletingEventId == route.eventId,
@@ -1254,7 +1314,6 @@ private fun MainHost(
                 // Partly AI-generated (Claude)
                 // 하단 탭 "내 정보" 의 첫 화면(iter4 H2-2, Figma `547:1244`). 도움 묶음은 도움말 · 처음 안내 다시 보기(H2-4).
                 AppRoute.Me -> MeTabScreen(
-                    onRooms = viewModel::openRooms,
                     state = state,
                     routineNames = routineNames,
                     calendarLink = calendarLinkState,

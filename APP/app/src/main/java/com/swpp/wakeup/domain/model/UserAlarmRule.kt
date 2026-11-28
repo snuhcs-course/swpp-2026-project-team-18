@@ -56,7 +56,15 @@ object UserAlarmRule {
      * @param startMinutes 일정 시작(하루의 분). 주면 휠 시각이 시작과 같거나 그 뒤(12시간 안쪽, [AlarmTimeChoice.availableMinutes])
      * 일 때 [Save.AfterStart] 다 — 세 칸은 서버가 정한 시각이라 이 규칙을 걸지 않는다(칸이 먼저다).
      */
-    fun choose(picked: Int, presets: Map<String, Int?>, supported: Boolean, startMinutes: Int? = null): Save {
+    fun choose(
+        picked: Int,
+        presets: Map<String, Int?>,
+        supported: Boolean,
+        startMinutes: Int? = null,
+        preferredPresetKey: String? = null,
+    ): Save {
+        // Equal clocks do not imply equal risk choices. Retain an explicitly tapped card's key.
+        preferredPresetKey?.takeIf { presets[it] == picked }?.let { return Save.Preset(it) }
         presets.entries.firstOrNull { it.value == picked }?.let { return Save.Preset(it.key) }
         if (startMinutes != null && isAfterStart(picked, startMinutes)) return Save.AfterStart
         return if (supported) Save.Custom(picked) else Save.Locked

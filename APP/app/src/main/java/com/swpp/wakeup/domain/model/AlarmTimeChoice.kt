@@ -12,6 +12,47 @@ object AlarmTimeChoice {
     const val MINUTE_STEP = 5
     const val MINUTES_PER_DAY = 24 * 60
 
+    /** A quick choice should change the alarm enough to be useful, without inventing modeled times. */
+    const val QUICK_PICK_MIN_GAP = 5
+
+    data class QuickPicks(
+        val options: List<RiskOptionView>,
+        val recommendedKey: String?,
+        val collapsed: Boolean,
+    )
+
+    /**
+     * Keep only genuinely different times supplied by the server. The actual recommendation wins a
+     * collision; otherwise preserve the current choice before considering the remaining options.
+     * Near-midnight clocks use circular distance, so 23:59 and 00:01 are not different quick picks.
+     * Never manufacture a normal recommendation when the server did not supply one.
+     */
+    fun quickPicks(options: RiskOptionsView?, recommendedKey: String? = options?.recommendedKey): QuickPicks {
+        val source = options?.options.orEmpty()
+        val valid = source.filter {
+            minutesOfDay(it.alarmAt, it.meridiem) != null && it.tau.isFinite() && it.tau > 0 && it.tau < 1
+        }.distinctBy { it.key }
+        val priority = listOfNotNull(
+            valid.firstOrNull { it.key == recommendedKey },
+            valid.firstOrNull { it.key == options?.selectedKey },
+        ) + valid
+        val retained = mutableListOf<RiskOptionView>()
+        priority.distinctBy { it.key }.forEach { candidate ->
+            val minute = minutesOfDay(candidate.alarmAt, candidate.meridiem)!!
+            if (retained.all { existing ->
+                val raw = kotlin.math.abs(minute - minutesOfDay(existing.alarmAt, existing.meridiem)!!)
+                minOf(raw, MINUTES_PER_DAY - raw) >= QUICK_PICK_MIN_GAP
+            }) retained += candidate
+        }
+        val retainedKeys = retained.map { it.key }.toSet()
+        val cells = valid.filter { it.key in retainedKeys }
+        return QuickPicks(
+            options = cells,
+            recommendedKey = recommendedKey?.takeIf { key -> cells.any { it.key == key } },
+            collapsed = cells.size < source.size,
+        )
+    }
+
     /**
      * 빠르게 고르기 세 칸의 라벨. 서버 라벨("안전·보통·도박") 대신 쓴다 —
      * 사용자가 고르는 것은 "얼마나 여유를 둘까" 이지 위험의 이름이 아니다.

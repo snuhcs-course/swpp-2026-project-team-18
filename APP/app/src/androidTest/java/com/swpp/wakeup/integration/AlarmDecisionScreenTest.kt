@@ -1,6 +1,9 @@
 package com.swpp.wakeup.integration
 
+import androidx.compose.ui.test.assertIsDisplayed
+
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -108,10 +111,11 @@ class AlarmDecisionScreenTest {
         compose.onNodeWithTag("plan_probability").assertTextEquals("정시 도착 확률 92%")
 
         compose.onNodeWithText("왜 오전 7:00인가요?").performScrollTo()
-        compose.onNodeWithText("준비 30분").assertExists()
-        compose.onNodeWithText("이동 40분").assertExists()
-        compose.onNodeWithText("여유 10분").assertExists()
-        compose.onNodeWithText("고정 · 기본 여유").assertExists()
+        compose.onNodeWithTag("plan_metric_PREP").assertTextContains("30분")
+            .assertTextContains("고정 · 설정한 준비 시간")
+        compose.onNodeWithTag("plan_metric_TRAVEL").assertTextContains("40분")
+        compose.onNodeWithTag("plan_metric_BUFFER").assertTextContains("10분")
+            .assertTextContains("고정 · 기본 여유")
         // 내부 말은 이 화면에서 뺐다
         compose.onNodeWithText("적용 τ", substring = true).assertDoesNotExist()
     }
@@ -122,8 +126,8 @@ class AlarmDecisionScreenTest {
 
         show(planFrom(eventJson(plan)))
 
-        compose.onNodeWithText("준비 30분").assertDoesNotExist()
-        compose.onNodeWithText("이동 40분").performScrollTo().assertExists()
+        compose.onNodeWithTag("plan_metric_PREP").assertDoesNotExist()
+        compose.onNodeWithTag("plan_metric_TRAVEL").performScrollTo().assertTextContains("40분")
     }
 
     @Test
@@ -131,7 +135,7 @@ class AlarmDecisionScreenTest {
         show(planFrom(eventJson(computedPlan)))
 
         compose.onNodeWithText("다시 계산").assertDoesNotExist()
-        compose.onNodeWithTag("risk_entry").performScrollTo().performClick()
+        compose.onNodeWithTag("risk_entry").assertIsDisplayed().performClick()
         compose.onNodeWithTag("plan_blocks").performScrollTo().performClick()
         compose.onNodeWithTag("event_delete").performScrollTo().performClick()
 
@@ -147,7 +151,7 @@ class AlarmDecisionScreenTest {
         compose.onNodeWithTag("plan_alarm_status").assertDoesNotExist()
         compose.onNodeWithText("오전 7:00에 알람이 울려요").assertDoesNotExist()
         compose.onNodeWithText("이 시각으로 알람 맞추기").assertDoesNotExist()
-        compose.onNodeWithTag("plan_confirm_alarm").performScrollTo().performClick()
+        compose.onNodeWithTag("plan_confirm_alarm").assertIsDisplayed().performClick()
         assertEquals(listOf("confirm"), calls)
     }
 

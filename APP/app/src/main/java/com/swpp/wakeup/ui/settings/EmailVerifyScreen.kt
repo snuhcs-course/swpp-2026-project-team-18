@@ -76,7 +76,7 @@ fun EmailVerifyScreen(
             Text(
                 text = state.info,
                 color = JitColor.TextSecondary,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 modifier = Modifier.testTag("email_verify_info"),
             )
         }
@@ -97,7 +97,7 @@ fun EmailVerifyScreen(
         Text(
             text = "인증하지 않아도 앱은 그대로 쓸 수 있어요",
             color = JitColor.TextSecondary,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
         )
         JitPrimaryButton(
             label = "인증하기",

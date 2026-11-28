@@ -17,6 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -307,7 +309,7 @@ fun AddEventScreen(
         )
     }
 
-    // 버튼 묶음. 전체 화면에서는 스크롤 끝에, 시트에서는 아래에 고정한다.
+    // P12: 입력 내용만 스크롤한다. 추가/수정 모두 저장 동작은 아래에 남긴다.
     val bottomBlock: @Composable () -> Unit = {
         state.error?.let {
             Text(
@@ -371,6 +373,17 @@ fun AddEventScreen(
                 subtitleTag = "add_required_note",
             )
         }
+    } else {
+        Column(
+            Modifier.padding(
+                start = JitSpace.ScreenHorizontal,
+                end = JitSpace.ScreenHorizontal,
+                top = JitSpace.ScreenTop,
+                bottom = 8.dp,
+            ),
+        ) {
+            ScreenHeader(title = if (editing) "일정 수정" else "알람 추가", onBack = onBack, enabled = !state.submitting)
+        }
     }
     Column(
         modifier = Modifier
@@ -382,16 +395,13 @@ fun AddEventScreen(
             .padding(
                 start = 18.dp,
                 end = 18.dp,
-                top = if (inSheet) 4.dp else JitSpace.ScreenTop,
-                bottom = if (inSheet) 12.dp else JitSpace.ScreenBottom,
+                top = 4.dp,
+                bottom = 12.dp,
             ),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         // 알람 추가(Figma `545:279`)와 일정 수정이 같은 구성 · 같은 순서다(사용자 피드백 11-16):
         // 어디로 가요 → 몇 시까지 도착해요 → 어떻게 가요 → 제목 → 반복 요일 → 종류.
-        if (!inSheet) {
-            ScreenHeader(title = if (editing) "일정 수정" else "알람 추가", onBack = onBack, enabled = !state.submitting)
-        }
         if (editing) {
             // 반복 회차는 저장할 때 범위를 고른다(iter4 A2). 범위 수정을 모르는 서버면 그 회차만 바뀌고 요일은 못 고친다.
             editNoteOf(state)?.let { note ->
@@ -534,19 +544,17 @@ fun AddEventScreen(
         }
         state.fieldErrors[AddField.TAG]?.let { EndpointError(it, tag = "tag_error") }
 
-        if (!inSheet) {
-            Spacer(Modifier.height(4.dp))
-            bottomBlock()
-        }
     }
-    if (inSheet) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) { bottomBlock() }
-    }
+    // The fullscreen host already consumes system/IME space. The separate
+    // bottom-sheet window keeps its existing root imePadding above.
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (inSheet) JitColor.Surface else JitColor.Bg)
+            .testTag("event_action_bar")
+            .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = if (inSheet) 22.dp else 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) { bottomBlock() }
     }
 }
 
@@ -943,19 +951,26 @@ private fun TagDropdown(
     val body: @Composable () -> Unit = {
         Box(modifier = if (compact) Modifier else Modifier.fillMaxWidth()) {
             // 알람 추가 · 수정 시트(Figma `545:279`): 높이 36 · 모서리 12 · 아래 꺾쇠 16 + 13sp 굵게
-            if (compact) Row(
+            if (compact) Box(
                 modifier = Modifier
-                    .heightIn(min = 36.dp)
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(JitColor.Surface2)
                     .clickable(enabled = enabled, role = Role.Button) { expanded = true }
-                    .testTag("tag_picker")
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    .testTag("tag_picker"),
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(LineIcons.chevronDown, contentDescription = null, tint = JitColor.TextPrimary, modifier = Modifier.size(16.dp))
-                Text(current.label, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Row(
+                    modifier = Modifier
+                        .heightIn(min = 36.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(JitColor.Surface2)
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(LineIcons.chevronDown, contentDescription = null, tint = JitColor.TextPrimary, modifier = Modifier.size(16.dp))
+                    Text(current.label, color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
             } else Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1122,17 +1137,17 @@ private fun DestinationUndoBar(message: String, enabled: Boolean, onUndo: () -> 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(message, color = JitColor.TextPrimary, fontSize = 12.sp, modifier = Modifier.weight(1f))
-        Text(
-            text = "되돌리기",
-            color = JitColor.Accent,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
+        Box(
             modifier = Modifier
+                .heightIn(min = 48.dp)
                 .clip(RoundedCornerShape(JitRadius.Hint))
                 .clickable(enabled = enabled, role = Role.Button, onClick = onUndo)
                 .testTag("destination_undo_action")
                 .padding(horizontal = 10.dp, vertical = 6.dp),
-        )
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("되돌리기", color = JitColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
     }
 }
 
@@ -1281,35 +1296,44 @@ private fun ArrivalTimeField(hour: Int, minute: Int, picked: Boolean, enabled: B
 }
 
 // Partly AI-generated (Claude)
-/** 반복 요일 줄: 라벨 + 월~일 둥근 칩 7개(높이 32, 13sp). 고른 요일이 있으면 아래에 요약 한 줄 */
+/** 작은 요일 알약은 유지하고 48dp 터치 영역을 확보한다. 좁으면 다음 줄로 감싼다. */
 @Composable
 private fun RepeatDaysRow(selected: Set<Int>, onToggle: (Int) -> Unit, enabled: Boolean) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         JitLabeledRow("반복 요일") {
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(
+                Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 DAY_NAMES.forEachIndexed { index, name ->
                     val on = index in selected
                     Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 32.dp)
+                            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                             .clip(RoundedCornerShape(percent = 50))
-                            .background(if (on) JitColor.Accent else JitColor.Surface2)
                             .testTag("repeat_day_$index")
                             .toggleable(value = on, enabled = enabled, role = Role.Checkbox, onValueChange = { onToggle(index) }),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            text = name,
-                            color = when {
-                                on -> JitColor.Bg
-                                enabled -> JitColor.TextPrimary
-                                else -> JitColor.Track
-                            },
-                            fontSize = 13.sp,
-                            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-                            maxLines = 1,
-                        )
+                        Box(
+                            Modifier.sizeIn(minWidth = 32.dp, minHeight = 32.dp)
+                                .clip(RoundedCornerShape(percent = 50))
+                                .background(if (on) JitColor.Accent else JitColor.Surface2),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = name,
+                                color = when {
+                                    on -> JitColor.Bg
+                                    enabled -> JitColor.TextPrimary
+                                    else -> JitColor.Track
+                                },
+                                fontSize = 13.sp,
+                                fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1,
+                            )
+                        }
                     }
                 }
             }

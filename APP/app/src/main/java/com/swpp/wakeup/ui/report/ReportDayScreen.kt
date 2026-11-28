@@ -8,6 +8,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -168,7 +170,7 @@ private fun OutcomeChips(
                 Text(
                     text = outcome.chipLabel,
                     color = if (chosen) JitColor.TextPrimary else JitColor.TextSecondary,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     maxLines = 1,
                 )
             }
@@ -228,11 +230,11 @@ private fun ResultCard(
             }
         }
         outcome.headlineNote?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text(text = it, color = JitColor.TextSecondary, fontSize = 12.sp)
         }
         Text(text = outcome.contextLine, color = JitColor.TextPrimary, fontSize = 12.sp)
         outcome.confidenceLine?.let {
-            Text(text = it, color = JitColor.TextSecondary, fontSize = 11.sp)
+            Text(text = it, color = JitColor.TextSecondary, fontSize = 12.sp)
         }
         // 가지 않은 날을 나중에라도 뺄 수 있는 유일한 곳이다(홈에서는 시작 1시간 뒤에 빠진다).
         // 되돌리기는 누른 직후의 스낵바에서만 된다 — 표시한 일정은 리포트에서 사라진다.
@@ -254,24 +256,24 @@ private fun ResultCard(
             Text(
                 text = "가지 않은 일정이면 표시해 주세요. 리포트와 학습에서 빠지고 이 화면에서도 사라져요",
                 color = JitColor.TextSecondary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         }
     }
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun PlanActualCard(outcome: MorningOutcome) {
     JitCard(padding = 14.dp, gap = 10.dp) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("계획 대비 실제", color = JitColor.TextSecondary, fontSize = 11.sp)
-            Row(
+            Text("계획 대비 실제", color = JitColor.TextSecondary, fontSize = 12.sp)
+            FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // 실제 막대 색은 줄마다 차이 부호를 따른다. 범례가 그 규칙을 그대로 말한다.
                 LegendItem(JitColor.Track, "계획")
@@ -299,7 +301,7 @@ private fun PlanActualCard(outcome: MorningOutcome) {
 @Composable
 private fun WakeDayCard(line: String) {
     JitCard(padding = 14.dp, gap = 6.dp, modifier = Modifier.testTag("report_day_wake")) {
-        Text("기상", color = JitColor.TextSecondary, fontSize = 11.sp)
+        Text("기상", color = JitColor.TextSecondary, fontSize = 12.sp)
         Text(line, color = JitColor.TextPrimary, fontSize = 12.sp)
     }
 }@Composable
@@ -307,7 +309,7 @@ private fun LegendItem(color: Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(7.dp).clip(RoundedCornerShape(2.dp)).background(color))
         Spacer(Modifier.width(3.dp))
-        Text(label, color = JitColor.TextSecondary, fontSize = 9.sp)
+        Text(label, color = JitColor.TextSecondary, fontSize = 12.sp)
     }
 }
 
@@ -354,7 +356,7 @@ private fun DurationRow(row: PlanActualRow) {
 private fun BarLine(fraction: Float?, color: Color, label: String, labelColor: Color, bold: Boolean) {
     if (fraction == null) {
         // 값이 없으면 막대를 그리지 않는다. 0 길이 막대는 "0분" 으로 읽힌다.
-        Text(text = label, color = labelColor, fontSize = 10.sp)
+        Text(text = label, color = labelColor, fontSize = 12.sp)
         return
     }
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -365,12 +367,10 @@ private fun BarLine(fraction: Float?, color: Color, label: String, labelColor: C
         Text(
             text = label,
             color = labelColor,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
             fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
-            // 최소 64dp, 긴 라벨("실제는 재지 못했어요")이면 막대가 줄어든다. 고정 폭은 라벨 끝을 잘랐다(11-19).
-            modifier = Modifier.widthIn(min = 64.dp),
-            maxLines = 1,
-            softWrap = false,
+            // Large text wraps instead of consuming the bar's entire width or clipping its label.
+            modifier = Modifier.widthIn(min = 64.dp, max = 160.dp),
         )
     }
 }
@@ -411,8 +411,8 @@ private fun CauseCard(cause: CauseExplanation) {
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
         )
-        Text(text = cause.body, color = JitColor.TextSecondary, fontSize = 11.sp)
-        cause.action?.let { Text(text = "→ $it", color = JitColor.Accent, fontSize = 10.sp) }
+        Text(text = cause.body, color = JitColor.TextSecondary, fontSize = 12.sp)
+        cause.action?.let { Text(text = "→ $it", color = JitColor.Accent, fontSize = 12.sp) }
     }
 }
 

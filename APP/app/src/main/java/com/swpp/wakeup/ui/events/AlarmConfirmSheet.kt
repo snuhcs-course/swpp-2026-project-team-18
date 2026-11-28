@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -36,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -65,8 +67,8 @@ private fun segmentColor(kind: AlarmConfirmView.Kind): Color = when (kind) {
  * 몇 시에 깨우는지를 문장으로 먼저 말하고, 기상 · 출발 · 도착 · 시작을 한 줄 타임라인으로 보여 준다.
  * 확인 없이 닫아도(아래로 밀기 · 뒤로 · 바깥 누르기) 알람은 이미 그 시각으로 맞춰져 있다.
  *
- * TODO(BE-H3a): 승인 상태("확인 전 / 확인함") 서버 필드가 생기면 [onConfirm] 에서 "확인함" 을 저장하고,
- *  확인 없이 닫으면 "확인 전" 으로 남긴다(④ 와 같은 승인). 지금은 시트만 닫는다.
+ * [onConfirm]은 호스트가 서버에 확인 상태를 저장하는 동작으로 연결한다(BE-H3a).
+ * 확인 없이 닫으면 "확인 전" 상태를 유지하고 등록된 알람은 그대로 울린다.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,6 +81,7 @@ fun AlarmConfirmSheet(
     /** 더 빠른 경로 카드의 [이 경로로 바꾸기]. null 이면 카드를 두지 않는다 */
     onSwitchRoute: ((com.swpp.wakeup.domain.model.FasterRouteOffer) -> Unit)? = null,
 ) {
+    val maximumHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() * 0.9f }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -87,14 +90,38 @@ fun AlarmConfirmSheet(
         scrimColor = JitColor.Bg.copy(alpha = 0.6f),
         dragHandle = { SheetHandle() },
     ) {
+        AlarmConfirmContent(
+            view = view, onChangeTime = onChangeTime, onDetails = onDetails,
+            onConfirm = onConfirm, onSwitchRoute = onSwitchRoute,
+            modifier = Modifier.heightIn(max = maximumHeight),
+        )
+    }
+}
+
+/** P10: the evidence scrolls independently from the always-visible confirmation. */
+@Composable
+internal fun AlarmConfirmContent(
+    view: AlarmConfirmView,
+    onChangeTime: () -> Unit,
+    onDetails: () -> Unit,
+    onConfirm: () -> Unit,
+    modifier: Modifier = Modifier,
+    onSwitchRoute: ((com.swpp.wakeup.domain.model.FasterRouteOffer) -> Unit)? = null,
+) {
+    Column(
+        modifier = modifier
+            .semantics { testTagsAsResourceId = true }
+            .testTag("alarm_confirm_sheet")
+            .fillMaxWidth(),
+    ) {
         Column(
             modifier = Modifier
-                .semantics { testTagsAsResourceId = true }
-                .testTag("alarm_confirm_sheet")
+                .weight(1f, fill = false)
                 .fillMaxWidth()
                 .sheetScrollGuard()
                 .verticalScroll(rememberScrollState())
-                .padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 22.dp),
+                .testTag("alarm_confirm_scroll")
+                .padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -141,6 +168,7 @@ fun AlarmConfirmSheet(
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     modifier = Modifier
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(JitRadius.Hint))
                         .border(1.dp, JitColor.Track, RoundedCornerShape(JitRadius.Hint))
                         .clickable(role = Role.Button, onClick = onChangeTime)
@@ -153,19 +181,23 @@ fun AlarmConfirmSheet(
                     Text("시각 바꾸기", color = JitColor.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.weight(1f))
-                Text(
-                    text = "자세히 보기 ›",
-                    color = JitColor.Accent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
+                Box(
                     modifier = Modifier
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(JitRadius.Hint))
                         .clickable(role = Role.Button, onClick = onDetails)
                         .testTag("alarm_confirm_details")
                         .padding(horizontal = 6.dp, vertical = 8.dp),
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("자세히 보기 ›", color = JitColor.Accent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
             }
-
+        }
+        Box(
+            Modifier.fillMaxWidth().background(JitColor.Surface)
+                .padding(start = 18.dp, end = 18.dp, top = 8.dp, bottom = 22.dp),
+        ) {
             JitPrimaryButton(
                 label = "이 시각으로 알람 맞추기",
                 onClick = onConfirm,
@@ -193,7 +225,7 @@ private fun PlanCard(view: AlarmConfirmView) {
                 Text(
                     text = "정시 도착 확률 ${ProbabilityRule.displayLabel(percent)}",
                     color = tone,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(JitRadius.Hint))
@@ -209,7 +241,7 @@ private fun PlanCard(view: AlarmConfirmView) {
         Text(
             text = view.footer,
             color = JitColor.TextSecondary,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             modifier = Modifier.testTag("alarm_confirm_footer"),
         )
     }
@@ -250,7 +282,7 @@ private fun Timeline(view: AlarmConfirmView) {
                     Text(
                         text = seg.label,
                         color = if (seg.kind == AlarmConfirmView.Kind.BUFFER) JitColor.TextSecondary else segmentColor(seg.kind),
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                     )
@@ -299,8 +331,8 @@ private fun Timeline(view: AlarmConfirmView) {
             ) { i ->
                 val p = view.points[i]
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(p.clock, color = JitColor.TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    Text(p.name, color = JitColor.TextSecondary, fontSize = 10.sp, maxLines = 1)
+                    Text(p.clock, color = JitColor.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text(p.name, color = JitColor.TextSecondary, fontSize = 12.sp, maxLines = 1)
                 }
             }
         }
