@@ -28,13 +28,13 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 Get-FileHash -Algorithm SHA256 .\app\build\outputs\apk\release\app-release.apk
 ```
 
-SDK build-tools 버전은 설치된 버전에 맞춰요. `app-release-unsigned.apk`만 생겼다면 서명 설정이 빠진 것이므로 배포하지 않아요. 서명 검증, 서버 버전 호환 확인, 실제 기기 첫 알람 확인을 마친 APK와 체크섬을 전달해요. 특히 좌표 없는 관측 업로드는 이 브랜치의 `observations.0008`(좌표 필수 제약 교체·과거 관측 좌표 삭제)과 기본 추천 복원 수정의 서버 선행 배포가 필요해요. 관측 좌표 삭제는 역방향 복원이 불가능하므로 배포 담당자가 검토·적용해요.
+SDK build-tools 버전은 설치된 버전에 맞춰요. `app-release-unsigned.apk`만 생겼다면 서명 설정이 빠진 것이므로 배포하지 않아요. 서명 검증, 서버 버전 호환 확인, 실제 기기 첫 알람 확인을 마친 APK와 체크섬을 전달해요. 특히 좌표 없는 관측 업로드는 이 브랜치의 `observations.0008`(좌표 필수 제약 교체·과거 관측 좌표 삭제)과 기본 추천 복원·관측 수신 후 미래 알람 갱신 수정의 서버 선행 배포가 필요해요. 관측 좌표 삭제는 역방향 복원이 불가능하므로 배포 담당자가 검토·적용해요.
 
 아래 결과는 테스터가 실제로 수행한 뒤에만 채워요.
 
 | 항목 | 결과 | 근거 |
 | --- | --- | --- |
-| APK 서명·SHA-256 | 완료 · 0.17.0(18), 기존 팀 키 | [서명 검사](evidence/release-signature.txt), [SHA-256](evidence/release-apk.sha256), [후보 APK](../../APP/app/build/outputs/apk/release/app-release.apk) |
+| APK 서명·SHA-256 | 완료 · 0.18.0(19), 기존 팀 키 | [서명 검사](evidence/release-signature.txt), [SHA-256](evidence/release-apk.sha256), [후보 APK](../../APP/app/build/outputs/apk/release/app-release.apk) |
 | 개발 도구 없이 설치·업데이트 | 미실행 | 기기·OS·앱 버전, 설치 화면 |
 | 신규 가입·집 설정 | 미실행 | 테스트 계정 식별자와 화면 |
 | 알림·정확한 알람 권한 설정 | 미실행 | 설정 화면 |

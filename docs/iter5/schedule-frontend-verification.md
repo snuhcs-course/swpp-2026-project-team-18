@@ -4,6 +4,8 @@
 
 범위는 [일정표 이행표](schedule-frontend-status.md)와 같다. [기계 판독 요약](evidence/schedule-tests.json), [백엔드 요약](evidence/schedule-backend-tests.json), [기기 실행 원문](evidence/schedule-device-tests.log)을 남겼다.
 
+이 문서의 수치는 일정표 반영 시점의 검증이다. 이후 알람 시각 불일치 수정과 최신 APK 검증은 [알람 일치 회귀 기록](alarm-time-consistency.md)에 따로 남겼다.
+
 ## 실행 결과
 
 | 검사 | 실제 결과 |

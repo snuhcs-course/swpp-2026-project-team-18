@@ -102,6 +102,8 @@ class EventRepository(
     private val cache: OfflineCache? = null,
     /** 지금 시각(epoch ms). 테스트가 시계를 고정할 때만 바꾼다 */
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    /** Owner-scoped plan fallback. Separate from API reads so strict reads never consult it. */
+    private val cachedPlanEvent: suspend (Long) -> EventDto? = { cache?.event(it) },
 ) {
 
     sealed interface Result<out T> {
@@ -783,7 +785,8 @@ class EventRepository(
         Result.Success(EditResult(dto, dto.toPlanView(ZoneId.systemDefault())))
     }
 
-    suspend fun loadPlan(eventId: Long): Result<AlarmPlanView> {
+    /** Detail pages may read offline copies; an editable alarm sheet must require a fresh response. */
+    suspend fun loadPlan(eventId: Long, allowCached: Boolean = true): Result<AlarmPlanView> {
         val online = guard {
             val response = api.get(eventId)
             val dto = unwrap(response)
@@ -792,11 +795,11 @@ class EventRepository(
             dto.toPlanView(ZoneId.systemDefault())?.let { Result.Success(it) }
                 ?: Result.Failure("알람을 아직 계산하지 못했어요.")
         }
-        if (online is Result.Success) return online
+        if (online is Result.Success || !allowCached) return online
 
         // 근거 화면은 오프라인에서도 열려야 한다. 알람이 울린 아침에 "왜 지금
         // 일어나야 하는가" 를 확인하려는 순간이 대개 지하철·엘리베이터 안이다.
-        val cached = cache?.event(eventId)?.toPlanView(ZoneId.systemDefault())
+        val cached = cachedPlanEvent(eventId)?.toPlanView(ZoneId.systemDefault())
         return if (cached != null) Result.Success(cached) else online
     }
 

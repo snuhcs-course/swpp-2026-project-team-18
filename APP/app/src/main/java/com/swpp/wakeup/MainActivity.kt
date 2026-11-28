@@ -582,6 +582,7 @@ private fun MainHost(
             canRestoreDefault = sheetPlan?.tauSourceLabel == AlarmTimeChoice.MANUAL_TAU_SOURCE,
             loading = alarmTimeSheet.loading,
             saving = alarmTimeSheet.saving,
+            canWrite = alarmTimeSheet.canWrite,
             error = alarmTimeSheet.error,
             onRetry = { viewModel.loadRiskOptions(sheetEventId) },
             onHelp = { viewModel.openHelp(HelpTopic.RISK_LEVELS) },

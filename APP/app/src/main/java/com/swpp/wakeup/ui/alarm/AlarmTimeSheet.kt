@@ -32,9 +32,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,7 +69,7 @@ import com.swpp.wakeup.ui.theme.JitColor
  * @param initialMinutesOfDay 휠이 처음 가리킬 시각(지금 알람). 없으면 추천 칸
  * @param startMinutesOfDay 일정 시작 시각(분). 휠로 고른 시각의 확률을 낼 때 쓴다
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun AlarmTimeSheet(
     subtitle: String?,
@@ -82,6 +85,7 @@ fun AlarmTimeSheet(
     currentProbability: Int? = null,
     loading: Boolean = false,
     saving: Boolean = false,
+    canWrite: Boolean = true,
     error: String? = null,
     onRetry: () -> Unit = {},
     /** 제목 줄 오른쪽 i. 도움말 › "여유 있게·보통·빠듯하게는 뭐가 달라요?" 를 펼쳐 연다(⑤ 에 있던 i) */
@@ -163,7 +167,7 @@ fun AlarmTimeSheet(
                     .background(JitColor.Track),
             )
         },
-        modifier = modifier.testTag("alarm_time_sheet"),
+        modifier = modifier.testTag("alarm_time_sheet").semantics { testTagsAsResourceId = true },
     ) {
         Column(
             modifier = Modifier
@@ -215,7 +219,7 @@ fun AlarmTimeSheet(
                         com.swpp.wakeup.ui.common.JitSecondaryButton(
                             label = "기본 추천으로 되돌리기",
                             onClick = onRevert,
-                            enabled = !saving,
+                            enabled = !saving && !loading && canWrite,
                             modifier = Modifier.fillMaxWidth().testTag("alarm_time_revert"),
                         )
                     }
@@ -289,7 +293,22 @@ fun AlarmTimeSheet(
                 ResultLine(pickedLabel, percent, goalTau, recommendedMinutes, picked)
             }
 
-            error?.let { Text(it, color = JitColor.Red, fontSize = 12.sp) }
+            if (loading && cells.isNotEmpty()) {
+                Text("현재 알람 시각을 확인하고 있어요", color = JitColor.TextSecondary,
+                    fontSize = 12.sp, modifier = Modifier.testTag("alarm_time_loading"))
+            }
+            error?.let {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(it, color = JitColor.Red, fontSize = 12.sp,
+                        modifier = Modifier.testTag("alarm_time_error"))
+                    if (cells.isNotEmpty()) {
+                        com.swpp.wakeup.ui.common.JitSecondaryButton(
+                            label = "다시 시도", onClick = onRetry, enabled = !loading && !saving,
+                            modifier = Modifier.fillMaxWidth().testTag("alarm_time_retry"),
+                        )
+                    }
+                }
+            }
             // 서버가 아직 직접 정한 시각을 받지 않으면(0.21.0 미만) 세 칸 밖은 저장할 수 없다.
             // 버튼만 흐려 두면 고장으로 읽혀서 이유를 적는다.
             if (save is UserAlarmRule.Save.Locked) {
@@ -333,7 +352,8 @@ fun AlarmTimeSheet(
                             UserAlarmRule.Save.Locked, UserAlarmRule.Save.AfterStart -> Unit
                         }
                     },
-                    enabled = (save is UserAlarmRule.Save.Preset || save is UserAlarmRule.Save.Custom) && !saving,
+                    enabled = (save is UserAlarmRule.Save.Preset || save is UserAlarmRule.Save.Custom) &&
+                        !saving && !loading && canWrite,
                     modifier = Modifier.weight(1f),
                 )
             }

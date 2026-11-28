@@ -64,27 +64,38 @@ class AlarmDecisionViewModelTest {
     }
 
     private val saved = mutableListOf<AlarmPlanView>()
+    private val refreshed = mutableListOf<AlarmPlanView>()
     private val notices = mutableListOf<Pair<String, HomeViewModel.AlarmUndo?>>()
     private var version: String? = "0.22.0"
     private var syncError: String? = null
+    private var refreshError: String? = null
     private var known: AlarmPlanView? = null
 
-    private fun TestScope.vm(repo: Repository) = AlarmDecisionViewModel(
+    private fun TestScope.vm(
+        repo: Repository,
+        onBeforeRead: suspend () -> String? = { null },
+        onRefreshed: suspend (AlarmPlanView) -> String? = { refreshed += it; refreshError },
+    ) = AlarmDecisionViewModel(
         repo, backgroundScope, { version }, { known },
         onSaved = { saved += it; syncError }, notify = { text, undo -> notices += text to undo }, zone = zone,
+        onRefreshed = onRefreshed,
+        onBeforeRead = onBeforeRead,
     )
 
-    @Test fun `open loads options and plan once while known plan avoids extra lookup`() = runTest {
+    @Test fun `known plan is an immediate preview but opening still reads and synchronizes the fresh plan`() = runTest {
         val repo = Repository()
-        known = plan(1)
+        known = plan(1).copy(alarmAt = "7:30")
         val vm = vm(repo)
         vm.open(1)
         vm.open(1)
         assertEquals(known, vm.state.value.plan)
         assertTrue(vm.state.value.loading)
         runCurrent()
-        assertTrue(repo.planCalls.isEmpty())
+        assertEquals(listOf(1L), repo.planCalls)
         assertEquals(listOf(1L), repo.optionCalls)
+        assertEquals(plan(1), vm.state.value.plan)
+        assertEquals(listOf(plan(1)), refreshed)
+        assertTrue(saved.isEmpty())
         assertEquals(options, vm.state.value.options)
         assertFalse(vm.state.value.loading)
     }
@@ -196,7 +207,7 @@ class AlarmDecisionViewModelTest {
         assertEquals("추천 시각으로 되돌렸어요", notices.single().first)
     }
 
-    @Test fun `options retry does not invalidate pending plan lookup`() = runTest {
+    @Test fun `retry restarts both reads after its upload barrier`() = runTest {
         val pending = CompletableDeferred<Result<AlarmPlanView>>()
         val repo = Repository().apply {
             planAnswer = { pending.await() }
@@ -211,6 +222,7 @@ class AlarmDecisionViewModelTest {
         runCurrent()
         pending.complete(Result.Success(plan(1)))
         runCurrent()
+        assertEquals(listOf(1L, 1L), repo.planCalls)
         assertEquals(plan(1), vm.state.value.plan)
         assertNull(vm.state.value.error)
     }
@@ -289,6 +301,8 @@ class AlarmDecisionViewModelTest {
         assertTrue(repo.customs.isEmpty())
         assertTrue(repo.reverts.isEmpty())
 
+        // The server now stores the completed write; reopening reads that state again.
+        repo.planAnswer = { Result.Success(plan(it).copy(alarmAt = "6:50")) }
         first.complete(Result.Success(plan(1).copy(alarmAt = "6:50")))
         runCurrent()
         assertFalse(vm.state.value.saving)
@@ -318,9 +332,8 @@ class AlarmDecisionViewModelTest {
         assertNull(vm.state.value.error)
     }
 
-    @Test fun `late options from reopened sheet cannot hide an earlier save failure`() = runTest {
+    @Test fun `reopened sheet does not read over a pending write or hide its failure`() = runTest {
         val pendingSave = CompletableDeferred<Result<AlarmPlanView>>()
-        val pendingOptions = CompletableDeferred<Result<RiskOptionsView>>()
         val repo = Repository().apply { saveAnswer = { pendingSave.await() } }
         val vm = vm(repo)
         vm.open(1)
@@ -328,15 +341,296 @@ class AlarmDecisionViewModelTest {
         vm.choose(1, "safe")
         runCurrent()
         vm.dismiss()
-        repo.optionAnswer = { withContext(NonCancellable) { pendingOptions.await() } }
         vm.open(1)
         runCurrent()
+        assertEquals(listOf(1L), repo.optionCalls)
+        assertEquals(listOf(1L), repo.planCalls)
         pendingSave.complete(Result.Failure("저장하지 못했어요"))
-        runCurrent()
-        pendingOptions.complete(Result.Success(options))
         runCurrent()
         assertEquals("저장하지 못했어요", vm.state.value.error)
         assertFalse(vm.state.value.loading)
         assertFalse(vm.state.value.saving)
+    }
+
+    @Test fun `fresh options cannot enable writes while cached plan is being refreshed and synchronized`() = runTest {
+        val read = CompletableDeferred<Result<AlarmPlanView>>()
+        val sync = CompletableDeferred<String?>()
+        val fresh = plan(1).copy(alarmAt = "6:35")
+        known = plan(1).copy(alarmAt = "7:30")
+        val repo = Repository().apply { planAnswer = { read.await() } }
+        val vm = vm(repo) { refreshed += it; sync.await() }
+        vm.open(1)
+        runCurrent()
+        assertEquals("7:30", vm.state.value.plan?.alarmAt)
+        assertNotNull(vm.state.value.options)
+        assertTrue(vm.state.value.loading)
+        vm.choose(1, "safe")
+        vm.custom(1, 8 * 60)
+        vm.revert(1)
+        assertTrue(repo.choices.isEmpty() && repo.customs.isEmpty() && repo.reverts.isEmpty())
+
+        read.complete(Result.Success(fresh))
+        runCurrent()
+        assertEquals(fresh, vm.state.value.plan)
+        assertEquals(listOf(fresh), refreshed)
+        assertTrue(vm.state.value.loading)
+        vm.choose(1, "safe")
+        assertTrue(repo.choices.isEmpty())
+        sync.complete(null)
+        runCurrent()
+        assertFalse(vm.state.value.loading)
+        vm.choose(1, "safe")
+        runCurrent()
+        assertEquals(listOf(1L to .987), repo.choices)
+    }
+
+    @Test fun `failed plan refresh keeps cached preview but blocks all writes until retry succeeds`() = runTest {
+        known = plan(1).copy(alarmAt = "7:30")
+        val repo = Repository().apply { planAnswer = { Result.Failure("최신 알람을 받지 못했어요") } }
+        val vm = vm(repo)
+        vm.open(1)
+        runCurrent()
+        assertEquals("7:30", vm.state.value.plan?.alarmAt)
+        assertFalse(vm.state.value.loading)
+        assertEquals("최신 알람을 받지 못했어요", vm.state.value.error)
+        vm.choose(1, "safe")
+        vm.custom(1, 8 * 60)
+        vm.revert(1)
+        assertTrue(repo.choices.isEmpty() && repo.customs.isEmpty() && repo.reverts.isEmpty())
+        assertTrue(refreshed.isEmpty())
+
+        val fresh = plan(1).copy(alarmAt = "6:40")
+        repo.planAnswer = { Result.Success(fresh) }
+        vm.loadOptions(1)
+        runCurrent()
+        assertEquals(listOf(1L, 1L), repo.planCalls)
+        assertEquals(fresh, vm.state.value.plan)
+        assertNull(vm.state.value.error)
+        assertEquals(listOf(fresh), refreshed)
+    }
+
+    @Test fun `retry refreshes an existing plan instead of combining it with new options`() = runTest {
+        val repo = Repository()
+        val vm = vm(repo)
+        vm.open(1)
+        runCurrent()
+        val nextPlan = CompletableDeferred<Result<AlarmPlanView>>()
+        repo.planAnswer = { nextPlan.await() }
+        repo.optionAnswer = { Result.Success(options.copy(selectedKey = "safe")) }
+        vm.loadOptions(1)
+        runCurrent()
+        assertEquals(listOf(1L, 1L), repo.planCalls)
+        assertEquals("safe", vm.state.value.options?.selectedKey)
+        assertTrue(vm.state.value.loading)
+        vm.choose(1, "safe")
+        assertTrue(repo.choices.isEmpty())
+        val fresh = plan(1).copy(alarmAt = "6:25")
+        nextPlan.complete(Result.Success(fresh))
+        runCurrent()
+        assertEquals(fresh, vm.state.value.plan)
+        assertEquals(listOf(plan(1), fresh), refreshed)
+        assertFalse(vm.state.value.loading)
+    }
+
+    @Test fun `a stale read from a closed sheet never synchronizes over a newer saved selection`() = runTest {
+        val stale = CompletableDeferred<Result<AlarmPlanView>>()
+        val repo = Repository().apply { planAnswer = { withContext(NonCancellable) { stale.await() } } }
+        val vm = vm(repo)
+        vm.open(1)
+        runCurrent()
+        vm.dismiss()
+        val fresh = plan(1).copy(alarmAt = "6:50")
+        repo.planAnswer = { Result.Success(fresh) }
+        vm.open(1)
+        runCurrent()
+        val selected = plan(1).copy(alarmAt = "6:20")
+        repo.saveAnswer = { Result.Success(selected) }
+        vm.choose(1, "safe")
+        runCurrent()
+        stale.complete(Result.Success(plan(1).copy(alarmAt = "8:00")))
+        runCurrent()
+        assertEquals(listOf(fresh), refreshed)
+        assertEquals(listOf(selected), saved)
+        assertNull(vm.state.value.eventId)
+    }
+
+    @Test fun `logout prevents a late uncancellable plan read from synchronizing the old account`() = runTest {
+        val read = CompletableDeferred<Result<AlarmPlanView>>()
+        val repo = Repository().apply { planAnswer = { withContext(NonCancellable) { read.await() } } }
+        val vm = vm(repo)
+        vm.open(1)
+        runCurrent()
+        vm.close()
+        read.complete(Result.Success(plan(1)))
+        runCurrent()
+        assertTrue(refreshed.isEmpty())
+        assertTrue(saved.isEmpty())
+        assertNull(vm.state.value.eventId)
+    }
+
+    @Test fun `late refresh synchronization cannot overwrite the next sheet loading or errors`() = runTest {
+        val oldSync = CompletableDeferred<String?>()
+        val repo = Repository()
+        val vm = vm(repo) {
+            refreshed += it
+            if (it.eventId == 1L) withContext(NonCancellable) { oldSync.await() } else null
+        }
+        vm.open(1)
+        runCurrent()
+        assertTrue(vm.state.value.loading)
+        vm.dismiss()
+        vm.open(2)
+        runCurrent()
+        oldSync.complete("옛 시트의 동기화 실패")
+        runCurrent()
+        assertEquals(2L, vm.state.value.eventId)
+        assertEquals(plan(2), vm.state.value.plan)
+        assertFalse(vm.state.value.loading)
+        assertNull(vm.state.value.error)
+    }
+
+    @Test fun `read synchronization failure stays a read error without saved notification or enabled writes`() = runTest {
+        val repo = Repository()
+        refreshError = "기기 알람을 새 시각으로 맞추지 못했어요. 다시 시도해 주세요."
+        val vm = vm(repo)
+        vm.open(1)
+        runCurrent()
+        assertEquals(refreshError, vm.state.value.error)
+        assertFalse(vm.state.value.loading)
+        assertTrue(saved.isEmpty())
+        assertTrue(notices.isEmpty())
+        vm.choose(1, "safe")
+        vm.custom(1, 8 * 60)
+        vm.revert(1)
+        assertTrue(repo.choices.isEmpty() && repo.customs.isEmpty() && repo.reverts.isEmpty())
+        refreshError = null
+        vm.loadOptions(1)
+        runCurrent()
+        assertNull(vm.state.value.error)
+        assertFalse(vm.state.value.loading)
+    }
+
+    @Test fun `a response for another event is rejected before host synchronization`() = runTest {
+        known = plan(1)
+        val repo = Repository().apply {
+            planAnswer = { Result.Success(this@AlarmDecisionViewModelTest.plan(2)) }
+        }
+        val vm = vm(repo)
+        vm.open(1)
+        runCurrent()
+        assertEquals(plan(1), vm.state.value.plan)
+        assertNotNull(vm.state.value.error)
+        assertTrue(refreshed.isEmpty())
+        vm.choose(1, "safe")
+        assertTrue(repo.choices.isEmpty())
+    }
+
+    @Test fun `both server reads wait for pending uploads and only a synchronized pair can write`() = runTest {
+        val barrier = CompletableDeferred<String?>()
+        val order = mutableListOf<String>()
+        val repo = Repository().apply {
+            planAnswer = { id -> order += "plan"; Result.Success(this@AlarmDecisionViewModelTest.plan(id)) }
+            optionAnswer = { order += "options"; Result.Success(options) }
+        }
+        val vm = vm(repo, onBeforeRead = { order += "uploads"; barrier.await() })
+        vm.open(1)
+        runCurrent()
+        assertEquals(listOf("uploads"), order)
+        assertTrue(repo.planCalls.isEmpty() && repo.optionCalls.isEmpty())
+        assertTrue(vm.state.value.loading)
+        assertFalse(vm.state.value.canWrite)
+        barrier.complete(null)
+        runCurrent()
+        assertEquals(listOf("uploads", "options", "plan"), order)
+        assertTrue(vm.state.value.canWrite)
+    }
+
+    @Test fun `uploads that cannot drain block reads until an explicit successful retry`() = runTest {
+        var pending = true
+        val repo = Repository()
+        val vm = vm(repo, onBeforeRead = { "아직 올리지 못한 기록이 있어요".takeIf { pending } })
+        vm.open(1)
+        runCurrent()
+        assertFalse(vm.state.value.loading)
+        assertFalse(vm.state.value.canWrite)
+        assertNotNull(vm.state.value.error)
+        assertTrue(repo.planCalls.isEmpty() && repo.optionCalls.isEmpty())
+        pending = false
+        vm.loadOptions(1)
+        runCurrent()
+        assertEquals(listOf(1L), repo.planCalls)
+        assertEquals(listOf(1L), repo.optionCalls)
+        assertTrue(vm.state.value.canWrite)
+        assertNull(vm.state.value.error)
+    }
+
+    @Test fun `a closed upload barrier cannot start reads for a reopened sheet`() = runTest {
+        val oldBarrier = CompletableDeferred<String?>()
+        var attempts = 0
+        val repo = Repository()
+        val vm = vm(repo, onBeforeRead = {
+            if (++attempts == 1) withContext(NonCancellable) { oldBarrier.await() } else null
+        })
+        vm.open(1)
+        runCurrent()
+        vm.dismiss()
+        vm.open(2)
+        runCurrent()
+        oldBarrier.complete(null)
+        runCurrent()
+        assertEquals(listOf(2L), repo.planCalls)
+        assertEquals(listOf(2L), repo.optionCalls)
+        assertEquals(2L, vm.state.value.eventId)
+        assertTrue(vm.state.value.canWrite)
+    }
+
+    @Test fun `logout while waiting for uploads never starts either read`() = runTest {
+        val barrier = CompletableDeferred<String?>()
+        val repo = Repository()
+        val vm = vm(repo, onBeforeRead = { withContext(NonCancellable) { barrier.await() } })
+        vm.open(1)
+        runCurrent()
+        vm.close()
+        barrier.complete(null)
+        runCurrent()
+        assertTrue(repo.planCalls.isEmpty() && repo.optionCalls.isEmpty())
+        assertFalse(vm.state.value.canWrite)
+    }
+
+    @Test fun `failed options block manual and revert too but successful empty options allow manual time`() = runTest {
+        val repo = Repository().apply { optionAnswer = { Result.Failure("선택지를 받지 못했어요") } }
+        val vm = vm(repo)
+        vm.open(1)
+        runCurrent()
+        assertFalse(vm.state.value.canWrite)
+        vm.custom(1, 8 * 60)
+        vm.revert(1)
+        assertTrue(repo.customs.isEmpty() && repo.reverts.isEmpty())
+        repo.optionAnswer = { Result.Success(options.copy(options = emptyList())) }
+        vm.loadOptions(1)
+        runCurrent()
+        assertTrue(vm.state.value.canWrite)
+        vm.custom(1, 8 * 60)
+        runCurrent()
+        assertEquals(1, repo.customs.size)
+    }
+
+    @Test fun `a failed save can retry while a saved but unsynchronized response cannot write again`() = runTest {
+        val repo = Repository().apply { saveAnswer = { Result.Failure("다시 저장해 주세요") } }
+        val vm = vm(repo)
+        vm.open(1)
+        runCurrent()
+        vm.choose(1, "safe")
+        assertFalse(vm.state.value.canWrite)
+        runCurrent()
+        assertTrue(vm.state.value.canWrite)
+        syncError = "저장했지만 기기 알람을 맞추지 못했어요"
+        repo.saveAnswer = { id -> Result.Success(this@AlarmDecisionViewModelTest.plan(id)) }
+        vm.choose(1, "safe")
+        runCurrent()
+        assertFalse(vm.state.value.canWrite)
+        vm.custom(1, 8 * 60)
+        vm.revert(1)
+        assertTrue(repo.customs.isEmpty() && repo.reverts.isEmpty())
     }
 }

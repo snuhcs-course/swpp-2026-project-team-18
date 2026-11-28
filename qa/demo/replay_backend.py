@@ -187,9 +187,12 @@ def replay_get(url):
 
 clients._get = replay_get
 clients.static_map = lambda *args, **kwargs: (map_bytes, "image/png", False)
-print(
-    "Local backend; upstream routing replay from " + fixture["provenance"], flush=True
-)
-call_command(
-    "runserver", "127.0.0.1:" + sys.argv[1], use_reloader=False, use_threading=False
-)
+def serve(port):
+    print("Local backend; upstream routing replay from " + fixture["provenance"], flush=True)
+    call_command(
+        "runserver", "127.0.0.1:" + str(port), use_reloader=False, use_threading=False
+    )
+
+
+if __name__ == "__main__":
+    serve(sys.argv[1])

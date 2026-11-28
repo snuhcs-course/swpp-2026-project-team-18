@@ -19,7 +19,9 @@ from rest_framework.views import APIView
 
 from apps.common import request_log
 
+from apps.planning import refresh as planning_refresh
 from apps.planning.learning_reset import recorded_before_reset
+from apps.planning.models import PlanRevision
 
 from .models import AlarmLog, TripObservation
 from .serializers import (
@@ -99,6 +101,13 @@ class ObservationBatchView(APIView):
                 else:
                     duplicated += 1
 
+        if created:
+            # A new GPS departure may complete a preparation sample. Reuse the
+            # saved route and retain the usual started/manual/confirmed policy.
+            planning_refresh.refresh_upcoming(
+                request.user, trigger=PlanRevision.Trigger.LEARNING
+            )
+
         return Response(
             {
                 "accepted": len(created),
@@ -171,6 +180,7 @@ class AlarmLogBatchView(APIView):
         duplicated = 0
         unlinked = 0
         ignored = 0
+        preparation_changed = False
         reset_at = recorded_before_reset(request.user)
         with transaction.atomic():
             for item in items:
@@ -190,8 +200,17 @@ class AlarmLogBatchView(APIView):
                     created.append(log.pk)
                     if log.event_id is None:
                         unlinked += 1
+                    elif log.kind == AlarmLog.Kind.DISMISSED:
+                        preparation_changed = True
                 else:
                     duplicated += 1
+
+        if preparation_changed:
+            # Offline queues can deliver the dismissal after the GPS departure.
+            # That order creates the same new preparation sample as the reverse.
+            planning_refresh.refresh_upcoming(
+                request.user, trigger=PlanRevision.Trigger.LEARNING
+            )
 
         return Response(
             {

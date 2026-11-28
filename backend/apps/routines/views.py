@@ -224,6 +224,13 @@ class BlockObservationBatchView(APIView):
                 obs = BlockObservation.objects.create(user=request.user, **row)
                 created.append(obs.pk)
 
+        if created:
+            # The estimator reads block evidence immediately. Keep saved alarms
+            # in step with risk previews without another upstream route request.
+            planning_refresh.refresh_upcoming(
+                request.user, trigger=PlanRevision.Trigger.LEARNING
+            )
+
         return Response(
             {
                 "accepted": len(created),

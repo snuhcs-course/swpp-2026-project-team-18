@@ -1,8 +1,17 @@
-﻿Verifies
+Verifies
 Verified using v1 scheme (JAR signing): false
 Verified using v2 scheme (APK Signature Scheme v2): true
 Verified using v3 scheme (APK Signature Scheme v3): false
 Verified using v3.1 scheme (APK Signature Scheme v3.1): false
 Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
 Number of signers: 1
+Signer #1 certificate DN: O=SWPP, CN=Sooyeon Kim
 Signer #1 certificate SHA-256 digest: 09cdd39643f2e1d5c28ab6c2440863e024591bb524bbb735d59b32651f6097fe
+Signer #1 certificate SHA-1 digest: ab56adc08fdcf0973f27ff000183323e47a0bf70
+Signer #1 certificate MD5 digest: 5424b0c3faa23a8dfac8e0166ace447e
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: 390d55183c2cead1e91de89d8d6611f28dd81281949c0827d62c1427de590ae8
+Signer #1 public key SHA-1 digest: 9e7583bfce9253e4dd7dcd29f63b9d54f3b3091a
+Signer #1 public key MD5 digest: e21734ca9027ee3928605b988e857a2c

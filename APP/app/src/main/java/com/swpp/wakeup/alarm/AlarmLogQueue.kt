@@ -17,6 +17,7 @@ import com.swpp.wakeup.data.remote.AlarmLogsApi
 import com.swpp.wakeup.data.remote.ApiClient
 import com.swpp.wakeup.domain.model.AlarmSchedule
 import com.swpp.wakeup.sensing.isoAt
+import com.swpp.wakeup.sensing.ObservationUploadGate
 import java.io.IOException
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
@@ -45,7 +46,9 @@ class AlarmLogQueue(
 
     val pendingCount: Int get() = pending().size
 
-    fun pending(): List<AlarmLogInput> {
+    fun pending(): List<AlarmLogInput> = ObservationUploadGate.storage { readPending() }
+
+    private fun readPending(): List<AlarmLogInput> {
         // 앞 사용자의 기록을 지금 계정의 토큰으로 올리지 않는다([com.swpp.wakeup.data.local.isForeignOwner]).
         if (prefs.discardIfForeign(appContext)) return emptyList()
 
@@ -70,7 +73,9 @@ class AlarmLogQueue(
     }
 
     /** 여러 건을 한 번에 적는다(등록 동기화). 비어 있으면 아무것도 하지 않는다. */
-    fun recordAll(logs: List<AlarmLogInput>) {
+    fun recordAll(logs: List<AlarmLogInput>) = ObservationUploadGate.storage { recordAllLocked(logs) }
+
+    private fun recordAllLocked(logs: List<AlarmLogInput>) {
         if (logs.isEmpty()) return
         runCatching {
             val keys = logs.map { it.clientUuid }.toSet()
@@ -89,18 +94,22 @@ class AlarmLogQueue(
      *
      * @return 서버가 처리한 건수(신규 + 중복). 올릴 것이 없으면 0.
      */
-    suspend fun flush(): Int {
+    suspend fun flush(): Int = ObservationUploadGate.upload { flushPending() }
+
+    private suspend fun flushPending(): Int {
         if (!isReady()) return 0
 
-        val items = pending()
+        val items = pending().take(MAX_PENDING)
         if (items.isEmpty()) return 0
+        val owner = ObservationUploadGate.owner(appContext, prefs)
 
         return try {
             val response = api().batch(AlarmLogBatchRequest(items))
             when {
                 response.isSuccessful -> {
                     val body = response.body()
-                    drop(items)
+                    if (!drop(items, owner)) return 0
+                    ObservationUploadGate.recordAccepted(body?.accepted ?: 0)
                     Log.i(
                         TAG,
                         "알람 기록 업로드 완료: 신규 ${body?.accepted ?: 0}건 중복 ${body?.duplicated ?: 0}건",
@@ -110,7 +119,7 @@ class AlarmLogQueue(
 
                 response.code() == 400 || response.code() == 404 -> {
                     Log.w(TAG, "서버가 알람 기록 ${items.size}건을 거부했다(${response.code()}). 버린다")
-                    drop(items)
+                    drop(items, owner)
                     0
                 }
 
@@ -137,7 +146,9 @@ class AlarmLogQueue(
      *
      * @return 지운 건수
      */
-    fun dropBefore(resetAt: String): Int {
+    fun dropBefore(resetAt: String): Int = ObservationUploadGate.storage { dropBeforeLocked(resetAt) }
+
+    private fun dropBeforeLocked(resetAt: String): Int {
         val items = pending()
         val keep = items.filterNot { com.swpp.wakeup.domain.model.LearningReset.isBeforeReset(it.occurredAt, resetAt) }
         if (keep.size != items.size) write(keep)
@@ -145,14 +156,17 @@ class AlarmLogQueue(
     }
 
     /** 큐를 통째로 비운다. **로그아웃·계정 전환에서 부른다.** */
-    fun wipe() {
+    fun wipe() = ObservationUploadGate.storage {
         prefs.edit { clear() }
     }
 
-    private fun drop(sent: List<AlarmLogInput>) {
-        val keys = sent.map { it.clientUuid }.toSet()
-        write(pending().filterNot { it.clientUuid in keys })
-    }
+    private fun drop(sent: List<AlarmLogInput>, owner: ObservationUploadGate.Owner): Boolean =
+        ObservationUploadGate.storage {
+            if (ObservationUploadGate.owner(appContext, prefs) != owner) return@storage false
+            val keys = sent.map { it.clientUuid }.toSet()
+            write(pending().filterNot { it.clientUuid in keys })
+            true
+        }
 
     private fun write(items: List<AlarmLogInput>) {
         prefs.edit {

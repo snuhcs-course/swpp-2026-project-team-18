@@ -1,0 +1,38 @@
+INSTRUMENTATION_STATUS: class=com.swpp.wakeup.AlarmTimeConsistencyTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=1
+INSTRUMENTATION_STATUS: stream=
+com.swpp.wakeup.AlarmTimeConsistencyTest:
+INSTRUMENTATION_STATUS: test=learnedPreparationKeepsHomeRecommendationAndDeviceConsistent
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.swpp.wakeup.AlarmTimeConsistencyTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=1
+INSTRUMENTATION_STATUS: stack=java.lang.AssertionError: Stored normal alarm differs from the normal recommendation expected:<1795906380000> but was:<1795905240000>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:647)
+	at com.swpp.wakeup.AlarmTimeConsistencyTest.learnedPreparationKeepsHomeRecommendationAndDeviceConsistent(AlarmTimeConsistencyTest.kt:74)
+INSTRUMENTATION_STATUS: stream=
+Error in learnedPreparationKeepsHomeRecommendationAndDeviceConsistent(com.swpp.wakeup.AlarmTimeConsistencyTest):
+java.lang.AssertionError: Stored normal alarm differs from the normal recommendation expected:<1795906380000> but was:<1795905240000>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:647)
+	at com.swpp.wakeup.AlarmTimeConsistencyTest.learnedPreparationKeepsHomeRecommendationAndDeviceConsistent(AlarmTimeConsistencyTest.kt:74)
+INSTRUMENTATION_STATUS: test=learnedPreparationKeepsHomeRecommendationAndDeviceConsistent
+INSTRUMENTATION_STATUS_CODE: -2
+INSTRUMENTATION_RESULT: stream=
+Time: 6.629
+There was 1 failure:
+1) learnedPreparationKeepsHomeRecommendationAndDeviceConsistent(com.swpp.wakeup.AlarmTimeConsistencyTest)
+java.lang.AssertionError: Stored normal alarm differs from the normal recommendation expected:<1795906380000> but was:<1795905240000>
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.failNotEquals(Assert.java:835)
+	at org.junit.Assert.assertEquals(Assert.java:647)
+	at com.swpp.wakeup.AlarmTimeConsistencyTest.learnedPreparationKeepsHomeRecommendationAndDeviceConsistent(AlarmTimeConsistencyTest.kt:74)
+FAILURES!!!
+Tests run: 1,  Failures: 1
+INSTRUMENTATION_CODE: -1

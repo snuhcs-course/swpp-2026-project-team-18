@@ -20,6 +20,11 @@ import com.swpp.wakeup.testing.prefsContext
 import com.swpp.wakeup.testing.unexpected
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -178,6 +183,56 @@ class ObservationQueuesTest {
         assertEquals(0, q.pendingCount)
     }
 
+    @Test
+    fun `이동 업로드 성공과 영구 거절 모두 보내는 동안 새로 쌓인 관측을 보존한다`() = runBlocking {
+        for (code in listOf(200, 400, 404)) {
+            lateinit var queue: TripObservationQueue
+            queue = tripQueue {
+                queue.enqueue(trip("late-$code"))
+                if (code == 200) ok(ObservationBatchResponse(accepted = 1)) else httpError(code)
+            }
+            queue.enqueue(trip("sent-$code"))
+            queue.flush()
+            assertEquals(listOf("late-$code"), queue.pending().map { it.clientUuid })
+            queue.wipe()
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `별도 큐 인스턴스의 flush는 진행 중인 업로드를 기다리고 새 관측만 이어 보낸다`() = runTest {
+        val release = CompletableDeferred<Unit>()
+        val first = tripQueue { release.await(); ok(ObservationBatchResponse(accepted = 1)) }
+        val second = tripQueue { ok(ObservationBatchResponse(accepted = 1)) }
+        first.enqueue(trip("first"))
+        val firstUpload = async { first.flush() }
+        runCurrent()
+        val secondUpload = async { second.flush() }
+        runCurrent()
+        assertEquals(1, tripSent.size)
+        second.enqueue(trip("during-upload"))
+        release.complete(Unit)
+        runCurrent()
+        assertEquals(1, firstUpload.await())
+        assertEquals(1, secondUpload.await())
+        assertEquals(listOf(listOf("first"), listOf("during-upload")), tripSent.map { it.observations.map { row -> row.clientUuid } })
+        assertEquals(0, second.pendingCount)
+    }
+
+    @Test
+    fun `옛 계정 업로드 응답은 새 계정의 동일 UUID 관측을 지우지 않는다`() = runBlocking {
+        prefs.edit().putString("email", "old@example.test").apply()
+        lateinit var queue: TripObservationQueue
+        queue = tripQueue {
+            prefs.edit().clear().putString("email", "new@example.test").apply()
+            queue.enqueue(trip("shared-key").copy(event = 2))
+            ok(ObservationBatchResponse(accepted = 1))
+        }
+        queue.enqueue(trip("shared-key"))
+        assertEquals(0, queue.flush())
+        assertEquals(2L, queue.pending().single().event)
+    }
+
     // --- 블록 관측 ------------------------------------------------------------
 
     private var blockSent = mutableListOf<BlockObservationBatchRequest>()
@@ -206,6 +261,18 @@ class ObservationQueuesTest {
         clientUuid = uuid,
         clientRecordedAt = recordedAt,
     )
+
+    @Test
+    fun `블록 업로드가 끝날 때 보낸 UUID만 지우고 새로 마친 항목은 남긴다`() = runBlocking {
+        lateinit var queue: BlockObservationQueue
+        queue = blockQueue {
+            queue.enqueue(block("newly-completed"))
+            ok(BlockObservationBatchResponse(accepted = 1))
+        }
+        queue.enqueue(block("sent"))
+        assertEquals(1, queue.flush())
+        assertEquals(listOf("newly-completed"), queue.pending().map { it.clientUuid })
+    }
 
     @Test
     fun `블록 관측은 적재하고 같은 키는 하나로 합친다`() {

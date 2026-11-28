@@ -51,7 +51,9 @@ class BlockObservationQueue(
 
     val pendingCount: Int get() = pending().size
 
-    fun pending(): List<BlockObservationInput> {
+    fun pending(): List<BlockObservationInput> = ObservationUploadGate.storage { readPending() }
+
+    private fun readPending(): List<BlockObservationInput> {
         // 앞 사용자의 큐를 지금 로그인한 계정의 토큰으로 올리면 안 된다. 서버가
         // 남의 블록 id 를 거절하겠지만, 거절받기 위해 남의 기록을 보내는 것
         // 자체가 틀렸다. 그 토큰은 이미 없으므로 올릴 길도 없다 — 버린다.
@@ -74,7 +76,7 @@ class BlockObservationQueue(
      * 올라간다. 아침에 기록하고 저녁에 앱을 열지 않는 사용자의 데이터가
      * 사라지지 않게 하려는 것이다.
      */
-    fun enqueue(observation: BlockObservationInput) {
+    fun enqueue(observation: BlockObservationInput): Unit = ObservationUploadGate.storage {
         val next = pending().filterNot { it.clientUuid == observation.clientUuid } +
             observation
         write(next)
@@ -93,11 +95,14 @@ class BlockObservationQueue(
      *
      * @return 서버가 처리한 건수. 올릴 것이 없으면 0.
      */
-    suspend fun flush(): Int {
+    suspend fun flush(): Int = ObservationUploadGate.upload { flushPending() }
+
+    private suspend fun flushPending(): Int {
         if (!isReady()) return 0
 
-        val items = pending()
+        val items = pending().take(BlockObservationBatchRequest.MAX_ITEMS)
         if (items.isEmpty()) return 0
+        val owner = ObservationUploadGate.owner(appContext, prefs)
 
         return try {
             val response = api.uploadObservations(
@@ -107,7 +112,8 @@ class BlockObservationQueue(
                 response.isSuccessful -> {
                     val body = response.body()
                     val handled = (body?.accepted ?: 0) + (body?.duplicated ?: 0)
-                    write(emptyList())
+                    if (!drop(items, owner)) return 0
+                    ObservationUploadGate.recordAccepted(body?.accepted ?: 0)
                     Log.i(
                         TAG,
                         "블록 관측 업로드 완료: 신규 ${body?.accepted ?: 0}건 " +
@@ -122,7 +128,7 @@ class BlockObservationQueue(
                         "서버가 블록 관측 ${items.size}건을 거부했다(${response.code()}). 버린다: " +
                             ApiClient.parseErrorMessage(response.errorBody()?.string()),
                     )
-                    write(emptyList())
+                    drop(items, owner)
                     0
                 }
 
@@ -144,6 +150,14 @@ class BlockObservationQueue(
         }
     }
 
+    private fun drop(items: List<BlockObservationInput>, owner: ObservationUploadGate.Owner): Boolean =
+        ObservationUploadGate.storage {
+            if (ObservationUploadGate.owner(appContext, prefs) != owner) return@storage false
+            val sent = items.map { it.clientUuid }.toSet()
+            write(pending().filterNot { it.clientUuid in sent })
+            true
+        }
+
     private fun write(items: List<BlockObservationInput>) {
         prefs.edit {
             if (items.isEmpty()) remove(KEY_PENDING)
@@ -159,7 +173,9 @@ class BlockObservationQueue(
      *
      * @return 지운 건수
      */
-    fun dropBefore(resetAt: String): Int {
+    fun dropBefore(resetAt: String): Int = ObservationUploadGate.storage { dropBeforeLocked(resetAt) }
+
+    private fun dropBeforeLocked(resetAt: String): Int {
         val items = pending()
         val keep = items.filterNot { com.swpp.wakeup.domain.model.LearningReset.isBeforeReset(it.clientRecordedAt, resetAt) }
         if (keep.size != items.size) write(keep)
@@ -167,7 +183,7 @@ class BlockObservationQueue(
     }
 
     /** 큐를 통째로 비운다. **로그아웃·계정 전환에서 부른다.** */
-    fun wipe() {
+    fun wipe() = ObservationUploadGate.storage {
         prefs.edit { clear() }
     }
 

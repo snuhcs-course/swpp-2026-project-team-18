@@ -13,7 +13,7 @@ interface AlarmDecisionRepository {
 }
 
 class EventAlarmDecisionRepository(private val events: EventRepository) : AlarmDecisionRepository {
-    override suspend fun plan(eventId: Long) = events.loadPlan(eventId)
+    override suspend fun plan(eventId: Long) = events.loadPlan(eventId, allowCached = false)
     override suspend fun options(eventId: Long) = events.loadRiskOptions(eventId)
     override suspend fun choose(eventId: Long, tau: Double) = events.saveRiskOption(eventId, tau)
     override suspend fun custom(eventId: Long, alarmAt: String) = events.setUserAlarm(eventId, alarmAt)

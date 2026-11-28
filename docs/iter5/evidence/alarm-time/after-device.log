@@ -1,0 +1,19 @@
+INSTRUMENTATION_STATUS: class=com.swpp.wakeup.AlarmTimeConsistencyTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=1
+INSTRUMENTATION_STATUS: stream=
+com.swpp.wakeup.AlarmTimeConsistencyTest:
+INSTRUMENTATION_STATUS: test=learnedPreparationKeepsHomeRecommendationAndDeviceConsistent
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.swpp.wakeup.AlarmTimeConsistencyTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=1
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=learnedPreparationKeepsHomeRecommendationAndDeviceConsistent
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_RESULT: stream=
+Time: 20.872
+OK (1 test)
+INSTRUMENTATION_CODE: -1

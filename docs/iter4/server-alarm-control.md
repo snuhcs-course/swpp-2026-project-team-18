@@ -205,7 +205,7 @@ PATCH 로 고르고 기기 알람을 `alarm_at` 으로 걸며 확인 API 를 부
 ## 4. 다시 계산할 때의 규칙
 
 다시 계산은 일정 생성 · 수정 · `POST /recompute`(앱의 경로 갱신 워커 포함) · 캘린더 가져오기 · 프로필/집 변경 · 블록 체크 ·
-루틴 수정 · 종류 τ 수정 · 밤 학습(`train_models`, `exclude_prep_mornings`)이다. 모두 `services._upsert` 또는 `refresh._remix`
+루틴 수정 · 종류 τ 수정 · 새 준비 관측 업로드 · 밤 학습(`train_models`, `exclude_prep_mornings`)이다. 모두 `services._upsert` 또는 `refresh._remix`
 를 지나고, 거기서 `alarm_control.after_compute` 가 아래 순서로 상태를 고친다. 이 단계가 실패해도 알람 계획 저장은 그대로다.
 사용자 상태는 **계획 행을 잠그고(`select_for_update`) DB 에서 다시 읽은 값**으로 고친다. 재계산 경로는 계획을 일찍
 읽어 두므로(밤 재계산은 일정 50개를 한 번에), 그사이 들어온 `PUT …/alarm/time` 을 옛 상태로 덮지 않게 한다.

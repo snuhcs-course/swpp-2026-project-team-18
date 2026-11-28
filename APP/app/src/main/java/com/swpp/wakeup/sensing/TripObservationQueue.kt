@@ -44,7 +44,9 @@ class TripObservationQueue(
 
     val pendingCount: Int get() = pending().size
 
-    fun pending(): List<TripObservationInput> {
+    fun pending(): List<TripObservationInput> = ObservationUploadGate.storage { readPending() }
+
+    private fun readPending(): List<TripObservationInput> {
         // 앞 사용자의 큐를 지금 로그인한 계정의 토큰으로 올리지 않는다.
         // 근거는 [com.swpp.wakeup.data.local.isForeignOwner] 에 있다.
         if (prefs.discardIfForeign(appContext)) return emptyList()
@@ -71,7 +73,7 @@ class TripObservationQueue(
      * 앱을 여는 것뿐이어서, 앱을 며칠 열지 않은 사용자의 아침이 학습에
      * 들어가지 않는다.
      */
-    fun enqueue(observation: TripObservationInput) {
+    fun enqueue(observation: TripObservationInput): Unit = ObservationUploadGate.storage {
         val next = pending().filterNot { it.clientUuid == observation.clientUuid } +
             observation.copy(lat = null, lng = null)
         write(next)
@@ -90,11 +92,14 @@ class TripObservationQueue(
      *
      * @return 서버가 받은 건수. 올릴 것이 없으면 0.
      */
-    suspend fun flush(): Int {
+    suspend fun flush(): Int = ObservationUploadGate.upload { flushPending() }
+
+    private suspend fun flushPending(): Int {
         if (!isReady()) return 0
 
-        val items = pending()
+        val items = pending().take(MAX_PENDING)
         if (items.isEmpty()) return 0
+        val owner = ObservationUploadGate.owner(appContext, prefs)
 
         return try {
             val response = api.batch(ObservationBatchRequest(items))
@@ -102,7 +107,8 @@ class TripObservationQueue(
                 response.isSuccessful -> {
                     val body = response.body()
                     val handled = (body?.accepted ?: 0) + (body?.duplicated ?: 0)
-                    write(emptyList())
+                    if (!drop(items, owner)) return 0
+                    ObservationUploadGate.recordAccepted(body?.accepted ?: 0)
                     Log.i(
                         TAG,
                         "관측 업로드 완료: 신규 ${body?.accepted ?: 0}건 " +
@@ -118,7 +124,7 @@ class TripObservationQueue(
                         "서버가 관측 ${items.size}건을 거부했다(${response.code()}). 버린다: " +
                             ApiClient.parseErrorMessage(response.errorBody()?.string()),
                     )
-                    write(emptyList())
+                    drop(items, owner)
                     0
                 }
 
@@ -144,6 +150,14 @@ class TripObservationQueue(
         }
     }
 
+    private fun drop(items: List<TripObservationInput>, owner: ObservationUploadGate.Owner): Boolean =
+        ObservationUploadGate.storage {
+            if (ObservationUploadGate.owner(appContext, prefs) != owner) return@storage false
+            val sent = items.map { it.clientUuid }.toSet()
+            write(pending().filterNot { it.clientUuid in sent })
+            true
+        }
+
     private fun write(items: List<TripObservationInput>) {
         prefs.edit {
             if (items.isEmpty()) remove(KEY_PENDING)
@@ -159,7 +173,9 @@ class TripObservationQueue(
      *
      * @return 지운 건수
      */
-    fun dropBefore(resetAt: String): Int {
+    fun dropBefore(resetAt: String): Int = ObservationUploadGate.storage { dropBeforeLocked(resetAt) }
+
+    private fun dropBeforeLocked(resetAt: String): Int {
         val items = pending()
         val keep = items.filterNot { com.swpp.wakeup.domain.model.LearningReset.isBeforeReset(it.observedAt, resetAt) }
         if (keep.size != items.size) write(keep)
@@ -167,7 +183,7 @@ class TripObservationQueue(
     }
 
     /** 큐를 통째로 비운다. **로그아웃·계정 전환에서 부른다.** */
-    fun wipe() {
+    fun wipe() = ObservationUploadGate.storage {
         prefs.edit { clear() }
     }
 

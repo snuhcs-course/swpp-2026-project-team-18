@@ -1,0 +1,60 @@
+{
+  "date": "2026-11-28",
+  "device": {
+    "avd": "SWPP_APP",
+    "api": 36,
+    "package": "com.swpp.wakeup.qa"
+  },
+  "backend_pytest_passed": 2553,
+  "jvm": {
+    "tests": 1807,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "android_integration_passed": 108,
+  "real_api_device_flow_passed": 1,
+  "lint": {
+    "errors": 0,
+    "warnings": 65
+  },
+  "coverage": {
+    "viewmodel_percent": 33.2,
+    "platform_percent": 44.2,
+    "total_percent": 33.4
+  },
+  "before": {
+    "stored_alarm_at": "2026-11-29T07:53:00+09:00",
+    "recommended_normal_at": "2026-11-28T22:34:00+00:00",
+    "device_alarm_at_ms": 1795906380000,
+    "difference_minutes": 19
+  },
+  "after": {
+    "stored_alarm_at": "2026-11-29T07:34:00+09:00",
+    "recommended_normal_at": "2026-11-28T22:34:00+00:00",
+    "device_alarm_at_ms": 1795905240000,
+    "difference_minutes": 0
+  },
+  "cache_refresh": {
+    "previous_alarm_at": "2026-11-29T07:34:00+09:00",
+    "refreshed_alarm_at": "2026-11-29T08:34:00+09:00",
+    "recommended_normal_at": "2026-11-28T23:34:00+00:00",
+    "device_alarm_at_ms": 1795908840000
+  },
+  "system_alarms": [
+    {
+      "alarm_at_ms": 1795905240000,
+      "os_registered": true
+    },
+    {
+      "alarm_at_ms": 1795905240000,
+      "os_registered": true
+    },
+    {
+      "alarm_at_ms": 1795908840000,
+      "os_registered": true
+    }
+  ],
+  "pending_record_http_201": true,
+  "apk_sha256": "a3b65f86a37e88c0da1017b85078644efe58d8ab2acb136b3b48a0433261312b"
+}

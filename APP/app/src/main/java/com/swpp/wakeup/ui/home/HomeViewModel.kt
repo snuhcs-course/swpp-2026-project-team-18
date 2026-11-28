@@ -91,6 +91,7 @@ import com.swpp.wakeup.domain.model.MorningSession
 import com.swpp.wakeup.domain.model.RoutineEditorState
 import com.swpp.wakeup.sensing.ArrivalRecords
 import com.swpp.wakeup.sensing.BlockObservationQueue
+import com.swpp.wakeup.sensing.ObservationUploadGate
 import com.swpp.wakeup.sensing.CurrentLocation
 import com.swpp.wakeup.domain.model.PlanRow
 import com.swpp.wakeup.domain.model.KakaoMapProjection
@@ -116,6 +117,7 @@ import com.swpp.wakeup.ui.me.MeViewModel
 import com.swpp.wakeup.ui.settings.PasswordChangeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -183,6 +185,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         serverVersion = { ServerWarmup.serverVersion },
         knownPlan = { id -> _plan.value?.takeIf { it.eventId == id } },
         onSaved = ::onAlarmTimeSaved,
+        onRefreshed = ::onAlarmTimeRefreshed,
+        onBeforeRead = ::beforeAlarmTimeRead,
         notify = { message, undo -> notify(message, undoAlarm = undo) },
     )
 
@@ -825,6 +829,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     /** 마지막으로 시작한 홈 불러오기. 늦게 끝난 옛 응답이 새 상태를 덮지 못하게 한다 */
     private var homeLoadGeneration = 0L
     private var refreshJob: Job? = null
+    private var observationUploadJob: Job? = null
+    private var observationSession = 0L
+    private var observationsRefreshedVersion = 0L
 
     /** 마지막 [refresh] 시작 시각(`SystemClock.elapsedRealtime`). 화면 복귀 때 다시 받을지 정한다 */
     private var lastRefreshStartedElapsed: Long? = null
@@ -969,7 +976,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 화면 복귀 새로고침이 조용히 도는 동안 알람 스위치·"안 감" 을 누르면, 먼저 시작한
      * 응답이 나중에 끝나 스위치를 되돌리거나 방금 끈 알람을 다시 걸 수 있다.
      */
-    private fun applyHome(data: EventRepository.HomeData, gen: Long) {
+    private fun applyHome(data: EventRepository.HomeData, gen: Long, uploadPending: Boolean = true) {
         if (gen != homeLoadGeneration) {
             Log.i(TAG, "홈 응답(세대 $gen)이 더 새 요청에 밀려 버린다")
             _state.update { it.copy(loading = false) }
@@ -998,7 +1005,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         renderHome()
         maybeAskOnboarding(data)
         syncGuideSeen(data)
-        syncAlarms(data.schedules, fromCache = data.fromCache)
+        syncAlarms(data.schedules, fromCache = data.fromCache, uploadPending = uploadPending)
         if (!data.fromCache) {
             reconcileArrivals(
                 data.events.map { ArrivalCandidate(it.id, it.startAtMillis, it.alarmAtMillis, it.skipped) }
@@ -1432,10 +1439,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 알람 등록이 실패해도 화면은 살아 있어야 한다. 등록 실패로 목록까지
      * 못 보게 만들 이유가 없다.
      */
-    private fun syncAlarms(schedules: List<AlarmSchedule>, fromCache: Boolean) {
+    private fun syncAlarms(schedules: List<AlarmSchedule>, fromCache: Boolean, uploadPending: Boolean = true) {
         val app = getApplication<Application>()
         val scheduler = AlarmScheduler(app)
-        val queue = TripObservationQueue(app)
 
         // **캐시로 그린 화면에서는 등록을 건드리지 않는다.** `sync` 는 받은
         // 목록으로 등록 상태를 갈아 끼우므로, 오래된 사본으로 부르면 이미 맞게
@@ -1463,12 +1469,88 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
         // 지하철에서 판정된 관측이 큐에 남아 있을 수 있다. 연결됐으니 올린다.
         // 아침 기록도 같이 올린다 — 사용자는 씻는 동안 앱을 떠나 있었다.
-        viewModelScope.launch {
-            queue.flush()
-            runCatching { blockQueue.flush() }
-            // Partly AI-generated (Claude) — 알람 울림·끄기 기록(db-schema.md A3)도 함께 올린다.
-            runCatching { AlarmLogQueue(app).flush() }
+        if (uploadPending) uploadObservationsAndRefresh()
+    }
+
+    private data class ObservationFlush(val pending: Int, val handled: Int)
+
+    private suspend fun flushPendingObservations(drain: Boolean = false): ObservationFlush {
+        // Each queue owns the same process gate. Do not take that non-reentrant
+        // gate here: awaiting flush also waits for an existing worker/service flush.
+        val app = getApplication<Application>()
+        val trips = TripObservationQueue(app)
+        val alarms = AlarmLogQueue(app)
+        val session = observationSession
+        val owner = tokenStore.email
+        var handled = 0
+        fun pending() = trips.pendingCount + blockQueue.pendingCount + alarms.pendingCount
+        var before = pending()
+        repeat(if (drain) 8 else 1) {
+            val beforeHandled = handled
+            for (flush in listOf<suspend () -> Int>(trips::flush, blockQueue::flush, alarms::flush)) {
+                currentCoroutineContext().ensureActive()
+                if (session != observationSession || owner != tokenStore.email) throw CancellationException("Observation owner changed")
+                handled += flush()
+            }
+            currentCoroutineContext().ensureActive()
+            if (session != observationSession || owner != tokenStore.email) throw CancellationException("Observation owner changed")
+            val after = pending()
             _state.update { it.copy(pendingObservations = pendingObservationCount()) }
+            if (after == 0) return ObservationFlush(0, handled)
+            // Retry a bounded number of batches, but never spin on offline/5xx.
+            if (after >= before && handled == beforeHandled) return ObservationFlush(after, handled)
+            before = after
+        }
+        return ObservationFlush(pending(), handled)
+    }
+
+    private suspend fun beforeAlarmTimeRead(): String? {
+        val session = observationSession
+        val owner = tokenStore.email
+        return try {
+            observationUploadJob?.takeIf { it.isActive }?.join()
+            currentCoroutineContext().ensureActive()
+            if (session != observationSession || owner != tokenStore.email) return "다시 로그인한 뒤 알람을 확인해 주세요."
+            val flushed = flushPendingObservations(drain = true)
+            currentCoroutineContext().ensureActive()
+            if (session != observationSession || owner != tokenStore.email) return "다시 로그인한 뒤 알람을 확인해 주세요."
+            if (flushed.pending > 0) "아직 올리지 못한 기록이 있어요. 연결을 확인하고 다시 시도해 주세요." else null
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "알람 조회 전 관측 동기화를 마치지 못했다", error)
+            "기록을 올리지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+        }
+    }
+
+    private fun uploadObservationsAndRefresh() {
+        if (observationUploadJob?.isActive == true) return
+        val session = observationSession
+        val owner = tokenStore.email
+        observationUploadJob = viewModelScope.launch {
+            try {
+                val flushed = flushPendingObservations()
+                currentCoroutineContext().ensureActive()
+                if (session != observationSession || owner != tokenStore.email) return@launch
+                val uploaded = ObservationUploadGate.acceptedVersion
+                // A duplicate acknowledgement may finish an earlier cancelled
+                // upload that already changed the server before its reply arrived.
+                if (uploaded <= observationsRefreshedVersion && flushed.handled == 0) return@launch
+                val gen = ++homeLoadGeneration
+                val result = repository.loadHome()
+                currentCoroutineContext().ensureActive()
+                if (session != observationSession || owner != tokenStore.email || gen != homeLoadGeneration) return@launch
+                if (result is EventRepository.Result.Success && !result.data.fromCache) {
+                    observationsRefreshedVersion = maxOf(observationsRefreshedVersion, uploaded)
+                    // Re-register the post-learning schedules once. This application
+                    // deliberately does not start another flush/reload cycle.
+                    applyHome(result.data, gen, uploadPending = false)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(TAG, "관측 업로드 뒤 알람 목록을 맞추지 못했다", error)
+            }
         }
     }
 
@@ -1486,6 +1568,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
      * 다루는 것은 기기에 남는 **보존 기간**이다.
      */
     fun logout() {
+        ++observationSession
+        observationUploadJob?.cancel()
         // Stop old account navigation and requests before clearing this session.
         navigation.endSession()
         manualArrivalReview.endSession()
@@ -1720,6 +1804,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val loading: Boolean = false,
         val saving: Boolean = false,
         val error: String? = null,
+        val canWrite: Boolean = false,
     )
 
     // Partly AI-generated (Claude)
@@ -1780,26 +1865,43 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     fun revertAlarmTime(eventId: Long) = alarmDecisionViewModel.revert(eventId)
 
     private suspend fun onAlarmTimeSaved(plan: AlarmPlanView): String? {
+        return synchronizeAlarmTime(plan, afterSave = true)
+    }
+
+    private suspend fun onAlarmTimeRefreshed(plan: AlarmPlanView): String? {
+        return synchronizeAlarmTime(plan, afterSave = false)
+    }
+
+    /** Both a save and a fresh GET can change the alarm registered on this device. */
+    private suspend fun synchronizeAlarmTime(plan: AlarmPlanView, afterSave: Boolean): String? {
+        currentCoroutineContext().ensureActive()
         val eventId = plan.eventId
         if (_nav.value.current == AppRoute.AlarmDecision(eventId)) {
             ++planLoadGeneration
             _plan.value = plan
         }
         val homeGen = ++homeLoadGeneration
+        val uploaded = ObservationUploadGate.acceptedVersion
         val home = repository.loadHome()
         // 저장소가 취소를 실패 결과로 바꿔도 로그아웃 뒤 옛 계정 알람을 다시 등록하지 않는다.
         currentCoroutineContext().ensureActive()
+        val retry = if (afterSave) {
+            "선택은 저장했지만 알람 목록을 새로 받지 못했어요. 다시 계속하기를 눌러 주세요."
+        } else {
+            "알람 시각은 새로 받았지만 목록과 기기 알람을 맞추지 못했어요. 다시 시도해 주세요."
+        }
         if (homeGen != homeLoadGeneration) {
-            return "선택은 저장했지만 알람 목록을 새로 받지 못했어요. 다시 계속하기를 눌러 주세요."
+            return retry
         }
         return when (home) {
             is EventRepository.Result.Success -> {
                 if (!home.data.fromCache) {
-                    applyHome(home.data, homeGen)
+                    observationsRefreshedVersion = maxOf(observationsRefreshedVersion, uploaded)
+                    applyHome(home.data, homeGen, uploadPending = false)
                     null
-                } else "선택은 저장했지만 알람 목록을 새로 받지 못했어요. 다시 계속하기를 눌러 주세요."
+                } else retry
             }
-            is EventRepository.Result.Failure -> "선택은 저장했지만 알람 목록을 새로 받지 못했어요. ${home.message}"
+            is EventRepository.Result.Failure -> "$retry ${home.message}"
         }
     }
 
@@ -2400,11 +2502,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         morningStore.clear()
         _morning.value = null
         _state.update { it.copy(morningBlocksLeft = null) }
-        viewModelScope.launch {
-            // 떠나기 전에 한 번 올려 본다. 실패해도 큐에 남는다.
-            runCatching { blockQueue.flush() }
-            _state.update { it.copy(pendingObservations = pendingObservationCount()) }
-        }
+        uploadObservationsAndRefresh()
         goBack()
     }
 
@@ -4288,6 +4386,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     /** 화면이 사라질 때 쓰다 만 일정을 프로세스 안의 보관함에 맡긴다(로그인 만료 → 다시 로그인 대비) */
     override fun onCleared() {
+        ++observationSession
+        observationUploadJob?.cancel()
         navigation.endSession()
         manualArrivalReview.endSession()
         eventEditorViewModel.close()
